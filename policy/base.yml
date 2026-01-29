@@ -1,0 +1,60 @@
+version: 1
+project: example-cdn-security
+
+defaults:
+  mode: "enforce"          # enforce | monitor (monitor needs logging/metrics)
+  response:
+    add_security_headers: true
+
+request:
+  allow_methods: ["GET", "HEAD", "POST"]
+
+  limits:
+    max_query_length: 1024
+    max_query_params: 30
+    max_uri_length: 2048
+
+  block:
+    path_patterns:
+      - "(?i)\\.{2}/"       # ../
+      - "(?i)%2e%2e"        # encoded ..
+    ua_contains:
+      - "sqlmap"
+      - "nikto"
+      - "acunetix"
+      - "masscan"
+      - "python-requests"
+    header_missing:
+      - "user-agent"
+
+  normalize:
+    drop_query_keys:
+      - "utm_source"
+      - "utm_medium"
+      - "utm_campaign"
+      - "utm_term"
+      - "utm_content"
+      - "gclid"
+      - "fbclid"
+
+routes:
+  - name: admin
+    match:
+      path_prefixes: ["/admin", "/docs", "/swagger"]
+    auth_gate:
+      type: "static_token"
+      header: "x-edge-token"
+      token_env: "EDGE_ADMIN_TOKEN"   # Set via each CDN's secret management
+    response:
+      cache_control: "no-store"
+    request:
+      allow_methods: ["GET", "HEAD", "POST"]
+
+response_headers:
+  hsts: "max-age=31536000; includeSubDomains; preload"
+  x_content_type_options: "nosniff"
+  referrer_policy: "strict-origin-when-cross-origin"
+  permissions_policy: "camera=(), microphone=(), geolocation=()"
+  # CSP: introduce gradually; start with report-only profile if needed
+  csp_public: "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';"
+  csp_admin:  "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"

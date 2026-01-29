@@ -1,0 +1,71 @@
+# Strict profile: maximum security; may require app/API compatibility.
+# Copy to policy/base.yml: cp policy/profiles/strict.yml policy/base.yml
+# See policy/README.md (en) or policy/README.ja.md (ja) for profile comparison.
+
+version: 1
+project: example-cdn-security
+
+defaults:
+  mode: "enforce"
+  response:
+    add_security_headers: true
+
+request:
+  allow_methods: ["GET", "HEAD", "POST"]
+
+  limits:
+    max_query_length: 512
+    max_query_params: 20
+    max_uri_length: 1024
+
+  block:
+    path_patterns:
+      - "(?i)\\.{2}/"
+      - "(?i)%2e%2e"
+      - "(?i)%2f\\.\\./"
+      - "(?i)\\.\\.%2f"
+      - "(?i)\\\\.\\.\\\\"
+    ua_contains:
+      - "sqlmap"
+      - "nikto"
+      - "acunetix"
+      - "masscan"
+      - "python-requests"
+      - "zgrab"
+      - "nmap"
+      - "curl"
+      - "wget"
+      - "scanner"
+    header_missing:
+      - "user-agent"
+
+  normalize:
+    drop_query_keys:
+      - "utm_source"
+      - "utm_medium"
+      - "utm_campaign"
+      - "utm_term"
+      - "utm_content"
+      - "gclid"
+      - "fbclid"
+
+routes:
+  - name: admin
+    match:
+      path_prefixes: ["/admin", "/docs", "/swagger", "/api/admin", "/internal"]
+    auth_gate:
+      type: "static_token"
+      header: "x-edge-token"
+      token_env: "EDGE_ADMIN_TOKEN"
+    response:
+      cache_control: "no-store"
+    request:
+      allow_methods: ["GET", "HEAD", "POST"]
+
+response_headers:
+  hsts: "max-age=31536000; includeSubDomains; preload"
+  x_content_type_options: "nosniff"
+  referrer_policy: "no-referrer"
+  permissions_policy: "camera=(), microphone=(), geolocation=(), payment=()"
+  csp_public: "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self';"
+  csp_admin:  "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';"

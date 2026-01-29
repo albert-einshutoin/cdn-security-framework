@@ -1,0 +1,63 @@
+# Permissive profile: fewer blocks for compatibility (APIs, scripts, legacy clients).
+# Copy to policy/base.yml: cp policy/profiles/permissive.yml policy/base.yml
+# See policy/README.md (en) or policy/README.ja.md (ja) for profile comparison.
+
+version: 1
+project: example-cdn-security
+
+defaults:
+  mode: "enforce"
+  response:
+    add_security_headers: true
+
+request:
+  allow_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+  limits:
+    max_query_length: 2048
+    max_query_params: 50
+    max_uri_length: 4096
+
+  block:
+    path_patterns:
+      - "(?i)\\.{2}/"       # ../
+      - "(?i)%2e%2e"        # encoded ..
+    # UA block: only obvious scanners; allow curl/wget/scripts
+    ua_contains:
+      - "sqlmap"
+      - "nikto"
+      - "acunetix"
+      - "masscan"
+    # Do not block missing User-Agent (APIs / scripts often omit it)
+    # header_missing: []
+
+  normalize:
+    drop_query_keys:
+      - "utm_source"
+      - "utm_medium"
+      - "utm_campaign"
+      - "utm_term"
+      - "utm_content"
+      - "gclid"
+      - "fbclid"
+
+routes:
+  - name: admin
+    match:
+      path_prefixes: ["/admin", "/docs", "/swagger"]
+    auth_gate:
+      type: "static_token"
+      header: "x-edge-token"
+      token_env: "EDGE_ADMIN_TOKEN"
+    response:
+      cache_control: "no-store"
+    request:
+      allow_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+response_headers:
+  hsts: "max-age=31536000; includeSubDomains; preload"
+  x_content_type_options: "nosniff"
+  referrer_policy: "strict-origin-when-cross-origin"
+  permissions_policy: "camera=(), microphone=(), geolocation=()"
+  csp_public: "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';"
+  csp_admin:  "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"

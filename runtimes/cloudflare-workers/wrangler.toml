@@ -1,0 +1,8 @@
+name = "cdn-security-framework"
+main = "src/index.ts"
+compatibility_date = "2026-01-29"
+
+# 簡易ゲート用トークン（管理画面保護）
+# `wrangler secret put EDGE_ADMIN_TOKEN` で設定
+[vars]
+# EDGE_ADMIN_TOKEN = "set-by-secret"

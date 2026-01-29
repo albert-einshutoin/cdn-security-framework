@@ -1,0 +1,40 @@
+# Policy lint and runtime tests
+# Runs on push/PR to main and on push to any branch (optional)
+name: Policy Lint & Runtime Tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'policy/**'
+      - 'scripts/**'
+      - 'runtimes/aws-cloudfront-functions/viewer-request.js'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'policy/**'
+      - 'scripts/**'
+      - 'runtimes/aws-cloudfront-functions/viewer-request.js'
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Policy lint (base)
+        run: node scripts/policy-lint.js policy/base.yml
+
+      - name: Policy lint (profiles)
+        run: |
+          node scripts/policy-lint.js policy/profiles/balanced.yml
+          node scripts/policy-lint.js policy/profiles/strict.yml
+          node scripts/policy-lint.js policy/profiles/permissive.yml
+
+      - name: Runtime tests (CloudFront Functions viewer-request)
+        run: node scripts/runtime-tests.js

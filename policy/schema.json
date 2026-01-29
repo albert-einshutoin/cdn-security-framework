@@ -1,0 +1,79 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "CDN Security Framework Policy",
+  "description": "Schema for policy/base.yml and policy/profiles/*.yml (v1)",
+  "type": "object",
+  "required": ["version", "request", "response_headers"],
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "project": { "type": "string" },
+    "defaults": {
+      "type": "object",
+      "properties": {
+        "mode": { "enum": ["enforce", "monitor"] },
+        "response": { "type": "object", "properties": { "add_security_headers": { "type": "boolean" } } }
+      }
+    },
+    "request": {
+      "type": "object",
+      "required": ["allow_methods"],
+      "properties": {
+        "allow_methods": { "type": "array", "items": { "type": "string" } },
+        "limits": {
+          "type": "object",
+          "properties": {
+            "max_query_length": { "type": "integer" },
+            "max_query_params": { "type": "integer" },
+            "max_uri_length": { "type": "integer" }
+          }
+        },
+        "block": {
+          "type": "object",
+          "properties": {
+            "path_patterns": { "type": "array", "items": { "type": "string" } },
+            "ua_contains": { "type": "array", "items": { "type": "string" } },
+            "header_missing": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "normalize": {
+          "type": "object",
+          "properties": {
+            "drop_query_keys": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "routes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["name", "match"],
+        "properties": {
+          "name": { "type": "string" },
+          "match": { "type": "object", "properties": { "path_prefixes": { "type": "array", "items": { "type": "string" } } } },
+          "auth_gate": {
+            "type": "object",
+            "properties": {
+              "type": { "enum": ["static_token"] },
+              "header": { "type": "string" },
+              "token_env": { "type": "string" }
+            }
+          },
+          "response": { "type": "object", "properties": { "cache_control": { "type": "string" } } },
+          "request": { "type": "object", "properties": { "allow_methods": { "type": "array", "items": { "type": "string" } } } }
+        }
+      }
+    },
+    "response_headers": {
+      "type": "object",
+      "properties": {
+        "hsts": { "type": "string" },
+        "x_content_type_options": { "type": "string" },
+        "referrer_policy": { "type": "string" },
+        "permissions_policy": { "type": "string" },
+        "csp_public": { "type": "string" },
+        "csp_admin": { "type": "string" }
+      }
+    }
+  }
+}
