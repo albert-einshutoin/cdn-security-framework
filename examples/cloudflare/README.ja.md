@@ -10,6 +10,8 @@
 - Cloudflare アカウント
 - Wrangler CLI（`npm i -g wrangler` または `npx wrangler`）と `wrangler login`
 
+**TypeScript について:** ビルド出力は **TypeScript**（`dist/edge/cloudflare/index.ts`）です。ローカルに TypeScript や esbuild は不要で、`wrangler deploy` 実行時に Wrangler がコンパイルします。Wrangler 以外でデプロイする場合は TypeScript 対応環境が必要です。
+
 ---
 
 ## 手順

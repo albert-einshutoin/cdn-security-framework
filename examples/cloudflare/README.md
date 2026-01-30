@@ -10,6 +10,8 @@ This example uses **cdn-security-framework** as a dev dependency: init → edit 
 - Cloudflare account
 - Wrangler CLI (`npm i -g wrangler` or use `npx wrangler`) and `wrangler login`
 
+**Note (TypeScript):** The build outputs **TypeScript** (`dist/edge/cloudflare/index.ts`). You do not need TypeScript or esbuild installed locally: Wrangler compiles TypeScript when you run `wrangler deploy`. If you deploy without Wrangler, a TypeScript-capable environment is required.
+
 ---
 
 ## Steps

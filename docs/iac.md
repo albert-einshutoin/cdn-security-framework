@@ -12,7 +12,7 @@ After `npx cdn-security build` (and `npx cdn-security build --target aws` for In
 |--------|-----|
 | **dist/edge/viewer-request.js** | CloudFront Function (Viewer Request) |
 | **dist/edge/viewer-response.js** | CloudFront Function (Viewer Response) |
-| **dist/edge/cloudflare/index.ts** | Cloudflare Worker (when built with `--target cloudflare`) |
+| **dist/edge/cloudflare/index.ts** | Cloudflare Worker (when built with `--target cloudflare`). Output is TypeScript; Wrangler compiles it on deploy. Without Wrangler, a TypeScript build step is required. |
 | **dist/infra/waf-rules.tf.json** | Terraform JSON: `aws_wafv2_rule_group` (rate-based rule). Use when policy has `firewall.waf`. |
 
 ---

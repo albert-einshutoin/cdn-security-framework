@@ -168,7 +168,7 @@ npx cdn-security build
 ## メンテナ向け（npm 公開）
 
 * **package-lock.json**: コミットしておく（CI で `npm ci` するため）。
-* **dist/**: CI で「dist ドリフト」を検知する場合は、`npm run build` を実行し `dist/edge/`（および将来の `dist/infra/`）をコミットしてリポジトリと一致させる。
+* **dist/**: `.gitignore` で無視。ユーザーは `npm run build` で `dist/edge/` と `dist/infra/` を生成する。CI でドリフト検知する場合は CI 内で `npm run build` を実行しポリシーと比較する（`dist/` はコミットしない）。
 * **公開**: リポジトリルートで `npm publish`（npm 認証が必要）。`package.json` のバージョン更新と `CHANGELOG.md` の記載を済ませた状態で公開すること。スコープ付きパッケージ（例: `@your-org/cdn-security-framework`）は初回公開時に `--access public` が必要。
 
 ---

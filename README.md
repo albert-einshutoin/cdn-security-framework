@@ -165,7 +165,7 @@ Use the generated files in `dist/edge/` with Terraform, CDK, or your CDN console
 ## For maintainers (publishing to npm)
 
 * **package-lock.json**: Commit it so CI can run `npm ci`.
-* **dist/**: If CI checks "dist drift" (`git diff --exit-code dist/`), run `npm run build` and commit `dist/edge/` (and later `dist/infra/`) so the repo stays in sync.
+* **dist/**: Ignored via `.gitignore`. Users run `npm run build` to generate `dist/edge/` and `dist/infra/`. For CI drift checks, run `npm run build` in CI and compare with policy (do not commit `dist/`).
 * **Publish**: From repo root, run `npm publish` (requires npm auth). Prefer publishing from a clean tree with version bumped in `package.json` and an entry in `CHANGELOG.md`. Scoped package (e.g. `@your-org/cdn-security-framework`) requires `--access public` for the first publish.
 
 ---

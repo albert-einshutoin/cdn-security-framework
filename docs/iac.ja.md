@@ -12,7 +12,7 @@
 |------|------|
 | **dist/edge/viewer-request.js** | CloudFront Function (Viewer Request) |
 | **dist/edge/viewer-response.js** | CloudFront Function (Viewer Response) |
-| **dist/edge/cloudflare/index.ts** | Cloudflare Worker（`--target cloudflare` でビルドした場合） |
+| **dist/edge/cloudflare/index.ts** | Cloudflare Worker（`--target cloudflare` でビルドした場合）。出力は TypeScript。Wrangler がデプロイ時にコンパイルする。Wrangler を使わない場合は TypeScript ビルド環境が必要。 |
 | **dist/infra/waf-rules.tf.json** | Terraform JSON: `aws_wafv2_rule_group`（レートベースルール）。ポリシーに `firewall.waf` がある場合に生成。 |
 
 ---

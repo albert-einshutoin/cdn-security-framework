@@ -17,7 +17,7 @@
 | **scripts/** | 補助ツール (policy-lint.js 等) | CLI のソース。コンパイルロジックの本体。 |
 | **policy/** | サンプル設定 | init 用テンプレート。init 時にユーザーの手元にコピーされる。 |
 | **examples/** | デプロイ例 | E2E テスト用プロジェクト。ツールでデプロイを検証する場。 |
-| **dist/** | （なし or 旧 dist/aws/） | **自動生成物の出力先**。Edge: `dist/edge/*.js`、Infra: `dist/infra/*.tf.json`。.gitignore またはコミットしてドリフト検知。 |
+| **dist/** | （なし or 旧 dist/aws/） | **自動生成物の出力先**。Edge: `dist/edge/*.js`、Infra: `dist/infra/*.tf.json`。`.gitignore` で無視。ユーザーは `npm run build` で生成。CI で検証する場合は CI 内で build して diff チェック。 |
 
 ## 実装フェーズ
 
