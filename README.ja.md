@@ -84,10 +84,13 @@
   templates/               # 内部用: build が dist/edge/ を生成する際に参照
     aws/
   dist/
-    edge/                  # 生成物: ここをデプロイ (viewer-request.js 等)
+    edge/                  # 生成物: ここをデプロイ (viewer-request.js, viewer-response.js, origin-request.js)
+    infra/                 # ポリシーに firewall がある場合に生成: waf-rules.tf.json (Terraform)
   runtimes/                # レガシー・参照用。デプロイは dist/edge/ から
   examples/
 ```
+
+Terraform / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.md) を参照。
 
 ---
 

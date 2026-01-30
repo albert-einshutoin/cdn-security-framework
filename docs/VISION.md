@@ -22,14 +22,14 @@
 ## 実装フェーズ
 
 - **Phase 1（完了）**: Edge Runtime の自動化 — `security.yml` → `dist/edge/*.js`
-- **Phase 2**: エクスペリエンス向上 — init の充実、IaC 連携ドキュメント
-- **Phase 3**: インフラ設定 (WAF) — YAML に `firewall` セクション追加 → `dist/infra/*.tf.json`
+- **Phase 2（完了）**: エクスペリエンス向上 — init の充実、IaC 連携ドキュメント（docs/iac.md）
+- **Phase 3（完了）**: インフラ設定 (WAF) — YAML に `firewall.waf` セクション追加 → `dist/infra/waf-rules.tf.json`
 
-## 今日のタスク（Phase 1 突破）
+## 達成済み（Phase 1〜3）
 
-- [x] templates/ をルートに用意し、`templates/aws/viewer-request.js` を参照
-- [x] package.json に bin を設定し、js-yaml / commander を利用
-- [x] コンパイラ: `scripts/compile.js` で YAML を読んで JS を吐く
-- [x] 動作確認: `npm run build` で `dist/edge/viewer-request.js` が生成され、CFG が YAML 通りになること
+- [x] templates/ をルートに用意し、AWS / Cloudflare テンプレートを参照
+- [x] CLI: `init` / `build`（`--target aws|cloudflare`）、`dist/edge/` と `dist/infra/` 出力
+- [x] IaC 連携ドキュメント（Terraform / CDK / WAF）
+- [x] Phase 3: `firewall.waf` → `dist/infra/waf-rules.tf.json`
 
-これが **「B ティア脱却」** の第一歩です。
+次のステップ: npm 公開（README の「For maintainers」参照）、または WAF/Lambda@Edge の拡張。

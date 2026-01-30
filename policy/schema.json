@@ -24,7 +24,8 @@
           "properties": {
             "max_query_length": { "type": "integer" },
             "max_query_params": { "type": "integer" },
-            "max_uri_length": { "type": "integer" }
+            "max_uri_length": { "type": "integer" },
+            "max_header_size": { "type": "integer" }
           }
         },
         "block": {
@@ -38,7 +39,14 @@
         "normalize": {
           "type": "object",
           "properties": {
-            "drop_query_keys": { "type": "array", "items": { "type": "string" } }
+            "drop_query_keys": { "type": "array", "items": { "type": "string" } },
+            "path": {
+              "type": "object",
+              "properties": {
+                "collapse_slashes": { "type": "boolean" },
+                "remove_dot_segments": { "type": "boolean" }
+              }
+            }
           }
         }
       }
@@ -54,9 +62,17 @@
           "auth_gate": {
             "type": "object",
             "properties": {
-              "type": { "enum": ["static_token"] },
+              "type": { "enum": ["static_token", "basic_auth", "jwt", "signed_url"] },
               "header": { "type": "string" },
-              "token_env": { "type": "string" }
+              "token_env": { "type": "string" },
+              "credentials_env": { "type": "string" },
+              "algorithm": { "enum": ["HS256", "RS256", "ES256", "HMAC-SHA256"] },
+              "jwks_url": { "type": "string" },
+              "issuer": { "type": "string" },
+              "audience": { "type": "string" },
+              "secret_env": { "type": "string" },
+              "expires_param": { "type": "string" },
+              "signature_param": { "type": "string" }
             }
           },
           "response": { "type": "object", "properties": { "cache_control": { "type": "string" } } },
@@ -72,7 +88,91 @@
         "referrer_policy": { "type": "string" },
         "permissions_policy": { "type": "string" },
         "csp_public": { "type": "string" },
-        "csp_admin": { "type": "string" }
+        "csp_admin": { "type": "string" },
+        "cors": {
+          "type": "object",
+          "properties": {
+            "allow_origins": { "type": "array", "items": { "type": "string" } },
+            "allow_methods": { "type": "array", "items": { "type": "string" } },
+            "allow_headers": { "type": "array", "items": { "type": "string" } },
+            "expose_headers": { "type": "array", "items": { "type": "string" } },
+            "allow_credentials": { "type": "boolean" },
+            "max_age": { "type": "integer" }
+          }
+        },
+        "cookie_attributes": {
+          "type": "object",
+          "properties": {
+            "secure": { "type": "boolean" },
+            "http_only": { "type": "boolean" },
+            "same_site": { "enum": ["Strict", "Lax", "None"] }
+          }
+        }
+      }
+    },
+    "firewall": {
+      "type": "object",
+      "properties": {
+        "waf": {
+          "type": "object",
+          "properties": {
+            "rate_limit": { "type": "integer" },
+            "scope": { "enum": ["REGIONAL", "CLOUDFRONT"] },
+            "managed_rules": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "geo": {
+          "type": "object",
+          "properties": {
+            "block_countries": { "type": "array", "items": { "type": "string" } },
+            "allow_countries": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "ip": {
+          "type": "object",
+          "properties": {
+            "allowlist": { "type": "array", "items": { "type": "string" } },
+            "blocklist": { "type": "array", "items": { "type": "string" } }
+          }
+        }
+      }
+    },
+    "transport": {
+      "type": "object",
+      "properties": {
+        "tls": {
+          "type": "object",
+          "properties": {
+            "minimum_version": { "enum": ["TLSv1.2", "TLSv1.3"] },
+            "security_policy": { "type": "string" }
+          }
+        },
+        "http": {
+          "type": "object",
+          "properties": {
+            "versions": { "type": "array", "items": { "enum": ["http1.1", "http2", "http3"] } }
+          }
+        }
+      }
+    },
+    "origin": {
+      "type": "object",
+      "properties": {
+        "auth": {
+          "type": "object",
+          "properties": {
+            "type": { "enum": ["custom_header"] },
+            "header": { "type": "string" },
+            "secret_env": { "type": "string" }
+          }
+        },
+        "timeout": {
+          "type": "object",
+          "properties": {
+            "connect": { "type": "integer" },
+            "read": { "type": "integer" }
+          }
+        }
       }
     }
   }

@@ -23,9 +23,13 @@ const CFG = {
   allowMethods: ["GET","HEAD","POST"],
   maxQueryLength: 1024,
   maxQueryParams: 30,
+  maxUriLength: 2048,
   dropQueryKeys: new Set(["utm_source","utm_medium","utm_campaign","utm_term","utm_content","gclid","fbclid"]),
   uaDenyContains: ["sqlmap","nikto","acunetix","masscan","python-requests"],
   blockPathMarks: ["/../","..","%2e%2e","%2E%2E"],
+  normalizePath: { collapseSlashes: false, removeDotSegments: false },
+  requiredHeaders: ["user-agent"],
+  cors: null,
   adminGate:   {
     "enabled": true,
     "protectedPrefixes": [
@@ -35,7 +39,8 @@ const CFG = {
     ],
     "tokenHeaderName": "x-edge-token",
     "token": "BUILD_TIME_INJECTION"
-  }
+  },
+  authGates: [{"name":"admin","protectedPrefixes":["/admin","/docs","/swagger"],"type":"static_token","tokenHeaderName":"x-edge-token","token":"BUILD_TIME_INJECTION"}],
 };
 
   function resp(statusCode, body) {
@@ -50,8 +55,72 @@ const CFG = {
     };
   }
 
+  function handleCorsPreflight(req) {
+    // Handle CORS preflight (OPTIONS) requests
+    if (req.method !== 'OPTIONS' || !CFG.cors) return null;
+    
+    const origin = req.headers['origin']?.value || '';
+    if (!origin) return null;
+    
+    const allowedOrigins = CFG.cors.allow_origins || [];
+    const isAllowed = allowedOrigins.includes('*') || allowedOrigins.includes(origin);
+    if (!isAllowed) return null;
+    
+    const headers = {
+      'access-control-allow-origin': { value: origin },
+      'cache-control': { value: 'no-store' },
+    };
+    
+    if (CFG.cors.allow_methods) {
+      headers['access-control-allow-methods'] = { value: CFG.cors.allow_methods.join(', ') };
+    }
+    if (CFG.cors.allow_headers) {
+      headers['access-control-allow-headers'] = { value: CFG.cors.allow_headers.join(', ') };
+    }
+    if (CFG.cors.allow_credentials) {
+      headers['access-control-allow-credentials'] = { value: 'true' };
+    }
+    if (CFG.cors.max_age) {
+      headers['access-control-max-age'] = { value: String(CFG.cors.max_age) };
+    }
+    
+    return {
+      statusCode: 204,
+      statusDescription: 'No Content',
+      headers,
+    };
+  }
+
   function blockIfMethodNotAllowed(req) {
+    // Skip method check for OPTIONS if CORS is enabled (handled by preflight)
+    if (req.method === 'OPTIONS' && CFG.cors) return null;
     if (!CFG.allowMethods.includes(req.method)) return resp(405, "Method Not Allowed");
+    return null;
+  }
+
+  function blockIfUriTooLong(req) {
+    if ((req.uri || '').length > CFG.maxUriLength) {
+      return resp(414, 'URI Too Long');
+    }
+    return null;
+  }
+
+  function normalizePath(req) {
+    let p = req.uri || '/';
+    if (CFG.normalizePath.collapseSlashes) {
+      p = p.replace(/\/+/g, '/');
+    }
+    if (CFG.normalizePath.removeDotSegments) {
+      // RFC 3986 準拠の dot-segment 除去
+      const segments = p.split('/');
+      const out = [];
+      for (const seg of segments) {
+        if (seg === '..') { out.pop(); }
+        else if (seg !== '.') { out.push(seg); }
+      }
+      p = out.join('/') || '/';
+    }
+    req.uri = p;
     return null;
   }
 
@@ -63,13 +132,20 @@ const CFG = {
     return null;
   }
 
+  function blockIfHeaderMissing(req) {
+    for (const h of CFG.requiredHeaders) {
+      const val = req.headers[h.toLowerCase()]?.value;
+      if (!val) return resp(400, "Missing " + h);
+    }
+    return null;
+  }
+
   function blockIfBadUA(req) {
     const ua = req.headers["user-agent"]?.value || "";
-    // Blocking missing UA is configurable (relax if you have API/IoT clients without UA)
-    if (!ua) return resp(400, "Missing User-Agent");
-    if (ua.length > 512) return resp(400, "User-Agent Too Long");
+    // UA length check (if UA exists)
+    if (ua && ua.length > 512) return resp(400, "User-Agent Too Long");
 
-    const lower = ua.toLowerCase();
+    const lower = (ua || "").toLowerCase();
     for (const mark of CFG.uaDenyContains) {
       if (lower.includes(mark)) return resp(403, "Forbidden");
     }
@@ -98,6 +174,52 @@ const CFG = {
     return null;
   }
 
+  function basicAuthResp() {
+    return {
+      statusCode: 401,
+      statusDescription: 'Unauthorized',
+      headers: {
+        'www-authenticate': { value: 'Basic realm="Protected"' },
+        'content-type': { value: 'text/plain; charset=utf-8' },
+        'cache-control': { value: 'no-store' },
+      },
+      body: 'Unauthorized',
+    };
+  }
+
+  function checkAuthGates(req) {
+    const uri = req.uri || "/";
+    
+    for (const gate of CFG.authGates) {
+      const isProtected = gate.protectedPrefixes.some(
+        (p) => uri === p || uri.startsWith(p + "/")
+      );
+      if (!isProtected) continue;
+      
+      if (gate.type === 'static_token') {
+        const token = req.headers[gate.tokenHeaderName]?.value || "";
+        if (token !== gate.token) {
+          return resp(401, "Unauthorized");
+        }
+      } else if (gate.type === 'basic_auth') {
+        const authHeader = req.headers['authorization']?.value || "";
+        if (!authHeader.startsWith('Basic ')) {
+          return basicAuthResp();
+        }
+        const provided = authHeader.slice(6);
+        if (provided !== gate.credentials) {
+          return basicAuthResp();
+        }
+      }
+      // jwt and signed_url types are handled in Lambda@Edge
+      
+      // Signal to origin that request passed edge auth
+      req.headers["x-edge-authenticated"] = { value: "1" };
+    }
+    return null;
+  }
+
+  // Legacy adminGate for backward compatibility
   function adminGate(req) {
     if (!CFG.adminGate.enabled) return null;
 
@@ -109,11 +231,9 @@ const CFG = {
 
     const token = req.headers[CFG.adminGate.tokenHeaderName]?.value || "";
     if (token !== CFG.adminGate.token) {
-      // Optionally return 404 to hide existence of the path
       return resp(401, "Unauthorized");
     }
 
-    // Optional: signal to origin that request passed edge auth
     req.headers["x-edge-authenticated"] = { value: "1" };
     return null;
   }
@@ -121,23 +241,42 @@ const CFG = {
   function handler(event) {
     const req = event.request;
 
+    // 0) CORS preflight handling
+    const preflight = handleCorsPreflight(req);
+    if (preflight) return preflight;
+
     // 1) Method allowlist
     const m = blockIfMethodNotAllowed(req);
     if (m) return m;
 
-    // 2) Path traversal (coarse)
+    // 2) URI length check
+    const uriLen = blockIfUriTooLong(req);
+    if (uriLen) return uriLen;
+
+    // 3) Path normalization
+    normalizePath(req);
+
+    // 4) Path traversal (coarse)
     const t = blockIfTraversal(req);
     if (t) return t;
 
-    // 3) UA sanity
+    // 5) Required headers check
+    const hm = blockIfHeaderMissing(req);
+    if (hm) return hm;
+
+    // 6) UA sanity (deny list)
     const u = blockIfBadUA(req);
     if (u) return u;
 
-    // 4) Query guard + normalize
+    // 7) Query guard + normalize
     const q = guardAndNormalizeQuery(req);
     if (q) return q;
 
-    // 5) Admin gate
+    // 8) Auth gates (includes Basic auth, static token, etc.)
+    const auth = checkAuthGates(req);
+    if (auth) return auth;
+
+    // 9) Legacy admin gate (backward compatibility)
     const g = adminGate(req);
     if (g) return g;
 

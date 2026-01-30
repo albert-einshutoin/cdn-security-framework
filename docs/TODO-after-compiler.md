@@ -109,11 +109,11 @@
 
 ## 7. 将来・拡張
 
-- [ ] **Lambda@Edge (origin-request.js)**  
-  必要ならテンプレートと build 対象に追加。
+- [x] **Lambda@Edge (origin-request.js)**（済）
+  - `templates/aws/origin-request.js` と `scripts/compile.js` で policy から `dist/edge/origin-request.js` を生成（最小 CFG: project, mode）。パススルー用。JWT 等は将来拡張。
 
-- [ ] **Cloudflare Workers (index.ts)**  
-  必要なら `runtimes/templates/cloudflare/` と build で生成する。
+- [x] **Cloudflare Workers (index.ts)**（済）
+  - `templates/cloudflare/index.ts` と `scripts/compile-cloudflare.js` で policy から `dist/edge/cloudflare/index.ts` を生成。`npx cdn-security build --target cloudflare` で利用可能。
 
-- [ ] **viewer-response.js の自動生成**  
-  policy の `response_headers` 等から生成する。
+- [x] **viewer-response.js の自動生成**（済）
+  - policy の `response_headers` と `routes` から `dist/edge/viewer-response.js` を生成。テンプレート: `templates/aws/viewer-response.js`。

@@ -81,10 +81,13 @@ This framework addresses these with **"policy-driven" + "runtime separation"**.
   templates/                # Internal: used by build to generate dist/edge/
     aws/
   dist/
-    edge/                  # Generated: deploy this (viewer-request.js, etc.)
+    edge/                  # Generated: deploy this (viewer-request.js, viewer-response.js, origin-request.js)
+    infra/                 # Generated when policy has firewall: waf-rules.tf.json (Terraform)
   runtimes/                # Legacy / reference; deploy from dist/edge/
   examples/
 ```
+
+See [IaC integration](docs/iac.md) for Terraform / CDK / WAF usage.
 
 ---
 

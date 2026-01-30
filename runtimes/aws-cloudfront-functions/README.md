@@ -6,7 +6,7 @@ This directory is **legacy / reference**. The **deployable code** is generated b
 
 1. Edit **`policy/security.yml`** (or `policy/base.yml`).
 2. Run **`npx cdn-security build`**.
-3. Deploy the files in **`dist/edge/`** (e.g. `dist/edge/viewer-request.js`) to CloudFront Functions (Terraform `file()`, CDK, or console).
+3. Deploy the files in **`dist/edge/`** (`dist/edge/viewer-request.js` and `dist/edge/viewer-response.js`) to CloudFront Functions (Terraform `file()`, CDK, or console).
 
 Do **not** edit `viewer-request.js` in this directory by hand; it is replaced by the generated `dist/edge/viewer-request.js`. The CLI reads the policy and injects config (allow methods, block rules, admin gate, etc.) into the template.
 
@@ -19,7 +19,7 @@ Do **not** edit `viewer-request.js` in this directory by hand; it is replaced by
 ## Where to attach
 
 - `dist/edge/viewer-request.js` → **Viewer Request**
-- `dist/edge/viewer-response.js` → **Viewer Response** (when generated)
+- `dist/edge/viewer-response.js` → **Viewer Response** (generated from policy `response_headers` and `routes`)
 
 ## Admin token
 

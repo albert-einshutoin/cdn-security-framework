@@ -1,52 +1,65 @@
-# Example: Cloudflare Workers
+# Example: Cloudflare Workers (E2E)
 
-This example shows how to deploy the Edge Security runtime with **Cloudflare Workers**.
+This example uses **cdn-security-framework** as a dev dependency: init → edit policy → build with `--target cloudflare` → deploy the generated **`dist/edge/cloudflare/index.ts`** to Cloudflare Workers.
 
 ---
 
 ## Prerequisites
 
+- Node.js 18+
 - Cloudflare account
-- Wrangler CLI (`npm i -g wrangler`) and `wrangler login`
+- Wrangler CLI (`npm i -g wrangler` or use `npx wrangler`) and `wrangler login`
 
 ---
 
 ## Steps
 
-### 1. Use the runtime
+### 1. Install and init
 
-From the repo root:
-
-```bash
-cd runtimes/cloudflare-workers
-```
-
-Or copy the contents of `runtimes/cloudflare-workers/` into your own Worker project.
-
-### 2. Install and build (if needed)
+From this directory (`examples/cloudflare/`):
 
 ```bash
 npm install
-npm run build   # if you have a build step
+npm run init
 ```
 
-### 3. Set the admin token secret
+This installs the framework from the repo root (`file:../..`) and creates `policy/security.yml` and `policy/profiles/balanced.yml`. For the published package, use `"cdn-security-framework": "^1.0.0"` in your project's `package.json`.
+
+### 2. Edit policy (optional)
+
+Edit `policy/security.yml` to adjust allowed methods, block rules, routes, response headers, etc.
+
+### 3. Build
+
+```bash
+npm run build
+```
+
+This runs `npx cdn-security build --target cloudflare`: validates the policy and generates **`dist/edge/cloudflare/index.ts`**. Deploy this generated file (or copy it into your Worker project). Wrangler will compile TypeScript when you deploy.
+
+### 4. Set the admin token secret
 
 ```bash
 wrangler secret put EDGE_ADMIN_TOKEN
 ```
 
-Enter your secret token when prompted.
+Enter your secret token when prompted. The Worker reads it from `env.EDGE_ADMIN_TOKEN`.
 
-### 4. Deploy
+### 5. Deploy
 
-```bash
-wrangler deploy
-```
+Copy or link the generated Worker into a Wrangler project and deploy:
 
-Note: Your Worker must be attached to a route (e.g. `*\.yourdomain.com/*`) in the Cloudflare dashboard or via `wrangler.toml` routes.
+- **Option A**: Create a Worker project that uses the generated file. For example, create `src/index.ts` that re-exports or copy `dist/edge/cloudflare/index.ts` into your Worker's `src/`, then:
 
-### 5. Verify
+  ```bash
+  wrangler deploy
+  ```
+
+- **Option B**: From the framework repo root, run Wrangler with the generated file. Configure `wrangler.toml` so that `main` points to `dist/edge/cloudflare/index.ts` (or the path relative to your project).
+
+Ensure your Worker is attached to a route (e.g. `*\.yourdomain.com/*`) in the Cloudflare dashboard or via `wrangler.toml` routes.
+
+### 6. Verify
 
 ```bash
 # Without token: 401
@@ -61,9 +74,14 @@ curl -i "https://YOUR_WORKER_DOMAIN/foo/../bar"
 
 ---
 
-## Policy alignment
+## Summary
 
-Runtime behavior is aligned with `policy/base.yml` (or `policy/profiles/balanced.yml`). When the policy compiler is added, Workers code can be generated from the policy.
+| Step   | Command / action |
+|--------|-------------------|
+| Install | `npm install` (uses cdn-security-framework from repo or npm) |
+| Init    | `npm run init` → creates `policy/security.yml` |
+| Build   | `npm run build` → generates `dist/edge/cloudflare/index.ts` |
+| Deploy  | Use `dist/edge/cloudflare/index.ts` in your Worker project and run `wrangler deploy` |
 
 ---
 
@@ -71,4 +89,4 @@ Runtime behavior is aligned with `policy/base.yml` (or `policy/profiles/balanced
 
 - [Cloudflare Workers Runtime](../../runtimes/cloudflare-workers/README.md)
 - [Quick Start](../../docs/quickstart.md)
-- [Architecture](../../docs/architecture.md)
+- [Policy and runtime sync](../../docs/policy-runtime-sync.md)

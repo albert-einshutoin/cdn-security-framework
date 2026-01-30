@@ -6,7 +6,7 @@
 
 1. **`policy/security.yml`**（または `policy/base.yml`）を編集する。
 2. **`npx cdn-security build`** を実行する。
-3. **`dist/edge/`** 内のファイル（例: `dist/edge/viewer-request.js`）を CloudFront Functions にデプロイする（Terraform の `file()`、CDK、コンソール）。
+3. **`dist/edge/`** 内のファイル（`dist/edge/viewer-request.js` と `dist/edge/viewer-response.js`）を CloudFront Functions にデプロイする（Terraform の `file()`、CDK、コンソール）。
 
 このディレクトリの `viewer-request.js` は手で編集しないでください。デプロイ対象は生成された `dist/edge/viewer-request.js` です。CLI がポリシーを読み、テンプレートに設定（許可メソッド、ブロックルール、admin gate など）を注入します。
 
@@ -19,7 +19,7 @@
 ## どこにアタッチする？
 
 - `dist/edge/viewer-request.js` → **Viewer Request**
-- `dist/edge/viewer-response.js` → **Viewer Response**（生成される場合）
+- `dist/edge/viewer-response.js` → **Viewer Response**（ポリシーの `response_headers` と `routes` から生成）
 
 ## 管理用トークン
 

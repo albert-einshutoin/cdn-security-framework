@@ -58,3 +58,9 @@ response_headers:
   # CSP: introduce gradually; start with report-only profile if needed
   csp_public: "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';"
   csp_admin:  "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
+
+# Phase 3: Infra Config (WAF). Omit to skip dist/infra/*.tf.json generation.
+firewall:
+  waf:
+    rate_limit: 2000   # requests per 5 min per IP (rate-based rule)
+    scope: REGIONAL    # REGIONAL | CLOUDFRONT

@@ -1,0 +1,13 @@
+{
+  "name": "example-cloudflare",
+  "version": "1.0.0",
+  "private": true,
+  "description": "E2E example: use cdn-security-framework to generate Cloudflare Workers code",
+  "scripts": {
+    "init": "cdn-security init --platform cloudflare --profile balanced --force",
+    "build": "cdn-security build --target cloudflare"
+  },
+  "devDependencies": {
+    "cdn-security-framework": "file:../.."
+  }
+}

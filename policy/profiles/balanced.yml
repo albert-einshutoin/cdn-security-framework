@@ -61,3 +61,8 @@ response_headers:
   # CSP: introduce gradually; start with report-only profile if needed
   csp_public: "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';"
   csp_admin:  "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';"
+
+firewall:
+  waf:
+    rate_limit: 2000
+    scope: REGIONAL

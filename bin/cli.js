@@ -135,11 +135,26 @@ program
       ], { stdio: 'inherit', cwd });
       if (compileResult.status !== 0) process.exit(1);
       console.log('[SUCCESS] Generated ' + path.join(outDir, 'edge', 'viewer-request.js'));
-      // viewer-response.js, dist/infra/*.tf.json は Phase 2/3 で追加
+      console.log('[SUCCESS] Generated ' + path.join(outDir, 'edge', 'viewer-response.js'));
+      console.log('[SUCCESS] Generated ' + path.join(outDir, 'edge', 'origin-request.js'));
+      const compileInfraPath = path.join(pkgRoot, 'scripts', 'compile-infra.js');
+      const compileInfraResult = spawnSync(process.execPath, [
+        compileInfraPath,
+        '--policy', policyPath,
+        '--out-dir', outDir,
+      ], { stdio: 'inherit', cwd });
+      if (compileInfraResult.status !== 0) process.exit(1);
+      console.log('[SUCCESS] Generated ' + path.join(outDir, 'infra', 'waf-rules.tf.json'));
     } else if (opts.target === 'cloudflare') {
-      console.log('[INFO] Target: Cloudflare Workers (codegen not yet implemented)');
-      console.log('[WARN] Use --target aws for now.');
-      process.exit(1);
+      console.log('[INFO] Target: Cloudflare Workers');
+      const compileCfPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare.js');
+      const compileCfResult = spawnSync(process.execPath, [
+        compileCfPath,
+        '--policy', policyPath,
+        '--out-dir', outDir,
+      ], { stdio: 'inherit', cwd });
+      if (compileCfResult.status !== 0) process.exit(1);
+      console.log('[SUCCESS] Generated ' + path.join(outDir, 'edge', 'cloudflare', 'index.ts'));
     } else {
       console.error('[ERROR] Unknown target:', opts.target);
       process.exit(1);
