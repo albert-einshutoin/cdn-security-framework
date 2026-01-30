@@ -13,6 +13,9 @@ node_modules/
 Thumbs.db
 
 # Build / logs
-dist/
+# dist/ はルートのみコミット（CI で policy とのドリフトを検知）。examples/*/dist は生成物のため無視
+/examples/*/dist/
+/examples/*/policy/
+/examples/*/node_modules/
 *.log
 .wrangler/

@@ -41,16 +41,16 @@ Quick Start now uses: `cp policy/profiles/balanced.yml policy/base.yml` and depl
 
 ## 4. Policy vs Runtimes
 
-- **Policy**: `policy/base.yml` and `policy/profiles/balanced.yml` exist; human-readable, CDN-agnostic.
-- **Runtimes**: CloudFront Functions, Lambda@Edge, Cloudflare Workers do **not** read the policy file; config is in-code (CFG). A **compiler** from policy to runtime is not yet implemented; runtimes are hand-synced with the policy.
+- **Policy**: `policy/security.yml` (or `policy/base.yml`) and `policy/profiles/` exist; human-readable, CDN-agnostic.
+- **Compiler**: **Implemented**. The CLI (`npx cdn-security build`) reads the policy, validates it, and generates Edge Runtime code into `dist/edge/*.js` (e.g. CloudFront Functions viewer-request). No manual sync of CFG; Lambda@Edge and Cloudflare Workers codegen are planned for later.
 
 ---
 
 ## 5. Optional Next Steps
 
-- Add CI (e.g. policy lint, basic runtime smoke tests).
-- Implement policy compiler to generate runtime code from `policy/base.yml`.
-- Version the project (e.g. tag v0.1.0) and keep CHANGELOG updated.
+- CI is in place (policy lint, build, dist drift check, runtime tests).
+- Policy compiler is implemented (init + build); extend to viewer-response, Lambda@Edge, Cloudflare, and `dist/infra/*.tf.json` (WAF) as needed.
+- Version the project (e.g. tag v0.1.0) and keep CHANGELOG updated. Document npm publish steps (see README "For maintainers").
 
 ---
 

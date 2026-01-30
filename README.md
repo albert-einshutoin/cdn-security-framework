@@ -64,62 +64,69 @@ This framework addresses these with **"policy-driven" + "runtime separation"**.
 
 ```
   README.md
+  bin/
+    cli.js                 # CLI entry (npx cdn-security)
   docs/
     architecture.md
     quickstart.md
-    threat-model.md
-    decision-matrix.md
     policy-runtime-sync.md
-    observability.md
+    VISION.md
   policy/
-    base.yml
-    README.md
+    security.yml / base.yml
     profiles/
-      balanced.yml
-      strict.yml
-      permissive.yml
   scripts/
+    compile.js
     policy-lint.js
     runtime-tests.js
-  runtimes/
-    aws-cloudfront-functions/
-    aws-lambda-edge/
-    cloudflare-workers/
+  templates/                # Internal: used by build to generate dist/edge/
+    aws/
+  dist/
+    edge/                  # Generated: deploy this (viewer-request.js, etc.)
+  runtimes/                # Legacy / reference; deploy from dist/edge/
   examples/
-    aws-cloudfront/
-    cloudflare/
 ```
 
 ---
 
-## Policy and Runtimes (Current State)
+## Policy and Runtimes
 
-* **Policy** (`policy/base.yml` and `policy/profiles/*.yml`) is the **source of truth** for security rules. Edit the policy to change blocking rules, headers, or route protection.
-* **Runtimes** (CloudFront Functions, Lambda@Edge, Cloudflare Workers) do **not** read the policy file today. Their config is in-code. When you change the policy, you must **manually update** each runtime's config (e.g. `CFG` in `viewer-request.js`) so it matches the policy.
-* A **policy compiler** (policy → generated runtime code) is **planned** but not yet implemented. Until then, keep policy and runtimes in sync by hand when you change rules. See [Policy and runtime sync](docs/policy-runtime-sync.md) for the workflow and future direction.
+* **Policy** (`policy/security.yml` or `policy/base.yml`) is the **single source of truth**. Edit the policy to change blocking rules, headers, or route protection.
+* **Build** runs the CLI compiler: `npx cdn-security build` reads the policy, validates it, and generates **Edge Runtime** code into `dist/edge/*.js`. No manual sync of `CFG` or runtime config.
+* See [Policy and runtime sync](docs/policy-runtime-sync.md) for details and IaC usage.
 
 ---
 
 ## Quick Start (5 minutes)
 
-### 1. Choose a policy profile
-
-Pick a profile from `policy/profiles/` (e.g. `balanced`, `strict`, `permissive`) and copy it to `base.yml`. See [Policy profiles](policy/README.md) for how to choose.
+### 1. Install
 
 ```bash
-cp policy/profiles/balanced.yml policy/base.yml
+npm install --save-dev cdn-security-framework
 ```
 
-### 2. Set admin token for admin UI
+### 2. Init (scaffold policy)
 
 ```bash
-export EDGE_ADMIN_TOKEN=your-secret-token
+npx cdn-security init
 ```
 
-### 3. Deploy runtime per CDN
+Answer the prompts (platform: AWS / Cloudflare, profile: Strict / Balanced / Permissive). This creates `policy/security.yml` and `policy/profiles/<profile>.yml`.
 
-* AWS: `examples/aws-cloudfront/` or `runtimes/aws-cloudfront-functions/`
-* Cloudflare: `examples/cloudflare/` or `runtimes/cloudflare-workers/`
+Or non-interactive: `npx cdn-security init --platform aws --profile balanced --force`
+
+### 3. Edit and build
+
+Edit `policy/security.yml` as needed, then:
+
+```bash
+npx cdn-security build
+```
+
+This validates the policy and generates `dist/edge/viewer-request.js` (and other Edge code).
+
+### 4. Deploy
+
+Use the generated files in `dist/edge/` with Terraform, CDK, or your CDN console. Set `EDGE_ADMIN_TOKEN` in your environment or secrets for admin routes.
 
 ---
 
@@ -149,6 +156,14 @@ export EDGE_ADMIN_TOKEN=your-secret-token
 * Global services using multiple CDNs
 * OSS / SaaS "secure template" offerings
 * Standardizing in-house security baselines
+
+---
+
+## For maintainers (publishing to npm)
+
+* **package-lock.json**: Commit it so CI can run `npm ci`.
+* **dist/**: If CI checks "dist drift" (`git diff --exit-code dist/`), run `npm run build` and commit `dist/edge/` (and later `dist/infra/`) so the repo stays in sync.
+* **Publish**: From repo root, run `npm publish` (requires npm auth). Prefer publishing from a clean tree with version bumped in `package.json` and an entry in `CHANGELOG.md`. Scoped package (e.g. `@your-org/cdn-security-framework`) requires `--access public` for the first publish.
 
 ---
 

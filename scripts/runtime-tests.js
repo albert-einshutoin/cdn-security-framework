@@ -10,19 +10,21 @@
 const fs = require('fs');
 const path = require('path');
 
-const viewerRequestPath = path.join(__dirname, '..', 'runtimes', 'aws-cloudfront-functions', 'viewer-request.js');
+// ビルド成果物をテスト（npm run build 後に実行）
+const viewerRequestPath = path.join(__dirname, '..', 'dist', 'edge', 'viewer-request.js');
 let code;
 try {
   code = fs.readFileSync(viewerRequestPath, 'utf8');
 } catch (e) {
-  console.error('Could not read viewer-request.js:', e.message);
+  console.error('Could not read dist/edge/viewer-request.js. Run: npm run build');
   process.exit(1);
 }
 
 // Run the script so handler() is defined (in global scope)
 eval(code);
 
-const DEFAULT_TOKEN = 'REPLACE_ME_WITH_EDGE_ADMIN_TOKEN';
+// ビルド時に EDGE_ADMIN_TOKEN 未設定なら BUILD_TIME_INJECTION が注入される
+const DEFAULT_TOKEN = process.env.EDGE_ADMIN_TOKEN || 'BUILD_TIME_INJECTION';
 
 function buildEvent(method, uri, headers, querystring) {
   const h = headers || {};

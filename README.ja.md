@@ -68,62 +68,68 @@
 
 ```
   README.md
+  bin/
+    cli.js                 # CLI エントリ (npx cdn-security)
   docs/
-    architecture.md
     quickstart.md
-    threat-model.md
-    decision-matrix.md
     policy-runtime-sync.md
-    observability.md
+    VISION.md
   policy/
-    base.yml
-    README.md
+    security.yml / base.yml
     profiles/
-      balanced.yml
-      strict.yml
-      permissive.yml
   scripts/
+    compile.js
     policy-lint.js
     runtime-tests.js
-  runtimes/
-    aws-cloudfront-functions/
-    aws-lambda-edge/
-    cloudflare-workers/
+  templates/               # 内部用: build が dist/edge/ を生成する際に参照
+    aws/
+  dist/
+    edge/                  # 生成物: ここをデプロイ (viewer-request.js 等)
+  runtimes/                # レガシー・参照用。デプロイは dist/edge/ から
   examples/
-    aws-cloudfront/
-    cloudflare/
 ```
 
 ---
 
-## ポリシーとランタイム（現状）
+## ポリシーとランタイム
 
-* **ポリシー**（`policy/base.yml` および `policy/profiles/*.yml`）がセキュリティルールの **正** です。ブロック条件・ヘッダー・ルート保護を変えるときはポリシーを編集します。
-* **ランタイム**（CloudFront Functions / Lambda@Edge / Cloudflare Workers）は **いまはポリシーファイルを読みません**。設定は各ランタイムのコード内（例: `viewer-request.js` の `CFG`）にあります。ポリシーを変更したら、**各ランタイムの設定を手動で合わせて**ください。
-* **ポリシーコンパイラ**（ポリシー → ランタイムコード生成）は **予定** されていますが未実装です。それまではルール変更時にポリシーとランタイムを手動で同期してください。手順と今後の方針は [ポリシーとランタイムの同期](docs/policy-runtime-sync.ja.md) を参照してください。
+* **ポリシー**（`policy/security.yml` または `policy/base.yml`）が **唯一の正** です。ブロック条件・ヘッダー・ルート保護を変えるときはポリシーを編集します。
+* **ビルド**で CLI コンパイラを実行: `npx cdn-security build` がポリシーを読み検証し、**Edge Runtime** コードを `dist/edge/*.js` に生成します。`CFG` やランタイム設定の手動同期は不要です。
+* 詳細と IaC 連携は [ポリシーとランタイムの同期](docs/policy-runtime-sync.ja.md) を参照してください。
 
 ---
 
 ## クイックスタート（5分）
 
-### 1. ポリシープロファイルを選ぶ
-
-`policy/profiles/` からプロファイル（`balanced` / `strict` / `permissive` など）を選び、`base.yml` にコピーします。選び方は [ポリシープロファイル](policy/README.ja.md) を参照してください。
+### 1. インストール
 
 ```bash
-cp policy/profiles/balanced.yml policy/base.yml
+npm install --save-dev cdn-security-framework
 ```
 
-### 2. 管理画面用トークンを設定
+### 2. 初期化（ポリシーの雛形生成）
 
 ```bash
-export EDGE_ADMIN_TOKEN=your-secret-token
+npx cdn-security init
 ```
 
-### 3. CDN別ランタイムをデプロイ
+対話でプラットフォーム（AWS / Cloudflare）とプロファイル（Strict / Balanced / Permissive）を選ぶと、`policy/security.yml` と `policy/profiles/<profile>.yml` が作成されます。
 
-* AWS: `examples/aws-cloudfront/` または `runtimes/aws-cloudfront-functions/`
-* Cloudflare: `examples/cloudflare/` または `runtimes/cloudflare-workers/`
+非対話: `npx cdn-security init --platform aws --profile balanced --force`
+
+### 3. 編集とビルド
+
+`policy/security.yml` を編集し、次を実行します。
+
+```bash
+npx cdn-security build
+```
+
+ポリシーが検証され、`dist/edge/viewer-request.js` などが生成されます。
+
+### 4. デプロイ
+
+生成された `dist/edge/` を Terraform / CDK や CDN コンソールでデプロイしてください。管理ルート用に `EDGE_ADMIN_TOKEN` を環境変数やシークレットで設定します。
 
 ---
 
@@ -153,6 +159,14 @@ export EDGE_ADMIN_TOKEN=your-secret-token
 * 複数 CDN を使うグローバルサービス
 * OSS / SaaS の「安全なテンプレ」提供
 * 社内セキュリティ基盤の標準化
+
+---
+
+## メンテナ向け（npm 公開）
+
+* **package-lock.json**: コミットしておく（CI で `npm ci` するため）。
+* **dist/**: CI で「dist ドリフト」を検知する場合は、`npm run build` を実行し `dist/edge/`（および将来の `dist/infra/`）をコミットしてリポジトリと一致させる。
+* **公開**: リポジトリルートで `npm publish`（npm 認証が必要）。`package.json` のバージョン更新と `CHANGELOG.md` の記載を済ませた状態で公開すること。スコープ付きパッケージ（例: `@your-org/cdn-security-framework`）は初回公開時に `--access public` が必要。
 
 ---
 

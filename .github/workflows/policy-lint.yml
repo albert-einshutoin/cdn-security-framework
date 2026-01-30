@@ -1,6 +1,6 @@
-# Policy lint and runtime tests
-# Runs on push/PR to main and on push to any branch (optional)
-name: Policy Lint & Runtime Tests
+# Policy lint, build, and runtime tests
+# 生成された dist/edge/ が security.yml (or base.yml) と一致しているかも検証する
+name: Policy Lint & Build Check
 
 on:
   push:
@@ -8,16 +8,18 @@ on:
     paths:
       - 'policy/**'
       - 'scripts/**'
-      - 'runtimes/aws-cloudfront-functions/viewer-request.js'
+      - 'templates/**'
+      - 'bin/**'
   pull_request:
     branches: [main]
     paths:
       - 'policy/**'
       - 'scripts/**'
-      - 'runtimes/aws-cloudfront-functions/viewer-request.js'
+      - 'templates/**'
+      - 'bin/**'
 
 jobs:
-  lint-and-test:
+  lint-build-test:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -27,14 +29,27 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Policy lint (base)
-        run: node scripts/policy-lint.js policy/base.yml
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Policy lint (security / base)
+        run: |
+          if [ -f policy/security.yml ]; then npm run lint:policy -- policy/security.yml; else npm run lint:policy -- policy/base.yml; fi
 
       - name: Policy lint (profiles)
         run: |
-          node scripts/policy-lint.js policy/profiles/balanced.yml
-          node scripts/policy-lint.js policy/profiles/strict.yml
-          node scripts/policy-lint.js policy/profiles/permissive.yml
+          npm run lint:policy -- policy/profiles/balanced.yml
+          npm run lint:policy -- policy/profiles/strict.yml
+          npm run lint:policy -- policy/profiles/permissive.yml
+
+      - name: Build (compile policy → dist)
+        run: npm run build
+
+      - name: Check for changes (dist drift)
+        run: |
+          # ビルド後の dist/ とコミットされた dist/ に差分がないか確認
+          # 手動で dist をいじった場合や policy 変更後に dist を更新し忘れた場合に検知
+          git diff --exit-code dist/
 
       - name: Runtime tests (CloudFront Functions viewer-request)
-        run: node scripts/runtime-tests.js
+        run: npm run test:runtime

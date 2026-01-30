@@ -1,11 +1,12 @@
-# 例: AWS CloudFront
+# 例: AWS CloudFront（E2E）
 
-この例では **AWS CloudFront** と **CloudFront Functions** で Edge セキュリティランタイムをデプロイする手順を示します。
+この例では **cdn-security-framework** を devDependency として使い、init → ポリシー編集 → build の流れで生成された **`dist/edge/`** のコードを CloudFront Functions にデプロイします。
 
 ---
 
 ## 前提条件
 
+- Node.js 18+
 - CloudFront および CloudFront Functions が利用可能な AWS アカウント
 - オリジン（S3 バケットまたはカスタムオリジン）の準備済み
 
@@ -13,37 +14,41 @@
 
 ## 手順
 
-### 1. ランタイムを使う
+### 1. インストールと初期化
 
-フレームワークのランタイムをコピーまたは参照します。
+このディレクトリ（`examples/aws-cloudfront/`）で:
 
-- **Viewer Request**: `../../runtimes/aws-cloudfront-functions/viewer-request.js`
-- **Viewer Response**: `../../runtimes/aws-cloudfront-functions/viewer-response.js`
-
-または、フレームワークの `runtimes/aws-cloudfront-functions/` をそのまま Functions のソースとしてデプロイしてください。
-
-### 2. 管理用トークンを設定
-
-`viewer-request.js` 内の次の行を、あなたの秘密トークンに置き換えます（または環境変数から注入するビルドステップを使用）。
-
-```js
-token: "REPLACE_ME_WITH_EDGE_ADMIN_TOKEN",
+```bash
+npm install
+npm run init
 ```
 
-### 3. コンソールで CloudFront Functions を作成
+リポジトリルート（`file:../..`）からフレームワークがインストールされ、`policy/security.yml` と `policy/profiles/balanced.yml` が作成されます。公開済みパッケージを使う場合は、devDependency を `"cdn-security-framework": "^1.0.0"` にし、そのプロジェクトで `npm install` を実行してください。
+
+### 2. ポリシー編集（任意）
+
+`policy/security.yml` を編集し、許可メソッド・ブロックルール・ルートなどを調整します。
+
+### 3. ビルド
+
+```bash
+npm run build
+```
+
+`npx cdn-security build` が実行され、ポリシーが検証され **`dist/edge/viewer-request.js`**（および他 Edge コードが実装されていればそれら）が生成されます。デプロイするのは **この生成ファイル** であり、フレームワークの `runtimes/` ソースではありません。
+
+### 4. 管理用トークン
+
+環境変数やシークレットで `EDGE_ADMIN_TOKEN` を設定してください。ビルド時に変数が設定されていれば注入されます。生成された JS を手で編集する必要はありません。
+
+### 5. CloudFront Functions の作成と関連付け
 
 1. CloudFront → Functions → Create function。
-2. **Viewer Request** 用の関数を作成: `viewer-request.js` の内容を貼り付けて Publish。
-3. **Viewer Response** 用の関数を作成: `viewer-response.js` の内容を貼り付けて Publish。
+2. **Viewer Request**: 関数を作成し **`dist/edge/viewer-request.js`** の内容を貼り付けて Publish。
+3. （生成されている場合）**Viewer Response**: 同様に `dist/edge/viewer-response.js`。
+4. ディストリビューション → Behaviors → 対象の behavior を編集 → **Viewer request**: Function type = CloudFront Functions、Viewer Request 関数を選択。**Viewer response** も同様に設定。保存しデプロイ完了を待ちます。
 
-### 4. ディストリビューションに関連付け
-
-1. ディストリビューション → Behaviors → デフォルト（または対象の behavior）を編集。
-2. **Viewer request**: Function type = CloudFront Functions、Viewer Request 関数を選択。
-3. **Viewer response**: Function type = CloudFront Functions、Viewer Response 関数を選択。
-4. 保存し、デプロイ完了を待ちます。
-
-### 5. 動作確認
+### 6. 動作確認
 
 ```bash
 # トークンなし: 401
@@ -58,9 +63,14 @@ curl -i "https://YOUR_DISTRIBUTION_DOMAIN/foo/../bar"
 
 ---
 
-## ポリシーとの対応
+## まとめ
 
-ランタイムの挙動は `policy/base.yml`（または `policy/profiles/balanced.yml`）と対応しています。ポリシーコンパイラ導入後は、ポリシーから Functions を生成できます。
+| ステップ | コマンド / 操作 |
+|----------|------------------|
+| インストール | `npm install`（リポジトリまたは npm の cdn-security-framework を使用） |
+| 初期化     | `npm run init` → `policy/security.yml` 作成 |
+| ビルド     | `npm run build` → `dist/edge/viewer-request.js` 生成 |
+| デプロイ   | `dist/edge/*.js` を CloudFront Functions（コンソール / Terraform / CDK）で使用 |
 
 ---
 
@@ -68,4 +78,4 @@ curl -i "https://YOUR_DISTRIBUTION_DOMAIN/foo/../bar"
 
 - [CloudFront Functions ランタイム](../../runtimes/aws-cloudfront-functions/README.ja.md)
 - [クイックスタート](../../docs/quickstart.ja.md)
-- [アーキテクチャ](../../docs/architecture.ja.md)
+- [ポリシーとランタイムの同期](../../docs/policy-runtime-sync.ja.md)

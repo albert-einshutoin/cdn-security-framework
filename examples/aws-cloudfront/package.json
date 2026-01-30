@@ -1,0 +1,13 @@
+{
+  "name": "example-aws-cloudfront",
+  "version": "1.0.0",
+  "private": true,
+  "description": "E2E example: use cdn-security-framework to generate Edge code and deploy to CloudFront",
+  "scripts": {
+    "init": "cdn-security init --platform aws --profile balanced --force",
+    "build": "cdn-security build"
+  },
+  "devDependencies": {
+    "cdn-security-framework": "file:../.."
+  }
+}

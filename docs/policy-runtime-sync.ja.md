@@ -1,46 +1,45 @@
 # ポリシーとランタイムの同期
 
-このドキュメントでは、**ポリシー**（`policy/base.yml` および `policy/profiles/*.yml`）と **ランタイム**（CloudFront Functions / Lambda@Edge / Cloudflare Workers）を、現状どう同期するかと、今後の方針を説明します。
+このドキュメントでは、**ポリシー**（`policy/security.yml` または `policy/base.yml`）と **ランタイム**（CloudFront Functions / Lambda@Edge / Cloudflare Workers）の同期のしかたを説明します。
 
 ---
 
 ## 現状
 
-* **ポリシー** が人間が読める正です。YAML を編集して以下を変更します：
+* **ポリシー** が唯一の正です。YAML を編集して以下を変更します：
   * 許可メソッド、クエリ/URI 制限
   * ブロックルール（パスパターン、UA 拒否リスト、必須ヘッダー欠落）
   * 正規化（例: `drop_query_keys`）
   * ルート（例: `/admin`, `/docs`）と認証ゲート
   * レスポンスヘッダー（HSTS、CSP など）
 
-* **ランタイム** は **ポリシーファイルを読みません**。各ランタイムはコード内の設定（例: `viewer-request.js` の `CFG`、Workers の `env`）を持ちます。ポリシーを変更したら、**各ランタイムを手動で更新**し、挙動がポリシーと一致するようにしてください。
+* **CloudFront Functions (viewer-request)** は CLI コンパイラで **自動生成** されます。ポリシーを編集したあと `npx cdn-security build` を実行すると、ポリシーが検証され、**Edge Runtime** コードが `dist/edge/*.js`（例: `dist/edge/viewer-request.js`）に出力されます。このターゲットでは `CFG` やランタイム設定の手動同期は不要です。
+
+* **Lambda@Edge** と **Cloudflare Workers** はまだコンパイラで生成されません。それらのランタイムは、コード生成が実装されるまでポリシーに合わせて手動で更新してください。
 
 ---
 
 ## ポリシーを変更したときの手順
 
-1. `policy/base.yml`（または使用しているプロファイル）を編集する。
-2. ポリシー Lint を実行する（任意だが推奨）：
+1. `policy/security.yml`（または `policy/base.yml`）を編集する。
+2. ビルド（ポリシー検証と Edge コード生成）を実行する：
    ```bash
-   node scripts/policy-lint.js policy/base.yml
+   npx cdn-security build
    ```
-3. 使用している各ランタイムを更新する：
-   * **CloudFront Functions**: `runtimes/aws-cloudfront-functions/viewer-request.js` と `viewer-response.js` — `CFG` とヘッダー処理をポリシーに合わせる。
-   * **Lambda@Edge**: `runtimes/aws-lambda-edge/origin-request.js`（および必要なら response）— 同様。
-   * **Cloudflare Workers**: `runtimes/cloudflare-workers/src/index.ts` — 設定とヘッダー処理をポリシーに合わせる。
-4. ランタイムのテストがあれば実行する（例: ランタイムまたは `scripts/` で `npm test`）。
-5. 更新したランタイムを CDN にデプロイする。
+3. 生成された **`dist/edge/`** 内のファイルを CDN にデプロイする（例: Terraform の `file("dist/edge/viewer-request.js")`、CDK、コンソール）。
+4. Lambda@Edge / Cloudflare Workers（未生成の場合）: 該当ランタイムをポリシーに合わせて手動で更新し、デプロイする。
 
 ---
 
-## 今後の方針：ポリシーコンパイラ
+## ポリシーコンパイラ（実装済み）
 
-**ポリシーコンパイラ** の導入を予定しています。想定している動きは次のとおりです。
+**ポリシーコンパイラ**（CLI: `npx cdn-security build`）は次のことを行います。
 
-* `policy/base.yml`（および任意でプロファイルの上書き）を読み込む。
-* 各ターゲット（CloudFront Functions / Lambda@Edge / Cloudflare Workers）向けのランタイムコードを **生成** または **検証** する。
+* `policy/security.yml` または `policy/base.yml`（および `--policy` でパス指定可能）を読み込む。
+* ポリシーを検証（Lint）する。
+* 選択したターゲット（例: AWS CloudFront Functions）向けの **Edge Runtime** コードを `dist/edge/*.js` に生成する。
 
-コンパイラができるまでは、ポリシーとランタイムを **手動で整合** させ、ランタイムの README とこのドキュメントでマッピングを明示します。
+ポリシーから生成コードへのマッピングは `scripts/compile.js` と `templates/` 内のテンプレートで実装されています。
 
 ---
 

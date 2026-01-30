@@ -47,12 +47,10 @@ README / README.ja.md の「リポジトリ構成」およびクイックスタ�
 
 ## 3. ポリシーとランタイムの関係
 
-- **`policy/base.yml`**: 人間が読めるポリシー（YAML）として存在し、内容は各ランタイムの CFG と対応している。
-- **ランタイム**: CloudFront Functions / Cloudflare Workers / Lambda@Edge は **いずれもポリシーファイルを読み込んでいない**。  
-  - 設定は各ランタイム内の `CFG` 等に **ハードコード**。
-  - README（CloudFront Functions）には「compiler を入れると `policy/base.yml` から自動生成できる」とあるが、**コンパイラは未実装**。
+- **`policy/security.yml`（または `policy/base.yml`）**: 人間が読めるポリシー（YAML）として存在し、内容は生成ランタイムの CFG と対応している。
+- **コンパイラ**: **実装済み**。CLI（`npx cdn-security build`）がポリシーを読み検証し、Edge Runtime コードを `dist/edge/*.js`（例: CloudFront Functions viewer-request）に生成する。CFG の手動同期は不要。Lambda@Edge と Cloudflare Workers のコード生成は今後の拡張予定。
 
-**影響**: 「ポリシー駆動」を謳っているが、現状はポリシーとランタイムが手動で同期する設計。ポリシー変更時に全ランタイムを手で書き換える必要がある。
+**影響**: ポリシー駆動が実現されており、ポリシー変更後は `npx cdn-security build` でランタイムを再生成すればよい。
 
 ---
 
@@ -111,7 +109,7 @@ README / README.ja.md の「リポジトリ構成」およびクイックスタ�
 
 7. **.github/** の整備（Issue/PR テンプレート、必要なら CI の骨子）。
 8. **CHANGELOG.md**（バージョンが付いた時点で運用開始で可）。
-9. **ポリシー ↔ ランタイム** の同期方針の明文化（現状は手動であることを README または architecture に記載し、将来 compiler を入れる場合の方針を 1 行でも書く）。
+9. **ポリシー ↔ ランタイム** の同期方針は実装済み（CLI: init / build）。README および docs/policy-runtime-sync に記載。
 
 ---
 

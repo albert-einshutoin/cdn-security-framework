@@ -1,11 +1,12 @@
-# Example: AWS CloudFront
+# Example: AWS CloudFront (E2E)
 
-This example shows how to deploy the Edge Security runtime with **AWS CloudFront** and **CloudFront Functions**.
+This example uses **cdn-security-framework** as a dev dependency: init → edit policy → build → deploy the generated **`dist/edge/`** code to CloudFront Functions.
 
 ---
 
 ## Prerequisites
 
+- Node.js 18+
 - AWS account with CloudFront and CloudFront Functions available
 - Origin (S3 bucket or custom origin) already set up
 
@@ -13,39 +14,41 @@ This example shows how to deploy the Edge Security runtime with **AWS CloudFront
 
 ## Steps
 
-### 1. Use the runtime
+### 1. Install and init
 
-Copy or link the runtime from the framework:
+From this directory (`examples/aws-cloudfront/`):
 
-- **Viewer Request**: `../../runtimes/aws-cloudfront-functions/viewer-request.js`
-- **Viewer Response**: `../../runtimes/aws-cloudfront-functions/viewer-response.js`
-
-Or deploy the framework's `runtimes/aws-cloudfront-functions/` directory as your Functions source.
-
-### 2. Set the admin token
-
-In `viewer-request.js`, replace:
-
-```js
-token: "REPLACE_ME_WITH_EDGE_ADMIN_TOKEN",
+```bash
+npm install
+npm run init
 ```
 
-with your secret token (or use a build step to inject it from an env var).
+This installs the framework from the repo root (`file:../..`) and creates `policy/security.yml` and `policy/profiles/balanced.yml`. To use the published package instead, replace the devDependency with `"cdn-security-framework": "^1.0.0"` and run `npm install` from a project that has the package on npm.
 
-### 3. Create CloudFront Functions in the console
+### 2. Edit policy (optional)
+
+Edit `policy/security.yml` to adjust allowed methods, block rules, routes, etc.
+
+### 3. Build
+
+```bash
+npm run build
+```
+
+This runs `npx cdn-security build`: validates the policy and generates **`dist/edge/viewer-request.js`** (and other Edge code when implemented). Deploy **this generated file**, not the framework’s `runtimes/` sources.
+
+### 4. Admin token
+
+Set `EDGE_ADMIN_TOKEN` in your environment or secrets; the build injects it at compile time when the variable is set. No manual edit of the generated JS.
+
+### 5. Create CloudFront Functions and associate
 
 1. CloudFront → Functions → Create function.
-2. Create a function for **Viewer Request**: paste the contents of `viewer-request.js`, publish.
-3. Create a function for **Viewer Response**: paste the contents of `viewer-response.js`, publish.
+2. **Viewer Request**: create a function and paste the contents of **`dist/edge/viewer-request.js`**, then publish.
+3. (When generated) **Viewer Response**: same for `dist/edge/viewer-response.js`.
+4. Open your distribution → Behaviors → Edit the behavior → **Viewer request**: Function type = CloudFront Functions, select the Viewer Request function. **Viewer response** similarly if used. Save and wait for deployment.
 
-### 4. Associate with your distribution
-
-1. Open your distribution → Behaviors → Edit default (or the behavior you use).
-2. **Viewer request**: Function type = CloudFront Functions, select the Viewer Request function.
-3. **Viewer response**: Function type = CloudFront Functions, select the Viewer Response function.
-4. Save and wait for deployment.
-
-### 5. Verify
+### 6. Verify
 
 ```bash
 # Without token: 401
@@ -60,9 +63,14 @@ curl -i "https://YOUR_DISTRIBUTION_DOMAIN/foo/../bar"
 
 ---
 
-## Policy alignment
+## Summary
 
-Runtime behavior is aligned with `policy/base.yml` (or `policy/profiles/balanced.yml`). When the policy compiler is added, Functions can be generated from the policy.
+| Step   | Command / action |
+|--------|-------------------|
+| Install | `npm install` (uses `cdn-security-framework` from repo or npm) |
+| Init    | `npm run init` → creates `policy/security.yml` |
+| Build   | `npm run build` → generates `dist/edge/viewer-request.js` |
+| Deploy  | Use `dist/edge/*.js` in CloudFront Functions (console, Terraform, or CDK) |
 
 ---
 
@@ -70,4 +78,4 @@ Runtime behavior is aligned with `policy/base.yml` (or `policy/profiles/balanced
 
 - [CloudFront Functions Runtime](../../runtimes/aws-cloudfront-functions/README.md)
 - [Quick Start](../../docs/quickstart.md)
-- [Architecture](../../docs/architecture.md)
+- [Policy and runtime sync](../../docs/policy-runtime-sync.md)

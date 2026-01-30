@@ -1,0 +1,29 @@
+{
+  "name": "cdn-security-framework",
+  "version": "1.0.0",
+  "description": "Policy-driven CDN edge security. Init YAML with npx cdn-security init, then npx cdn-security build to generate runtime code.",
+  "bin": {
+    "cdn-security": "./bin/cli.js"
+  },
+  "scripts": {
+    "build": "node scripts/compile.js",
+    "lint:policy": "node scripts/policy-lint.js",
+    "test:runtime": "node scripts/runtime-tests.js"
+  },
+  "keywords": ["cdn", "cloudfront", "edge", "security", "policy", "cli"],
+  "license": "Apache-2.0",
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "commander": "^11.0.0",
+    "inquirer": "^8.2.0",
+    "js-yaml": "^4.1.0"
+  },
+  "files": [
+    "bin/",
+    "scripts/",
+    "templates/",
+    "policy/profiles/"
+  ]
+}
