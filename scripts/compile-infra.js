@@ -21,11 +21,19 @@ const basePath = path.join(repoRoot, 'policy', 'base.yml');
 let policyPath = fs.existsSync(securityPath) ? securityPath : basePath;
 let outDir = path.join(repoRoot, 'dist');
 let ruleGroupOnly = false;
+let outputMode = 'full';
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '--policy' && argv[i + 1]) { policyPath = argv[++i]; continue; }
   if (argv[i] === '--out-dir' && argv[i + 1]) { outDir = argv[++i]; continue; }
   if (argv[i] === '--rule-group-only') { ruleGroupOnly = true; continue; }
+  if (argv[i] === '--output-mode' && argv[i + 1]) { outputMode = argv[++i]; continue; }
   if (!argv[i].startsWith('--')) { policyPath = argv[i]; }
+}
+
+if (ruleGroupOnly) outputMode = 'rule-group';
+if (!['full', 'rule-group'].includes(outputMode)) {
+  console.error('Error: invalid --output-mode. Use "full" or "rule-group".');
+  process.exit(1);
 }
 
 let policy;
@@ -129,8 +137,9 @@ const tfWafJson = {
 
 // Add managed rules if present (as a separate web_acl reference)
 if (waf.managed_rules && waf.managed_rules.length > 0) {
-  if (ruleGroupOnly) {
-    console.log('[INFO] --rule-group-only enabled: skipping aws_wafv2_web_acl generation (managed_rules are not emitted).');
+  if (outputMode === 'rule-group') {
+    console.log('[INFO] output-mode=rule-group: skipping aws_wafv2_web_acl generation.');
+    console.log('[INFO] managed_rules are intentionally not emitted because AWS managed rule groups can only be attached from Web ACL.');
   } else {
     tfWafJson.resource.aws_wafv2_web_acl = {
       [projectName + '-waf-acl']: {

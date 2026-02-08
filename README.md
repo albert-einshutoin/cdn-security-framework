@@ -72,7 +72,6 @@ This framework addresses these with **"policy-driven" + "runtime separation"**.
     architecture.md
     quickstart.md
     policy-runtime-sync.md
-    VISION.md
   policy/
     security.yml / base.yml
     profiles/

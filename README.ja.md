@@ -73,7 +73,6 @@
   docs/
     quickstart.md
     policy-runtime-sync.md
-    VISION.md
   policy/
     security.yml / base.yml
     profiles/

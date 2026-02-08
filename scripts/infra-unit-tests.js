@@ -26,6 +26,7 @@ function runCompileInfra(policyContent, options = {}) {
   fs.writeFileSync(policyPath, policyContent, 'utf8');
 
   const args = [path.join(repoRoot, 'scripts', 'compile-infra.js'), '--policy', policyPath, '--out-dir', outDir];
+  if (options.outputMode) args.push('--output-mode', options.outputMode);
   if (options.ruleGroupOnly) args.push('--rule-group-only');
 
   execFileSync(process.execPath, args, {
@@ -153,6 +154,29 @@ firewall:
   try {
     const waf = ctx.read('infra/waf-rules.tf.json');
     assert.ok(waf.resource.aws_wafv2_rule_group['rg-only-test-rate-limit']);
+    assert.ok(!waf.resource.aws_wafv2_web_acl);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('compile-infra supports --output-mode rule-group for existing web ACL users', () => {
+  const ctx = runCompileInfra(`
+version: 1
+project: outmode-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  waf:
+    managed_rules:
+      - "AWSManagedRulesCommonRuleSet"
+`, { outputMode: 'rule-group' });
+
+  try {
+    const waf = ctx.read('infra/waf-rules.tf.json');
+    assert.ok(waf.resource.aws_wafv2_rule_group['outmode-test-rate-limit']);
     assert.ok(!waf.resource.aws_wafv2_web_acl);
   } finally {
     ctx.cleanup();
