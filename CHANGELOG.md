@@ -16,6 +16,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Deploy examples: `examples/aws-cloudfront/`, `examples/cloudflare/` with README (EN + JA).
 - CONTRIBUTING.md, CODE_OF_CONDUCT.md, and `.github` issue/PR templates.
 - OSS readiness audit: `docs/OSS-READINESS-AUDIT.ja.md` (Japanese).
+- Lambda@Edge origin-request runtime support for JWT auth gates (RS256/HS256), Signed URL validation, and origin auth injection.
+- Compiler unit tests for `scripts/compile.js` core logic (`pathPatternsToMarks`, `getAuthGates`, `getAdminGate`, `validateAuthGates`).
 
 ### Changed
 
@@ -23,10 +25,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Quick Start steps use existing paths: `policy/base.yml`, `policy/profiles/balanced.yml`, deploy via `runtimes/` or `examples/`.
 - All runtime code and comments (CloudFront Functions, Lambda@Edge, Cloudflare Workers) use English only.
 - Policy `policy/base.yml` comments and `.ja`-only files: Japanese only in `.ja` files; non-`.ja` files and code: English only.
+- CI quality gate now includes compiler unit tests in addition to policy lint, build, and runtime tests.
 
 ### Fixed
 
 - README no longer references non-existent files (`base.yaml`, `threat-model.md`, `decision-matrix.md`, empty `examples/`).
+- `package.json` repository metadata (`repository`, `homepage`, `bugs`) now points to the actual GitHub repository.
 
 ---
 

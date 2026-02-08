@@ -29,6 +29,20 @@
 
 ---
 
+## CI 品質ゲート
+
+PR 作成前に、次のチェックがローカルで通ることを確認してください。
+
+1. `npm run lint:policy -- policy/base.yml`
+2. `npm run build`
+3. `node scripts/compile-cloudflare.js`
+4. `npm run test:runtime`
+5. `npm run test:unit`
+
+GitHub Actions でも、`policy/`、`scripts/`、`templates/`、`bin/` の変更時に同じゲートを実行します。
+
+---
+
 ## リポジトリ構成
 
 - `docs/` – アーキテクチャ、脅威モデル、判断マトリクス、クイックスタート（英語 + `.ja`）。

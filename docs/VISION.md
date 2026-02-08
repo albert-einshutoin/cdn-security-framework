@@ -32,4 +32,5 @@
 - [x] IaC 連携ドキュメント（Terraform / CDK / WAF）
 - [x] Phase 3: `firewall.waf` → `dist/infra/waf-rules.tf.json`
 
-次のステップ: npm 公開（README の「For maintainers」参照）、または WAF/Lambda@Edge の拡張。
+次のステップ: npm 公開（README の「For maintainers」参照）、または WAF/Lambda@Edge の拡張。  
+拡張トラックの管理は `docs/ROADMAP.md` / `docs/ROADMAP.ja.md` を参照。

@@ -57,3 +57,6 @@ jobs:
 
       - name: Runtime tests (viewer-request + origin-request)
         run: npm run test:runtime
+
+      - name: Unit tests (compiler core)
+        run: npm run test:unit

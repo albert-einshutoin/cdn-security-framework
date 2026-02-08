@@ -29,6 +29,20 @@ Thank you for your interest in contributing. This document explains how to propo
 
 ---
 
+## CI quality gate
+
+Before opening a PR, ensure these checks pass locally:
+
+1. `npm run lint:policy -- policy/base.yml`
+2. `npm run build`
+3. `node scripts/compile-cloudflare.js`
+4. `npm run test:runtime`
+5. `npm run test:unit`
+
+GitHub Actions runs the same gate for changes under `policy/`, `scripts/`, `templates/`, and `bin/`.
+
+---
+
 ## Repository layout
 
 - `docs/` – Architecture, threat model, decision matrix, quick start (English + `.ja`).
