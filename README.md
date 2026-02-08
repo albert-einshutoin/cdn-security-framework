@@ -137,7 +137,7 @@ This validates the policy and generates Edge Runtime code into `dist/edge/`.
 npm run test:runtime
 ```
 
-Runs all runtime tests (viewer-request + origin-request including JWT and Signed URL verification).
+Runs all runtime tests (AWS viewer/origin + Cloudflare Workers auth/runtime behavior).
 
 ### 5. Deploy
 

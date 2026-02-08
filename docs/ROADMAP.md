@@ -6,34 +6,26 @@ This document tracks post-Phase-3 work as explicit follow-up tracks.
 
 ## Track A: Cloudflare Workers JWT / Signed URL / Origin Auth
 
-Status: Planned (separate track)
+Status: Completed (2026-02-08)
 Priority: Medium
 
-### Scope
+Implemented:
 
-- Add JWT auth gate support (`RS256` / `HS256`) for Cloudflare Workers runtime.
-- Add Signed URL validation support for Cloudflare Workers runtime.
-- Evaluate and define origin auth handling equivalent to Lambda@Edge where feasible.
-
-### Constraints
-
-- Respect Workers CPU and memory limits.
-- Avoid per-request heavy JWKS fetch; design cache strategy.
-- Keep behavior aligned with policy schema and Lambda@Edge semantics.
-
-### Acceptance criteria
-
-1. `npx cdn-security build --target cloudflare` generates runtime code that enforces configured JWT and Signed URL gates.
-2. Runtime tests cover pass/fail cases for both JWT and Signed URL in Cloudflare target.
-3. SECURITY-FEATURE-MATRIX is updated from `—` to `✓` for supported items.
-4. Docs explain any intentional feature parity gaps.
+- `npx cdn-security build --target cloudflare` now injects JWT / Signed URL / Origin auth configuration.
+- Worker template enforces JWT (`HS256` / `RS256`), Signed URL, and origin custom header auth.
+- Runtime test suite now includes Cloudflare auth behavior checks.
+- Security matrix and DOs/DON'Ts documentation updated to reflect support.
 
 ---
 
 ## Track B: Compiler test depth
 
-Status: In progress
+Status: Completed (2026-02-08)
 Priority: High
 
-- Added compiler unit tests for core auth/path logic.
-- Next: expand unit tests for output generation edge cases and infra compiler helpers.
+Implemented:
+
+- Core compiler unit tests for auth/path logic.
+- Output-generation unit checks for `build()` artifacts.
+- Infra compiler unit tests including JA3 WAF rule generation.
+- CI drift check against committed golden generated artifacts.

@@ -44,7 +44,7 @@ You do **not** edit `viewer-request.js` by hand; the token is driven by policy (
 npm run test:runtime
 ```
 
-Runs all runtime tests (viewer-request + origin-request).
+Runs all runtime tests (AWS viewer/origin + Cloudflare Workers auth/runtime behavior).
 
 ## 5. Deploy
 

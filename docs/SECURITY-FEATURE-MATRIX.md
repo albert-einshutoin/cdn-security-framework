@@ -6,8 +6,7 @@ This document maps **which security-related YAML settings are supported** by cat
 
 ## Conclusion: Comprehensive security framework with YAML-driven configuration
 
-- **Supported**: All major security features including Request Hygiene, Response Security, Authentication (Token/Basic/JWT/Signed URL), CORS, Cookie attributes, WAF (rate limit, managed rules, geo, IP), Transport (TLS/HTTP), Origin auth/timeout
-- **Partial**: Fingerprint (JA3) depends on WAF/Shield Advanced
+- **Supported**: All major security features including Request Hygiene, Response Security, Authentication (Token/Basic/JWT/Signed URL), CORS, Cookie attributes, WAF (rate limit, managed rules, geo, IP, JA3), Transport (TLS/HTTP), Origin auth/timeout
 
 ---
 
@@ -38,8 +37,8 @@ This document maps **which security-related YAML settings are supported** by cat
 |---------|--------|-------|
 | **Basic auth** | Supported | `routes[].auth_gate.type: basic_auth` with `credentials_env`. Edge template in viewer-request. |
 | **Token auth** | Supported | `routes[].auth_gate.type: static_token` with `header` and `token_env` for path-based token gate. |
-| **Signed URL** | Supported | `routes[].auth_gate.type: signed_url` with `algorithm`, `secret_env`, `expires_param`, `signature_param`. Lambda@Edge required. |
-| **JWT validation** | Supported | `routes[].auth_gate.type: jwt` with `algorithm` (RS256/HS256), `jwks_url`, `issuer`, `audience`. Lambda@Edge required. |
+| **Signed URL** | Supported | `routes[].auth_gate.type: signed_url` with `algorithm`, `secret_env`, `expires_param`, `signature_param`. Supported on Lambda@Edge and Cloudflare Workers. |
+| **JWT validation** | Supported | `routes[].auth_gate.type: jwt` with `algorithm` (RS256/HS256), `jwks_url`, `issuer`, `audience`. Supported on Lambda@Edge and Cloudflare Workers. |
 
 ---
 
@@ -56,7 +55,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | **Query normalization** | Supported | `request.normalize.drop_query_keys` strips tracking params (utm_*, gclid, etc.). |
 | **Required headers** | Supported | `request.block.header_missing` checks for required headers (generalized, not just UA). |
 | **Bot/scanner (User-Agent)** | Supported | `request.block.ua_contains` blocks known scanners. |
-| **Fingerprint (JA3)** | Partial | WAF/Shield Advanced dependent. Out of framework scope. |
+| **Fingerprint (JA3)** | Supported | `firewall.waf.ja3_fingerprints` generates WAF JA3 block rules in `dist/infra/waf-rules.tf.json`. |
 
 ---
 
@@ -86,7 +85,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | **Transport** | HSTS, TLS version, HTTP version | — | — |
 | **Firewall / Access** | Rate limit, Geo, IP, WAF managed rules | — | — |
 | **Authentication** | Token, Basic, JWT, Signed URL | — | — |
-| **Request Hygiene** | Method, URI/Query/Header limits, Normalization, UA block, Required headers | Fingerprint (JA3) | — |
+| **Request Hygiene** | Method, URI/Query/Header limits, Normalization, UA block, Required headers, Fingerprint (JA3) | — | — |
 | **Response Security** | Security headers, CORS, Cookie attributes | — | — |
 | **Origin Security** | Origin auth, Timeout | — | — |
 
@@ -107,9 +106,9 @@ This document maps **which security-related YAML settings are supported** by cat
 | IP allow/block | — | — | — | ✓ |
 | WAF managed rules | — | — | — | ✓ |
 | TLS/HTTP version | — | — | — | ✓ |
-| JWT validation | — | ✓ | — | — |
-| Signed URL | — | ✓ | — | — |
-| Origin auth | — | ✓ | — | — |
+| JWT validation | — | ✓ | ✓ | — |
+| Signed URL | — | ✓ | ✓ | — |
+| Origin auth | — | ✓ | ✓ | — |
 | Origin timeout | — | — | — | ✓ |
 | Monitor mode | ✓ | ✓ | ✓ | — |
 

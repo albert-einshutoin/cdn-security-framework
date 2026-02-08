@@ -39,7 +39,7 @@ npx cdn-security build
 生成された **`dist/edge/`** 内のファイルを Terraform / CDK や CDN コンソールでデプロイします。
 
 - AWS: CloudFront Function / Lambda@Edge の設定で `dist/edge/viewer-request.js`（および viewer-response.js が生成されていればそれも）を参照。
-- Cloudflare: Cloudflare ターゲット実装後は `dist/edge/` の Workers コードを使用。
+- Cloudflare: `dist/edge/cloudflare/index.ts` を Workers としてデプロイ。
 
 ## 5. 動作確認
 

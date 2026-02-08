@@ -1,12 +1,16 @@
 #!/usr/bin/env node
 
 const assert = require('assert');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 const {
   DEFAULT_MARKS,
   pathPatternsToMarks,
   getAuthGates,
   getAdminGate,
   validateAuthGates,
+  build,
 } = require('./lib/compile-core');
 
 function test(name, fn) {
@@ -171,6 +175,62 @@ test('validateAuthGates reports missing required auth fields', () => {
       && err.validationErrors.some((e) => e.includes('broken-hs'))
       && err.validationErrors.some((e) => e.includes('broken-signed')),
   );
+});
+
+test('build emits edge files with JWT, Signed URL, and origin auth config', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
+  try {
+    const policy = {
+      version: 1,
+      project: 'unit-build',
+      defaults: { mode: 'enforce' },
+      request: { allow_methods: ['GET'] },
+      response_headers: { hsts: 'max-age=1' },
+      routes: [
+        {
+          name: 'api',
+          match: { path_prefixes: ['/api'] },
+          auth_gate: {
+            type: 'jwt',
+            algorithm: 'HS256',
+            secret_env: 'JWT_SECRET',
+            issuer: 'issuer',
+            audience: 'aud',
+          },
+        },
+        {
+          name: 'assets',
+          match: { path_prefixes: ['/assets'] },
+          auth_gate: {
+            type: 'signed_url',
+            secret_env: 'URL_SIGNING_SECRET',
+            expires_param: 'exp',
+            signature_param: 'sig',
+          },
+        },
+      ],
+      origin: {
+        auth: {
+          type: 'custom_header',
+          header: 'X-Origin-Verify',
+          secret_env: 'ORIGIN_SECRET',
+        },
+      },
+    };
+
+    const outputs = build(policy, {
+      outDir: tmpDir,
+      rootDir: path.join(__dirname, '..'),
+    });
+
+    assert.strictEqual(outputs.length, 3);
+    const originCode = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.ok(originCode.includes('\"algorithm\":\"HS256\"'));
+    assert.ok(originCode.includes('\"type\":\"signed_url\"'));
+    assert.ok(/originAuth:\s*\{\"type\":\"custom_header\"/.test(originCode));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 if (process.exitCode) {

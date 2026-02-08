@@ -38,6 +38,7 @@ Before opening a PR, ensure these checks pass locally:
 3. `node scripts/compile-cloudflare.js`
 4. `npm run test:runtime`
 5. `npm run test:unit`
+6. `npm run test:drift`
 
 GitHub Actions runs the same gate for changes under `policy/`, `scripts/`, `templates/`, and `bin/`.
 

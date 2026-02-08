@@ -8,8 +8,7 @@
 
 **YAML による一元管理が可能な包括的セキュリティフレームワーク** として、主要なセキュリティ機能を網羅しています。
 
-- **対応済み**: Request Hygiene（メソッド・URI・クエリ・ヘッダー制限、正規化、UA ブロック）、Response Security（セキュリティヘッダー、CORS、Cookie 属性）、Authentication（トークン、Basic、JWT、署名付き URL）、WAF（レート制限、マネージドルール、Geo、IP）、Transport（TLS/HTTP 版）、Origin（認証、タイムアウト）
-- **部分対応**: 指紋（JA3）は WAF/Shield Advanced 依存
+- **対応済み**: Request Hygiene（メソッド・URI・クエリ・ヘッダー制限、正規化、UA ブロック、JA3 指紋）、Response Security（セキュリティヘッダー、CORS、Cookie 属性）、Authentication（トークン、Basic、JWT、署名付き URL）、WAF（レート制限、マネージドルール、Geo、IP、JA3）、Transport（TLS/HTTP 版）、Origin（認証、タイムアウト）
 
 ---
 
@@ -40,8 +39,8 @@
 |------|------|------|
 | **Basic 認証** | ✅ 対応 | `routes[].auth_gate.type: basic_auth` と `credentials_env` で設定。viewer-request で検証。 |
 | **トークン認証** | ✅ 対応 | `routes[].auth_gate.type: static_token` と `header`, `token_env` でパス別トークンゲート。 |
-| **署名付き URL** | ✅ 対応 | `routes[].auth_gate.type: signed_url` と `algorithm`, `secret_env`, `expires_param`, `signature_param`。Lambda@Edge 必須。 |
-| **JWT 検証** | ✅ 対応 | `routes[].auth_gate.type: jwt` と `algorithm` (RS256/HS256), `jwks_url`, `issuer`, `audience`。Lambda@Edge 必須。 |
+| **署名付き URL** | ✅ 対応 | `routes[].auth_gate.type: signed_url` と `algorithm`, `secret_env`, `expires_param`, `signature_param`。Lambda@Edge / Cloudflare Workers に対応。 |
+| **JWT 検証** | ✅ 対応 | `routes[].auth_gate.type: jwt` と `algorithm` (RS256/HS256), `jwks_url`, `issuer`, `audience`。Lambda@Edge / Cloudflare Workers に対応。 |
 
 ---
 
@@ -58,7 +57,7 @@
 | **クエリ正規化** | ✅ 対応 | `request.normalize.drop_query_keys` でトラッキングパラメータ（utm_*、gclid 等）を除去。 |
 | **必須ヘッダー** | ✅ 対応 | `request.block.header_missing` で必須ヘッダーをチェック（UA 以外も対応）。 |
 | **Bot/スキャナ対策（User-Agent）** | ✅ 対応 | `request.block.ua_contains` で既知スキャナをブロック。 |
-| **指紋（JA3 等）** | △ 部分対応 | WAF/Shield Advanced 依存。フレームワークのスコープ外。 |
+| **指紋（JA3 等）** | ✅ 対応 | `firewall.waf.ja3_fingerprints` から WAF JA3 ブロックルールを `dist/infra/waf-rules.tf.json` に生成。 |
 
 ---
 
@@ -88,7 +87,7 @@
 | **Transport** | HSTS, TLS 版, HTTP 版 | — | — |
 | **Firewall / Access** | レート制限, Geo, IP, WAF マネージド | — | — |
 | **Authentication** | トークン, Basic, JWT, 署名付き URL | — | — |
-| **Request Hygiene** | メソッド, URI/クエリ/ヘッダー制限, 正規化, UA ブロック, 必須ヘッダー | 指紋（JA3） | — |
+| **Request Hygiene** | メソッド, URI/クエリ/ヘッダー制限, 正規化, UA ブロック, 必須ヘッダー, 指紋（JA3） | — | — |
 | **Response Security** | セキュリティヘッダー, CORS, Cookie 属性 | — | — |
 | **Origin Security** | オリジン認証, タイムアウト | — | — |
 
@@ -109,9 +108,9 @@
 | IP 制限 | — | — | — | ✓ |
 | WAF マネージド | — | — | — | ✓ |
 | TLS/HTTP 版 | — | — | — | ✓ |
-| JWT 検証 | — | ✓ | — | — |
-| 署名付き URL | — | ✓ | — | — |
-| オリジン認証 | — | ✓ | — | — |
+| JWT 検証 | — | ✓ | ✓ | — |
+| 署名付き URL | — | ✓ | ✓ | — |
+| オリジン認証 | — | ✓ | ✓ | — |
 | タイムアウト | — | — | — | ✓ |
 | モニターモード | ✓ | ✓ | ✓ | — |
 

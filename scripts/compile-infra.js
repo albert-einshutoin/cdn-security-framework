@@ -75,13 +75,38 @@ if (waf.rate_limit) {
   });
 }
 
+// JA3 fingerprint block rules
+if (Array.isArray(waf.ja3_fingerprints) && waf.ja3_fingerprints.length > 0) {
+  for (const fp of waf.ja3_fingerprints) {
+    if (!fp) continue;
+    wafRules.push({
+      name: `ja3-block-${String(fp).slice(0, 12).toLowerCase()}`,
+      priority: priority++,
+      action: { block: {} },
+      statement: {
+        byte_match_statement: {
+          field_to_match: { ja3_fingerprint: {} },
+          positional_constraint: 'EXACTLY',
+          search_string: String(fp),
+          text_transformation: [{ priority: 0, type: 'NONE' }],
+        },
+      },
+      visibility_config: {
+        cloudwatch_metrics_enabled: true,
+        metric_name: `${projectName}-ja3-${String(fp).slice(0, 12).toLowerCase()}`,
+        sampled_requests_enabled: true,
+      },
+    });
+  }
+}
+
 const tfWafJson = {
   resource: {
     aws_wafv2_rule_group: {
       [projectName + '-rate-limit']: {
         name: projectName + '-rate-limit',
         scope,
-        capacity: 2,
+        capacity: Math.max(2, wafRules.length * 2 || 2),
         rule: wafRules,
         visibility_config: {
           cloudwatch_metrics_enabled: true,

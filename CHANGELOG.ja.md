@@ -18,6 +18,9 @@
 - OSS 公開準備の監査: `docs/OSS-READINESS-AUDIT.ja.md`（日本語）。
 - Lambda@Edge origin-request のランタイム対応を追加（JWT 認証: RS256/HS256、署名付き URL 検証、origin auth 注入）。
 - `scripts/compile.js` の主要ロジック（`pathPatternsToMarks`, `getAuthGates`, `getAdminGate`, `validateAuthGates`）に単体テストを追加。
+- Cloudflare Workers で JWT（`HS256`/`RS256`）・署名付き URL・origin custom header 認証をポリシー生成で利用可能にした。
+- コミット済み golden 生成物（`tests/golden/base/*`）とのドリフト検知（`npm run test:drift`）を追加し、CI に統合。
+- `firewall.waf.ja3_fingerprints` から JA3 フィンガープリント WAF ブロックルールを生成する機能を追加。
 
 ### 変更
 
@@ -26,6 +29,7 @@
 - 全ランタイムのコード・コメント（CloudFront Functions, Lambda@Edge, Cloudflare Workers）を英語に統一。
 - ポリシー `policy/base.yml` のコメントおよび `.ja` ファイル: `.ja` ファイルにのみ日本語；それ以外のファイルとコードは英語のみ。
 - CI の品質ゲートにコンパイラ単体テストを追加（policy lint / build / runtime test に加えて実行）。
+- ランタイムテストに Cloudflare ターゲット検証を追加し、CI ゲートを runtime + unit + drift に拡張。
 
 ### 修正
 

@@ -5,9 +5,37 @@
  * security.yml（または policy/security.yml）を編集し、npx cdn-security build --target cloudflare で dist/edge/cloudflare/index.ts を生成してください。
  */
 
-// {{INJECT_CONFIG}}
+const CFG = {
+  mode: "enforce",
+  allowMethods: new Set(["GET","HEAD","POST"]),
+  maxQueryLength: 1024,
+  maxQueryParams: 30,
+  maxUriLength: 2048,
+  maxHeaderSize: 0,
+  dropQueryKeys: new Set(["utm_source","utm_medium","utm_campaign","utm_term","utm_content","gclid","fbclid"]),
+  uaDenyContains: ["sqlmap","nikto","acunetix","masscan","python-requests"],
+  blockPathMarks: ["/../","..","%2e%2e","%2E%2E"],
+  normalizePath: { collapseSlashes: false, removeDotSegments: false },
+  requiredHeaders: ["user-agent"],
+  cors: null,
+  authGates: [{"name":"admin","protectedPrefixes":["/admin","/docs","/swagger"],"type":"static_token","tokenHeaderName":"x-edge-token","tokenEnv":"EDGE_ADMIN_TOKEN"}],
+  originAuth: null,
+};
 
-// {{INJECT_RESPONSE_CFG}}
+const RESPONSE_CFG = {
+  headers: {
+    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+    "x-content-type-options": "nosniff",
+    "referrer-policy": "strict-origin-when-cross-origin",
+    "permissions-policy": "camera=(), microphone=(), geolocation=()",
+  },
+  csp_public: "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
+  csp_admin: "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+  adminPathPrefixes: ["/admin","/docs","/swagger"],
+  adminCacheControl: "no-store",
+  cors: null,
+  cookie_attributes: null,
+};
 
 type WorkerEnv = Record<string, string | undefined>;
 

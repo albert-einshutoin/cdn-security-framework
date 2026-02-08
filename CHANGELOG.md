@@ -18,6 +18,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - OSS readiness audit: `docs/OSS-READINESS-AUDIT.ja.md` (Japanese).
 - Lambda@Edge origin-request runtime support for JWT auth gates (RS256/HS256), Signed URL validation, and origin auth injection.
 - Compiler unit tests for `scripts/compile.js` core logic (`pathPatternsToMarks`, `getAuthGates`, `getAdminGate`, `validateAuthGates`).
+- Cloudflare Workers auth/runtime support for JWT (`HS256`/`RS256`), Signed URL, and origin custom-header auth generated from policy.
+- Drift check with committed golden generated artifacts (`tests/golden/base/*`) and CI integration (`npm run test:drift`).
+- Infra compiler support for JA3 fingerprint WAF block rules via `firewall.waf.ja3_fingerprints`.
 
 ### Changed
 
@@ -26,6 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - All runtime code and comments (CloudFront Functions, Lambda@Edge, Cloudflare Workers) use English only.
 - Policy `policy/base.yml` comments and `.ja`-only files: Japanese only in `.ja` files; non-`.ja` files and code: English only.
 - CI quality gate now includes compiler unit tests in addition to policy lint, build, and runtime tests.
+- Runtime tests now include Cloudflare target checks; CI gate includes runtime + unit + drift checks.
 
 ### Fixed
 

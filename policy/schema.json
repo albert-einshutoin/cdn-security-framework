@@ -118,7 +118,8 @@
           "properties": {
             "rate_limit": { "type": "integer" },
             "scope": { "enum": ["REGIONAL", "CLOUDFRONT"] },
-            "managed_rules": { "type": "array", "items": { "type": "string" } }
+            "managed_rules": { "type": "array", "items": { "type": "string" } },
+            "ja3_fingerprints": { "type": "array", "items": { "type": "string" } }
           }
         },
         "geo": {

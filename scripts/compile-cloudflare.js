@@ -33,9 +33,8 @@ try {
   process.exit(1);
 }
 
-// Validate auth gate required fields
-function validateAuthGates(policy) {
-  const routes = policy.routes || [];
+function validateAuthGates(inputPolicy) {
+  const routes = inputPolicy.routes || [];
   const errors = [];
 
   for (const route of routes) {
@@ -61,7 +60,7 @@ function validateAuthGates(policy) {
 
   if (errors.length > 0) {
     console.error('Auth gate validation failed:');
-    errors.forEach(e => console.error('  -', e));
+    errors.forEach((e) => console.error('  -', e));
     process.exit(1);
   }
 }
@@ -93,30 +92,41 @@ const block = request.block || {};
 const normalize = request.normalize || {};
 const routes = policy.routes || [];
 
-// Get all auth gates
 function getAuthGates() {
   const gates = [];
   for (const route of routes) {
     const gate = route.auth_gate;
     if (!gate) continue;
-    
+
     const match = route.match || {};
     const prefixes = match.path_prefixes || [];
     const authType = gate.type || 'static_token';
-    
+
     const gateConfig = {
       name: route.name || 'unnamed',
       protectedPrefixes: prefixes.length ? prefixes : ['/admin', '/docs', '/swagger'],
       type: authType,
     };
-    
+
     if (authType === 'static_token') {
       gateConfig.tokenHeaderName = gate.header || 'x-edge-token';
+      gateConfig.tokenEnv = gate.token_env || 'EDGE_ADMIN_TOKEN';
     } else if (authType === 'basic_auth') {
-      const credEnv = gate.credentials_env || 'BASIC_AUTH_CREDS';
-      gateConfig.credentialsEnv = credEnv;
+      gateConfig.credentialsEnv = gate.credentials_env || 'BASIC_AUTH_CREDS';
+    } else if (authType === 'jwt') {
+      gateConfig.algorithm = gate.algorithm || 'RS256';
+      gateConfig.jwks_url = gate.jwks_url || '';
+      gateConfig.issuer = gate.issuer || '';
+      gateConfig.audience = gate.audience || '';
+      gateConfig.secret_env = gate.secret_env || '';
+      gateConfig.cache_ttl_sec = Number(gate.cache_ttl_sec) || 3600;
+    } else if (authType === 'signed_url') {
+      gateConfig.algorithm = gate.algorithm || 'HMAC-SHA256';
+      gateConfig.secret_env = gate.secret_env || 'URL_SIGNING_SECRET';
+      gateConfig.expires_param = gate.expires_param || 'exp';
+      gateConfig.signature_param = gate.signature_param || 'sig';
     }
-    
+
     gates.push(gateConfig);
   }
   return gates;
@@ -132,6 +142,7 @@ const pathNormalize = normalize.path || {};
 const requiredHeaders = block.header_missing || ['user-agent'];
 const resHeaders = policy.response_headers || {};
 const corsConfig = resHeaders.cors || null;
+const originAuth = (policy.origin || {}).auth || null;
 
 const cfgCode = [
   'const CFG = {',
@@ -148,6 +159,7 @@ const cfgCode = [
   `  requiredHeaders: ${JSON.stringify(requiredHeaders)},`,
   `  cors: ${JSON.stringify(corsConfig)},`,
   `  authGates: ${JSON.stringify(authGates)},`,
+  `  originAuth: ${JSON.stringify(originAuth)},`,
   '};',
 ].join('\n');
 
