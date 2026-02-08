@@ -42,14 +42,18 @@ jobs:
           npm run lint:policy -- policy/profiles/strict.yml
           npm run lint:policy -- policy/profiles/permissive.yml
 
-      - name: Build (compile policy → dist)
+      - name: Build AWS (compile policy → dist)
         run: npm run build
+
+      - name: Build Cloudflare (compile policy → dist)
+        run: node scripts/compile-cloudflare.js
 
       - name: Ensure build produces dist/
         run: |
           test -f dist/edge/viewer-request.js || (echo "Missing dist/edge/viewer-request.js"; exit 1)
           test -f dist/edge/viewer-response.js || (echo "Missing dist/edge/viewer-response.js"; exit 1)
           test -f dist/edge/origin-request.js || (echo "Missing dist/edge/origin-request.js"; exit 1)
+          test -f dist/edge/cloudflare/index.ts || (echo "Missing dist/edge/cloudflare/index.ts"; exit 1)
 
-      - name: Runtime tests (CloudFront Functions viewer-request)
+      - name: Runtime tests (viewer-request + origin-request)
         run: npm run test:runtime

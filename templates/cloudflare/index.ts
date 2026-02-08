@@ -21,6 +21,14 @@ function deny(code: number, msg: string) {
   return new Response(msg, { status: code, headers: { "cache-control": "no-store" } });
 }
 
+function shouldBlock(code: number, msg: string): Response | null {
+  if (CFG.mode === 'monitor') {
+    console.log('[monitor]', code, msg);
+    return null;
+  }
+  return deny(code, msg);
+}
+
 function normalizePath(pathname: string): string {
   let p = pathname;
   if (CFG.normalizePath.collapseSlashes) {
@@ -82,22 +90,34 @@ export default {
     if (request.method === 'OPTIONS' && CFG.cors) {
       // Non-matching origin OPTIONS - let it through or deny
     } else if (!CFG.allowMethods.has(request.method)) {
-      return deny(405, "Method Not Allowed");
+      const r = shouldBlock(405, "Method Not Allowed");
+      if (r) return r;
     }
 
     // URI length check
-    if (url.pathname.length > CFG.maxUriLength) return deny(414, "URI Too Long");
+    if (url.pathname.length > CFG.maxUriLength) {
+      const r = shouldBlock(414, "URI Too Long");
+      if (r) return r;
+    }
 
     // Path normalization
     url.pathname = normalizePath(url.pathname);
 
     const path = url.pathname.toLowerCase();
-    for (const m of CFG.blockPathMarks) if (path.includes(m)) return deny(400, "Bad Request");
+    for (const m of CFG.blockPathMarks) {
+      if (path.includes(m)) {
+        const r = shouldBlock(400, "Bad Request");
+        if (r) return r;
+      }
+    }
 
     // Required headers check
     for (const h of CFG.requiredHeaders) {
       const val = request.headers.get(h);
-      if (!val) return deny(400, "Missing " + h);
+      if (!val) {
+        const r = shouldBlock(400, "Missing " + h);
+        if (r) return r;
+      }
     }
 
     // Header size check (Cloudflare Workers can access all headers)
@@ -106,19 +126,36 @@ export default {
       request.headers.forEach((value, key) => {
         totalSize += key.length + value.length;
       });
-      if (totalSize > CFG.maxHeaderSize) return deny(431, "Request Header Fields Too Large");
+      if (totalSize > CFG.maxHeaderSize) {
+        const r = shouldBlock(431, "Request Header Fields Too Large");
+        if (r) return r;
+      }
     }
 
     // UA deny list check
     const ua = request.headers.get("user-agent") || "";
-    if (ua && ua.length > 512) return deny(400, "User-Agent Too Long");
+    if (ua && ua.length > 512) {
+      const r = shouldBlock(400, "User-Agent Too Long");
+      if (r) return r;
+    }
     const uaLower = ua.toLowerCase();
-    for (const s of CFG.uaDenyContains) if (uaLower.includes(s)) return deny(403, "Forbidden");
+    for (const s of CFG.uaDenyContains) {
+      if (uaLower.includes(s)) {
+        const r = shouldBlock(403, "Forbidden");
+        if (r) return r;
+      }
+    }
 
     const qs = url.search.slice(1);
-    if (qs.length > CFG.maxQueryLength) return deny(414, "URI Too Long");
+    if (qs.length > CFG.maxQueryLength) {
+      const r = shouldBlock(414, "URI Too Long");
+      if (r) return r;
+    }
     const parts = qs ? qs.split("&") : [];
-    if (parts.length > CFG.maxQueryParams) return deny(400, "Too many query params");
+    if (parts.length > CFG.maxQueryParams) {
+      const r = shouldBlock(400, "Too many query params");
+      if (r) return r;
+    }
 
     for (const k of CFG.dropQueryKeys) url.searchParams.delete(k);
 
@@ -126,35 +163,40 @@ export default {
     for (const gate of CFG.authGates) {
       const isProtected = gate.protectedPrefixes.some((p: string) => url.pathname === p || url.pathname.startsWith(p + "/"));
       if (!isProtected) continue;
-      
+
       if (gate.type === 'static_token') {
         const tok = request.headers.get(gate.tokenHeaderName) || "";
         const expectedToken = (env as any)[gate.tokenHeaderName?.replace(/-/g, '_').toUpperCase()] || env.EDGE_ADMIN_TOKEN || "";
-        if (tok !== expectedToken) return deny(401, "Unauthorized");
+        if (tok !== expectedToken) {
+          const r = shouldBlock(401, "Unauthorized");
+          if (r) return r;
+        }
       } else if (gate.type === 'basic_auth') {
         const authHeader = request.headers.get('authorization') || "";
         if (!authHeader.startsWith('Basic ')) {
-          return new Response('Unauthorized', {
-            status: 401,
-            headers: { 'WWW-Authenticate': 'Basic realm="Protected"', 'Cache-Control': 'no-store' }
-          });
-        }
-        const provided = authHeader.slice(6);
-        const expectedCreds = (env as any)[gate.credentialsEnv] || "";
-        if (provided !== expectedCreds) {
-          return new Response('Unauthorized', {
-            status: 401,
-            headers: { 'WWW-Authenticate': 'Basic realm="Protected"', 'Cache-Control': 'no-store' }
-          });
+          if (CFG.mode === 'monitor') {
+            console.log('[monitor] 401 Missing Basic auth');
+          } else {
+            return new Response('Unauthorized', {
+              status: 401,
+              headers: { 'WWW-Authenticate': 'Basic realm="Protected"', 'Cache-Control': 'no-store' }
+            });
+          }
+        } else {
+          const provided = authHeader.slice(6);
+          const expectedCreds = (env as any)[gate.credentialsEnv] || "";
+          if (provided !== expectedCreds) {
+            if (CFG.mode === 'monitor') {
+              console.log('[monitor] 401 Invalid Basic auth credentials');
+            } else {
+              return new Response('Unauthorized', {
+                status: 401,
+                headers: { 'WWW-Authenticate': 'Basic realm="Protected"', 'Cache-Control': 'no-store' }
+              });
+            }
+          }
         }
       }
-    }
-
-    // Legacy: Check protected prefixes (backward compatibility)
-    const isProtected = CFG.protectedPrefixes.some((p: string) => url.pathname === p || url.pathname.startsWith(p + "/"));
-    if (isProtected) {
-      const tok = request.headers.get(CFG.adminTokenHeader) || "";
-      if (tok !== (env.EDGE_ADMIN_TOKEN || "")) return deny(401, "Unauthorized");
     }
 
     const res = await fetch(new Request(url.toString(), request));

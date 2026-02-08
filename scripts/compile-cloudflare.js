@@ -33,6 +33,41 @@ try {
   process.exit(1);
 }
 
+// Validate auth gate required fields
+function validateAuthGates(policy) {
+  const routes = policy.routes || [];
+  const errors = [];
+
+  for (const route of routes) {
+    const gate = route.auth_gate;
+    if (!gate) continue;
+    const name = route.name || 'unnamed';
+    const authType = gate.type || 'static_token';
+
+    if (authType === 'jwt') {
+      const alg = gate.algorithm || 'RS256';
+      if (alg === 'RS256' && !gate.jwks_url) {
+        errors.push(`Route "${name}": JWT+RS256 requires "jwks_url"`);
+      }
+      if (alg === 'HS256' && !gate.secret_env) {
+        errors.push(`Route "${name}": JWT+HS256 requires "secret_env"`);
+      }
+    } else if (authType === 'signed_url') {
+      if (!gate.secret_env) {
+        errors.push(`Route "${name}": signed_url requires "secret_env"`);
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    console.error('Auth gate validation failed:');
+    errors.forEach(e => console.error('  -', e));
+    process.exit(1);
+  }
+}
+
+validateAuthGates(policy);
+
 function pathPatternsToMarks(pathPatterns) {
   if (!Array.isArray(pathPatterns) || pathPatterns.length === 0) {
     return ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
@@ -51,23 +86,12 @@ function pathPatternsToMarks(pathPatterns) {
   return Array.from(marks);
 }
 
+const defaults = policy.defaults || {};
 const request = policy.request || {};
 const limits = request.limits || {};
 const block = request.block || {};
 const normalize = request.normalize || {};
 const routes = policy.routes || [];
-
-let protectedPrefixes = ['/admin', '/docs', '/swagger'];
-let adminTokenHeader = 'x-edge-token';
-for (const route of routes) {
-  const gate = route.auth_gate;
-  if (!gate) continue;
-  const match = route.match || {};
-  const prefixes = match.path_prefixes || [];
-  if (prefixes.length) protectedPrefixes = prefixes;
-  adminTokenHeader = gate.header || 'x-edge-token';
-  break;
-}
 
 // Get all auth gates
 function getAuthGates() {
@@ -111,6 +135,7 @@ const corsConfig = resHeaders.cors || null;
 
 const cfgCode = [
   'const CFG = {',
+  `  mode: ${JSON.stringify(defaults.mode || 'enforce')},`,
   `  allowMethods: new Set(${JSON.stringify(allowMethods)}),`,
   `  maxQueryLength: ${Number(limits.max_query_length) || 1024},`,
   `  maxQueryParams: ${Number(limits.max_query_params) || 30},`,
@@ -123,8 +148,6 @@ const cfgCode = [
   `  requiredHeaders: ${JSON.stringify(requiredHeaders)},`,
   `  cors: ${JSON.stringify(corsConfig)},`,
   `  authGates: ${JSON.stringify(authGates)},`,
-  `  protectedPrefixes: ${JSON.stringify(protectedPrefixes)},`,
-  `  adminTokenHeader: ${JSON.stringify(adminTokenHeader)},`,
   '};',
 ].join('\n');
 

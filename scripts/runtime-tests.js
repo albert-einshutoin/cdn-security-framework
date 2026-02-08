@@ -160,10 +160,51 @@ async function runAsyncCase(name, event, expected) {
   return true;
 }
 
+// Helper: compile origin-request template with inline config
+function compileOriginTemplate(cfgCode) {
+  const templatePath = path.join(__dirname, '..', 'templates', 'aws', 'origin-request.js');
+  let originCode;
+  try {
+    originCode = fs.readFileSync(templatePath, 'utf8');
+  } catch (e) {
+    console.error('Could not read templates/aws/origin-request.js');
+    return null;
+  }
+
+  originCode = originCode.replace('// {{INJECT_CONFIG}}', cfgCode);
+
+  const wrappedCode = '(function() {\n' +
+    'const crypto = require("crypto");\n' +
+    'const https = require("https");\n' +
+    originCode
+      .replace("const crypto = require('crypto');", '')
+      .replace("const https = require('https');", '') +
+    '\nreturn exports.handler;\n' +
+    '})()';
+
+  try {
+    return eval(wrappedCode);
+  } catch (e) {
+    console.error('Failed to eval origin-request template:', e.message);
+    return null;
+  }
+}
+
+// Helper: create signed URL query string
+const SIGNED_URL_SECRET = 'test-signing-secret-for-urls-32b';
+
+function createSignedUrlParams(uri, expiresSec, secret) {
+  const signData = uri + String(expiresSec);
+  const sig = crypto.createHmac('sha256', secret)
+    .update(signData)
+    .digest('base64url');
+  return 'exp=' + expiresSec + '&sig=' + sig;
+}
+
 async function runOriginRequestTests() {
-  // Build a temporary test policy inline and compile the origin-request code
   const testSecret = HS256_SECRET;
   process.env.JWT_TEST_SECRET = testSecret;
+  process.env.URL_SIGNING_SECRET = SIGNED_URL_SECRET;
 
   const originCfgCode = [
     'const CFG = {',
@@ -180,57 +221,37 @@ async function runOriginRequestTests() {
     '    audience: "test-audience",',
     '    secret_env: "JWT_TEST_SECRET"',
     '  }],',
-    '  signedUrlGates: [],',
+    '  signedUrlGates: [{',
+    '    name: "assets",',
+    '    protectedPrefixes: ["/assets"],',
+    '    type: "signed_url",',
+    '    algorithm: "HMAC-SHA256",',
+    '    secret_env: "URL_SIGNING_SECRET",',
+    '    expires_param: "exp",',
+    '    signature_param: "sig"',
+    '  }],',
     '  originAuth: null',
     '};',
   ].join('\n');
 
-  const templatePath = path.join(__dirname, '..', 'templates', 'aws', 'origin-request.js');
-  let originCode;
-  try {
-    originCode = fs.readFileSync(templatePath, 'utf8');
-  } catch (e) {
-    console.error('Could not read templates/aws/origin-request.js');
-    return 1;
-  }
+  const originHandler = compileOriginTemplate(originCfgCode);
+  if (!originHandler) return 1;
 
-  originCode = originCode.replace('// {{INJECT_CONFIG}}', originCfgCode);
-
-  // Wrap in a module scope to avoid polluting globals
-  const wrappedCode = '(function() {\n' +
-    'const crypto = require("crypto");\n' +
-    'const https = require("https");\n' +
-    originCode
-      .replace("const crypto = require('crypto');", '')
-      .replace("const https = require('https');", '') +
-    '\nreturn exports.handler;\n' +
-    '})()';
-
-  let originHandler;
-  try {
-    originHandler = eval(wrappedCode);
-  } catch (e) {
-    console.error('Failed to eval origin-request template:', e.message);
-    return 1;
-  }
-
-  // Make originHandler available to runAsyncCase
   global.originHandler = originHandler;
 
   const nowSec = Math.floor(Date.now() / 1000);
 
   const originCases = [
-    // Pass-through (no protected prefix match)
+    // --- Pass-through ---
     ['origin: GET / pass-through',
       buildLambdaEdgeEvent('/'),
       'allow'],
 
-    // Missing Authorization header on protected route
+    // --- JWT HS256 tests ---
     ['origin: GET /api/data no auth',
       buildLambdaEdgeEvent('/api/data'),
       '401'],
 
-    // Valid JWT
     ['origin: GET /api/data valid JWT',
       buildLambdaEdgeEvent('/api/data', {
         'Authorization': 'Bearer ' + createHS256Jwt({
@@ -240,7 +261,6 @@ async function runOriginRequestTests() {
       }),
       'allow'],
 
-    // Expired JWT
     ['origin: GET /api/data expired JWT',
       buildLambdaEdgeEvent('/api/data', {
         'Authorization': 'Bearer ' + createHS256Jwt({
@@ -250,7 +270,6 @@ async function runOriginRequestTests() {
       }),
       '401'],
 
-    // Bad signature (wrong secret)
     ['origin: GET /api/data bad signature',
       buildLambdaEdgeEvent('/api/data', {
         'Authorization': 'Bearer ' + createHS256Jwt({
@@ -260,7 +279,6 @@ async function runOriginRequestTests() {
       }),
       '401'],
 
-    // Wrong issuer
     ['origin: GET /api/data wrong issuer',
       buildLambdaEdgeEvent('/api/data', {
         'Authorization': 'Bearer ' + createHS256Jwt({
@@ -270,7 +288,6 @@ async function runOriginRequestTests() {
       }),
       '401'],
 
-    // Wrong audience
     ['origin: GET /api/data wrong audience',
       buildLambdaEdgeEvent('/api/data', {
         'Authorization': 'Bearer ' + createHS256Jwt({
@@ -280,7 +297,6 @@ async function runOriginRequestTests() {
       }),
       '401'],
 
-    // Future nbf (not yet valid)
     ['origin: GET /api/data future nbf',
       buildLambdaEdgeEvent('/api/data', {
         'Authorization': 'Bearer ' + createHS256Jwt({
@@ -290,12 +306,35 @@ async function runOriginRequestTests() {
       }),
       '401'],
 
-    // Malformed token (not 3 parts)
     ['origin: GET /api/data malformed token',
       buildLambdaEdgeEvent('/api/data', {
         'Authorization': 'Bearer not-a-jwt',
       }),
       '401'],
+
+    // --- Signed URL tests ---
+    ['origin: GET /assets/file.png valid signed URL',
+      buildLambdaEdgeEvent('/assets/file.png', {},
+        createSignedUrlParams('/assets/file.png', nowSec + 3600, SIGNED_URL_SECRET)),
+      'allow'],
+
+    ['origin: GET /assets/file.png expired signed URL',
+      buildLambdaEdgeEvent('/assets/file.png', {},
+        createSignedUrlParams('/assets/file.png', nowSec - 100, SIGNED_URL_SECRET)),
+      '403'],
+
+    ['origin: GET /assets/file.png bad signature',
+      buildLambdaEdgeEvent('/assets/file.png', {},
+        createSignedUrlParams('/assets/file.png', nowSec + 3600, 'wrong-secret')),
+      '403'],
+
+    ['origin: GET /assets/file.png missing sig params',
+      buildLambdaEdgeEvent('/assets/file.png', {}, 'foo=bar'),
+      '403'],
+
+    ['origin: GET /other/file not protected by signed URL',
+      buildLambdaEdgeEvent('/other/file', {}, ''),
+      'allow'],
   ];
 
   let originFailed = 0;
@@ -303,18 +342,120 @@ async function runOriginRequestTests() {
     if (!(await runAsyncCase(name, event, expected))) originFailed++;
   }
 
-  console.log('--- origin-request: ' + (originCases.length - originFailed) + '/' + originCases.length + ' passed ---');
-  return originFailed;
+  console.log('--- origin-request (enforce): ' + (originCases.length - originFailed) + '/' + originCases.length + ' passed ---');
+  return { failed: originFailed, total: originCases.length };
+}
+
+// Monitor mode tests: blocking checks should pass through
+async function runMonitorModeTests() {
+  const testSecret = HS256_SECRET;
+  process.env.JWT_TEST_SECRET = testSecret;
+  process.env.URL_SIGNING_SECRET = SIGNED_URL_SECRET;
+
+  const monitorCfgCode = [
+    'const CFG = {',
+    '  project: "test",',
+    '  mode: "monitor",',
+    '  maxHeaderSize: 100,',
+    '  jwtGates: [{',
+    '    name: "api",',
+    '    protectedPrefixes: ["/api"],',
+    '    type: "jwt",',
+    '    algorithm: "HS256",',
+    '    jwks_url: "",',
+    '    issuer: "test-issuer",',
+    '    audience: "test-audience",',
+    '    secret_env: "JWT_TEST_SECRET"',
+    '  }],',
+    '  signedUrlGates: [{',
+    '    name: "assets",',
+    '    protectedPrefixes: ["/assets"],',
+    '    type: "signed_url",',
+    '    algorithm: "HMAC-SHA256",',
+    '    secret_env: "URL_SIGNING_SECRET",',
+    '    expires_param: "exp",',
+    '    signature_param: "sig"',
+    '  }],',
+    '  originAuth: null',
+    '};',
+  ].join('\n');
+
+  const monitorHandler = compileOriginTemplate(monitorCfgCode);
+  if (!monitorHandler) return { failed: 1, total: 1 };
+
+  global.originHandler = monitorHandler;
+
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  const monitorCases = [
+    // In monitor mode, invalid JWT should pass through (allow)
+    ['monitor: GET /api/data invalid JWT passes through',
+      buildLambdaEdgeEvent('/api/data'),
+      'allow'],
+
+    // In monitor mode, expired signed URL should pass through
+    ['monitor: GET /assets/file.png expired signed URL passes through',
+      buildLambdaEdgeEvent('/assets/file.png', {},
+        createSignedUrlParams('/assets/file.png', nowSec - 100, SIGNED_URL_SECRET)),
+      'allow'],
+  ];
+
+  let monitorFailed = 0;
+  for (const [name, event, expected] of monitorCases) {
+    if (!(await runAsyncCase(name, event, expected))) monitorFailed++;
+  }
+
+  console.log('--- origin-request (monitor): ' + (monitorCases.length - monitorFailed) + '/' + monitorCases.length + ' passed ---');
+  return { failed: monitorFailed, total: monitorCases.length };
+}
+
+// Error boundary test: handler should return 502 on unexpected error
+async function runErrorBoundaryTests() {
+  const badCfgCode = [
+    'const CFG = {',
+    '  project: "test",',
+    '  mode: "enforce",',
+    '  maxHeaderSize: 0,',
+    '  jwtGates: [],',
+    '  signedUrlGates: [],',
+    '  originAuth: null',
+    '};',
+  ].join('\n');
+
+  const errorHandler = compileOriginTemplate(badCfgCode);
+  if (!errorHandler) return { failed: 1, total: 1 };
+
+  // Send a malformed event missing Records[0].cf
+  const malformedEvent = { Records: [{}] };
+  const result = await errorHandler(malformedEvent);
+  const ok = result && result.status === '502';
+  if (!ok) {
+    console.error('FAIL: error boundary | expected 502, got', result && result.status);
+    console.log('--- error-boundary: 0/1 passed ---');
+    return { failed: 1, total: 1 };
+  }
+  console.log('OK: error boundary returns 502 on malformed event');
+  console.log('--- error-boundary: 1/1 passed ---');
+  return { failed: 0, total: 1 };
 }
 
 // Run all tests
 async function main() {
   let totalFailed = viewerFailed;
+  let totalTests = cases.length;
 
-  const originFailed = await runOriginRequestTests();
-  totalFailed += originFailed;
+  const enforceResult = await runOriginRequestTests();
+  totalFailed += enforceResult.failed;
+  totalTests += enforceResult.total;
 
-  const totalTests = cases.length + 9; // 9 origin-request test cases
+  const monitorResult = await runMonitorModeTests();
+  totalFailed += monitorResult.failed;
+  totalTests += monitorResult.total;
+
+  const errorResult = await runErrorBoundaryTests();
+  totalFailed += errorResult.failed;
+  totalTests += errorResult.total;
+
   if (totalFailed > 0) {
     console.error('Total:', totalFailed, 'failed out of', totalTests, 'tests');
     process.exit(1);

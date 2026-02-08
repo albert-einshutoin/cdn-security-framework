@@ -96,13 +96,13 @@ This document maps **which security-related YAML settings are supported** by cat
 
 | Feature | CloudFront Functions | Lambda@Edge | Cloudflare Workers | Terraform |
 |---------|---------------------|-------------|-------------------|-----------|
-| URI/Query limits | ✓ | ✓ | ✓ | — |
-| Path normalization | ✓ | ✓ | ✓ | — |
-| Required headers | ✓ | ✓ | ✓ | — |
+| URI/Query limits | ✓ | — | ✓ | — |
+| Path normalization | ✓ | — | ✓ | — |
+| Required headers | ✓ | — | ✓ | — |
 | Header size limit | — | ✓ | ✓ | — |
-| CORS | ✓ | ✓ | ✓ | — |
-| Basic auth | ✓ | ✓ | ✓ | — |
-| Cookie attributes | ✓ | ✓ | ✓ | — |
+| CORS | ✓ | — | ✓ | — |
+| Basic auth | ✓ | — | ✓ | — |
+| Cookie attributes | ✓ | — | ✓ | — |
 | Geo block | — | — | — | ✓ |
 | IP allow/block | — | — | — | ✓ |
 | WAF managed rules | — | — | — | ✓ |

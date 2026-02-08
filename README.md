@@ -122,12 +122,24 @@ Or non-interactive: `npx cdn-security init --platform aws --profile balanced --f
 Edit `policy/security.yml` as needed, then:
 
 ```bash
+# AWS (default): generates viewer-request.js, viewer-response.js, origin-request.js
 npx cdn-security build
+
+# Cloudflare Workers: generates index.ts for Wrangler
+npx cdn-security build --target cloudflare
 ```
 
-This validates the policy and generates `dist/edge/viewer-request.js` (and other Edge code).
+This validates the policy and generates Edge Runtime code into `dist/edge/`.
 
-### 4. Deploy
+### 4. Test
+
+```bash
+npm run test:runtime
+```
+
+Runs all runtime tests (viewer-request + origin-request including JWT and Signed URL verification).
+
+### 5. Deploy
 
 Use the generated files in `dist/edge/` with Terraform, CDK, or your CDN console. Set `EDGE_ADMIN_TOKEN` in your environment or secrets for admin routes.
 
@@ -138,9 +150,11 @@ Use the generated files in `dist/edge/` with Terraform, CDK, or your CDN console
 * Block unwanted HTTP methods
 * Early Path Traversal blocking
 * UA / query anomaly detection
-* Simple Edge auth for /admin, /docs
-* Enforced security headers
+* Auth gates: static token, Basic auth, JWT (RS256/HS256), Signed URL
+* Enforced security headers (HSTS, CSP, Referrer-Policy, Permissions-Policy)
+* CORS and Cookie attribute management
 * Cache poisoning mitigation
+* Monitor mode for non-blocking observation
 * Design that does not conflict with WAF
 
 ---
