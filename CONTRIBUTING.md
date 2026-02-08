@@ -41,7 +41,14 @@ Before opening a PR, ensure these checks pass locally:
 6. `npm run test:drift`
 7. `npm run test:security-baseline`
 
-GitHub Actions runs the same gate for changes under `policy/`, `scripts/`, `templates/`, and `bin/`.
+GitHub Actions runs the same gate on push/PR to `main`.
+
+Release is automated by tag:
+
+1. Update `package.json` version.
+2. Push commit to `main`.
+3. Push tag `vX.Y.Z`.
+4. `.github/workflows/release-npm.yml` runs the full gate and publishes to npm only when green.
 
 ---
 

@@ -1,23 +1,21 @@
-# Policy lint, build, and runtime tests
-# dist/ はコミットしない。ビルドが成功し dist/edge/ が生成されることを確認する。
-name: Policy Lint & Build Check
+name: Release to npm
 
 on:
   push:
-    branches: [main]
-  pull_request:
-    branches: [main]
+    tags:
+      - 'v*'
   workflow_dispatch:
 
 permissions:
   contents: read
+  id-token: write
 
 concurrency:
-  group: ci-${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
-  lint-build-test:
+  publish:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +24,17 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          registry-url: 'https://registry.npmjs.org'
           cache: 'npm'
+
+      - name: Ensure tag matches package version
+        run: |
+          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          PKG_VERSION="$(node -p "require('./package.json').version")"
+          if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
+            echo "Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)."
+            exit 1
+          fi
 
       - name: Install dependencies
         run: npm ci
@@ -41,18 +49,11 @@ jobs:
           npm run lint:policy -- policy/profiles/strict.yml
           npm run lint:policy -- policy/profiles/permissive.yml
 
-      - name: Build AWS (compile policy → dist)
+      - name: Build AWS (compile policy -> dist)
         run: npm run build
 
-      - name: Build Cloudflare (compile policy → dist)
+      - name: Build Cloudflare (compile policy -> dist)
         run: node scripts/compile-cloudflare.js
-
-      - name: Ensure build produces dist/
-        run: |
-          test -f dist/edge/viewer-request.js || (echo "Missing dist/edge/viewer-request.js"; exit 1)
-          test -f dist/edge/viewer-response.js || (echo "Missing dist/edge/viewer-response.js"; exit 1)
-          test -f dist/edge/origin-request.js || (echo "Missing dist/edge/origin-request.js"; exit 1)
-          test -f dist/edge/cloudflare/index.ts || (echo "Missing dist/edge/cloudflare/index.ts"; exit 1)
 
       - name: Runtime tests (AWS + Cloudflare)
         run: npm run test:runtime
@@ -68,3 +69,13 @@ jobs:
 
       - name: Verify npm package contents (dry-run)
         run: npm pack --dry-run
+
+      - name: Publish package to npm
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "${NODE_AUTH_TOKEN}" ]; then
+            npm publish --access public
+          else
+            npm publish --provenance --access public
+          fi

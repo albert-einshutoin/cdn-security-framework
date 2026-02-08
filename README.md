@@ -3,6 +3,7 @@
 ## CDN Security Framework
 
 [![CI](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/policy-lint.yml/badge.svg)](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/policy-lint.yml)
+[![npm release](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/release-npm.yml/badge.svg)](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/release-npm.yml)
 
 **CDN Security Framework** is a **security design and implementation framework** that can be used across major CDN edge execution environments such as CloudFront, CloudFront Functions, Lambda@Edge, and Cloudflare Workers.
 
@@ -194,7 +195,17 @@ Use the generated files in `dist/edge/` with Terraform, CDK, or your CDN console
 
 * **package-lock.json**: Commit it so CI can run `npm ci`.
 * **dist/**: Ignored via `.gitignore`. Users run `npm run build` to generate `dist/edge/` and `dist/infra/`. For CI drift checks, run `npm run build` in CI and compare with policy (do not commit `dist/`).
-* **Publish**: From repo root, run `npm publish` (requires npm auth). Prefer publishing from a clean tree with version bumped in `package.json` and an entry in `CHANGELOG.md`. Scoped package (e.g. `@your-org/cdn-security-framework`) requires `--access public` for the first publish.
+* **CI workflows**:
+  * `.github/workflows/policy-lint.yml`: push/PR quality gate (lint/build/runtime/unit/drift/security-baseline + `npm pack --dry-run`)
+  * `.github/workflows/release-npm.yml`: tag-driven publish workflow
+* **Release by tag**:
+  1. Bump `package.json` version (example: `1.0.1`)
+  2. Commit and push to `main`
+  3. Create and push tag `v1.0.1`
+  4. GitHub Actions runs release checks, then publishes to npm if all checks pass
+* **npm auth for release**:
+  * Preferred: npm Trusted Publishing (OIDC) with `npm publish --provenance`
+  * Fallback: set repository secret `NPM_TOKEN` and workflow uses token publish
 
 ---
 

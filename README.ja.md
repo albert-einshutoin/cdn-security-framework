@@ -185,7 +185,17 @@ CI と同じ runtime / unit / drift / security-baseline チェックを実行し
 
 * **package-lock.json**: コミットしておく（CI で `npm ci` するため）。
 * **dist/**: `.gitignore` で無視。ユーザーは `npm run build` で `dist/edge/` と `dist/infra/` を生成する。CI でドリフト検知する場合は CI 内で `npm run build` を実行しポリシーと比較する（`dist/` はコミットしない）。
-* **公開**: リポジトリルートで `npm publish`（npm 認証が必要）。`package.json` のバージョン更新と `CHANGELOG.md` の記載を済ませた状態で公開すること。スコープ付きパッケージ（例: `@your-org/cdn-security-framework`）は初回公開時に `--access public` が必要。
+* **CI ワークフロー**:
+  * `.github/workflows/policy-lint.yml`: push/PR の品質ゲート（lint/build/runtime/unit/drift/security-baseline + `npm pack --dry-run`）
+  * `.github/workflows/release-npm.yml`: タグ起点の npm 公開ワークフロー
+* **タグで公開する手順**:
+  1. `package.json` の version を更新（例: `1.0.1`）
+  2. `main` へコミット/プッシュ
+  3. `v1.0.1` タグを作成して push
+  4. GitHub Actions が公開前チェックを実行し、全て成功時のみ npm へ公開
+* **npm 認証**:
+  * 推奨: npm Trusted Publishing（OIDC, `npm publish --provenance`）
+  * フォールバック: リポジトリシークレット `NPM_TOKEN` を設定してトークン公開
 
 ---
 
