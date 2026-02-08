@@ -105,6 +105,107 @@ for (const [name, event, expected] of cases) {
 console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases.length + ' passed ---');
 
 // =========================================================================
+// Section 1b: viewer-request.js monitor mode tests
+// =========================================================================
+
+function compileViewerTemplate(cfgCode) {
+  const templatePath = path.join(__dirname, '..', 'templates', 'aws', 'viewer-request.js');
+  let vrCode;
+  try {
+    vrCode = fs.readFileSync(templatePath, 'utf8');
+  } catch (e) {
+    console.error('Could not read templates/aws/viewer-request.js');
+    return null;
+  }
+
+  vrCode = vrCode.replace('// {{INJECT_CONFIG}}', cfgCode);
+
+  const wrappedCode = '(function() {\n' + vrCode + '\nreturn handler;\n})()';
+  try {
+    return eval(wrappedCode);
+  } catch (e) {
+    console.error('Failed to eval viewer-request template:', e.message);
+    return null;
+  }
+}
+
+function runViewerMonitorTests() {
+  const monitorCfg = [
+    'const CFG = {',
+    '  mode: "monitor",',
+    '  allowMethods: ["GET", "HEAD"],',
+    '  maxQueryLength: 1024,',
+    '  maxQueryParams: 30,',
+    '  maxUriLength: 2048,',
+    '  dropQueryKeys: new Set(["utm_source"]),',
+    '  uaDenyContains: ["sqlmap"],',
+    '  blockPathMarks: ["/../", "%2e%2e"],',
+    '  normalizePath: { collapseSlashes: true, removeDotSegments: true },',
+    '  requiredHeaders: ["user-agent"],',
+    '  cors: null,',
+    '  adminGate: { enabled: false, protectedPrefixes: [], tokenHeaderName: "x-edge-token", token: "" },',
+    '  authGates: [{',
+    '    name: "admin",',
+    '    protectedPrefixes: ["/admin"],',
+    '    type: "static_token",',
+    '    tokenHeaderName: "x-edge-token",',
+    '    token: "test-token"',
+    '  }],',
+    '};',
+  ].join('\n');
+
+  const monitorHandler = compileViewerTemplate(monitorCfg);
+  if (!monitorHandler) return { failed: 1, total: 1 };
+
+  const monitorCases = [
+    // In monitor mode, blocked method should pass through
+    ['viewer-monitor: POST blocked method passes through',
+      buildEvent('POST', '/', { 'user-agent': 'Mozilla' }),
+      'allow'],
+
+    // In monitor mode, traversal should pass through
+    ['viewer-monitor: path traversal passes through',
+      buildEvent('GET', '/foo/../bar', { 'user-agent': 'Mozilla' }),
+      'allow'],
+
+    // In monitor mode, missing UA should pass through
+    ['viewer-monitor: missing UA passes through',
+      buildEvent('GET', '/'),
+      'allow'],
+
+    // In monitor mode, denied UA should pass through
+    ['viewer-monitor: sqlmap UA passes through',
+      buildEvent('GET', '/', { 'user-agent': 'sqlmap/1.0' }),
+      'allow'],
+
+    // In monitor mode, missing auth token should pass through
+    ['viewer-monitor: /admin no token passes through',
+      buildEvent('GET', '/admin', { 'user-agent': 'Mozilla' }),
+      'allow'],
+  ];
+
+  let failed = 0;
+  for (const [name, event, expected] of monitorCases) {
+    const result = monitorHandler(event);
+    const allowed = result && !result.statusCode && result.uri !== undefined;
+    const got = allowed ? 'allow' : (result && result.statusCode);
+    const ok = (expected === 'allow' && allowed);
+    if (!ok) {
+      console.error('FAIL:', name, '| expected', expected, 'got', got);
+      failed++;
+    } else {
+      console.log('OK:', name);
+    }
+  }
+
+  console.log('--- viewer-request (monitor): ' + (monitorCases.length - failed) + '/' + monitorCases.length + ' passed ---');
+  return { failed, total: monitorCases.length };
+}
+
+const viewerMonitorResult = runViewerMonitorTests();
+viewerFailed += viewerMonitorResult.failed;
+
+// =========================================================================
 // Section 2: origin-request.js tests (Lambda@Edge)
 // =========================================================================
 
@@ -442,7 +543,7 @@ async function runErrorBoundaryTests() {
 // Run all tests
 async function main() {
   let totalFailed = viewerFailed;
-  let totalTests = cases.length;
+  let totalTests = cases.length + viewerMonitorResult.total;
 
   const enforceResult = await runOriginRequestTests();
   totalFailed += enforceResult.failed;

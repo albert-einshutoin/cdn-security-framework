@@ -32,6 +32,15 @@
     };
   }
 
+  function shouldBlock(checkResult) {
+    if (!checkResult) return null;
+    if (CFG.mode === 'monitor') {
+      console.log('[monitor]', checkResult.statusCode, checkResult.body || '');
+      return null;
+    }
+    return checkResult;
+  }
+
   function handleCorsPreflight(req) {
     // Handle CORS preflight (OPTIONS) requests
     if (req.method !== 'OPTIONS' || !CFG.cors) return null;
@@ -223,38 +232,38 @@
     if (preflight) return preflight;
 
     // 1) Method allowlist
-    const m = blockIfMethodNotAllowed(req);
+    const m = shouldBlock(blockIfMethodNotAllowed(req));
     if (m) return m;
 
     // 2) URI length check
-    const uriLen = blockIfUriTooLong(req);
+    const uriLen = shouldBlock(blockIfUriTooLong(req));
     if (uriLen) return uriLen;
 
     // 3) Path normalization
     normalizePath(req);
 
     // 4) Path traversal (coarse)
-    const t = blockIfTraversal(req);
+    const t = shouldBlock(blockIfTraversal(req));
     if (t) return t;
 
     // 5) Required headers check
-    const hm = blockIfHeaderMissing(req);
+    const hm = shouldBlock(blockIfHeaderMissing(req));
     if (hm) return hm;
 
     // 6) UA sanity (deny list)
-    const u = blockIfBadUA(req);
+    const u = shouldBlock(blockIfBadUA(req));
     if (u) return u;
 
     // 7) Query guard + normalize
-    const q = guardAndNormalizeQuery(req);
+    const q = shouldBlock(guardAndNormalizeQuery(req));
     if (q) return q;
 
     // 8) Auth gates (includes Basic auth, static token, etc.)
-    const auth = checkAuthGates(req);
+    const auth = shouldBlock(checkAuthGates(req));
     if (auth) return auth;
 
     // 9) Legacy admin gate (backward compatibility)
-    const g = adminGate(req);
+    const g = shouldBlock(adminGate(req));
     if (g) return g;
 
     return req;

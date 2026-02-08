@@ -111,6 +111,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | Signed URL | — | ✓ | — | — |
 | Origin auth | — | ✓ | — | — |
 | Origin timeout | — | — | — | ✓ |
+| Monitor mode | ✓ | ✓ | ✓ | — |
 
 ---
 
