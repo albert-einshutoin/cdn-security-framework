@@ -15,8 +15,10 @@ CDN Security Framework の補助スクリプト一覧です。
 | `runtime-tests.js` | AWS viewer/origin テンプレートのランタイム挙動テスト。 |
 | `cloudflare-runtime-tests.js` | Cloudflare の compile/template 挙動テスト（JWT/署名付き URL/origin auth 経路）。 |
 | `compile-unit-tests.js` | コンパイラコアの単体テスト。 |
-| `infra-unit-tests.js` | infra コンパイラ出力の単体テスト（JA3 ルール含む）。 |
+| `infra-unit-tests.js` | infra コンパイラ出力の単体テスト（JA3/JA4 ルール含む）。 |
 | `check-drift.js` | 生成物とコミット済み golden のドリフト検知。 |
+| `fingerprint-candidates.js` | WAF JSONL ログから JA3/JA4 候補を抽出（段階導入向け）。 |
+| `security-baseline-check.js` | OWASP ベースライン参照と CI ガードレールの必須項目を検証。 |
 
 ---
 
@@ -43,13 +45,20 @@ node scripts/policy-lint.js policy/profiles/balanced.yml
 npm run test:runtime
 npm run test:unit
 npm run test:drift
+npm run test:security-baseline
+```
+
+### フィンガープリント候補抽出
+
+```bash
+npm run fingerprints:candidates -- --input waf-logs.jsonl --min-count 20 --top 50
 ```
 
 ---
 
 ## CI
 
-GitHub Actions の `.github/workflows/policy-lint.yml` では、`main` への push/PR で `policy/`、`scripts/`、`templates/`、`bin/` が変更された場合、次の品質ゲートを実行します。
+GitHub Actions の `.github/workflows/policy-lint.yml` では、`main` への push/PR で `policy/`、`scripts/`、`templates/`、`bin/`、`tests/`、`docs/`、およびトップレベルのガイド文書（`README*`, `CONTRIBUTING*`）が変更された場合、次の品質ゲートを実行します。
 
 1. policy lint（base + 全プロファイル）
 2. build（AWS + Cloudflare）
@@ -57,6 +66,7 @@ GitHub Actions の `.github/workflows/policy-lint.yml` では、`main` への pu
 4. runtime テスト（`npm run test:runtime`）
 5. unit テスト（`npm run test:unit`）
 6. drift チェック（`npm run test:drift`）
+7. security baseline チェック（`npm run test:security-baseline`）
 
 ---
 

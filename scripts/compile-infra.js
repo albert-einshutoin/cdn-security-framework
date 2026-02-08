@@ -54,6 +54,7 @@ fs.mkdirSync(distDir, { recursive: true });
 // 1. WAF Rules (rate limit + managed rules)
 const wafRules = [];
 let priority = 1;
+const fingerprintActionType = (waf.fingerprint_action === 'count') ? 'count' : 'block';
 
 // Rate limit rule
 if (waf.rate_limit) {
@@ -75,30 +76,36 @@ if (waf.rate_limit) {
   });
 }
 
-// JA3 fingerprint block rules
-if (Array.isArray(waf.ja3_fingerprints) && waf.ja3_fingerprints.length > 0) {
-  for (const fp of waf.ja3_fingerprints) {
+function addFingerprintRules(fieldName, fingerprints, rulePrefix, metricPrefix) {
+  if (!Array.isArray(fingerprints) || fingerprints.length === 0) return;
+  for (const fp of fingerprints) {
     if (!fp) continue;
+    const fpStr = String(fp);
+    const slug = fpStr.slice(0, 12).toLowerCase();
     wafRules.push({
-      name: `ja3-block-${String(fp).slice(0, 12).toLowerCase()}`,
+      name: `${rulePrefix}-${fingerprintActionType}-${slug}`,
       priority: priority++,
-      action: { block: {} },
+      action: { [fingerprintActionType]: {} },
       statement: {
         byte_match_statement: {
-          field_to_match: { ja3_fingerprint: {} },
+          field_to_match: { [fieldName]: {} },
           positional_constraint: 'EXACTLY',
-          search_string: String(fp),
+          search_string: fpStr,
           text_transformation: [{ priority: 0, type: 'NONE' }],
         },
       },
       visibility_config: {
         cloudwatch_metrics_enabled: true,
-        metric_name: `${projectName}-ja3-${String(fp).slice(0, 12).toLowerCase()}`,
+        metric_name: `${projectName}-${metricPrefix}-${slug}`,
         sampled_requests_enabled: true,
       },
     });
   }
 }
+
+// JA3/JA4 fingerprint rules
+addFingerprintRules('ja3_fingerprint', waf.ja3_fingerprints, 'ja3', 'ja3');
+addFingerprintRules('ja4_fingerprint', waf.ja4_fingerprints, 'ja4', 'ja4');
 
 const tfWafJson = {
   resource: {

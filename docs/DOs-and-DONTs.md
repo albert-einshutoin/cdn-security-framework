@@ -14,7 +14,7 @@ A concise list of what you **should do** and what you **should not do** when usi
 | **Build after changes** | Run `npx cdn-security build` or `npm run build` after editing the policy so `dist/edge/` and `dist/infra/` are regenerated. |
 | **Start with init** | Use `npx cdn-security init` to choose platform and profile and generate a policy scaffold. |
 | **Validate the policy** | Run `npm run lint:policy` after edits; use it in CI as well. |
-| **Test after build** | Run `npm run build && npm run test:runtime` to verify generated code. |
+| **Test after build** | Run `npm run build && npm run test:runtime && npm run test:unit && npm run test:drift && npm run test:security-baseline` to verify generated code and CI guardrails. |
 | **Set token in deployment** | Configure `EDGE_ADMIN_TOKEN` as a secret in Terraform, Wrangler, etc., for protected paths like `/admin`. |
 | **Deploy generated artifacts** | Use `dist/edge/` for CloudFront Functions / Lambda@Edge / Workers, and `dist/infra/*.tf.json` with Terraform. |
 
@@ -64,6 +64,6 @@ As of **2026-02-08**, the implementation gaps previously listed here are closed:
 - Cloudflare Workers now supports JWT / Signed URL / Origin auth gates generated from policy.
 - Default CI includes drift check against committed golden generated artifacts.
 - Compiler test suite includes unit tests for compile core and infra compiler outputs.
-- JA3 fingerprint block rules can be generated via `firewall.waf.ja3_fingerprints`.
+- JA3/JA4 fingerprint rules can be generated via `firewall.waf.ja3_fingerprints` / `firewall.waf.ja4_fingerprints` (use `fingerprint_action: count` first).
 
 Industry templates, audit, and compliance are intentionally out of scope (“DON’T”), not implementation gaps.

@@ -76,3 +76,24 @@ For responses that pass through the Edge Security Layer, the framework adds secu
 
 * [Architecture](architecture.md) — Edge vs WAF vs Origin.
 * [Threat model](threat-model.md) — threats addressed at the edge.
+
+---
+
+## Fingerprint Operations (JA3/JA4)
+
+For JA3/JA4 operations, use a staged rollout:
+
+1. Start with `firewall.waf.fingerprint_action: count`.
+2. Collect WAF logs and extract candidates.
+3. Promote to `block` only after false-positive review.
+
+Candidate extraction helper:
+
+```bash
+node scripts/fingerprint-candidates.js --input waf-logs.jsonl --min-count 20 --top 50
+```
+
+The script outputs:
+
+- top JA3/JA4 candidates by frequency
+- a policy patch snippet (`recommended_policy_patch`) for review

@@ -72,6 +72,38 @@ firewall:
   }
 });
 
+test('compile-infra emits JA4 count rules when configured', () => {
+  const ctx = runCompileInfra(`
+version: 1
+project: ja4-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  waf:
+    fingerprint_action: count
+    ja4_fingerprints:
+      - "t13d1516h2_8daaf6152771_02713d6af862"
+`);
+
+  try {
+    const waf = ctx.read('infra/waf-rules.tf.json');
+    const group = waf.resource.aws_wafv2_rule_group['ja4-test-rate-limit'];
+    const ja4Rules = group.rule.filter((r) =>
+      r.statement &&
+      r.statement.byte_match_statement &&
+      r.statement.byte_match_statement.field_to_match &&
+      r.statement.byte_match_statement.field_to_match.ja4_fingerprint
+    );
+    assert.strictEqual(ja4Rules.length, 1);
+    assert.ok(ja4Rules[0].action.count);
+    assert.strictEqual(ja4Rules[0].statement.byte_match_statement.positional_constraint, 'EXACTLY');
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test('compile-infra still emits managed rules and rate limits', () => {
   const ctx = runCompileInfra(`
 version: 1

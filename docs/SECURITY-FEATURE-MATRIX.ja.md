@@ -8,7 +8,7 @@
 
 **YAML による一元管理が可能な包括的セキュリティフレームワーク** として、主要なセキュリティ機能を網羅しています。
 
-- **対応済み**: Request Hygiene（メソッド・URI・クエリ・ヘッダー制限、正規化、UA ブロック、JA3 指紋）、Response Security（セキュリティヘッダー、CORS、Cookie 属性）、Authentication（トークン、Basic、JWT、署名付き URL）、WAF（レート制限、マネージドルール、Geo、IP、JA3）、Transport（TLS/HTTP 版）、Origin（認証、タイムアウト）
+- **対応済み**: Request Hygiene（メソッド・URI・クエリ・ヘッダー制限、正規化、UA ブロック、JA3/JA4 指紋）、Response Security（セキュリティヘッダー、CORS、Cookie 属性）、Authentication（トークン、Basic、JWT、署名付き URL）、WAF（レート制限、マネージドルール、Geo、IP、JA3/JA4）、Transport（TLS/HTTP 版）、Origin（認証、タイムアウト）
 
 ---
 
@@ -30,6 +30,7 @@
 | **IP 制限（許可リスト / 拒否リスト）** | ✅ 対応 | `firewall.ip.allowlist` / `blocklist` → `dist/infra/ip-sets.tf.json` |
 | **レート制限（DDoS 対策）** | ✅ 対応 | `firewall.waf.rate_limit` で `dist/infra/waf-rules.tf.json` にレートベースルールを出力。 |
 | **WAF マネージドルール（SQLi, XSS, OWASP Top 10）** | ✅ 対応 | `firewall.waf.managed_rules` 配列 → `dist/infra/waf-rules.tf.json` (aws_wafv2_web_acl)。 |
+| **TLS 指紋ルール（JA3/JA4）** | ✅ 対応 | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints` と `fingerprint_action: block|count` に対応。 |
 
 ---
 
@@ -57,7 +58,7 @@
 | **クエリ正規化** | ✅ 対応 | `request.normalize.drop_query_keys` でトラッキングパラメータ（utm_*、gclid 等）を除去。 |
 | **必須ヘッダー** | ✅ 対応 | `request.block.header_missing` で必須ヘッダーをチェック（UA 以外も対応）。 |
 | **Bot/スキャナ対策（User-Agent）** | ✅ 対応 | `request.block.ua_contains` で既知スキャナをブロック。 |
-| **指紋（JA3 等）** | ✅ 対応 | `firewall.waf.ja3_fingerprints` から WAF JA3 ブロックルールを `dist/infra/waf-rules.tf.json` に生成。 |
+| **指紋（JA3/JA4）** | ✅ 対応 | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints` からルール生成。初期は `fingerprint_action: count`、検証後 `block` へ昇格。 |
 
 ---
 
@@ -85,9 +86,9 @@
 | カテゴリ | 対応済み | 部分対応 | 未対応 |
 |----------|----------|----------|--------|
 | **Transport** | HSTS, TLS 版, HTTP 版 | — | — |
-| **Firewall / Access** | レート制限, Geo, IP, WAF マネージド | — | — |
+| **Firewall / Access** | レート制限, Geo, IP, WAF マネージド, JA3/JA4 指紋ルール | — | — |
 | **Authentication** | トークン, Basic, JWT, 署名付き URL | — | — |
-| **Request Hygiene** | メソッド, URI/クエリ/ヘッダー制限, 正規化, UA ブロック, 必須ヘッダー, 指紋（JA3） | — | — |
+| **Request Hygiene** | メソッド, URI/クエリ/ヘッダー制限, 正規化, UA ブロック, 必須ヘッダー, 指紋（JA3/JA4） | — | — |
 | **Response Security** | セキュリティヘッダー, CORS, Cookie 属性 | — | — |
 | **Origin Security** | オリジン認証, タイムアウト | — | — |
 
@@ -107,6 +108,7 @@
 | Geo ブロック | — | — | — | ✓ |
 | IP 制限 | — | — | — | ✓ |
 | WAF マネージド | — | — | — | ✓ |
+| JA3/JA4 指紋ルール | — | — | — | ✓ |
 | TLS/HTTP 版 | — | — | — | ✓ |
 | JWT 検証 | — | ✓ | ✓ | — |
 | 署名付き URL | — | ✓ | ✓ | — |

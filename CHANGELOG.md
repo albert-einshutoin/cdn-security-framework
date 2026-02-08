@@ -21,6 +21,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cloudflare Workers auth/runtime support for JWT (`HS256`/`RS256`), Signed URL, and origin custom-header auth generated from policy.
 - Drift check with committed golden generated artifacts (`tests/golden/base/*`) and CI integration (`npm run test:drift`).
 - Infra compiler support for JA3 fingerprint WAF block rules via `firewall.waf.ja3_fingerprints`.
+- Infra compiler support for JA4 fingerprint rules and staged rollout mode via `firewall.waf.ja4_fingerprints` + `firewall.waf.fingerprint_action` (`count`/`block`).
+- Fingerprint candidate extraction helper: `scripts/fingerprint-candidates.js` (WAF JSONL → JA3/JA4 candidates).
+- Security baseline guardrail check: `scripts/security-baseline-check.js` + CI integration (`npm run test:security-baseline`).
 
 ### Changed
 

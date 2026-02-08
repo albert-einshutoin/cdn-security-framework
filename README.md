@@ -143,9 +143,10 @@ This validates the policy and generates Edge Runtime code into `dist/edge/`.
 npm run test:runtime
 npm run test:unit
 npm run test:drift
+npm run test:security-baseline
 ```
 
-Runs runtime, unit, and drift checks used by CI.
+Runs runtime, unit, drift, and security-baseline checks used by CI.
 
 ### 5. Deploy
 

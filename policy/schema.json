@@ -120,7 +120,9 @@
             "rate_limit": { "type": "integer" },
             "scope": { "enum": ["REGIONAL", "CLOUDFRONT"] },
             "managed_rules": { "type": "array", "items": { "type": "string" } },
-            "ja3_fingerprints": { "type": "array", "items": { "type": "string" } }
+            "ja3_fingerprints": { "type": "array", "items": { "type": "string" } },
+            "ja4_fingerprints": { "type": "array", "items": { "type": "string" } },
+            "fingerprint_action": { "enum": ["block", "count"] }
           }
         },
         "geo": {

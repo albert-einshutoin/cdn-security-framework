@@ -144,4 +144,4 @@ flowchart TB
 * [decision-matrix.ja.md](decision-matrix.ja.md) で Edge / WAF 判断
 * ポリシーとランタイムの同期: [policy-runtime-sync.ja.md](policy-runtime-sync.ja.md)
 * 観測: [observability.ja.md](observability.ja.md) でログ・メトリクス仕様
-* CI 品質ゲート（policy lint + build + runtime + unit + drift）: `.github/workflows/policy-lint.yml`
+* CI 品質ゲート（policy lint + build + runtime + unit + drift + security-baseline）: `.github/workflows/policy-lint.yml`

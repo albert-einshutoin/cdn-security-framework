@@ -43,9 +43,10 @@ npx cdn-security build --target cloudflare
 npm run test:runtime
 npm run test:unit
 npm run test:drift
+npm run test:security-baseline
 ```
 
-CI と同じ runtime / unit / drift チェックを実行します。
+CI と同じ runtime / unit / drift / security-baseline チェックを実行します。
 
 ## 5. デプロイ
 

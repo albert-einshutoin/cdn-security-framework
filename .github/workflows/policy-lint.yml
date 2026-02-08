@@ -11,6 +11,11 @@ on:
       - 'templates/**'
       - 'bin/**'
       - 'tests/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'README.ja.md'
+      - 'CONTRIBUTING.md'
+      - 'CONTRIBUTING.ja.md'
   pull_request:
     branches: [main]
     paths:
@@ -19,6 +24,11 @@ on:
       - 'templates/**'
       - 'bin/**'
       - 'tests/**'
+      - 'docs/**'
+      - 'README.md'
+      - 'README.ja.md'
+      - 'CONTRIBUTING.md'
+      - 'CONTRIBUTING.ja.md'
 
 jobs:
   lint-build-test:
@@ -63,5 +73,8 @@ jobs:
       - name: Unit tests (compiler core)
         run: npm run test:unit
 
-      - name: Drift check (policy/base.yml vs golden generated artifacts)
+      - name: Drift check (base + profiles vs golden generated artifacts)
         run: npm run test:drift
+
+      - name: Security baseline check (OWASP mapping + CI guardrails)
+        run: npm run test:security-baseline

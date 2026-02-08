@@ -144,4 +144,4 @@ flowchart TB
 * Use [decision-matrix.md](decision-matrix.md) for Edge / WAF decisions
 * Keep policy and runtimes in sync: [policy-runtime-sync.md](policy-runtime-sync.md)
 * Observability: [observability.md](observability.md) for logging and metrics
-* CI quality gate (policy lint + build + runtime + unit + drift): `.github/workflows/policy-lint.yml`
+* CI quality gate (policy lint + build + runtime + unit + drift + security-baseline): `.github/workflows/policy-lint.yml`

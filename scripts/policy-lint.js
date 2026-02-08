@@ -93,6 +93,11 @@ try {
       }
     }
   }
+
+  const waf = (parsed && parsed.firewall && parsed.firewall.waf) || {};
+  if (waf.fingerprint_action && !['block', 'count'].includes(waf.fingerprint_action)) {
+    errors.push('firewall.waf.fingerprint_action must be "block" or "count"');
+  }
 } catch (e) {
   errors.push('Failed to parse YAML for auth gate validation: ' + e.message);
 }

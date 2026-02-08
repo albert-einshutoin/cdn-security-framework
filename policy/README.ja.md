@@ -75,3 +75,21 @@ node scripts/policy-lint.js policy/base.yml
 
 * [ポリシーとランタイムの同期](../docs/policy-runtime-sync.ja.md) — ポリシーとランタイムの同期方法。
 * [アーキテクチャ](../docs/architecture.ja.md) — ポリシー駆動の設計。
+
+---
+
+## WAF フィンガープリント制御（任意）
+
+TLS フィンガープリントルールを policy に追加できます。
+
+```yaml
+firewall:
+  waf:
+    fingerprint_action: count   # count | block
+    ja3_fingerprints:
+      - "0123456789abcdef0123456789abcdef"
+    ja4_fingerprints:
+      - "t13d1516h2_8daaf6152771_02713d6af862"
+```
+
+推奨運用: まず `count` で投入し、ログ/メトリクス評価後に `block` へ切り替える。

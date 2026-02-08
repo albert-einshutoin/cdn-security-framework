@@ -14,7 +14,7 @@
 | **変更後にビルドする** | ポリシーを編集したら `npx cdn-security build` または `npm run build` を実行し、`dist/edge/` と `dist/infra/` を再生成する。 |
 | **init で始める** | 初回は `npx cdn-security init` でプラットフォーム・プロファイルを選び、雛形のポリシーを生成する。 |
 | **ポリシーを検証する** | 編集後に `npm run lint:policy` でスキーマ検証する。CI でも実行する。 |
-| **ビルド後にテストする** | `npm run build && npm run test:runtime` で生成コードの動作を確認する。 |
+| **ビルド後にテストする** | `npm run build && npm run test:runtime && npm run test:unit && npm run test:drift && npm run test:security-baseline` で生成コードと CI ガードレールを確認する。 |
 | **デプロイでトークンを設定する** | `/admin` 等の保護用に、Terraform / Wrangler 等で `EDGE_ADMIN_TOKEN` をシークレットとして設定する。 |
 | **生成物はデプロイに使う** | `dist/edge/` を CloudFront Function / Lambda@Edge / Workers に、`dist/infra/*.tf.json` を Terraform でデプロイする。 |
 
@@ -64,6 +64,6 @@
 - Cloudflare Workers でも、policy 生成で JWT / Signed URL / Origin auth gate を利用可能。
 - 標準 CI に、コミット済み golden 生成物とのドリフト検知を追加。
 - コンパイラの単体テストを、compile コアと infra 出力まで拡張。
-- `firewall.waf.ja3_fingerprints` による JA3 ブロックルール生成に対応。
+- `firewall.waf.ja3_fingerprints` / `firewall.waf.ja4_fingerprints` による JA3/JA4 ルール生成に対応（初期は `fingerprint_action: count` 推奨）。
 
 ※ 業種別テンプレ・監査・規制対応は意図的なスコープ外であり、実装ギャップではありません。

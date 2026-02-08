@@ -15,8 +15,10 @@ Helper scripts for the CDN Security Framework.
 | `runtime-tests.js` | Runtime behavior tests for AWS viewer/origin templates. |
 | `cloudflare-runtime-tests.js` | Cloudflare compile/template behavior tests (JWT/Signed URL/origin-auth paths). |
 | `compile-unit-tests.js` | Unit tests for compiler core logic. |
-| `infra-unit-tests.js` | Unit tests for infra compiler outputs (including JA3 rules). |
+| `infra-unit-tests.js` | Unit tests for infra compiler outputs (including JA3/JA4 rules). |
 | `check-drift.js` | Drift check: compares generated artifacts with committed golden fixtures. |
+| `fingerprint-candidates.js` | Extracts JA3/JA4 candidates from WAF JSONL logs for staged rollout. |
+| `security-baseline-check.js` | Verifies OWASP baseline references and mandatory CI guardrails. |
 
 ---
 
@@ -43,13 +45,20 @@ node scripts/policy-lint.js policy/profiles/balanced.yml
 npm run test:runtime
 npm run test:unit
 npm run test:drift
+npm run test:security-baseline
+```
+
+### Fingerprint candidate extraction
+
+```bash
+npm run fingerprints:candidates -- --input waf-logs.jsonl --min-count 20 --top 50
 ```
 
 ---
 
 ## CI
 
-GitHub Actions workflow `.github/workflows/policy-lint.yml` runs the default quality gate on push/PR to `main` when `policy/`, `scripts/`, `templates/`, or `bin/` change:
+GitHub Actions workflow `.github/workflows/policy-lint.yml` runs the default quality gate on push/PR to `main` when `policy/`, `scripts/`, `templates/`, `bin/`, `tests/`, `docs/`, or top-level guidance docs (`README*`, `CONTRIBUTING*`) change:
 
 1. policy lint (base + all profiles)
 2. build (AWS + Cloudflare)
@@ -57,6 +66,7 @@ GitHub Actions workflow `.github/workflows/policy-lint.yml` runs the default qua
 4. runtime tests (`npm run test:runtime`)
 5. unit tests (`npm run test:unit`)
 6. drift check (`npm run test:drift`)
+7. security baseline check (`npm run test:security-baseline`)
 
 ---
 

@@ -75,3 +75,21 @@ node scripts/policy-lint.js policy/base.yml
 
 * [Policy and runtime sync](../docs/policy-runtime-sync.md) — how to keep policy and runtimes in sync.
 * [Architecture](../docs/architecture.md) — policy-driven design.
+
+---
+
+## Optional WAF fingerprint controls
+
+You can add TLS fingerprint rules in policy:
+
+```yaml
+firewall:
+  waf:
+    fingerprint_action: count   # count | block
+    ja3_fingerprints:
+      - "0123456789abcdef0123456789abcdef"
+    ja4_fingerprints:
+      - "t13d1516h2_8daaf6152771_02713d6af862"
+```
+
+Recommended rollout: start with `count`, review logs/metrics, then switch to `block`.

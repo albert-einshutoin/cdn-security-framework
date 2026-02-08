@@ -76,3 +76,24 @@ Edge セキュリティレイヤーを通過したレスポンスには、フレ
 
 * [アーキテクチャ](architecture.ja.md) — Edge / WAF / Origin の責務。
 * [脅威モデル](threat-model.ja.md) — エッジで扱う脅威。
+
+---
+
+## フィンガープリント運用（JA3/JA4）
+
+JA3/JA4 は段階的に運用してください。
+
+1. `firewall.waf.fingerprint_action: count` で開始
+2. WAF ログから候補を抽出
+3. 誤検知レビュー後に `block` へ昇格
+
+候補抽出ヘルパー:
+
+```bash
+node scripts/fingerprint-candidates.js --input waf-logs.jsonl --min-count 20 --top 50
+```
+
+出力内容:
+
+- 出現頻度上位の JA3/JA4 候補
+- レビュー用の policy 差分スニペット（`recommended_policy_patch`）

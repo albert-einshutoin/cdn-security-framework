@@ -21,6 +21,9 @@
 - Cloudflare Workers で JWT（`HS256`/`RS256`）・署名付き URL・origin custom header 認証をポリシー生成で利用可能にした。
 - コミット済み golden 生成物（`tests/golden/base/*`）とのドリフト検知（`npm run test:drift`）を追加し、CI に統合。
 - `firewall.waf.ja3_fingerprints` から JA3 フィンガープリント WAF ブロックルールを生成する機能を追加。
+- `firewall.waf.ja4_fingerprints` と `firewall.waf.fingerprint_action`（`count`/`block`）による JA4 対応と段階導入モードを追加。
+- `scripts/fingerprint-candidates.js` を追加（WAF JSONL ログから JA3/JA4 候補を抽出）。
+- `scripts/security-baseline-check.js` を追加し、`npm run test:security-baseline` として CI に統合。
 
 ### 変更
 

@@ -103,3 +103,22 @@ This document organizes threats that this Edge Security Framework is designed to
 * **Internal / DB abuse** (application).
 
 Use `decision-matrix.md` to decide Edge vs WAF for each control.
+
+---
+
+## OWASP Mapping (2026 baseline)
+
+This framework should be operated with explicit references to:
+
+- **OWASP Top 10:2025**
+- **OWASP API Security Top 10 (2023)**
+
+Practical interpretation:
+
+| OWASP area | Framework role | Notes |
+|------------|----------------|-------|
+| Input and request abuse | Edge + WAF | Method/path/query/header checks at edge, deep inspection in WAF/app. |
+| Auth/session weaknesses | Edge + Origin | Edge gate is coarse filtering; critical authn/authz remains app/origin responsibility. |
+| Security misconfiguration | CI + policy | Keep policy lint/build/runtime/unit/drift checks mandatory in CI. |
+| Software supply chain risk | CI + dependency hygiene | Keep lockfile, monitor dependencies, and treat generated artifacts as reproducible outputs. |
+| API abuse patterns | WAF + app controls | Use API schema validation/rate limiting outside edge runtime. |

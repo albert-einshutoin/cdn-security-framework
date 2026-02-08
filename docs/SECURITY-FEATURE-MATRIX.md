@@ -6,7 +6,7 @@ This document maps **which security-related YAML settings are supported** by cat
 
 ## Conclusion: Comprehensive security framework with YAML-driven configuration
 
-- **Supported**: All major security features including Request Hygiene, Response Security, Authentication (Token/Basic/JWT/Signed URL), CORS, Cookie attributes, WAF (rate limit, managed rules, geo, IP, JA3), Transport (TLS/HTTP), Origin auth/timeout
+- **Supported**: All major security features including Request Hygiene, Response Security, Authentication (Token/Basic/JWT/Signed URL), CORS, Cookie attributes, WAF (rate limit, managed rules, geo, IP, JA3/JA4), Transport (TLS/HTTP), Origin auth/timeout
 
 ---
 
@@ -28,6 +28,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | **IP allowlist / blocklist** | Supported | `firewall.ip.allowlist` / `blocklist` → `dist/infra/ip-sets.tf.json` |
 | **Rate limiting (DDoS)** | Supported | `firewall.waf.rate_limit` → `dist/infra/waf-rules.tf.json` (rate-based rule). |
 | **WAF managed rules (SQLi, XSS, OWASP Top 10)** | Supported | `firewall.waf.managed_rules` array → `dist/infra/waf-rules.tf.json` (aws_wafv2_web_acl). |
+| **TLS fingerprint rules (JA3/JA4)** | Supported | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints`, optional `fingerprint_action: block|count`. |
 
 ---
 
@@ -55,7 +56,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | **Query normalization** | Supported | `request.normalize.drop_query_keys` strips tracking params (utm_*, gclid, etc.). |
 | **Required headers** | Supported | `request.block.header_missing` checks for required headers (generalized, not just UA). |
 | **Bot/scanner (User-Agent)** | Supported | `request.block.ua_contains` blocks known scanners. |
-| **Fingerprint (JA3)** | Supported | `firewall.waf.ja3_fingerprints` generates WAF JA3 block rules in `dist/infra/waf-rules.tf.json`. |
+| **Fingerprint (JA3/JA4)** | Supported | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints` generate WAF fingerprint rules in `dist/infra/waf-rules.tf.json`. Start with `fingerprint_action: count`, then promote to `block`. |
 
 ---
 
@@ -83,9 +84,9 @@ This document maps **which security-related YAML settings are supported** by cat
 | Category | Supported | Partial | Not supported |
 |----------|-----------|---------|---------------|
 | **Transport** | HSTS, TLS version, HTTP version | — | — |
-| **Firewall / Access** | Rate limit, Geo, IP, WAF managed rules | — | — |
+| **Firewall / Access** | Rate limit, Geo, IP, WAF managed rules, JA3/JA4 fingerprint rules | — | — |
 | **Authentication** | Token, Basic, JWT, Signed URL | — | — |
-| **Request Hygiene** | Method, URI/Query/Header limits, Normalization, UA block, Required headers, Fingerprint (JA3) | — | — |
+| **Request Hygiene** | Method, URI/Query/Header limits, Normalization, UA block, Required headers, Fingerprint (JA3/JA4) | — | — |
 | **Response Security** | Security headers, CORS, Cookie attributes | — | — |
 | **Origin Security** | Origin auth, Timeout | — | — |
 
@@ -105,6 +106,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | Geo block | — | — | — | ✓ |
 | IP allow/block | — | — | — | ✓ |
 | WAF managed rules | — | — | — | ✓ |
+| JA3/JA4 fingerprint rules | — | — | — | ✓ |
 | TLS/HTTP version | — | — | — | ✓ |
 | JWT validation | — | ✓ | ✓ | — |
 | Signed URL | — | ✓ | ✓ | — |
