@@ -1,6 +1,19 @@
 # ポリシー
 
-このディレクトリには、**セキュリティポリシー**（正）と、`base.yml` にコピーして使う **プロファイル** を置きます。
+このディレクトリには、**セキュリティポリシー**（正）と、`security.yml` または `base.yml` にコピーして使う **プロファイル** を置きます。
+
+---
+
+## 推奨: init と build
+
+**推奨フロー:** CLI でポリシーを作成し、ランタイムを生成します。
+
+```bash
+npx cdn-security init    # policy/security.yml と policy/profiles/<profile>.yml を作成
+npx cdn-security build   # policy/security.yml（なければ policy/base.yml）を読み、dist/edge/ と dist/infra/ を生成
+```
+
+build は `policy/security.yml` を優先して参照し、なければ `policy/base.yml` を使います。どちらを有効ポリシーとして使っても構いません。
 
 ---
 
@@ -8,22 +21,23 @@
 
 | ファイル | 役割 |
 |----------|------|
-| `base.yml` | 有効なポリシー。これを編集するか、プロファイルで上書きする（下記参照）。 |
+| `security.yml` | `npx cdn-security init` で作成。存在する場合は有効なポリシー。 |
+| `base.yml` | `security.yml` がないときに build が参照。有効ポリシーとして編集するか、プロファイルで上書き（下記参照）。 |
 | `profiles/balanced.yml` | デフォルト。セキュリティと互換性のバランス。 |
 | `profiles/strict.yml` | 制限を強め、ブロックを増やす。クライアントを制御できる場合向け。 |
 | `profiles/permissive.yml` | 制限を緩め、ブロックを減らす。API・スクリプト・レガシークライアント向け。 |
 
 ---
 
-## プロファイルの選び方
+## プロファイルの選び方（base.yml を使う場合）
+
+`init` ではなく `base.yml` を使う場合は、プロファイルを選んで `base.yml` にコピーします。
 
 | プロファイル | 使いどころ |
 |--------------|------------|
 | **balanced** | デフォルト。多くのサイト・API（ブラウザ＋一般的なクライアント）に適している。 |
 | **strict** | エッジで最大限のセキュリティ。クエリ/URI 制限を厳しく、UA ブロックを増やす（curl/wget 等）、パスパターン・CSP を厳格に。汎用スクリプトやレガシークライアントを許可しない場合向け。 |
 | **permissive** | ブロックを減らし、制限を緩める。API や、User-Agent を付けないクライアント、PUT/DELETE/OPTIONS を使う場合向け。 |
-
-選んだら、そのプロファイルを `base.yml` にコピーします。
 
 ```bash
 cp policy/profiles/balanced.yml policy/base.yml
@@ -32,9 +46,11 @@ cp policy/profiles/strict.yml policy/base.yml
 cp policy/profiles/permissive.yml policy/base.yml
 ```
 
-その後、**ランタイムを手動で同期**してください（[ポリシーとランタイムの同期](../docs/policy-runtime-sync.ja.md) 参照）。デプロイ前にポリシー Lint を実行することを推奨します。
+その後 **build** でランタイムを生成します（[ポリシーとランタイムの同期](../docs/policy-runtime-sync.ja.md) 参照）。デプロイ前にポリシー Lint を実行することを推奨します。
 
 ```bash
+npx cdn-security build
+# または
 node scripts/policy-lint.js policy/base.yml
 ```
 

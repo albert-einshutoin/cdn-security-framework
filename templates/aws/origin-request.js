@@ -60,9 +60,9 @@ async function fetchJwks(url) {
   if (jwksCache[url] && (now - jwksCache[url].time) < JWKS_CACHE_TTL) {
     return jwksCache[url].keys;
   }
-  
+
   return new Promise((resolve, reject) => {
-    https.get(url, (res) => {
+    const req = https.get(url, (res) => {
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
@@ -74,8 +74,17 @@ async function fetchJwks(url) {
           reject(e);
         }
       });
-    }).on('error', reject);
+    });
+    req.on('error', reject);
+    req.setTimeout(5000, () => {
+      req.destroy();
+      reject(new Error('JWKS fetch timeout'));
+    });
   });
+}
+
+function invalidateJwksCache(url) {
+  delete jwksCache[url];
 }
 
 // Base64URL decode
@@ -89,23 +98,28 @@ function base64UrlDecode(str) {
 async function verifyJwtRS256(token, jwksUrl, issuer, audience) {
   const parts = token.split('.');
   if (parts.length !== 3) return { valid: false, error: 'Invalid token format' };
-  
+
   const [headerB64, payloadB64, signatureB64] = parts;
-  
+
   try {
     const header = JSON.parse(base64UrlDecode(headerB64).toString());
     const payload = JSON.parse(base64UrlDecode(payloadB64).toString());
-    
+
     // Check expiration
     if (payload.exp && Date.now() >= payload.exp * 1000) {
       return { valid: false, error: 'Token expired' };
     }
-    
+
+    // Check not-before
+    if (payload.nbf && Date.now() < payload.nbf * 1000) {
+      return { valid: false, error: 'Token not yet valid' };
+    }
+
     // Check issuer
     if (issuer && payload.iss !== issuer) {
       return { valid: false, error: 'Invalid issuer' };
     }
-    
+
     // Check audience
     if (audience) {
       const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
@@ -113,31 +127,36 @@ async function verifyJwtRS256(token, jwksUrl, issuer, audience) {
         return { valid: false, error: 'Invalid audience' };
       }
     }
-    
-    // Fetch JWKS and find matching key
-    const keys = await fetchJwks(jwksUrl);
-    const key = keys.find(k => k.kid === header.kid && k.alg === 'RS256');
+
+    // Fetch JWKS and find matching key; retry once on kid miss (cache refresh)
+    let keys = await fetchJwks(jwksUrl);
+    let key = keys.find(k => k.kid === header.kid && k.alg === 'RS256');
     if (!key) {
-      return { valid: false, error: 'Key not found' };
+      invalidateJwksCache(jwksUrl);
+      keys = await fetchJwks(jwksUrl);
+      key = keys.find(k => k.kid === header.kid && k.alg === 'RS256');
+      if (!key) {
+        return { valid: false, error: 'Key not found' };
+      }
     }
-    
+
     // Verify signature using Node crypto
     const signData = headerB64 + '.' + payloadB64;
     const signature = base64UrlDecode(signatureB64);
-    
+
     // Convert JWK to PEM
     const pubKey = crypto.createPublicKey({
       key: key,
       format: 'jwk',
     });
-    
+
     const isValid = crypto.verify(
       'sha256',
       Buffer.from(signData),
       pubKey,
       signature
     );
-    
+
     return { valid: isValid, payload };
   } catch (e) {
     return { valid: false, error: e.message };
@@ -145,20 +164,38 @@ async function verifyJwtRS256(token, jwksUrl, issuer, audience) {
 }
 
 // Verify JWT with HS256 (symmetric key)
-function verifyJwtHS256(token, secret) {
+function verifyJwtHS256(token, secret, issuer, audience) {
   const parts = token.split('.');
   if (parts.length !== 3) return { valid: false, error: 'Invalid token format' };
-  
+
   const [headerB64, payloadB64, signatureB64] = parts;
-  
+
   try {
     const payload = JSON.parse(base64UrlDecode(payloadB64).toString());
-    
+
     // Check expiration
     if (payload.exp && Date.now() >= payload.exp * 1000) {
       return { valid: false, error: 'Token expired' };
     }
-    
+
+    // Check not-before
+    if (payload.nbf && Date.now() < payload.nbf * 1000) {
+      return { valid: false, error: 'Token not yet valid' };
+    }
+
+    // Check issuer
+    if (issuer && payload.iss !== issuer) {
+      return { valid: false, error: 'Invalid issuer' };
+    }
+
+    // Check audience
+    if (audience) {
+      const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
+      if (!aud.includes(audience)) {
+        return { valid: false, error: 'Invalid audience' };
+      }
+    }
+
     // Compute expected signature
     const signData = headerB64 + '.' + payloadB64;
     const expectedSig = crypto.createHmac('sha256', secret)
@@ -167,10 +204,14 @@ function verifyJwtHS256(token, secret) {
       .replace(/\+/g, '-')
       .replace(/\//g, '_')
       .replace(/=/g, '');
-    
-    const providedSig = signatureB64;
-    
-    return { valid: expectedSig === providedSig, payload };
+
+    // Timing-safe comparison
+    const expectedBuf = Buffer.from(expectedSig, 'utf8');
+    const providedBuf = Buffer.from(signatureB64, 'utf8');
+    const isValid = expectedBuf.length === providedBuf.length &&
+      crypto.timingSafeEqual(expectedBuf, providedBuf);
+
+    return { valid: isValid, payload };
   } catch (e) {
     return { valid: false, error: e.message };
   }
@@ -193,8 +234,14 @@ function verifySignedUrl(uri, querystring, gate) {
   const expectedSig = crypto.createHmac('sha256', secret)
     .update(signData)
     .digest('base64url');
-  
-  return { valid: sig === expectedSig };
+
+  // Timing-safe comparison
+  const expectedBuf = Buffer.from(expectedSig, 'utf8');
+  const providedBuf = Buffer.from(sig, 'utf8');
+  const isValid = expectedBuf.length === providedBuf.length &&
+    crypto.timingSafeEqual(expectedBuf, providedBuf);
+
+  return { valid: isValid };
 }
 
 // Check JWT auth gates
@@ -221,7 +268,7 @@ async function checkJwtGates(request) {
       result = await verifyJwtRS256(jwt, gate.jwks_url, gate.issuer, gate.audience);
     } else if (gate.algorithm === 'HS256' && gate.secret_env) {
       const secret = process.env[gate.secret_env] || '';
-      result = verifyJwtHS256(jwt, secret);
+      result = verifyJwtHS256(jwt, secret, gate.issuer, gate.audience);
     } else {
       return resp(500, 'JWT gate misconfigured');
     }
@@ -262,7 +309,7 @@ function checkSignedUrlGates(request) {
 // Add origin auth header
 function addOriginAuth(request) {
   if (!CFG.originAuth) return;
-  
+
   const secret = process.env[CFG.originAuth.secret_env] || '';
   if (secret) {
     const headerName = (CFG.originAuth.header || 'X-Origin-Verify').toLowerCase();
@@ -273,24 +320,47 @@ function addOriginAuth(request) {
   }
 }
 
+// Monitor mode: log and allow instead of blocking
+function shouldBlock(checkResult, request) {
+  if (!checkResult) return null;
+  if (CFG.mode === 'monitor') {
+    console.log('[monitor]', checkResult.status, checkResult.statusDescription,
+      'uri=' + (request && request.uri || '/'));
+    return null;
+  }
+  // In enforce mode, strip detailed error messages from client responses
+  const status = parseInt(checkResult.status, 10);
+  if (status === 401) {
+    return resp(401, 'Unauthorized');
+  } else if (status === 403) {
+    return resp(403, 'Forbidden');
+  }
+  return checkResult;
+}
+
 exports.handler = async (event) => {
-  const cf = event.Records[0].cf;
-  const req = cf.request;
+  try {
+    const cf = event.Records[0].cf;
+    const req = cf.request;
 
-  // Header size check (Lambda@Edge can access all headers)
-  const headerCheck = checkHeaderSize(req);
-  if (headerCheck) return headerCheck;
+    // Header size check (Lambda@Edge can access all headers)
+    const headerBlock = shouldBlock(checkHeaderSize(req), req);
+    if (headerBlock) return headerBlock;
 
-  // JWT auth gates
-  const jwtCheck = await checkJwtGates(req);
-  if (jwtCheck) return jwtCheck;
+    // JWT auth gates
+    const jwtBlock = shouldBlock(await checkJwtGates(req), req);
+    if (jwtBlock) return jwtBlock;
 
-  // Signed URL gates
-  const signedUrlCheck = checkSignedUrlGates(req);
-  if (signedUrlCheck) return signedUrlCheck;
+    // Signed URL gates
+    const signedUrlBlock = shouldBlock(checkSignedUrlGates(req), req);
+    if (signedUrlBlock) return signedUrlBlock;
 
-  // Add origin auth header
-  addOriginAuth(req);
+    // Add origin auth header
+    addOriginAuth(req);
 
-  return req;
+    return req;
+  } catch (err) {
+    console.log('[origin-request] unexpected error:', err.message || err);
+    return resp(502, 'Bad Gateway');
+  }
 };

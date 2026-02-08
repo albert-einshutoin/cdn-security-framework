@@ -8,6 +8,7 @@
 
 const fs = require('fs');
 const path = require('path');
+const yaml = require('js-yaml');
 
 const policyPath = process.argv[2] || path.join(__dirname, '..', 'policy', 'base.yml');
 let content;
@@ -66,6 +67,34 @@ if (blockPathMatch && !content.includes('- "') && !content.includes("- '") && !c
   if (!snippet.includes('- ') && !snippet.includes('[]')) {
     errors.push('request.block.path_patterns should be a list (use - "pattern" lines)');
   }
+}
+
+// Auth gate field validation (structured check using js-yaml)
+try {
+  const parsed = yaml.load(content);
+  const routes = (parsed && parsed.routes) || [];
+  for (const route of routes) {
+    const gate = route.auth_gate;
+    if (!gate) continue;
+    const name = route.name || 'unnamed';
+    const authType = gate.type || 'static_token';
+
+    if (authType === 'jwt') {
+      const alg = gate.algorithm || 'RS256';
+      if (alg === 'RS256' && !gate.jwks_url) {
+        errors.push(`Route "${name}": JWT+RS256 requires "jwks_url"`);
+      }
+      if (alg === 'HS256' && !gate.secret_env) {
+        errors.push(`Route "${name}": JWT+HS256 requires "secret_env"`);
+      }
+    } else if (authType === 'signed_url') {
+      if (!gate.secret_env) {
+        errors.push(`Route "${name}": signed_url requires "secret_env"`);
+      }
+    }
+  }
+} catch (e) {
+  errors.push('Failed to parse YAML for auth gate validation: ' + e.message);
 }
 
 if (errors.length > 0) {

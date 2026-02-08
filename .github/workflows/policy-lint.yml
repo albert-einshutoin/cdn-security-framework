@@ -1,5 +1,5 @@
 # Policy lint, build, and runtime tests
-# 生成された dist/edge/ が security.yml (or base.yml) と一致しているかも検証する
+# dist/ はコミットしない。ビルドが成功し dist/edge/ が生成されることを確認する。
 name: Policy Lint & Build Check
 
 on:
@@ -45,11 +45,11 @@ jobs:
       - name: Build (compile policy → dist)
         run: npm run build
 
-      - name: Check for changes (dist drift)
+      - name: Ensure build produces dist/
         run: |
-          # ビルド後の dist/ とコミットされた dist/ に差分がないか確認
-          # 手動で dist をいじった場合や policy 変更後に dist を更新し忘れた場合に検知
-          git diff --exit-code dist/
+          test -f dist/edge/viewer-request.js || (echo "Missing dist/edge/viewer-request.js"; exit 1)
+          test -f dist/edge/viewer-response.js || (echo "Missing dist/edge/viewer-response.js"; exit 1)
+          test -f dist/edge/origin-request.js || (echo "Missing dist/edge/origin-request.js"; exit 1)
 
       - name: Runtime tests (CloudFront Functions viewer-request)
         run: npm run test:runtime

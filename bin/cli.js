@@ -144,7 +144,7 @@ program
         '--out-dir', outDir,
       ], { stdio: 'inherit', cwd });
       if (compileInfraResult.status !== 0) process.exit(1);
-      console.log('[SUCCESS] Generated ' + path.join(outDir, 'infra', 'waf-rules.tf.json'));
+      console.log('[SUCCESS] Generated ' + path.join(outDir, 'infra', '*.tf.json'));
     } else if (opts.target === 'cloudflare') {
       console.log('[INFO] Target: Cloudflare Workers');
       const compileCfPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare.js');

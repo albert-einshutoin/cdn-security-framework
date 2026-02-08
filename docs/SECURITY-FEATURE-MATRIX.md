@@ -107,9 +107,9 @@ This document maps **which security-related YAML settings are supported** by cat
 | IP allow/block | — | — | — | ✓ |
 | WAF managed rules | — | — | — | ✓ |
 | TLS/HTTP version | — | — | — | ✓ |
-| JWT validation | — | ✓ | ✓ | — |
-| Signed URL | — | ✓ | ✓ | — |
-| Origin auth | — | ✓ | ✓ | — |
+| JWT validation | — | ✓ | — | — |
+| Signed URL | — | ✓ | — | — |
+| Origin auth | — | ✓ | — | — |
 | Origin timeout | — | — | — | ✓ |
 
 ---

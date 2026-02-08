@@ -36,6 +36,41 @@ try {
   process.exit(1);
 }
 
+// Validate auth gate required fields
+function validateAuthGates(policy) {
+  const routes = policy.routes || [];
+  const errors = [];
+
+  for (const route of routes) {
+    const gate = route.auth_gate;
+    if (!gate) continue;
+    const name = route.name || 'unnamed';
+    const authType = gate.type || 'static_token';
+
+    if (authType === 'jwt') {
+      const alg = gate.algorithm || 'RS256';
+      if (alg === 'RS256' && !gate.jwks_url) {
+        errors.push(`Route "${name}": JWT+RS256 requires "jwks_url"`);
+      }
+      if (alg === 'HS256' && !gate.secret_env) {
+        errors.push(`Route "${name}": JWT+HS256 requires "secret_env"`);
+      }
+    } else if (authType === 'signed_url') {
+      if (!gate.secret_env) {
+        errors.push(`Route "${name}": signed_url requires "secret_env"`);
+      }
+    }
+  }
+
+  if (errors.length > 0) {
+    console.error('Auth gate validation failed:');
+    errors.forEach(e => console.error('  -', e));
+    process.exit(1);
+  }
+}
+
+validateAuthGates(policy);
+
 // path_patterns (正規表現) を CloudFront 用の blockPathMarks（部分文字列）に変換
 function pathPatternsToMarks(pathPatterns) {
   if (!Array.isArray(pathPatterns) || pathPatterns.length === 0) {

@@ -11,7 +11,7 @@
     "test:runtime": "node scripts/runtime-tests.js"
   },
   "keywords": ["cdn", "cloudfront", "edge", "security", "policy", "cli"],
-  "license": "Apache-2.0",
+  "license": "MIT",
   "engines": {
     "node": ">=18"
   },
@@ -24,6 +24,15 @@
     "bin/",
     "scripts/",
     "templates/",
-    "policy/profiles/"
-  ]
+    "policy/profiles/",
+    "policy/schema.json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/user/cdn-security-framework.git"
+  },
+  "homepage": "https://github.com/user/cdn-security-framework#readme",
+  "bugs": {
+    "url": "https://github.com/user/cdn-security-framework/issues"
+  }
 }
