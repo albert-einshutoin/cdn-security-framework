@@ -30,6 +30,7 @@ CDN Security Framework の補助スクリプト一覧です。
 node scripts/compile.js
 node scripts/compile-cloudflare.js
 node scripts/compile-infra.js
+node scripts/compile-infra.js --rule-group-only
 ```
 
 ### Lint

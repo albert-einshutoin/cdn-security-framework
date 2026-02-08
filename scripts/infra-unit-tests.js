@@ -19,13 +19,16 @@ function test(name, fn) {
 
 const repoRoot = path.join(__dirname, '..');
 
-function runCompileInfra(policyContent) {
+function runCompileInfra(policyContent, options = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'infra-unit-'));
   const policyPath = path.join(tempDir, 'policy.yml');
   const outDir = path.join(tempDir, 'out');
   fs.writeFileSync(policyPath, policyContent, 'utf8');
 
-  execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile-infra.js'), '--policy', policyPath, '--out-dir', outDir], {
+  const args = [path.join(repoRoot, 'scripts', 'compile-infra.js'), '--policy', policyPath, '--out-dir', outDir];
+  if (options.ruleGroupOnly) args.push('--rule-group-only');
+
+  execFileSync(process.execPath, args, {
     cwd: repoRoot,
     stdio: 'pipe',
   });
@@ -127,6 +130,30 @@ firewall:
     const acl = waf.resource.aws_wafv2_web_acl['waf-test-waf-acl'];
     assert.ok(acl.rule.length === 1);
     assert.strictEqual(acl.rule[0].statement.managed_rule_group_statement.name, 'AWSManagedRulesCommonRuleSet');
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('compile-infra supports --rule-group-only for existing web ACL users', () => {
+  const ctx = runCompileInfra(`
+version: 1
+project: rg-only-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  waf:
+    rate_limit: 1200
+    managed_rules:
+      - "AWSManagedRulesCommonRuleSet"
+`, { ruleGroupOnly: true });
+
+  try {
+    const waf = ctx.read('infra/waf-rules.tf.json');
+    assert.ok(waf.resource.aws_wafv2_rule_group['rg-only-test-rate-limit']);
+    assert.ok(!waf.resource.aws_wafv2_web_acl);
   } finally {
     ctx.cleanup();
   }

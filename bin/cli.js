@@ -95,6 +95,7 @@ program
   .option('-p, --policy <path>', 'Policy file path (default: policy/security.yml or policy/base.yml)', null)
   .option('-o, --out-dir <dir>', 'Output directory', 'dist')
   .option('-t, --target <platform>', 'Target platform (aws | cloudflare)', 'aws')
+  .option('--rule-group-only', 'AWS only: generate WAF rule groups without aws_wafv2_web_acl output')
   .action((opts) => {
     const cwd = process.cwd();
     let policyPath = opts.policy;
@@ -142,6 +143,7 @@ program
         compileInfraPath,
         '--policy', policyPath,
         '--out-dir', outDir,
+        ...(opts.ruleGroupOnly ? ['--rule-group-only'] : []),
       ], { stdio: 'inherit', cwd });
       if (compileInfraResult.status !== 0) process.exit(1);
       console.log('[SUCCESS] Generated ' + path.join(outDir, 'infra', '*.tf.json'));

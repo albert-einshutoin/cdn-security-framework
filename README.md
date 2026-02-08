@@ -2,6 +2,8 @@
 
 ## CDN Security Framework
 
+[![CI](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/policy-lint.yml/badge.svg)](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/policy-lint.yml)
+
 **CDN Security Framework** is a **security design and implementation framework** that can be used across major CDN edge execution environments such as CloudFront, CloudFront Functions, Lambda@Edge, and Cloudflare Workers.
 
 The goal is simple.
@@ -133,6 +135,10 @@ npx cdn-security build
 
 # Cloudflare Workers: generates index.ts for Wrangler
 npx cdn-security build --target cloudflare
+
+# AWS + existing Terraform-managed Web ACL:
+# generate only rule groups (skip aws_wafv2_web_acl output)
+npx cdn-security build --rule-group-only
 ```
 
 This validates the policy and generates Edge Runtime code into `dist/edge/`.

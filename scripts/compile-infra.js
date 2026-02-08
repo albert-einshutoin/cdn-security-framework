@@ -20,9 +20,11 @@ const securityPath = path.join(repoRoot, 'policy', 'security.yml');
 const basePath = path.join(repoRoot, 'policy', 'base.yml');
 let policyPath = fs.existsSync(securityPath) ? securityPath : basePath;
 let outDir = path.join(repoRoot, 'dist');
+let ruleGroupOnly = false;
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '--policy' && argv[i + 1]) { policyPath = argv[++i]; continue; }
   if (argv[i] === '--out-dir' && argv[i + 1]) { outDir = argv[++i]; continue; }
+  if (argv[i] === '--rule-group-only') { ruleGroupOnly = true; continue; }
   if (!argv[i].startsWith('--')) { policyPath = argv[i]; }
 }
 
@@ -127,34 +129,38 @@ const tfWafJson = {
 
 // Add managed rules if present (as a separate web_acl reference)
 if (waf.managed_rules && waf.managed_rules.length > 0) {
-  tfWafJson.resource.aws_wafv2_web_acl = {
-    [projectName + '-waf-acl']: {
-      name: projectName + '-waf-acl',
-      scope,
-      default_action: { allow: {} },
-      rule: waf.managed_rules.map((ruleName, idx) => ({
-        name: `AWS-${ruleName}`,
-        priority: 10 + idx,
-        override_action: { none: {} },
-        statement: {
-          managed_rule_group_statement: {
-            vendor_name: 'AWS',
-            name: ruleName,
+  if (ruleGroupOnly) {
+    console.log('[INFO] --rule-group-only enabled: skipping aws_wafv2_web_acl generation (managed_rules are not emitted).');
+  } else {
+    tfWafJson.resource.aws_wafv2_web_acl = {
+      [projectName + '-waf-acl']: {
+        name: projectName + '-waf-acl',
+        scope,
+        default_action: { allow: {} },
+        rule: waf.managed_rules.map((ruleName, idx) => ({
+          name: `AWS-${ruleName}`,
+          priority: 10 + idx,
+          override_action: { none: {} },
+          statement: {
+            managed_rule_group_statement: {
+              vendor_name: 'AWS',
+              name: ruleName,
+            },
           },
-        },
+          visibility_config: {
+            cloudwatch_metrics_enabled: true,
+            metric_name: `${projectName}-${ruleName}`,
+            sampled_requests_enabled: true,
+          },
+        })),
         visibility_config: {
           cloudwatch_metrics_enabled: true,
-          metric_name: `${projectName}-${ruleName}`,
+          metric_name: projectName + '-waf-acl',
           sampled_requests_enabled: true,
         },
-      })),
-      visibility_config: {
-        cloudwatch_metrics_enabled: true,
-        metric_name: projectName + '-waf-acl',
-        sampled_requests_enabled: true,
       },
-    },
-  };
+    };
+  }
 }
 
 fs.writeFileSync(path.join(distDir, 'waf-rules.tf.json'), JSON.stringify(tfWafJson, null, 2), 'utf8');

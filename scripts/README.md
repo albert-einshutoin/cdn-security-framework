@@ -30,6 +30,7 @@ Helper scripts for the CDN Security Framework.
 node scripts/compile.js
 node scripts/compile-cloudflare.js
 node scripts/compile-infra.js
+node scripts/compile-infra.js --rule-group-only
 ```
 
 ### Lint
