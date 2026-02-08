@@ -79,8 +79,14 @@
     profiles/
   scripts/
     compile.js
+    compile-cloudflare.js
+    compile-infra.js
     policy-lint.js
     runtime-tests.js
+    cloudflare-runtime-tests.js
+    compile-unit-tests.js
+    infra-unit-tests.js
+    check-drift.js
   templates/               # 内部用: build が dist/edge/ を生成する際に参照
     aws/
   dist/
@@ -130,7 +136,17 @@ npx cdn-security build
 
 ポリシーが検証され、`dist/edge/viewer-request.js` などが生成されます。
 
-### 4. デプロイ
+### 4. テスト
+
+```bash
+npm run test:runtime
+npm run test:unit
+npm run test:drift
+```
+
+CI と同じ runtime / unit / drift チェックを実行します。
+
+### 5. デプロイ
 
 生成された `dist/edge/` を Terraform / CDK や CDN コンソールでデプロイしてください。管理ルート用に `EDGE_ADMIN_TOKEN` を環境変数やシークレットで設定します。
 

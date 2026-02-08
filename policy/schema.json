@@ -71,6 +71,7 @@
               "issuer": { "type": "string" },
               "audience": { "type": "string" },
               "secret_env": { "type": "string" },
+              "cache_ttl_sec": { "type": "integer" },
               "expires_param": { "type": "string" },
               "signature_param": { "type": "string" }
             }

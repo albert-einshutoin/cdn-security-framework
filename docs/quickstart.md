@@ -42,9 +42,11 @@ You do **not** edit `viewer-request.js` by hand; the token is driven by policy (
 
 ```bash
 npm run test:runtime
+npm run test:unit
+npm run test:drift
 ```
 
-Runs all runtime tests (AWS viewer/origin + Cloudflare Workers auth/runtime behavior).
+Runs runtime, unit, and drift checks used by CI.
 
 ## 5. Deploy
 

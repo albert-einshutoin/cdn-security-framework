@@ -8,7 +8,7 @@
 
 ### バグ報告・機能提案
 
-- [Issue](https://github.com/YOUR_ORG/YOUR_REPO/issues) を立て、タイトルと説明を明確に記載してください。
+- [Issue](https://github.com/albert-einshutoin/cdn-security-framework/issues) を立て、タイトルと説明を明確に記載してください。
 - バグ: 再現手順、期待する動作と実際の動作、環境（CDN・ランタイム）を含めてください。
 - 機能: ユースケースと、フレームワークのスコープ（Edge セキュリティ、ポリシー駆動、WAF と補完）にどう合うかを記載してください。
 

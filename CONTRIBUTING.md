@@ -8,7 +8,7 @@ Thank you for your interest in contributing. This document explains how to propo
 
 ### Reporting bugs or suggesting features
 
-- Open an [Issue](https://github.com/YOUR_ORG/YOUR_REPO/issues) with a clear title and description.
+- Open an [Issue](https://github.com/albert-einshutoin/cdn-security-framework/issues) with a clear title and description.
 - For bugs: include steps to reproduce, expected vs actual behavior, and environment (CDN, runtime).
 - For features: describe the use case and how it fits the framework’s scope (Edge security, policy-driven, WAF-complementary).
 

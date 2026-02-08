@@ -21,9 +21,12 @@ npx cdn-security init
 
 ```bash
 npx cdn-security build
+
+# Cloudflare Workers
+npx cdn-security build --target cloudflare
 ```
 
-ポリシーが検証され、**Edge Runtime** コードが `dist/edge/` に生成されます（例: AWS CloudFront Functions 用 `dist/edge/viewer-request.js`）。`CFG` やランタイム設定の手動編集は不要です。
+ポリシーが検証され、**Edge Runtime** コードが `dist/edge/` に生成されます（AWS: `viewer-request.js` / `viewer-response.js` / `origin-request.js`、Cloudflare: `cloudflare/index.ts`）。`CFG` やランタイム設定の手動編集は不要です。
 
 ## 3. 管理用トークン
 
@@ -34,14 +37,24 @@ npx cdn-security build
 
 `viewer-request.js` を手で編集する必要はありません。トークンはポリシー（routes.auth_gate.token_env）と環境変数で制御されます。
 
-## 4. デプロイ
+## 4. テスト
+
+```bash
+npm run test:runtime
+npm run test:unit
+npm run test:drift
+```
+
+CI と同じ runtime / unit / drift チェックを実行します。
+
+## 5. デプロイ
 
 生成された **`dist/edge/`** 内のファイルを Terraform / CDK や CDN コンソールでデプロイします。
 
 - AWS: CloudFront Function / Lambda@Edge の設定で `dist/edge/viewer-request.js`（および viewer-response.js が生成されていればそれも）を参照。
 - Cloudflare: `dist/edge/cloudflare/index.ts` を Workers としてデプロイ。
 
-## 5. 動作確認
+## 6. 動作確認
 
 - `/admin` がトークン無しで 401
 - トークン付きで通る

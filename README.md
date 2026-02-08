@@ -76,8 +76,14 @@ This framework addresses these with **"policy-driven" + "runtime separation"**.
     profiles/
   scripts/
     compile.js
+    compile-cloudflare.js
+    compile-infra.js
     policy-lint.js
     runtime-tests.js
+    cloudflare-runtime-tests.js
+    compile-unit-tests.js
+    infra-unit-tests.js
+    check-drift.js
   templates/                # Internal: used by build to generate dist/edge/
     aws/
   dist/
@@ -135,9 +141,11 @@ This validates the policy and generates Edge Runtime code into `dist/edge/`.
 
 ```bash
 npm run test:runtime
+npm run test:unit
+npm run test:drift
 ```
 
-Runs all runtime tests (AWS viewer/origin + Cloudflare Workers auth/runtime behavior).
+Runs runtime, unit, and drift checks used by CI.
 
 ### 5. Deploy
 
