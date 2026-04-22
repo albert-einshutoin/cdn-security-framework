@@ -7,6 +7,12 @@
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
+const {
+  parsePathPatterns,
+  regexesLiteralCode,
+  validateAuthGates,
+  hasAllowPlaceholderFlag,
+} = require('./lib/compile-core');
 
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
@@ -17,8 +23,10 @@ let outDir = path.join(repoRoot, 'dist');
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '--policy' && argv[i + 1]) { policyPath = argv[++i]; continue; }
   if (argv[i] === '--out-dir' && argv[i + 1]) { outDir = argv[++i]; continue; }
+  if (argv[i] === '--allow-placeholder-token') { continue; }
   if (!argv[i].startsWith('--')) { policyPath = argv[i]; }
 }
+const allowPlaceholderToken = hasAllowPlaceholderFlag(argv);
 
 let policy;
 try {
@@ -33,57 +41,10 @@ try {
   process.exit(1);
 }
 
-function validateAuthGates(inputPolicy) {
-  const routes = inputPolicy.routes || [];
-  const errors = [];
-
-  for (const route of routes) {
-    const gate = route.auth_gate;
-    if (!gate) continue;
-    const name = route.name || 'unnamed';
-    const authType = gate.type || 'static_token';
-
-    if (authType === 'jwt') {
-      const alg = gate.algorithm || 'RS256';
-      if (alg === 'RS256' && !gate.jwks_url) {
-        errors.push(`Route "${name}": JWT+RS256 requires "jwks_url"`);
-      }
-      if (alg === 'HS256' && !gate.secret_env) {
-        errors.push(`Route "${name}": JWT+HS256 requires "secret_env"`);
-      }
-    } else if (authType === 'signed_url') {
-      if (!gate.secret_env) {
-        errors.push(`Route "${name}": signed_url requires "secret_env"`);
-      }
-    }
-  }
-
-  if (errors.length > 0) {
-    console.error('Auth gate validation failed:');
-    errors.forEach((e) => console.error('  -', e));
-    process.exit(1);
-  }
-}
-
-validateAuthGates(policy);
-
-function pathPatternsToMarks(pathPatterns) {
-  if (!Array.isArray(pathPatterns) || pathPatterns.length === 0) {
-    return ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
-  }
-  const marks = new Set();
-  const knownMap = {
-    '(?i)\\.{2}/': ['/../', '..'],
-    '(?i)%2e%2e': ['%2e%2e', '%2E%2E'],
-  };
-  for (const p of pathPatterns) {
-    const s = (p || '').trim();
-    if (knownMap[s]) knownMap[s].forEach((m) => marks.add(m));
-    else if (s) marks.add(s.replace(/\\(\.)/g, '$1').replace(/\?i\)/g, '').slice(0, 20));
-  }
-  if (marks.size === 0) return ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
-  return Array.from(marks);
-}
+// Cloudflare Workers reads env at runtime for static_token/basic_auth, so build
+// does not require the actual token value. Only structural gate fields matter.
+// We still validate jwt/signed_url required fields via the shared helper.
+validateAuthGates(policy, { allowPlaceholderToken: true });
 
 const defaults = policy.defaults || {};
 const request = policy.request || {};
@@ -92,7 +53,7 @@ const block = request.block || {};
 const normalize = request.normalize || {};
 const routes = policy.routes || [];
 
-function getAuthGates() {
+function getWorkerAuthGates() {
   const gates = [];
   for (const route of routes) {
     const gate = route.auth_gate;
@@ -131,12 +92,12 @@ function getAuthGates() {
   }
   return gates;
 }
-const authGates = getAuthGates();
+const authGates = getWorkerAuthGates();
 
 const dropQueryKeysArray = normalize.drop_query_keys || [
   'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid',
 ];
-const blockPathMarks = pathPatternsToMarks(block.path_patterns);
+const { contains: blockPathContains, regexSources: blockPathRegexSources } = parsePathPatterns(block.path_patterns);
 const allowMethods = request.allow_methods || ['GET', 'HEAD', 'POST'];
 const pathNormalize = normalize.path || {};
 const requiredHeaders = block.header_missing || ['user-agent'];
@@ -154,7 +115,8 @@ const cfgCode = [
   `  maxHeaderSize: ${Number(limits.max_header_size) || 0},`,
   `  dropQueryKeys: new Set(${JSON.stringify(dropQueryKeysArray)}),`,
   `  uaDenyContains: ${JSON.stringify(block.ua_contains || ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests'])},`,
-  `  blockPathMarks: ${JSON.stringify(blockPathMarks)},`,
+  `  blockPathContains: ${JSON.stringify(blockPathContains)},`,
+  `  blockPathRegexes: ${regexesLiteralCode(blockPathRegexSources)},`,
   `  normalizePath: { collapseSlashes: ${!!pathNormalize.collapse_slashes}, removeDotSegments: ${!!pathNormalize.remove_dot_segments} },`,
   `  requiredHeaders: ${JSON.stringify(requiredHeaders)},`,
   `  cors: ${JSON.stringify(corsConfig)},`,

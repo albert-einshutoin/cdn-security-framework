@@ -27,8 +27,10 @@ try {
 // Run the script so handler() is defined (in global scope)
 eval(code);
 
-// ビルド時に EDGE_ADMIN_TOKEN 未設定なら BUILD_TIME_INJECTION が注入される
-const DEFAULT_TOKEN = process.env.EDGE_ADMIN_TOKEN || 'BUILD_TIME_INJECTION';
+// The build must have been invoked with EDGE_ADMIN_TOKEN set (see CI / npm script).
+// Fall back to the documented placeholder only for --allow-placeholder-token builds.
+const DEFAULT_TOKEN = process.env.EDGE_ADMIN_TOKEN
+  || 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
 
 function buildEvent(method, uri, headers, querystring) {
   const h = headers || {};
@@ -70,7 +72,7 @@ const cases = [
   ['GET /very-long-uri (2049 chars)', buildEvent('GET', '/' + 'a'.repeat(2048), { 'user-agent': 'Mozilla' }), 414],
 
   // Phase A-2: Path normalization is done but doesn't reject (just normalizes)
-  // Traversal patterns are blocked by blockPathMarks
+  // Traversal patterns are blocked by blockPathContains / blockPathRegexes
   ['GET /foo/../bar (traversal)', buildEvent('GET', '/foo/../bar', { 'user-agent': 'Mozilla' }), 400],
   ['GET / with %2e%2e', buildEvent('GET', '/x%2e%2e/y', { 'user-agent': 'Mozilla' }), 400],
 
@@ -139,16 +141,17 @@ function runViewerMonitorTests() {
     '  maxUriLength: 2048,',
     '  dropQueryKeys: new Set(["utm_source"]),',
     '  uaDenyContains: ["sqlmap"],',
-    '  blockPathMarks: ["/../", "%2e%2e"],',
+    '  blockPathContains: ["/../", "%2e%2e"],',
+    '  blockPathRegexes: [],',
     '  normalizePath: { collapseSlashes: true, removeDotSegments: true },',
     '  requiredHeaders: ["user-agent"],',
     '  cors: null,',
-    '  adminGate: { enabled: false, protectedPrefixes: [], tokenHeaderName: "x-edge-token", token: "" },',
     '  authGates: [{',
     '    name: "admin",',
     '    protectedPrefixes: ["/admin"],',
     '    type: "static_token",',
     '    tokenHeaderName: "x-edge-token",',
+    '    tokenEnv: "EDGE_ADMIN_TOKEN",',
     '    token: "test-token"',
     '  }],',
     '};',

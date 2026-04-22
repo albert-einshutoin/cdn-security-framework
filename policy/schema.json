@@ -31,7 +31,24 @@
         "block": {
           "type": "object",
           "properties": {
-            "path_patterns": { "type": "array", "items": { "type": "string" } },
+            "path_patterns": {
+              "oneOf": [
+                {
+                  "description": "Legacy shape: list of literal substrings. Regex-style entries are rejected at build time; use the object form instead.",
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                {
+                  "description": "Typed shape: literal substrings under contains, RegExp sources under regex (compiled at build time).",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "contains": { "type": "array", "items": { "type": "string" } },
+                    "regex": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              ]
+            },
             "ua_contains": { "type": "array", "items": { "type": "string" } },
             "header_missing": { "type": "array", "items": { "type": "string" } }
           }

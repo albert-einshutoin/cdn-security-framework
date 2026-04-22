@@ -23,7 +23,9 @@
 
 ## 管理用トークン
 
-環境変数やシークレットで `EDGE_ADMIN_TOKEN` を設定してください。ビルド時に変数が設定されていれば注入されます。コード内の `CFG.adminGate.token` を手で置換する必要はありません。
+`npm run build` を実行する前に、環境変数やシークレットで `EDGE_ADMIN_TOKEN` を設定してください。CloudFront Functions は実行時に環境変数を読めないため、トークンはビルド時に `dist/edge/viewer-request.js` の `CFG.authGates[].token` へ埋め込まれます。`static_token` を利用する場合、生成物自体がシークレットに準ずるため取り扱いに注意してください。
+
+トークンを持たない開発用ビルドでは `--allow-placeholder-token` を渡してください。プレースホルダー (`INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN`) が埋め込まれ、ビルド時に明示的な警告が出力されます。
 
 ## 動作確認（例）
 

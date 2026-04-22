@@ -19,6 +19,11 @@ concurrency:
 jobs:
   lint-build-test:
     runs-on: ubuntu-latest
+    env:
+      # CI-only token. Required because CloudFront Functions cannot read env
+      # at runtime, so static_token values are baked into the build artifact.
+      # This is not a production secret — real deployments use GitHub Secrets.
+      EDGE_ADMIN_TOKEN: ci-build-token-not-for-deploy
     steps:
       - uses: actions/checkout@v4
 

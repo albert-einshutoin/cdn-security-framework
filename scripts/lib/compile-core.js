@@ -3,7 +3,12 @@ const path = require('path');
 const yaml = require('js-yaml');
 
 const repoRoot = path.join(__dirname, '..', '..');
-const DEFAULT_MARKS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
+const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
+
+const LEGACY_KNOWN_MAP = {
+  '(?i)\\.{2}/': { contains: ['/../', '..'] },
+  '(?i)%2e%2e': { contains: ['%2e%2e', '%2E%2E'] },
+};
 
 function parseArgs(argv, rootDir = repoRoot) {
   const securityPath = path.join(rootDir, 'policy', 'security.yml');
@@ -33,9 +38,103 @@ function loadPolicy(policyPath) {
   return yaml.load(content);
 }
 
+function extractRegex(source) {
+  // Convert `(?i)...` to { pattern: '...', flags: 'i' }; else use the source as pattern.
+  if (typeof source !== 'string') {
+    throw new Error('Regex source must be a string');
+  }
+  const trimmed = source.trim();
+  if (!trimmed) {
+    throw new Error('Regex source must be non-empty');
+  }
+  if (trimmed.startsWith('(?i)')) {
+    return { pattern: trimmed.slice(4), flags: 'i' };
+  }
+  return { pattern: trimmed, flags: '' };
+}
+
+function compileRegexOrThrow(source, context) {
+  const { pattern, flags } = extractRegex(source);
+  try {
+    return new RegExp(pattern, flags);
+  } catch (e) {
+    throw new Error(`Invalid regex in ${context}: ${source} — ${e.message}`);
+  }
+}
+
+function looksLikeRegex(s) {
+  // Heuristic: presence of common regex metacharacters suggests a regex intent.
+  return /[\\(){}\[\]|^$+?*]|\.\{|\\\\/.test(s);
+}
+
+function parsePathPatterns(pathPatterns) {
+  // Returns { contains: string[], regexSources: string[] } with strict validation.
+  if (pathPatterns === undefined || pathPatterns === null) {
+    return { contains: DEFAULT_CONTAINS.slice(), regexSources: [] };
+  }
+
+  if (Array.isArray(pathPatterns)) {
+    // Legacy shape: list of strings. Each item is either a known regex literal
+    // (expanded via LEGACY_KNOWN_MAP) or a plain substring (treated as contains).
+    // Anything that looks like an unknown regex is rejected to avoid silent
+    // downgrade to substring semantics.
+    const contains = new Set();
+    const regexSources = [];
+    for (const raw of pathPatterns) {
+      const s = (raw || '').trim();
+      if (!s) continue;
+      const mapped = LEGACY_KNOWN_MAP[s];
+      if (mapped) {
+        if (mapped.contains) mapped.contains.forEach((m) => contains.add(m));
+        if (mapped.regex) mapped.regex.forEach((m) => regexSources.push(m));
+        continue;
+      }
+      if (looksLikeRegex(s)) {
+        throw new Error(
+          `Ambiguous path_patterns entry: "${s}". ` +
+          'Move regex-style patterns under `path_patterns.regex: [...]` or ' +
+          'literal substrings under `path_patterns.contains: [...]`.',
+        );
+      }
+      contains.add(s);
+    }
+    if (contains.size === 0 && regexSources.length === 0) {
+      return { contains: DEFAULT_CONTAINS.slice(), regexSources: [] };
+    }
+    return { contains: Array.from(contains), regexSources };
+  }
+
+  if (typeof pathPatterns === 'object') {
+    const contains = Array.isArray(pathPatterns.contains) ? pathPatterns.contains.filter(Boolean) : [];
+    const regexSources = Array.isArray(pathPatterns.regex) ? pathPatterns.regex.filter(Boolean) : [];
+    // Validate each regex compiles successfully at build time.
+    for (const src of regexSources) {
+      compileRegexOrThrow(src, 'request.block.path_patterns.regex');
+    }
+    if (contains.length === 0 && regexSources.length === 0) {
+      return { contains: DEFAULT_CONTAINS.slice(), regexSources: [] };
+    }
+    return { contains, regexSources };
+  }
+
+  throw new Error('request.block.path_patterns must be an array or an object with contains/regex');
+}
+
+function regexesLiteralCode(regexSources) {
+  // Emit real RegExp literals in generated JS so runtime avoids `new RegExp` at request time.
+  if (regexSources.length === 0) return '[]';
+  const literals = regexSources.map((src) => {
+    const re = compileRegexOrThrow(src, 'request.block.path_patterns.regex');
+    return re.toString();
+  });
+  return '[' + literals.join(', ') + ']';
+}
+
 function validateAuthGates(policy, options = {}) {
   const exitOnError = options.exitOnError !== false;
   const logger = options.logger || console;
+  const env = options.env || process.env;
+  const allowPlaceholderToken = options.allowPlaceholderToken === true;
   const routes = policy.routes || [];
   const errors = [];
 
@@ -57,6 +156,25 @@ function validateAuthGates(policy, options = {}) {
       if (!gate.secret_env) {
         errors.push(`Route "${name}": signed_url requires "secret_env"`);
       }
+    } else if (authType === 'static_token') {
+      const tokenEnv = gate.token_env || 'EDGE_ADMIN_TOKEN';
+      const resolved = env[tokenEnv];
+      if (!resolved && !allowPlaceholderToken) {
+        errors.push(
+          `Route "${name}": static_token requires env "${tokenEnv}" at build time. ` +
+          'CloudFront Functions cannot read env at runtime, so the token is baked into dist/edge/viewer-request.js. ' +
+          'Set the env var, or pass --allow-placeholder-token for non-production builds.',
+        );
+      }
+    } else if (authType === 'basic_auth') {
+      const credEnv = gate.credentials_env || 'BASIC_AUTH_CREDS';
+      const resolved = env[credEnv];
+      if (!resolved && !allowPlaceholderToken) {
+        errors.push(
+          `Route "${name}": basic_auth requires env "${credEnv}" at build time. ` +
+          'Set the env var, or pass --allow-placeholder-token for non-production builds.',
+        );
+      }
     }
   }
 
@@ -75,33 +193,11 @@ function validateAuthGates(policy, options = {}) {
   throw error;
 }
 
-function pathPatternsToMarks(pathPatterns) {
-  if (!Array.isArray(pathPatterns) || pathPatterns.length === 0) {
-    return DEFAULT_MARKS;
-  }
+const PLACEHOLDER_TOKEN = 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
 
-  const marks = new Set();
-  const knownMap = {
-    '(?i)\\.{2}/': ['/../', '..'],
-    '(?i)%2e%2e': ['%2e%2e', '%2E%2E'],
-  };
-
-  for (const p of pathPatterns) {
-    const s = (p || '').trim();
-    if (knownMap[s]) {
-      knownMap[s].forEach((m) => marks.add(m));
-    } else if (s) {
-      marks.add(s.replace(/\\(\.)/g, '$1').replace(/\?i\)/g, '').slice(0, 20));
-    }
-  }
-
-  if (marks.size === 0) {
-    return DEFAULT_MARKS;
-  }
-  return Array.from(marks);
-}
-
-function getAuthGates(policy) {
+function getAuthGates(policy, options = {}) {
+  const env = options.env || process.env;
+  const allowPlaceholderToken = options.allowPlaceholderToken === true;
   const routes = policy.routes || [];
   const gates = [];
 
@@ -122,13 +218,29 @@ function getAuthGates(policy) {
     if (authType === 'static_token') {
       const header = gate.header || 'x-edge-token';
       const tokenEnv = gate.token_env || 'EDGE_ADMIN_TOKEN';
-      const token = process.env[tokenEnv] || process.env.EDGE_ADMIN_TOKEN || 'BUILD_TIME_INJECTION';
+      const resolved = env[tokenEnv];
+      const token = resolved != null && resolved !== ''
+        ? resolved
+        : (allowPlaceholderToken ? PLACEHOLDER_TOKEN : null);
+      if (token === null) {
+        throw new Error(`static_token for route "${gateConfig.name}" requires env ${tokenEnv}`);
+      }
       gateConfig.tokenHeaderName = header;
+      gateConfig.tokenEnv = tokenEnv;
       gateConfig.token = token;
+      gateConfig.tokenIsPlaceholder = token === PLACEHOLDER_TOKEN;
     } else if (authType === 'basic_auth') {
       const credEnv = gate.credentials_env || 'BASIC_AUTH_CREDS';
-      const credentials = process.env[credEnv] || 'BUILD_TIME_INJECTION';
+      const resolved = env[credEnv];
+      const credentials = resolved != null && resolved !== ''
+        ? resolved
+        : (allowPlaceholderToken ? PLACEHOLDER_TOKEN : null);
+      if (credentials === null) {
+        throw new Error(`basic_auth for route "${gateConfig.name}" requires env ${credEnv}`);
+      }
+      gateConfig.credentialsEnv = credEnv;
       gateConfig.credentials = credentials;
+      gateConfig.credentialsIsPlaceholder = credentials === PLACEHOLDER_TOKEN;
     }
 
     gates.push(gateConfig);
@@ -137,25 +249,15 @@ function getAuthGates(policy) {
   return gates;
 }
 
-function getAdminGate(policy) {
-  const gates = getAuthGates(policy);
-  const staticTokenGate = gates.find((g) => g.type === 'static_token');
-
-  if (staticTokenGate) {
-    return {
-      enabled: true,
-      protectedPrefixes: staticTokenGate.protectedPrefixes,
-      tokenHeaderName: staticTokenGate.tokenHeaderName,
-      token: staticTokenGate.token,
-    };
-  }
-
-  return { enabled: false, protectedPrefixes: [], tokenHeaderName: 'x-edge-token', token: '' };
+function hasAllowPlaceholderFlag(argv) {
+  return Array.isArray(argv) && argv.includes('--allow-placeholder-token');
 }
 
 function build(policy, options = {}) {
   const rootDir = options.rootDir || repoRoot;
   const outDir = options.outDir || path.join(rootDir, 'dist');
+  const env = options.env || process.env;
+  const allowPlaceholderToken = options.allowPlaceholderToken === true;
 
   const defaults = policy.defaults || {};
   const request = policy.request || {};
@@ -163,13 +265,12 @@ function build(policy, options = {}) {
   const block = request.block || {};
   const normalize = request.normalize || {};
 
-  const adminGate = getAdminGate(policy);
-  const authGates = getAuthGates(policy);
+  const authGates = getAuthGates(policy, { env, allowPlaceholderToken });
 
   const dropQueryKeysArray = normalize.drop_query_keys || [
     'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid',
   ];
-  const blockPathMarks = pathPatternsToMarks(block.path_patterns);
+  const { contains: blockPathContains, regexSources: blockPathRegexSources } = parsePathPatterns(block.path_patterns);
   const pathNormalize = normalize.path || {};
   const requiredHeaders = block.header_missing || ['user-agent'];
   const corsConfig = (policy.response_headers || {}).cors || null;
@@ -183,11 +284,11 @@ function build(policy, options = {}) {
     `  maxUriLength: ${Number(limits.max_uri_length) || 2048},`,
     `  dropQueryKeys: new Set(${JSON.stringify(dropQueryKeysArray)}),`,
     `  uaDenyContains: ${JSON.stringify(block.ua_contains || ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests'])},`,
-    `  blockPathMarks: ${JSON.stringify(blockPathMarks)},`,
+    `  blockPathContains: ${JSON.stringify(blockPathContains)},`,
+    `  blockPathRegexes: ${regexesLiteralCode(blockPathRegexSources)},`,
     `  normalizePath: { collapseSlashes: ${!!pathNormalize.collapse_slashes}, removeDotSegments: ${!!pathNormalize.remove_dot_segments} },`,
     `  requiredHeaders: ${JSON.stringify(requiredHeaders)},`,
     `  cors: ${JSON.stringify(corsConfig)},`,
-    '  adminGate: ' + JSON.stringify(adminGate, null, 2).replace(/^/gm, '  ') + ',',
     `  authGates: ${JSON.stringify(authGates)},`,
     '};',
   ].join('\n');
@@ -293,6 +394,7 @@ function build(policy, options = {}) {
 
 function main(argv = process.argv.slice(2)) {
   const { policyPath, outDir } = parseArgs(argv, repoRoot);
+  const allowPlaceholderToken = hasAllowPlaceholderFlag(argv);
   let policy;
 
   try {
@@ -306,28 +408,37 @@ function main(argv = process.argv.slice(2)) {
     process.exit(1);
   }
 
-  validateAuthGates(policy);
+  validateAuthGates(policy, { allowPlaceholderToken });
 
   try {
-    const outputs = build(policy, { outDir, rootDir: repoRoot });
+    const outputs = build(policy, { outDir, rootDir: repoRoot, allowPlaceholderToken });
     outputs.forEach((outPath) => console.log('Build complete:', outPath));
+    // Advertise placeholder usage loudly so humans notice in CI output.
+    if (allowPlaceholderToken) {
+      console.error('[WARN] Built with --allow-placeholder-token. Generated artifacts are NOT safe for production.');
+    }
   } catch (e) {
     if (e.code === 'ENOENT') {
       console.error('Error: template not found:', e.path);
       process.exit(1);
     }
-    throw e;
+    console.error('Error:', e.message);
+    process.exit(1);
   }
 }
 
 module.exports = {
-  DEFAULT_MARKS,
+  DEFAULT_CONTAINS,
   parseArgs,
   loadPolicy,
   validateAuthGates,
-  pathPatternsToMarks,
+  parsePathPatterns,
+  extractRegex,
+  compileRegexOrThrow,
+  regexesLiteralCode,
   getAuthGates,
-  getAdminGate,
+  hasAllowPlaceholderFlag,
   build,
   main,
+  PLACEHOLDER_TOKEN,
 };

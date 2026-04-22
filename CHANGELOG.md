@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security / Breaking
+
+- `request.block.path_patterns` is now typed: pass either an array of literal substrings (legacy) or an object with `contains:` and `regex:` keys. Ambiguous regex-like array entries fail the build instead of being silently downgraded to substring matches. Affected the `strict` profile (migrated to the object form).
+- `static_token` and `basic_auth` gates now require their env vars at build time. The silent `BUILD_TIME_INJECTION` fallback is removed; missing env fails the build unless `--allow-placeholder-token` is passed, in which case the visible placeholder `INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN` is embedded and a warning is logged.
+- CloudFront Functions and Cloudflare Workers now compare `static_token` / `basic_auth` credentials with a constant-time equality helper to mitigate timing side-channels.
+- Removed the legacy `CFG.adminGate` double-evaluation path. Auth is driven exclusively by `CFG.authGates`.
+- `policy-lint` now validates policies against `policy/schema.json` via ajv, in addition to the existing cross-field auth-gate checks.
+
 ### Added
 
 - Threat model (`docs/threat-model.md`) and decision matrix (`docs/decision-matrix.md`) for Edge vs WAF.
@@ -17,7 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CONTRIBUTING.md, CODE_OF_CONDUCT.md, and `.github` issue/PR templates.
 - OSS readiness audit: `docs/OSS-READINESS-AUDIT.ja.md` (Japanese).
 - Lambda@Edge origin-request runtime support for JWT auth gates (RS256/HS256), Signed URL validation, and origin auth injection.
-- Compiler unit tests for `scripts/compile.js` core logic (`pathPatternsToMarks`, `getAuthGates`, `getAdminGate`, `validateAuthGates`).
+- Compiler unit tests for `scripts/compile.js` core logic (`parsePathPatterns`, `regexesLiteralCode`, `getAuthGates`, `validateAuthGates`).
 - Cloudflare Workers auth/runtime support for JWT (`HS256`/`RS256`), Signed URL, and origin custom-header auth generated from policy.
 - Drift check with committed golden generated artifacts (`tests/golden/base/*`) and CI integration (`npm run test:drift`).
 - Infra compiler support for JA3 fingerprint WAF block rules via `firewall.waf.ja3_fingerprints`.
