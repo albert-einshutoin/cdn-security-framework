@@ -217,9 +217,15 @@ export default {
 
     url.pathname = normalizePath(url.pathname);
 
-    const path = url.pathname.toLowerCase();
-    for (const m of CFG.blockPathMarks) {
-      if (path.includes(m)) {
+    const pathLower = url.pathname.toLowerCase();
+    for (const m of CFG.blockPathContains) {
+      if (pathLower.includes(m)) {
+        const r = shouldBlock(400, 'Bad Request');
+        if (r) return r;
+      }
+    }
+    for (const re of CFG.blockPathRegexes) {
+      if (re.test(url.pathname)) {
         const r = shouldBlock(400, 'Bad Request');
         if (r) return r;
       }
@@ -276,13 +282,26 @@ export default {
 
       if (gate.type === 'static_token') {
         const tok = request.headers.get(gate.tokenHeaderName) || '';
-        const expectedToken = env[gate.tokenEnv] || env.EDGE_ADMIN_TOKEN || '';
-        if (tok !== expectedToken) {
+        const expectedToken = env[gate.tokenEnv] || '';
+        if (!expectedToken) {
+          console.error('[auth] static_token env missing:', gate.tokenEnv);
+          const r = shouldBlock(503, 'Auth misconfigured');
+          if (r) return r;
+          continue;
+        }
+        if (!timingSafeEqual(tok, expectedToken)) {
           const r = shouldBlock(401, 'Unauthorized');
           if (r) return r;
         }
       } else if (gate.type === 'basic_auth') {
         const authHeader = request.headers.get('authorization') || '';
+        const expectedCreds = env[gate.credentialsEnv] || '';
+        if (!expectedCreds) {
+          console.error('[auth] basic_auth env missing:', gate.credentialsEnv);
+          const r = shouldBlock(503, 'Auth misconfigured');
+          if (r) return r;
+          continue;
+        }
         if (!authHeader.startsWith('Basic ')) {
           if (CFG.mode === 'monitor') {
             console.log('[monitor] 401 Missing Basic auth');
@@ -294,8 +313,7 @@ export default {
           }
         } else {
           const provided = authHeader.slice(6);
-          const expectedCreds = env[gate.credentialsEnv] || '';
-          if (provided !== expectedCreds) {
+          if (!timingSafeEqual(provided, expectedCreds)) {
             if (CFG.mode === 'monitor') {
               console.log('[monitor] 401 Invalid Basic auth credentials');
             } else {

@@ -11,11 +11,11 @@
  *
  * Why this design:
  * - CloudFront Functions are ultra-low latency and stateless
- * - Rate limiting and bot behavior analysis are not available here; those belong to WAF/Shield
- *
- * You can also:
- * - Split rules by path (/api, /static) using Behavior separation
- * - Move stricter JWT validation to Lambda@Edge (e.g. RS256)
+ * - CloudFront Functions cannot read env vars at runtime, so static_token
+ *   values are embedded at build time. Treat dist/edge/viewer-request.js as a
+ *   secret artifact when static tokens are configured.
+ * - Rate limiting and bot behavior analysis are not available here; those
+ *   belong to WAF/Shield
  */
 
 const CFG = {
@@ -26,23 +26,12 @@ const CFG = {
   maxUriLength: 1024,
   dropQueryKeys: new Set(["utm_source","utm_medium","utm_campaign","utm_term","utm_content","gclid","fbclid"]),
   uaDenyContains: ["sqlmap","nikto","acunetix","masscan","python-requests","zgrab","nmap","curl","wget","scanner"],
-  blockPathMarks: ["/../","..","%2e%2e","%2E%2E","(%2f../","(..%2f","(\\..\\\\"],
+  blockPathContains: ["/../","..","%2e%2e","%2E%2E"],
+  blockPathRegexes: [/%2f\.\.\//i, /\.\.%2f/i, /\\\.\.\\/i],
   normalizePath: { collapseSlashes: false, removeDotSegments: false },
   requiredHeaders: ["user-agent"],
   cors: null,
-  adminGate:   {
-    "enabled": true,
-    "protectedPrefixes": [
-      "/admin",
-      "/docs",
-      "/swagger",
-      "/api/admin",
-      "/internal"
-    ],
-    "tokenHeaderName": "x-edge-token",
-    "token": "BUILD_TIME_INJECTION"
-  },
-  authGates: [{"name":"admin","protectedPrefixes":["/admin","/docs","/swagger","/api/admin","/internal"],"type":"static_token","tokenHeaderName":"x-edge-token","token":"BUILD_TIME_INJECTION"}],
+  authGates: [{"name":"admin","protectedPrefixes":["/admin","/docs","/swagger","/api/admin","/internal"],"type":"static_token","tokenHeaderName":"x-edge-token","tokenEnv":"EDGE_ADMIN_TOKEN","token":"ci-build-token-not-for-deploy","tokenIsPlaceholder":false}],
 };
 
   function resp(statusCode, body) {
@@ -66,22 +55,34 @@ const CFG = {
     return checkResult;
   }
 
+  function constantTimeEqual(a, b) {
+    // Constant-time string equality for CFF (no SubtleCrypto available).
+    // Length comparison leaks length, which is acceptable for fixed-length tokens.
+    if (typeof a !== 'string' || typeof b !== 'string') return false;
+    if (a.length !== b.length) return false;
+    var diff = 0;
+    for (var i = 0; i < a.length; i++) {
+      diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    }
+    return diff === 0;
+  }
+
   function handleCorsPreflight(req) {
     // Handle CORS preflight (OPTIONS) requests
     if (req.method !== 'OPTIONS' || !CFG.cors) return null;
-    
+
     const origin = req.headers['origin']?.value || '';
     if (!origin) return null;
-    
+
     const allowedOrigins = CFG.cors.allow_origins || [];
     const isAllowed = allowedOrigins.includes('*') || allowedOrigins.includes(origin);
     if (!isAllowed) return null;
-    
+
     const headers = {
       'access-control-allow-origin': { value: origin },
       'cache-control': { value: 'no-store' },
     };
-    
+
     if (CFG.cors.allow_methods) {
       headers['access-control-allow-methods'] = { value: CFG.cors.allow_methods.join(', ') };
     }
@@ -94,7 +95,7 @@ const CFG = {
     if (CFG.cors.max_age) {
       headers['access-control-max-age'] = { value: String(CFG.cors.max_age) };
     }
-    
+
     return {
       statusCode: 204,
       statusDescription: 'No Content',
@@ -122,7 +123,7 @@ const CFG = {
       p = p.replace(/\/+/g, '/');
     }
     if (CFG.normalizePath.removeDotSegments) {
-      // RFC 3986 準拠の dot-segment 除去
+      // RFC 3986 dot-segment removal
       const segments = p.split('/');
       const out = [];
       for (const seg of segments) {
@@ -136,9 +137,13 @@ const CFG = {
   }
 
   function blockIfTraversal(req) {
-    const uri = (req.uri || "").toLowerCase();
-    for (const m of CFG.blockPathMarks) {
-      if (uri.includes(m)) return resp(400, "Bad Request");
+    const uri = req.uri || "";
+    const lower = uri.toLowerCase();
+    for (const m of CFG.blockPathContains) {
+      if (lower.includes(m)) return resp(400, "Bad Request");
+    }
+    for (const re of CFG.blockPathRegexes) {
+      if (re.test(uri)) return resp(400, "Bad Request");
     }
     return null;
   }
@@ -153,7 +158,6 @@ const CFG = {
 
   function blockIfBadUA(req) {
     const ua = req.headers["user-agent"]?.value || "";
-    // UA length check (if UA exists)
     if (ua && ua.length > 512) return resp(400, "User-Agent Too Long");
 
     const lower = (ua || "").toLowerCase();
@@ -171,7 +175,6 @@ const CFG = {
     const parts = qs ? qs.split("&") : [];
     if (parts.length > CFG.maxQueryParams) return resp(400, "Too many query params");
 
-    // drop keys
     const kept = [];
     for (const p of parts) {
       if (!p) continue;
@@ -200,16 +203,16 @@ const CFG = {
 
   function checkAuthGates(req) {
     const uri = req.uri || "/";
-    
+
     for (const gate of CFG.authGates) {
       const isProtected = gate.protectedPrefixes.some(
         (p) => uri === p || uri.startsWith(p + "/")
       );
       if (!isProtected) continue;
-      
+
       if (gate.type === 'static_token') {
         const token = req.headers[gate.tokenHeaderName]?.value || "";
-        if (token !== gate.token) {
+        if (!constantTimeEqual(token, gate.token)) {
           return resp(401, "Unauthorized");
         }
       } else if (gate.type === 'basic_auth') {
@@ -218,34 +221,15 @@ const CFG = {
           return basicAuthResp();
         }
         const provided = authHeader.slice(6);
-        if (provided !== gate.credentials) {
+        if (!constantTimeEqual(provided, gate.credentials)) {
           return basicAuthResp();
         }
       }
       // jwt and signed_url types are handled in Lambda@Edge
-      
+
       // Signal to origin that request passed edge auth
       req.headers["x-edge-authenticated"] = { value: "1" };
     }
-    return null;
-  }
-
-  // Legacy adminGate for backward compatibility
-  function adminGate(req) {
-    if (!CFG.adminGate.enabled) return null;
-
-    const uri = req.uri || "/";
-    const isProtected = CFG.adminGate.protectedPrefixes.some(
-      (p) => uri === p || uri.startsWith(p + "/")
-    );
-    if (!isProtected) return null;
-
-    const token = req.headers[CFG.adminGate.tokenHeaderName]?.value || "";
-    if (token !== CFG.adminGate.token) {
-      return resp(401, "Unauthorized");
-    }
-
-    req.headers["x-edge-authenticated"] = { value: "1" };
     return null;
   }
 
@@ -283,13 +267,9 @@ const CFG = {
     const q = shouldBlock(guardAndNormalizeQuery(req));
     if (q) return q;
 
-    // 8) Auth gates (includes Basic auth, static token, etc.)
+    // 8) Auth gates (static token, basic auth)
     const auth = shouldBlock(checkAuthGates(req));
     if (auth) return auth;
-
-    // 9) Legacy admin gate (backward compatibility)
-    const g = shouldBlock(adminGate(req));
-    if (g) return g;
 
     return req;
   }

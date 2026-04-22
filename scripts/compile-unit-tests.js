@@ -5,12 +5,13 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const {
-  DEFAULT_MARKS,
-  pathPatternsToMarks,
+  DEFAULT_CONTAINS,
+  parsePathPatterns,
+  regexesLiteralCode,
   getAuthGates,
-  getAdminGate,
   validateAuthGates,
   build,
+  PLACEHOLDER_TOKEN,
 } = require('./lib/compile-core');
 
 function test(name, fn) {
@@ -43,26 +44,73 @@ function withEnv(key, value, fn) {
   }
 }
 
-test('pathPatternsToMarks falls back to defaults', () => {
-  assert.deepStrictEqual(pathPatternsToMarks(undefined), DEFAULT_MARKS);
-  assert.deepStrictEqual(pathPatternsToMarks([]), DEFAULT_MARKS);
+test('parsePathPatterns returns defaults when unset or empty', () => {
+  assert.deepStrictEqual(parsePathPatterns(undefined), { contains: DEFAULT_CONTAINS.slice(), regexSources: [] });
+  assert.deepStrictEqual(parsePathPatterns(null), { contains: DEFAULT_CONTAINS.slice(), regexSources: [] });
+  assert.deepStrictEqual(parsePathPatterns([]), { contains: DEFAULT_CONTAINS.slice(), regexSources: [] });
 });
 
-test('pathPatternsToMarks expands known patterns', () => {
-  const marks = pathPatternsToMarks(['(?i)\\.{2}/', '(?i)%2e%2e']);
-  assert.ok(marks.includes('/../'));
-  assert.ok(marks.includes('..'));
-  assert.ok(marks.includes('%2e%2e'));
-  assert.ok(marks.includes('%2E%2E'));
+test('parsePathPatterns expands known legacy regex entries as contains', () => {
+  const { contains, regexSources } = parsePathPatterns(['(?i)\\.{2}/', '(?i)%2e%2e']);
+  assert.ok(contains.includes('/../'));
+  assert.ok(contains.includes('..'));
+  assert.ok(contains.includes('%2e%2e'));
+  assert.ok(contains.includes('%2E%2E'));
+  assert.deepStrictEqual(regexSources, []);
 });
 
-test('pathPatternsToMarks normalizes custom patterns', () => {
-  const marks = pathPatternsToMarks(['  \\.\\./very/long/custom/pattern/example  ']);
-  assert.strictEqual(marks.length, 1);
-  assert.strictEqual(marks[0], '../very/long/custom/');
+test('parsePathPatterns treats plain substrings as contains', () => {
+  const { contains, regexSources } = parsePathPatterns(['/admin/internal/', '/debug/']);
+  assert.deepStrictEqual(contains, ['/admin/internal/', '/debug/']);
+  assert.deepStrictEqual(regexSources, []);
 });
 
-test('getAuthGates resolves static token env and defaults', () => {
+test('parsePathPatterns rejects ambiguous regex-like legacy entries', () => {
+  assert.throws(
+    () => parsePathPatterns(['(?i)(foo|bar).*']),
+    /Ambiguous path_patterns entry/,
+  );
+});
+
+test('parsePathPatterns accepts object form with contains and regex', () => {
+  const { contains, regexSources } = parsePathPatterns({
+    contains: ['/internal/'],
+    regex: ['(?i)\\.git/', '\\.env$'],
+  });
+  assert.deepStrictEqual(contains, ['/internal/']);
+  assert.deepStrictEqual(regexSources, ['(?i)\\.git/', '\\.env$']);
+});
+
+test('parsePathPatterns rejects invalid regex at build time', () => {
+  assert.throws(
+    () => parsePathPatterns({ regex: ['[unterminated'] }),
+    /Invalid regex/,
+  );
+});
+
+test('parsePathPatterns rejects regex-like entries under object-form contains', () => {
+  assert.throws(
+    () => parsePathPatterns({ contains: ['(?i)%2f\\.\\./'], regex: [] }),
+    /Ambiguous path_patterns\.contains entry/,
+  );
+  assert.throws(
+    () => parsePathPatterns({ contains: ['\\.git/'] }),
+    /Ambiguous path_patterns\.contains entry/,
+  );
+  assert.throws(
+    () => parsePathPatterns({ contains: ['(foo|bar)'] }),
+    /Ambiguous path_patterns\.contains entry/,
+  );
+});
+
+test('regexesLiteralCode emits real RegExp literals with flags', () => {
+  assert.strictEqual(regexesLiteralCode([]), '[]');
+  const code = regexesLiteralCode(['(?i)\\.git/', '\\.env$']);
+  assert.ok(code.includes('/\\.git\\//i') || code.includes('/\\.git\\//gi') || code.includes('/\\.git\\//i'));
+  assert.ok(code.includes('/\\.env$/'));
+});
+
+test('getAuthGates resolves static_token env', () => {
   withEnv('CUSTOM_EDGE_TOKEN', 'secret-token', () => {
     const policy = {
       routes: [{
@@ -83,12 +131,47 @@ test('getAuthGates resolves static token env and defaults', () => {
       protectedPrefixes: ['/admin'],
       type: 'static_token',
       tokenHeaderName: 'x-custom-token',
+      tokenEnv: 'CUSTOM_EDGE_TOKEN',
       token: 'secret-token',
+      tokenIsPlaceholder: false,
     });
   });
 });
 
-test('getAuthGates resolves basic auth and default prefixes', () => {
+test('getAuthGates throws for missing static_token env without placeholder flag', () => {
+  withEnv('EDGE_ADMIN_TOKEN', undefined, () => {
+    const policy = {
+      routes: [{
+        name: 'admin',
+        match: { path_prefixes: ['/admin'] },
+        auth_gate: { type: 'static_token' },
+      }],
+    };
+
+    assert.throws(
+      () => getAuthGates(policy),
+      /static_token for route "admin" requires env/,
+    );
+  });
+});
+
+test('getAuthGates emits placeholder when allowPlaceholderToken set', () => {
+  withEnv('EDGE_ADMIN_TOKEN', undefined, () => {
+    const policy = {
+      routes: [{
+        name: 'admin',
+        match: { path_prefixes: ['/admin'] },
+        auth_gate: { type: 'static_token' },
+      }],
+    };
+
+    const gates = getAuthGates(policy, { allowPlaceholderToken: true });
+    assert.strictEqual(gates[0].token, PLACEHOLDER_TOKEN);
+    assert.strictEqual(gates[0].tokenIsPlaceholder, true);
+  });
+});
+
+test('getAuthGates resolves basic_auth env and default prefixes', () => {
   withEnv('BASIC_AUTH_CREDS', 'dXNlcjpwYXNz', () => {
     const policy = {
       routes: [{
@@ -103,46 +186,10 @@ test('getAuthGates resolves basic auth and default prefixes', () => {
       name: 'dashboard',
       protectedPrefixes: ['/admin', '/docs', '/swagger'],
       type: 'basic_auth',
+      credentialsEnv: 'BASIC_AUTH_CREDS',
       credentials: 'dXNlcjpwYXNz',
+      credentialsIsPlaceholder: false,
     });
-  });
-});
-
-test('getAdminGate returns enabled config when static token exists', () => {
-  withEnv('EDGE_ADMIN_TOKEN', 'edge-token', () => {
-    const policy = {
-      routes: [{
-        name: 'admin',
-        match: { path_prefixes: ['/admin'] },
-        auth_gate: { type: 'static_token' },
-      }],
-    };
-
-    const adminGate = getAdminGate(policy);
-    assert.deepStrictEqual(adminGate, {
-      enabled: true,
-      protectedPrefixes: ['/admin'],
-      tokenHeaderName: 'x-edge-token',
-      token: 'edge-token',
-    });
-  });
-});
-
-test('getAdminGate returns disabled config when no static token gate exists', () => {
-  const policy = {
-    routes: [{
-      name: 'api',
-      match: { path_prefixes: ['/api'] },
-      auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://example.com/.well-known/jwks.json' },
-    }],
-  };
-
-  const adminGate = getAdminGate(policy);
-  assert.deepStrictEqual(adminGate, {
-    enabled: false,
-    protectedPrefixes: [],
-    tokenHeaderName: 'x-edge-token',
-    token: '',
   });
 });
 
@@ -155,7 +202,7 @@ test('validateAuthGates accepts valid jwt and signed_url gates', () => {
     ],
   };
 
-  validateAuthGates(policy, { exitOnError: false });
+  validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true });
 });
 
 test('validateAuthGates reports missing required auth fields', () => {
@@ -168,13 +215,37 @@ test('validateAuthGates reports missing required auth fields', () => {
   };
 
   assert.throws(
-    () => validateAuthGates(policy, { exitOnError: false }),
+    () => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }),
     (err) => Array.isArray(err.validationErrors)
       && err.validationErrors.length === 3
       && err.validationErrors.some((e) => e.includes('broken-rs'))
       && err.validationErrors.some((e) => e.includes('broken-hs'))
       && err.validationErrors.some((e) => e.includes('broken-signed')),
   );
+});
+
+test('validateAuthGates reports missing static_token env at build time', () => {
+  withEnv('EDGE_ADMIN_TOKEN', undefined, () => {
+    const policy = {
+      routes: [{ name: 'admin', auth_gate: { type: 'static_token' } }],
+    };
+
+    assert.throws(
+      () => validateAuthGates(policy, { exitOnError: false }),
+      (err) => Array.isArray(err.validationErrors)
+        && err.validationErrors.some((e) => e.includes('EDGE_ADMIN_TOKEN')),
+    );
+  });
+});
+
+test('validateAuthGates accepts missing static_token env with placeholder flag', () => {
+  withEnv('EDGE_ADMIN_TOKEN', undefined, () => {
+    const policy = {
+      routes: [{ name: 'admin', auth_gate: { type: 'static_token' } }],
+    };
+
+    validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true });
+  });
 });
 
 test('build emits edge files with JWT, Signed URL, and origin auth config', () => {
@@ -225,9 +296,37 @@ test('build emits edge files with JWT, Signed URL, and origin auth config', () =
 
     assert.strictEqual(outputs.length, 3);
     const originCode = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.ok(originCode.includes('\"algorithm\":\"HS256\"'));
-    assert.ok(originCode.includes('\"type\":\"signed_url\"'));
-    assert.ok(/originAuth:\s*\{\"type\":\"custom_header\"/.test(originCode));
+    assert.ok(originCode.includes('"algorithm":"HS256"'));
+    assert.ok(originCode.includes('"type":"signed_url"'));
+    assert.ok(/originAuth:\s*\{"type":"custom_header"/.test(originCode));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build emits blockPathContains and blockPathRegexes as RegExp literals', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
+  try {
+    const policy = {
+      version: 1,
+      project: 'unit-build',
+      defaults: { mode: 'enforce' },
+      request: {
+        block: {
+          path_patterns: {
+            contains: ['/internal/'],
+            regex: ['(?i)\\.git/', '\\.env$'],
+          },
+        },
+      },
+      response_headers: {},
+    };
+
+    build(policy, { outDir: tmpDir, rootDir: path.join(__dirname, '..') });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    assert.ok(code.includes('blockPathContains: ["/internal/"]'));
+    assert.ok(/blockPathRegexes:\s*\[\/\\\.git\\\//.test(code));
+    assert.ok(/\/\\\.env\$\//.test(code));
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

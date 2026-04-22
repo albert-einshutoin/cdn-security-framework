@@ -49,9 +49,9 @@
 | ------------------------ | ---------------------- | ------------------- | -------------------- |
 | `request.allow_methods`  | `CFG.allowMethods`     | 同様                | `CFG.allowMethods`   |
 | `request.limits`         | `CFG.maxQueryLength` 等 | 同様                | 同様                 |
-| `request.block.*`        | `CFG.blockPathMarks`, `CFG.uaDenyContains` | 同様 | 同様                 |
+| `request.block.*`        | `CFG.blockPathContains`, `CFG.blockPathRegexes`, `CFG.uaDenyContains` | 同様 | 同様                 |
 | `request.normalize.drop_query_keys` | `CFG.dropQueryKeys` | 同様                | `CFG.dropQueryKeys`  |
-| `routes[].auth_gate`     | `CFG.adminGate`        | JWT / 署名付き URL の検証 | static token / Basic / JWT / 署名付き URL の検証 |
+| `routes[].auth_gate`     | `CFG.authGates` (static_token / Basic) | JWT / 署名付き URL の検証 | `CFG.authGates` (static token / Basic / JWT / 署名付き URL) |
 | `response_headers`       | `viewer-response.js`   | Origin response     | レスポンスヘッダー設定 |
 | `origin.auth`            | —                      | カスタムヘッダー注入 | upstream fetch にカスタムヘッダー注入 |
 

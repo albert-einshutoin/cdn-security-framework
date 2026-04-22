@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+### セキュリティ / 破壊的変更
+
+- `request.block.path_patterns` を型付け: 従来のリテラル文字列配列（レガシー互換）に加え、`contains:` / `regex:` を持つオブジェクト形式を正式サポート。配列中に正規表現らしきエントリが混入した場合は、substring マッチへの暗黙フォールバックをせずビルド失敗とする。`strict` プロファイルはオブジェクト形式に移行済み。
+- `static_token` / `basic_auth` ゲートはビルド時に対応する環境変数を必須化した。従来の `BUILD_TIME_INJECTION` サイレントフォールバックは廃止。環境変数未設定のままビルドすると失敗し、`--allow-placeholder-token` 指定時のみ `INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN` を明示的に埋め込み、警告を出力する。
+- CloudFront Functions / Cloudflare Workers の `static_token` および `basic_auth` 照合を constant-time 比較に置き換え、タイミング攻撃耐性を確保。
+- レガシーの `CFG.adminGate` 二重評価経路を削除。認証は `CFG.authGates` に一本化。
+- `policy-lint` は `policy/schema.json` を ajv で強制するようになり、従来のクロスフィールド検証（JWT / 署名付き URL など）と併用する。
+
 ### 追加
 
 - Edge と WAF の切り分けのための脅威モデル（`docs/threat-model.md`）と判断マトリクス（`docs/decision-matrix.md`）。
@@ -17,7 +25,7 @@
 - CONTRIBUTING.md, CODE_OF_CONDUCT.md、および `.github` の Issue/PR テンプレート。
 - OSS 公開準備の監査: `docs/OSS-READINESS-AUDIT.ja.md`（日本語）。
 - Lambda@Edge origin-request のランタイム対応を追加（JWT 認証: RS256/HS256、署名付き URL 検証、origin auth 注入）。
-- `scripts/compile.js` の主要ロジック（`pathPatternsToMarks`, `getAuthGates`, `getAdminGate`, `validateAuthGates`）に単体テストを追加。
+- `scripts/compile.js` の主要ロジック（`parsePathPatterns`, `regexesLiteralCode`, `getAuthGates`, `validateAuthGates`）に単体テストを追加。
 - Cloudflare Workers で JWT（`HS256`/`RS256`）・署名付き URL・origin custom header 認証をポリシー生成で利用可能にした。
 - コミット済み golden 生成物（`tests/golden/base/*`）とのドリフト検知（`npm run test:drift`）を追加し、CI に統合。
 - `firewall.waf.ja3_fingerprints` から JA3 フィンガープリント WAF ブロックルールを生成する機能を追加。
