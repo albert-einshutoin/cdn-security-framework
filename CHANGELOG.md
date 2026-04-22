@@ -16,6 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - CloudFront Functions and Cloudflare Workers now compare `static_token` / `basic_auth` credentials with a constant-time equality helper to mitigate timing side-channels.
 - Removed the legacy `CFG.adminGate` double-evaluation path. Auth is driven exclusively by `CFG.authGates`.
 - `policy-lint` now validates policies against `policy/schema.json` via ajv, in addition to the existing cross-field auth-gate checks.
+- **Edge-auth marker spoofing**: both the AWS CloudFront Functions handler and the Cloudflare Workers handler now strip any client-supplied `x-edge-authenticated` header at request entry / before forwarding to origin. Previously a client could set this header on an unauthenticated request and trick downstream code into trusting it.
+- **`path_patterns.contains` case-normalization**: `contains` entries are lowercased at compile time. The runtime lowercases the URI before calling `includes()`, so uppercase policy entries like `%2E%2E` used to silently never match. This is the same silent-downgrade class as the regex reject; now both forms are normalized.
+- **`auth_gate.header` case-normalization**: CloudFront Functions expose header keys in lowercase only, so the compiled `tokenHeaderName` is forced to lowercase. Policies that set `header: X-Edge-Token` previously caused every authenticated lookup to return `undefined` and reject valid requests.
 
 ### Added
 

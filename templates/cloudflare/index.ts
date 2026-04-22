@@ -349,6 +349,10 @@ export default {
     }
 
     const forwardHeaders = new Headers(request.headers);
+    // Strip any client-supplied edge-auth marker before forwarding to origin.
+    // Only the edge is allowed to assert this; trusting an incoming value
+    // would let a client spoof authenticated state.
+    forwardHeaders.delete('x-edge-authenticated');
     if (CFG.originAuth && CFG.originAuth.type === 'custom_header') {
       const secret = env[CFG.originAuth.secret_env || ''] || '';
       if (secret) {

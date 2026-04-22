@@ -222,7 +222,14 @@
   function handler(event) {
     const req = event.request;
 
-    // 0) CORS preflight handling
+    // 0a) Strip any client-supplied edge-auth marker. Only the edge itself is
+    //     allowed to set this; trusting an incoming value would let a client
+    //     spoof authenticated state to the origin.
+    if (req.headers) {
+      delete req.headers['x-edge-authenticated'];
+    }
+
+    // 0b) CORS preflight handling
     const preflight = handleCorsPreflight(req);
     if (preflight) return preflight;
 

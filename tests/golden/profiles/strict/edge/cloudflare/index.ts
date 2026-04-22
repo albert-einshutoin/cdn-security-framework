@@ -14,7 +14,7 @@ const CFG = {
   maxHeaderSize: 0,
   dropQueryKeys: new Set(["utm_source","utm_medium","utm_campaign","utm_term","utm_content","gclid","fbclid"]),
   uaDenyContains: ["sqlmap","nikto","acunetix","masscan","python-requests","zgrab","nmap","curl","wget","scanner"],
-  blockPathContains: ["/../","..","%2e%2e","%2E%2E"],
+  blockPathContains: ["/../","..","%2e%2e","%2e%2e"],
   blockPathRegexes: [/%2f\.\.\//i, /\.\.%2f/i, /\\\.\.\\/i],
   normalizePath: { collapseSlashes: false, removeDotSegments: false },
   requiredHeaders: ["user-agent"],
@@ -378,6 +378,10 @@ export default {
     }
 
     const forwardHeaders = new Headers(request.headers);
+    // Strip any client-supplied edge-auth marker before forwarding to origin.
+    // Only the edge is allowed to assert this; trusting an incoming value
+    // would let a client spoof authenticated state.
+    forwardHeaders.delete('x-edge-authenticated');
     if (CFG.originAuth && CFG.originAuth.type === 'custom_header') {
       const secret = env[CFG.originAuth.secret_env || ''] || '';
       if (secret) {

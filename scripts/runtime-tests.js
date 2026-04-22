@@ -106,6 +106,40 @@ for (const [name, event, expected] of cases) {
 
 console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases.length + ' passed ---');
 
+// x-edge-authenticated spoofing defense: the handler MUST strip any
+// client-supplied value before the origin sees it. If the caller does not
+// also supply a valid token the request must still fail auth.
+(function runEdgeAuthSpoofingTests() {
+  const spoofEvent = buildEvent('GET', '/admin', {
+    'user-agent': 'Mozilla',
+    'x-edge-authenticated': '1',
+  });
+  const result = handler(spoofEvent);
+  const blocked = result && result.statusCode === 401;
+  if (!blocked) {
+    console.error('FAIL: spoofed x-edge-authenticated on /admin should still 401, got', result && result.statusCode);
+    viewerFailed++;
+  } else {
+    console.log('OK: spoofed x-edge-authenticated on /admin still blocked (401)');
+  }
+
+  const passEvent = buildEvent('GET', '/not-protected', {
+    'user-agent': 'Mozilla',
+    'x-edge-authenticated': 'totally-fake',
+  });
+  const passResult = handler(passEvent);
+  const headerStripped = passResult
+    && passResult.uri !== undefined
+    && passResult.headers
+    && !passResult.headers['x-edge-authenticated'];
+  if (!headerStripped) {
+    console.error('FAIL: x-edge-authenticated leaked through on non-protected path', passResult && passResult.headers);
+    viewerFailed++;
+  } else {
+    console.log('OK: x-edge-authenticated stripped from incoming request');
+  }
+})();
+
 // =========================================================================
 // Section 1b: viewer-request.js monitor mode tests
 // =========================================================================

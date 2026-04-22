@@ -7,7 +7,7 @@ const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
 
 const LEGACY_KNOWN_MAP = {
   '(?i)\\.{2}/': { contains: ['/../', '..'] },
-  '(?i)%2e%2e': { contains: ['%2e%2e', '%2E%2E'] },
+  '(?i)%2e%2e': { contains: ['%2e%2e'] },
 };
 
 function parseArgs(argv, rootDir = repoRoot) {
@@ -85,7 +85,9 @@ function parsePathPatterns(pathPatterns) {
       if (!s) continue;
       const mapped = LEGACY_KNOWN_MAP[s];
       if (mapped) {
-        if (mapped.contains) mapped.contains.forEach((m) => contains.add(m));
+        // Runtime lowercases the URI before `includes()`, so contains entries
+        // must also be lowercase or they never match.
+        if (mapped.contains) mapped.contains.forEach((m) => contains.add(m.toLowerCase()));
         if (mapped.regex) mapped.regex.forEach((m) => regexSources.push(m));
         continue;
       }
@@ -96,7 +98,7 @@ function parsePathPatterns(pathPatterns) {
           'literal substrings under `path_patterns.contains: [...]`.',
         );
       }
-      contains.add(s);
+      contains.add(s.toLowerCase());
     }
     if (contains.size === 0 && regexSources.length === 0) {
       return { contains: DEFAULT_CONTAINS.slice(), regexSources: [] };
@@ -121,7 +123,9 @@ function parsePathPatterns(pathPatterns) {
           'or escape the metacharacters if you genuinely want a literal substring.',
         );
       }
-      contains.push(s);
+      // Runtime lowercases the URI before `includes()`, so contains entries
+      // must also be lowercase or they never match. Normalize at build time.
+      contains.push(s.toLowerCase());
     }
     // Validate each regex compiles successfully at build time.
     for (const src of regexSources) {
@@ -232,7 +236,11 @@ function getAuthGates(policy, options = {}) {
     };
 
     if (authType === 'static_token') {
-      const header = gate.header || 'x-edge-token';
+      // CloudFront Functions only expose header keys in lowercase form, so
+      // force the configured name to lowercase to avoid a silent mismatch
+      // (e.g. policy says `X-Edge-Token`, runtime lookup `req.headers[...]`
+      // returns undefined and every authenticated call fails).
+      const header = (gate.header || 'x-edge-token').toLowerCase();
       const tokenEnv = gate.token_env || 'EDGE_ADMIN_TOKEN';
       const resolved = env[tokenEnv];
       const token = resolved != null && resolved !== ''

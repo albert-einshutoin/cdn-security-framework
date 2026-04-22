@@ -50,12 +50,13 @@ test('parsePathPatterns returns defaults when unset or empty', () => {
   assert.deepStrictEqual(parsePathPatterns([]), { contains: DEFAULT_CONTAINS.slice(), regexSources: [] });
 });
 
-test('parsePathPatterns expands known legacy regex entries as contains', () => {
+test('parsePathPatterns expands known legacy regex entries as contains (lowercased)', () => {
   const { contains, regexSources } = parsePathPatterns(['(?i)\\.{2}/', '(?i)%2e%2e']);
   assert.ok(contains.includes('/../'));
   assert.ok(contains.includes('..'));
   assert.ok(contains.includes('%2e%2e'));
-  assert.ok(contains.includes('%2E%2E'));
+  // Runtime lowercases the URI before `includes()`, so we only need the lower form.
+  assert.ok(contains.every((c) => c === c.toLowerCase()));
   assert.deepStrictEqual(regexSources, []);
 });
 
@@ -103,6 +104,15 @@ test('parsePathPatterns rejects regex-like entries under object-form contains', 
   );
 });
 
+test('parsePathPatterns lowercases contains entries so uppercase policy survives runtime toLowerCase', () => {
+  const fromObject = parsePathPatterns({ contains: ['%2E%2E', '/INTERNAL/'], regex: [] });
+  assert.deepStrictEqual(fromObject.contains, ['%2e%2e', '/internal/']);
+
+  const fromLegacy = parsePathPatterns(['/INTERNAL/', '(?i)\\.{2}/']);
+  assert.ok(fromLegacy.contains.includes('/internal/'), 'plain upper entry normalized');
+  assert.ok(fromLegacy.contains.every((c) => c === c.toLowerCase()), 'mapped entries normalized');
+});
+
 test('regexesLiteralCode emits real RegExp literals with flags', () => {
   assert.strictEqual(regexesLiteralCode([]), '[]');
   const code = regexesLiteralCode(['(?i)\\.git/', '\\.env$']);
@@ -135,6 +145,24 @@ test('getAuthGates resolves static_token env', () => {
       token: 'secret-token',
       tokenIsPlaceholder: false,
     });
+  });
+});
+
+test('getAuthGates forces tokenHeaderName to lowercase for CFF compatibility', () => {
+  withEnv('CUSTOM_EDGE_TOKEN', 'secret-token', () => {
+    const policy = {
+      routes: [{
+        name: 'admin',
+        match: { path_prefixes: ['/admin'] },
+        auth_gate: {
+          type: 'static_token',
+          header: 'X-Edge-Token',
+          token_env: 'CUSTOM_EDGE_TOKEN',
+        },
+      }],
+    };
+    const gates = getAuthGates(policy);
+    assert.strictEqual(gates[0].tokenHeaderName, 'x-edge-token');
   });
 });
 
