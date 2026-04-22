@@ -172,6 +172,22 @@ function validateAuthGates(policy, options = {}) {
       if (alg === 'HS256' && !gate.secret_env) {
         errors.push(`Route "${name}": JWT+HS256 requires "secret_env"`);
       }
+      // The gate has a single verifier chosen by `gate.algorithm`. Accepting
+      // any other alg via `allowed_algorithms` would route those tokens
+      // through the wrong verifier and cause a silent auth outage, so fail
+      // at build time rather than ship a config that never authenticates.
+      if (Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0) {
+        const extras = gate.allowed_algorithms.filter(
+          (a) => typeof a === 'string' && a !== 'none' && a !== alg,
+        );
+        if (extras.length > 0) {
+          errors.push(
+            `Route "${name}": auth_gate.allowed_algorithms contains ${JSON.stringify(extras)} ` +
+              `but the gate only runs the "${alg}" verifier. Remove the extra algorithm(s) ` +
+              `or switch the gate's "algorithm" field.`,
+          );
+        }
+      }
     } else if (authType === 'signed_url') {
       if (!gate.secret_env) {
         errors.push(`Route "${name}": signed_url requires "secret_env"`);
@@ -378,11 +394,15 @@ function build(policy, options = {}) {
     const route = (policy.routes || []).find((r) => r.name === g.name);
     const gate = route?.auth_gate || {};
     const algorithm = gate.algorithm || 'RS256';
-    // Default: accept only the configured algorithm. Users can opt into
-    // multi-alg acceptance via `allowed_algorithms`. `none` is never accepted.
-    const allowedAlgorithms = Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0
-      ? gate.allowed_algorithms.filter((a) => typeof a === 'string' && a !== 'none')
-      : [algorithm];
+    // Runtime has only one verifier per gate (RS256 or HS256), so the emitted
+    // whitelist can only ever contain that algorithm. `allowed_algorithms` is
+    // honored for its intersection with `algorithm` (filtering `none`/unknown
+    // values out at runtime too), but cross-alg entries are rejected at build
+    // time in `validateAuthGates` to avoid a silent auth outage.
+    const userAllowed = Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0
+      ? gate.allowed_algorithms.filter((a) => typeof a === 'string' && a !== 'none' && a === algorithm)
+      : null;
+    const allowedAlgorithms = userAllowed && userAllowed.length > 0 ? userAllowed : [algorithm];
     const clockSkewSec = Number.isFinite(Number(gate.clock_skew_sec))
       ? Math.max(0, Math.min(600, Number(gate.clock_skew_sec)))
       : 30;

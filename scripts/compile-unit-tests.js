@@ -426,7 +426,7 @@ test('build emits JWT gate with allowed_algorithms defaulting to configured algo
   }
 });
 
-test('build honors explicit allowed_algorithms and clock_skew_sec, rejects alg=none', () => {
+test('build honors explicit allowed_algorithms matching the configured algorithm and filters alg=none', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
   try {
     const policy = {
@@ -441,16 +441,77 @@ test('build honors explicit allowed_algorithms and clock_skew_sec, rejects alg=n
           type: 'jwt',
           algorithm: 'RS256',
           jwks_url: 'https://example.com/jwks.json',
-          allowed_algorithms: ['RS256', 'none', 'ES256'],
+          allowed_algorithms: ['RS256', 'none'],
           clock_skew_sec: 120,
         },
       }],
     };
     build(policy, { outDir: tmpDir, rootDir: path.join(__dirname, '..') });
     const code = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.ok(code.includes('"allowed_algorithms":["RS256","ES256"]'),
-      'allowed_algorithms should filter out "none"; got:\n' + code.match(/"allowed_algorithms":[^,}]+/)?.[0]);
+    assert.ok(code.includes('"allowed_algorithms":["RS256"]'),
+      'allowed_algorithms should filter "none" and retain only the configured algorithm; got:\n' +
+        code.match(/"allowed_algorithms":[^,}]+/)?.[0]);
     assert.ok(code.includes('"clock_skew_sec":120'));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('validateAuthGates rejects allowed_algorithms that include an alg the verifier cannot validate', () => {
+  const policy = {
+    version: 1,
+    defaults: { mode: 'enforce' },
+    request: { allow_methods: ['GET'] },
+    response_headers: {},
+    routes: [{
+      name: 'api',
+      match: { path_prefixes: ['/api'] },
+      auth_gate: {
+        type: 'jwt',
+        algorithm: 'RS256',
+        jwks_url: 'https://example.com/jwks.json',
+        allowed_algorithms: ['HS256'],
+      },
+    }],
+  };
+  let caught;
+  try {
+    validateAuthGates(policy, { exitOnError: false });
+  } catch (e) {
+    caught = e;
+  }
+  assert.ok(caught, 'validateAuthGates should throw');
+  const detail = (caught.validationErrors || []).join('\n');
+  assert.match(detail,
+    /allowed_algorithms contains .*HS256.* but the gate only runs the "RS256" verifier/);
+});
+
+test('build filters cross-alg entries from emitted allowed_algorithms even when validateAuthGates is bypassed', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
+  try {
+    // Simulate a future call path that forgot to run validateAuthGates first.
+    // The emission must still never advertise an alg the verifier can't handle.
+    const policy = {
+      version: 1,
+      defaults: { mode: 'enforce' },
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      routes: [{
+        name: 'api',
+        match: { path_prefixes: ['/api'] },
+        auth_gate: {
+          type: 'jwt',
+          algorithm: 'RS256',
+          jwks_url: 'https://example.com/jwks.json',
+          allowed_algorithms: ['HS256', 'ES256', 'none'],
+        },
+      }],
+    };
+    build(policy, { outDir: tmpDir, rootDir: path.join(__dirname, '..') });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.ok(code.includes('"allowed_algorithms":["RS256"]'),
+      'emission must fall back to configured algorithm when no entry matches; got:\n' +
+        code.match(/"allowed_algorithms":[^,}]+/)?.[0]);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

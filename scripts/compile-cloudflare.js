@@ -77,9 +77,14 @@ function getWorkerAuthGates() {
     } else if (authType === 'jwt') {
       const algorithm = gate.algorithm || 'RS256';
       gateConfig.algorithm = algorithm;
-      gateConfig.allowed_algorithms = Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0
-        ? gate.allowed_algorithms.filter((a) => typeof a === 'string' && a !== 'none')
-        : [algorithm];
+      // Cloudflare Workers runtime uses a single verifier per gate selected by
+      // `algorithm`. `allowed_algorithms` can only restrict acceptance to that
+      // verifier — cross-alg entries would cause silent auth outage and are
+      // rejected at build time via `validateAuthGates`.
+      const userAllowed = Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0
+        ? gate.allowed_algorithms.filter((a) => typeof a === 'string' && a !== 'none' && a === algorithm)
+        : null;
+      gateConfig.allowed_algorithms = userAllowed && userAllowed.length > 0 ? userAllowed : [algorithm];
       gateConfig.clock_skew_sec = Number.isFinite(Number(gate.clock_skew_sec))
         ? Math.max(0, Math.min(600, Number(gate.clock_skew_sec)))
         : 30;

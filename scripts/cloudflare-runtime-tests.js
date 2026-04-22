@@ -114,16 +114,47 @@ routes:
       jwks_url: https://example.com/jwks.json
       issuer: test
       audience: test
-      allowed_algorithms: ["RS256", "none", "ES256"]
+      allowed_algorithms: ["RS256", "none"]
       clock_skew_sec: 60
 `);
 
   assert.ok(generated.includes('allowedHosts: ["api.example.com","*.edge.example.com"]'),
     'allowedHosts emitted lowercased;\n' + (generated.match(/allowedHosts: .*/)?.[0] || ''));
   assert.ok(/trustForwardedFor:\s*false/.test(generated));
-  assert.ok(generated.includes('"allowed_algorithms":["RS256","ES256"]'),
-    'allowed_algorithms emitted without "none"');
+  assert.ok(generated.includes('"allowed_algorithms":["RS256"]'),
+    'allowed_algorithms emitted without "none" or cross-alg entries');
   assert.ok(generated.includes('"clock_skew_sec":60'));
+});
+
+test('cloudflare compile fails when allowed_algorithms includes an alg the verifier cannot validate', () => {
+  let caught;
+  try {
+    compileCloudflare(`
+version: 1
+project: cf-hardening-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+routes:
+  - name: api-jwt
+    match:
+      path_prefixes: ["/api"]
+    auth_gate:
+      type: jwt
+      algorithm: RS256
+      jwks_url: https://example.com/jwks.json
+      issuer: test
+      audience: test
+      allowed_algorithms: ["HS256"]
+`);
+  } catch (e) {
+    caught = e;
+  }
+  assert.ok(caught, 'expected compile-cloudflare to fail validation');
+  const stderr = String(caught && caught.stderr ? caught.stderr : '');
+  assert.ok(/allowed_algorithms/.test(stderr) && /RS256/.test(stderr),
+    'stderr should mention allowed_algorithms and the verifier alg; got:\n' + stderr);
 });
 
 if (process.exitCode) {
