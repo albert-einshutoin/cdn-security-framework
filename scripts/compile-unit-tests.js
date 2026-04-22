@@ -88,6 +88,21 @@ test('parsePathPatterns rejects invalid regex at build time', () => {
   );
 });
 
+test('parsePathPatterns rejects regex-like entries under object-form contains', () => {
+  assert.throws(
+    () => parsePathPatterns({ contains: ['(?i)%2f\\.\\./'], regex: [] }),
+    /Ambiguous path_patterns\.contains entry/,
+  );
+  assert.throws(
+    () => parsePathPatterns({ contains: ['\\.git/'] }),
+    /Ambiguous path_patterns\.contains entry/,
+  );
+  assert.throws(
+    () => parsePathPatterns({ contains: ['(foo|bar)'] }),
+    /Ambiguous path_patterns\.contains entry/,
+  );
+});
+
 test('regexesLiteralCode emits real RegExp literals with flags', () => {
   assert.strictEqual(regexesLiteralCode([]), '[]');
   const code = regexesLiteralCode(['(?i)\\.git/', '\\.env$']);

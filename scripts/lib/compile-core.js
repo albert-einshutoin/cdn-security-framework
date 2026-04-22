@@ -105,8 +105,24 @@ function parsePathPatterns(pathPatterns) {
   }
 
   if (typeof pathPatterns === 'object') {
-    const contains = Array.isArray(pathPatterns.contains) ? pathPatterns.contains.filter(Boolean) : [];
+    const rawContains = Array.isArray(pathPatterns.contains) ? pathPatterns.contains.filter(Boolean) : [];
     const regexSources = Array.isArray(pathPatterns.regex) ? pathPatterns.regex.filter(Boolean) : [];
+    // Reject regex-looking entries under `contains` to prevent silent downgrade
+    // where a user accidentally puts a regex literal under `contains` and it
+    // becomes a substring match that never fires.
+    const contains = [];
+    for (const raw of rawContains) {
+      const s = typeof raw === 'string' ? raw.trim() : '';
+      if (!s) continue;
+      if (looksLikeRegex(s)) {
+        throw new Error(
+          `Ambiguous path_patterns.contains entry: "${s}". ` +
+          'This looks like a regex. Move it under `path_patterns.regex: [...]`, ' +
+          'or escape the metacharacters if you genuinely want a literal substring.',
+        );
+      }
+      contains.push(s);
+    }
     // Validate each regex compiles successfully at build time.
     for (const src of regexSources) {
       compileRegexOrThrow(src, 'request.block.path_patterns.regex');
