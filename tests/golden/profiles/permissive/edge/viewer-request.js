@@ -30,6 +30,8 @@ const CFG = {
   blockPathRegexes: [],
   normalizePath: { collapseSlashes: false, removeDotSegments: false },
   requiredHeaders: ["user-agent"],
+  allowedHosts: [],
+  trustForwardedFor: false,
   cors: null,
   authGates: [{"name":"admin","protectedPrefixes":["/admin","/docs","/swagger"],"type":"static_token","tokenHeaderName":"x-edge-token","tokenEnv":"EDGE_ADMIN_TOKEN","token":"ci-build-token-not-for-deploy","tokenIsPlaceholder":false}],
 };
@@ -108,6 +110,28 @@ const CFG = {
     if (req.method === 'OPTIONS' && CFG.cors) return null;
     if (!CFG.allowMethods.includes(req.method)) return resp(405, "Method Not Allowed");
     return null;
+  }
+
+  function blockIfHostNotAllowed(req) {
+    // Host header allowlist. When CFG.allowedHosts is empty, allowlist is
+    // disabled and any host is accepted. Entries are lowercase (normalized at
+    // build time). Supports `*.example.com` wildcard prefix.
+    if (!CFG.allowedHosts || CFG.allowedHosts.length === 0) return null;
+    var hostHeader = (req.headers['host'] && req.headers['host'].value) || '';
+    var host = hostHeader.toLowerCase();
+    // Strip optional :port suffix so :8443 etc. still match.
+    var colon = host.indexOf(':');
+    if (colon !== -1) host = host.slice(0, colon);
+    for (var i = 0; i < CFG.allowedHosts.length; i++) {
+      var allowed = CFG.allowedHosts[i];
+      if (allowed === host) return null;
+      if (allowed.length > 2 && allowed.charCodeAt(0) === 42 && allowed.charCodeAt(1) === 46) {
+        // '*.example.com' — match suffix including the dot
+        var suffix = allowed.slice(1);
+        if (host.length > suffix.length && host.slice(-suffix.length) === suffix) return null;
+      }
+    }
+    return resp(400, 'Host Not Allowed');
   }
 
   function blockIfUriTooLong(req) {
@@ -241,11 +265,22 @@ const CFG = {
     //     spoof authenticated state to the origin.
     if (req.headers) {
       delete req.headers['x-edge-authenticated'];
+      // Strip client-supplied X-Forwarded-For unless explicitly trusted.
+      // CloudFront populates cloudfront-viewer-address for the real client IP;
+      // leaving a spoofed XFF header in place can poison downstream rate
+      // limiting, IP-based allowlists, and audit logs.
+      if (!CFG.trustForwardedFor) {
+        delete req.headers['x-forwarded-for'];
+      }
     }
 
     // 0b) CORS preflight handling
     const preflight = handleCorsPreflight(req);
     if (preflight) return preflight;
+
+    // 0c) Host allowlist (early reject — cheaper than running every check)
+    const host = shouldBlock(blockIfHostNotAllowed(req));
+    if (host) return host;
 
     // 1) Method allowlist
     const m = shouldBlock(blockIfMethodNotAllowed(req));

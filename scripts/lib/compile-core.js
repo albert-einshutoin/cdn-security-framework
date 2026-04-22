@@ -298,6 +298,13 @@ function build(policy, options = {}) {
   const pathNormalize = normalize.path || {};
   const requiredHeaders = block.header_missing || ['user-agent'];
   const corsConfig = (policy.response_headers || {}).cors || null;
+  // Host allowlist: lowercase entries so we can compare against the lowercase
+  // Host header value without per-request normalization.
+  const rawAllowedHosts = Array.isArray(request.allowed_hosts) ? request.allowed_hosts : [];
+  const allowedHosts = rawAllowedHosts
+    .map((h) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
+    .filter(Boolean);
+  const trustForwardedFor = request.trust_forwarded_for === true;
 
   const cfgCode = [
     'const CFG = {',
@@ -312,6 +319,8 @@ function build(policy, options = {}) {
     `  blockPathRegexes: ${regexesLiteralCode(blockPathRegexSources)},`,
     `  normalizePath: { collapseSlashes: ${!!pathNormalize.collapse_slashes}, removeDotSegments: ${!!pathNormalize.remove_dot_segments} },`,
     `  requiredHeaders: ${JSON.stringify(requiredHeaders)},`,
+    `  allowedHosts: ${JSON.stringify(allowedHosts)},`,
+    `  trustForwardedFor: ${trustForwardedFor ? 'true' : 'false'},`,
     `  cors: ${JSON.stringify(corsConfig)},`,
     `  authGates: ${JSON.stringify(authGates)},`,
     '};',
@@ -368,11 +377,22 @@ function build(policy, options = {}) {
   const jwtGates = authGates.filter((g) => g.type === 'jwt').map((g) => {
     const route = (policy.routes || []).find((r) => r.name === g.name);
     const gate = route?.auth_gate || {};
+    const algorithm = gate.algorithm || 'RS256';
+    // Default: accept only the configured algorithm. Users can opt into
+    // multi-alg acceptance via `allowed_algorithms`. `none` is never accepted.
+    const allowedAlgorithms = Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0
+      ? gate.allowed_algorithms.filter((a) => typeof a === 'string' && a !== 'none')
+      : [algorithm];
+    const clockSkewSec = Number.isFinite(Number(gate.clock_skew_sec))
+      ? Math.max(0, Math.min(600, Number(gate.clock_skew_sec)))
+      : 30;
     return {
       name: g.name,
       protectedPrefixes: g.protectedPrefixes,
       type: 'jwt',
-      algorithm: gate.algorithm || 'RS256',
+      algorithm,
+      allowed_algorithms: allowedAlgorithms,
+      clock_skew_sec: clockSkewSec,
       jwks_url: gate.jwks_url || '',
       issuer: gate.issuer || '',
       audience: gate.audience || '',
@@ -401,6 +421,7 @@ function build(policy, options = {}) {
     `  project: ${JSON.stringify(policy.project || 'cdn-security')},`,
     `  mode: ${JSON.stringify(defaults.mode || 'enforce')},`,
     `  maxHeaderSize: ${Number(limits.max_header_size) || 0},`,
+    `  trustForwardedFor: ${trustForwardedFor ? 'true' : 'false'},`,
     `  jwtGates: ${JSON.stringify(jwtGates)},`,
     `  signedUrlGates: ${JSON.stringify(signedUrlGates)},`,
     `  originAuth: ${JSON.stringify(originAuth)},`,

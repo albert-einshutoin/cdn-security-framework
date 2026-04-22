@@ -94,8 +94,20 @@ function base64UrlDecode(str) {
   return Buffer.from(str, 'base64');
 }
 
+// Guard against alg-confusion attacks. The configured gate decides which
+// header.alg values are acceptable; attackers who flip RS256 → HS256 (or set
+// alg=none) must be rejected before any signature math runs.
+function isAlgAllowed(headerAlg, gate, expected) {
+  if (!headerAlg || typeof headerAlg !== 'string') return false;
+  if (headerAlg.toLowerCase() === 'none') return false;
+  const allowed = Array.isArray(gate && gate.allowed_algorithms) && gate.allowed_algorithms.length > 0
+    ? gate.allowed_algorithms
+    : [expected];
+  return allowed.indexOf(headerAlg) !== -1;
+}
+
 // Verify JWT signature (RS256)
-async function verifyJwtRS256(token, jwksUrl, issuer, audience) {
+async function verifyJwtRS256(token, gate) {
   const parts = token.split('.');
   if (parts.length !== 3) return { valid: false, error: 'Invalid token format' };
 
@@ -105,15 +117,30 @@ async function verifyJwtRS256(token, jwksUrl, issuer, audience) {
     const header = JSON.parse(base64UrlDecode(headerB64).toString());
     const payload = JSON.parse(base64UrlDecode(payloadB64).toString());
 
-    // Check expiration
-    if (payload.exp && Date.now() >= payload.exp * 1000) {
+    // alg whitelist — reject alg=none and unexpected algorithms (e.g., HS256
+    // substituted for RS256 to bypass signature verification with the public
+    // JWKS key treated as an HMAC secret).
+    if (!isAlgAllowed(header.alg, gate, 'RS256')) {
+      return { valid: false, error: 'Unexpected JWT algorithm' };
+    }
+
+    const skewMs = (gate && Number.isFinite(Number(gate.clock_skew_sec))
+      ? Number(gate.clock_skew_sec) : 30) * 1000;
+    const now = Date.now();
+
+    // Check expiration (with skew tolerance)
+    if (payload.exp && now >= payload.exp * 1000 + skewMs) {
       return { valid: false, error: 'Token expired' };
     }
 
-    // Check not-before
-    if (payload.nbf && Date.now() < payload.nbf * 1000) {
+    // Check not-before (with skew tolerance)
+    if (payload.nbf && now + skewMs < payload.nbf * 1000) {
       return { valid: false, error: 'Token not yet valid' };
     }
+
+    const issuer = gate && gate.issuer;
+    const audience = gate && gate.audience;
+    const jwksUrl = gate && gate.jwks_url;
 
     // Check issuer
     if (issuer && payload.iss !== issuer) {
@@ -164,24 +191,37 @@ async function verifyJwtRS256(token, jwksUrl, issuer, audience) {
 }
 
 // Verify JWT with HS256 (symmetric key)
-function verifyJwtHS256(token, secret, issuer, audience) {
+function verifyJwtHS256(token, secret, gate) {
   const parts = token.split('.');
   if (parts.length !== 3) return { valid: false, error: 'Invalid token format' };
 
   const [headerB64, payloadB64, signatureB64] = parts;
 
   try {
+    const header = JSON.parse(base64UrlDecode(headerB64).toString());
     const payload = JSON.parse(base64UrlDecode(payloadB64).toString());
 
-    // Check expiration
-    if (payload.exp && Date.now() >= payload.exp * 1000) {
+    // alg whitelist — reject alg=none and any alg not in the gate's allowlist.
+    if (!isAlgAllowed(header.alg, gate, 'HS256')) {
+      return { valid: false, error: 'Unexpected JWT algorithm' };
+    }
+
+    const skewMs = (gate && Number.isFinite(Number(gate.clock_skew_sec))
+      ? Number(gate.clock_skew_sec) : 30) * 1000;
+    const now = Date.now();
+
+    // Check expiration (with skew tolerance)
+    if (payload.exp && now >= payload.exp * 1000 + skewMs) {
       return { valid: false, error: 'Token expired' };
     }
 
-    // Check not-before
-    if (payload.nbf && Date.now() < payload.nbf * 1000) {
+    // Check not-before (with skew tolerance)
+    if (payload.nbf && now + skewMs < payload.nbf * 1000) {
       return { valid: false, error: 'Token not yet valid' };
     }
+
+    const issuer = gate && gate.issuer;
+    const audience = gate && gate.audience;
 
     // Check issuer
     if (issuer && payload.iss !== issuer) {
@@ -265,10 +305,10 @@ async function checkJwtGates(request) {
     
     let result;
     if (gate.algorithm === 'RS256' && gate.jwks_url) {
-      result = await verifyJwtRS256(jwt, gate.jwks_url, gate.issuer, gate.audience);
+      result = await verifyJwtRS256(jwt, gate);
     } else if (gate.algorithm === 'HS256' && gate.secret_env) {
       const secret = process.env[gate.secret_env] || '';
-      result = verifyJwtHS256(jwt, secret, gate.issuer, gate.audience);
+      result = verifyJwtHS256(jwt, secret, gate);
     } else {
       return resp(500, 'JWT gate misconfigured');
     }
@@ -342,6 +382,13 @@ exports.handler = async (event) => {
   try {
     const cf = event.Records[0].cf;
     const req = cf.request;
+
+    // Defense-in-depth: viewer-request already strips X-Forwarded-For when
+    // trust_forwarded_for is false, but origin-request is the last hop before
+    // origin and may be invoked without a preceding CFF in some setups.
+    if (req && req.headers && !CFG.trustForwardedFor) {
+      delete req.headers['x-forwarded-for'];
+    }
 
     // Header size check (Lambda@Edge can access all headers)
     const headerBlock = shouldBlock(checkHeaderSize(req), req);

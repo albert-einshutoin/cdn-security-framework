@@ -18,6 +18,8 @@ const CFG = {
   blockPathRegexes: [/%2f\.\.\//i, /\.\.%2f/i, /\\\.\.\\/i],
   normalizePath: { collapseSlashes: false, removeDotSegments: false },
   requiredHeaders: ["user-agent"],
+  allowedHosts: [],
+  trustForwardedFor: false,
   cors: null,
   authGates: [{"name":"admin","protectedPrefixes":["/admin","/docs","/swagger","/api/admin","/internal"],"type":"static_token","tokenHeaderName":"x-edge-token","tokenEnv":"EDGE_ADMIN_TOKEN"}],
   originAuth: null,
@@ -125,6 +127,15 @@ async function fetchJwks(jwksUrl: string, ttlSec: number): Promise<Array<Record<
   return keys;
 }
 
+function isJwtAlgAllowed(headerAlg: unknown, gate: any, expected: string): boolean {
+  if (typeof headerAlg !== 'string' || headerAlg.length === 0) return false;
+  if (headerAlg.toLowerCase() === 'none') return false;
+  const allowed: string[] = Array.isArray(gate?.allowed_algorithms) && gate.allowed_algorithms.length > 0
+    ? gate.allowed_algorithms
+    : [expected];
+  return allowed.includes(headerAlg);
+}
+
 async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ valid: boolean; error?: string; payload?: any }> {
   const parts = token.split('.');
   if (parts.length !== 3) return { valid: false, error: 'Invalid token format' };
@@ -140,9 +151,17 @@ async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ va
     return { valid: false, error: 'Malformed JWT' };
   }
 
+  // alg whitelist — reject alg=none and any algorithm not explicitly accepted
+  // by this gate. This blocks RS256↔HS256 confusion and the classic alg=none
+  // bypass.
+  if (!isJwtAlgAllowed(header?.alg, gate, gate.algorithm || 'RS256')) {
+    return { valid: false, error: 'Unexpected JWT algorithm' };
+  }
+
+  const skewSec: number = Number.isFinite(Number(gate?.clock_skew_sec)) ? Number(gate.clock_skew_sec) : 30;
   const nowSec = Math.floor(Date.now() / 1000);
-  if (payload.exp && nowSec >= payload.exp) return { valid: false, error: 'Token expired' };
-  if (payload.nbf && nowSec < payload.nbf) return { valid: false, error: 'Token not yet valid' };
+  if (payload.exp && nowSec >= payload.exp + skewSec) return { valid: false, error: 'Token expired' };
+  if (payload.nbf && nowSec + skewSec < payload.nbf) return { valid: false, error: 'Token not yet valid' };
   if (gate.issuer && payload.iss !== gate.issuer) return { valid: false, error: 'Invalid issuer' };
   if (gate.audience) {
     const aud = Array.isArray(payload.aud) ? payload.aud : [payload.aud];
@@ -202,6 +221,22 @@ async function verifySignedUrl(gate: any, url: URL, env: WorkerEnv): Promise<{ v
   return { valid: true };
 }
 
+function isHostAllowed(hostHeader: string): boolean {
+  const allowedHosts: string[] = Array.isArray(CFG.allowedHosts) ? CFG.allowedHosts : [];
+  if (allowedHosts.length === 0) return true;
+  let host = (hostHeader || '').toLowerCase();
+  const colon = host.indexOf(':');
+  if (colon !== -1) host = host.slice(0, colon);
+  for (const allowed of allowedHosts) {
+    if (allowed === host) return true;
+    if (allowed.length > 2 && allowed.startsWith('*.')) {
+      const suffix = allowed.slice(1);
+      if (host.length > suffix.length && host.endsWith(suffix)) return true;
+    }
+  }
+  return false;
+}
+
 function handleCorsPreflight(request: Request): Response | null {
   if (request.method !== 'OPTIONS' || !CFG.cors) return null;
 
@@ -231,6 +266,13 @@ export default {
 
     const preflight = handleCorsPreflight(request);
     if (preflight) return preflight;
+
+    // Host allowlist — reject requests whose Host does not match before running
+    // any other checks.
+    if (!isHostAllowed(request.headers.get('host') || url.hostname)) {
+      const r = shouldBlock(400, 'Host Not Allowed');
+      if (r) return r;
+    }
 
     if (request.method === 'OPTIONS' && CFG.cors) {
       // let through non-matching origin preflight
@@ -382,6 +424,12 @@ export default {
     // Only the edge is allowed to assert this; trusting an incoming value
     // would let a client spoof authenticated state.
     forwardHeaders.delete('x-edge-authenticated');
+    // Strip client-supplied X-Forwarded-For unless explicitly trusted. The
+    // real client IP is already available via cf-connecting-ip, and a spoofed
+    // XFF value can poison downstream rate limiters, IP allowlists, and logs.
+    if (!CFG.trustForwardedFor) {
+      forwardHeaders.delete('x-forwarded-for');
+    }
     if (CFG.originAuth && CFG.originAuth.type === 'custom_header') {
       const secret = env[CFG.originAuth.secret_env || ''] || '';
       if (secret) {

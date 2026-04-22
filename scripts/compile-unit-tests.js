@@ -360,6 +360,129 @@ test('build emits blockPathContains and blockPathRegexes as RegExp literals', ()
   }
 });
 
+test('build emits allowedHosts (lowercased) and trustForwardedFor in viewer CFG', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
+  try {
+    const policy = {
+      version: 1,
+      defaults: { mode: 'enforce' },
+      request: {
+        allow_methods: ['GET'],
+        allowed_hosts: ['API.example.com', '*.cdn.example.com', '  '],
+        trust_forwarded_for: true,
+      },
+      response_headers: {},
+    };
+
+    build(policy, { outDir: tmpDir, rootDir: path.join(__dirname, '..') });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    assert.ok(code.includes('allowedHosts: ["api.example.com","*.cdn.example.com"]'),
+      'expected lowercased, trimmed, filtered allowedHosts; got:\n' + code.match(/allowedHosts: .*/)?.[0]);
+    assert.ok(/trustForwardedFor:\s*true/.test(code));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build defaults trustForwardedFor to false and emits empty allowedHosts when unset', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
+  try {
+    const policy = {
+      version: 1,
+      defaults: { mode: 'enforce' },
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+    };
+    build(policy, { outDir: tmpDir, rootDir: path.join(__dirname, '..') });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    assert.ok(code.includes('allowedHosts: []'));
+    assert.ok(/trustForwardedFor:\s*false/.test(code));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build emits JWT gate with allowed_algorithms defaulting to configured algorithm and clock_skew_sec=30', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
+  try {
+    const policy = {
+      version: 1,
+      defaults: { mode: 'enforce' },
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      routes: [{
+        name: 'api',
+        match: { path_prefixes: ['/api'] },
+        auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://example.com/jwks.json' },
+      }],
+    };
+
+    build(policy, { outDir: tmpDir, rootDir: path.join(__dirname, '..') });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.ok(code.includes('"allowed_algorithms":["RS256"]'), 'default allowed_algorithms missing');
+    assert.ok(code.includes('"clock_skew_sec":30'), 'default clock_skew_sec missing');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build honors explicit allowed_algorithms and clock_skew_sec, rejects alg=none', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
+  try {
+    const policy = {
+      version: 1,
+      defaults: { mode: 'enforce' },
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      routes: [{
+        name: 'api',
+        match: { path_prefixes: ['/api'] },
+        auth_gate: {
+          type: 'jwt',
+          algorithm: 'RS256',
+          jwks_url: 'https://example.com/jwks.json',
+          allowed_algorithms: ['RS256', 'none', 'ES256'],
+          clock_skew_sec: 120,
+        },
+      }],
+    };
+    build(policy, { outDir: tmpDir, rootDir: path.join(__dirname, '..') });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.ok(code.includes('"allowed_algorithms":["RS256","ES256"]'),
+      'allowed_algorithms should filter out "none"; got:\n' + code.match(/"allowed_algorithms":[^,}]+/)?.[0]);
+    assert.ok(code.includes('"clock_skew_sec":120'));
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build clamps clock_skew_sec to 0..600', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
+  try {
+    const policy = {
+      version: 1,
+      defaults: { mode: 'enforce' },
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      routes: [{
+        name: 'api',
+        match: { path_prefixes: ['/api'] },
+        auth_gate: {
+          type: 'jwt',
+          algorithm: 'HS256',
+          secret_env: 'JWT_SECRET',
+          clock_skew_sec: 99999,
+        },
+      }],
+    };
+    build(policy, { outDir: tmpDir, rootDir: path.join(__dirname, '..') });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.ok(code.includes('"clock_skew_sec":600'), 'clock_skew_sec should clamp to 600');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

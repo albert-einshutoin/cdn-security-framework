@@ -75,7 +75,14 @@ function getWorkerAuthGates() {
     } else if (authType === 'basic_auth') {
       gateConfig.credentialsEnv = gate.credentials_env || 'BASIC_AUTH_CREDS';
     } else if (authType === 'jwt') {
-      gateConfig.algorithm = gate.algorithm || 'RS256';
+      const algorithm = gate.algorithm || 'RS256';
+      gateConfig.algorithm = algorithm;
+      gateConfig.allowed_algorithms = Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0
+        ? gate.allowed_algorithms.filter((a) => typeof a === 'string' && a !== 'none')
+        : [algorithm];
+      gateConfig.clock_skew_sec = Number.isFinite(Number(gate.clock_skew_sec))
+        ? Math.max(0, Math.min(600, Number(gate.clock_skew_sec)))
+        : 30;
       gateConfig.jwks_url = gate.jwks_url || '';
       gateConfig.issuer = gate.issuer || '';
       gateConfig.audience = gate.audience || '';
@@ -104,6 +111,11 @@ const requiredHeaders = block.header_missing || ['user-agent'];
 const resHeaders = policy.response_headers || {};
 const corsConfig = resHeaders.cors || null;
 const originAuth = (policy.origin || {}).auth || null;
+const rawAllowedHosts = Array.isArray(request.allowed_hosts) ? request.allowed_hosts : [];
+const allowedHosts = rawAllowedHosts
+  .map((h) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
+  .filter(Boolean);
+const trustForwardedFor = request.trust_forwarded_for === true;
 
 const cfgCode = [
   'const CFG = {',
@@ -119,6 +131,8 @@ const cfgCode = [
   `  blockPathRegexes: ${regexesLiteralCode(blockPathRegexSources)},`,
   `  normalizePath: { collapseSlashes: ${!!pathNormalize.collapse_slashes}, removeDotSegments: ${!!pathNormalize.remove_dot_segments} },`,
   `  requiredHeaders: ${JSON.stringify(requiredHeaders)},`,
+  `  allowedHosts: ${JSON.stringify(allowedHosts)},`,
+  `  trustForwardedFor: ${trustForwardedFor ? 'true' : 'false'},`,
   `  cors: ${JSON.stringify(corsConfig)},`,
   `  authGates: ${JSON.stringify(authGates)},`,
   `  originAuth: ${JSON.stringify(originAuth)},`,
