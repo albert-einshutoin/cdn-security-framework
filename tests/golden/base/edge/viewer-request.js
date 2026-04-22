@@ -26,7 +26,7 @@ const CFG = {
   maxUriLength: 2048,
   dropQueryKeys: new Set(["utm_source","utm_medium","utm_campaign","utm_term","utm_content","gclid","fbclid"]),
   uaDenyContains: ["sqlmap","nikto","acunetix","masscan","python-requests"],
-  blockPathContains: ["/../","..","%2e%2e","%2E%2E"],
+  blockPathContains: ["/../","..","%2e%2e"],
   blockPathRegexes: [],
   normalizePath: { collapseSlashes: false, removeDotSegments: false },
   requiredHeaders: ["user-agent"],
@@ -236,7 +236,14 @@ const CFG = {
   function handler(event) {
     const req = event.request;
 
-    // 0) CORS preflight handling
+    // 0a) Strip any client-supplied edge-auth marker. Only the edge itself is
+    //     allowed to set this; trusting an incoming value would let a client
+    //     spoof authenticated state to the origin.
+    if (req.headers) {
+      delete req.headers['x-edge-authenticated'];
+    }
+
+    // 0b) CORS preflight handling
     const preflight = handleCorsPreflight(req);
     if (preflight) return preflight;
 
