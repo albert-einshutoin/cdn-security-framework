@@ -19,6 +19,15 @@
       "required": ["allow_methods"],
       "properties": {
         "allow_methods": { "type": "array", "items": { "type": "string" } },
+        "allowed_hosts": {
+          "description": "Optional Host header allowlist. When set, requests whose Host does not match any entry are rejected at the edge. Entries support exact match (api.example.com) and wildcard prefix (*.example.com).",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "trust_forwarded_for": {
+          "description": "If false (default), any client-supplied X-Forwarded-For header is stripped before the request reaches origin auth / logging. Enable only when the edge sits behind a trusted upstream proxy that you intentionally want to honor.",
+          "type": "boolean"
+        },
         "limits": {
           "type": "object",
           "properties": {
@@ -84,6 +93,17 @@
               "token_env": { "type": "string" },
               "credentials_env": { "type": "string" },
               "algorithm": { "enum": ["HS256", "RS256", "ES256", "HMAC-SHA256"] },
+              "allowed_algorithms": {
+                "description": "Optional whitelist of JWT header `alg` values accepted at verify time. If omitted, only the gate's configured `algorithm` is accepted. `none` is always rejected.",
+                "type": "array",
+                "items": { "enum": ["HS256", "RS256", "ES256"] }
+              },
+              "clock_skew_sec": {
+                "description": "Tolerance (in seconds) applied to JWT exp/nbf checks. Default 30.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 600
+              },
               "jwks_url": { "type": "string" },
               "issuer": { "type": "string" },
               "audience": { "type": "string" },

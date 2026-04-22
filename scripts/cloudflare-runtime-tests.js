@@ -85,6 +85,76 @@ test('cloudflare template contains auth enforcement logic', () => {
   assert.ok(template.includes('if (gate.type === \'signed_url\')'));
   assert.ok(template.includes('CFG.originAuth'));
   assert.ok(template.includes('forwardHeaders.set(headerName, secret)'));
+  // Auth/crypto hardening fixtures
+  assert.ok(template.includes('isJwtAlgAllowed'), 'JWT alg whitelist helper missing');
+  assert.ok(template.includes('isHostAllowed'), 'Host allowlist helper missing');
+  assert.ok(template.includes("forwardHeaders.delete('x-forwarded-for')"),
+    'XFF strip missing from forward path');
+  assert.ok(/payload\.exp\s*&&\s*nowSec\s*>=\s*payload\.exp\s*\+\s*skewSec/.test(template),
+    'JWT clock skew tolerance missing');
+});
+
+test('cloudflare compile emits allowedHosts, trustForwardedFor, and JWT alg/skew fields', () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-hardening-test
+request:
+  allow_methods: ["GET"]
+  allowed_hosts: ["API.example.com", "*.edge.example.com"]
+  trust_forwarded_for: false
+response_headers:
+  hsts: "max-age=31536000"
+routes:
+  - name: api-jwt
+    match:
+      path_prefixes: ["/api"]
+    auth_gate:
+      type: jwt
+      algorithm: RS256
+      jwks_url: https://example.com/jwks.json
+      issuer: test
+      audience: test
+      allowed_algorithms: ["RS256", "none"]
+      clock_skew_sec: 60
+`);
+
+  assert.ok(generated.includes('allowedHosts: ["api.example.com","*.edge.example.com"]'),
+    'allowedHosts emitted lowercased;\n' + (generated.match(/allowedHosts: .*/)?.[0] || ''));
+  assert.ok(/trustForwardedFor:\s*false/.test(generated));
+  assert.ok(generated.includes('"allowed_algorithms":["RS256"]'),
+    'allowed_algorithms emitted without "none" or cross-alg entries');
+  assert.ok(generated.includes('"clock_skew_sec":60'));
+});
+
+test('cloudflare compile fails when allowed_algorithms includes an alg the verifier cannot validate', () => {
+  let caught;
+  try {
+    compileCloudflare(`
+version: 1
+project: cf-hardening-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+routes:
+  - name: api-jwt
+    match:
+      path_prefixes: ["/api"]
+    auth_gate:
+      type: jwt
+      algorithm: RS256
+      jwks_url: https://example.com/jwks.json
+      issuer: test
+      audience: test
+      allowed_algorithms: ["HS256"]
+`);
+  } catch (e) {
+    caught = e;
+  }
+  assert.ok(caught, 'expected compile-cloudflare to fail validation');
+  const stderr = String(caught && caught.stderr ? caught.stderr : '');
+  assert.ok(/allowed_algorithms/.test(stderr) && /RS256/.test(stderr),
+    'stderr should mention allowed_algorithms and the verifier alg; got:\n' + stderr);
 });
 
 if (process.exitCode) {

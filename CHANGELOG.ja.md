@@ -19,6 +19,10 @@
 - **edge-auth マーカーのスプーフィング対策**: AWS CloudFront Functions ハンドラおよび Cloudflare Workers ハンドラの双方で、クライアントから送られてきた `x-edge-authenticated` ヘッダをリクエスト入口 / オリジン転送前に必ず剥ぎ取るようにした。従来はクライアントが未認証リクエストにこのヘッダを付与するだけで、下流が認証済みと誤認する余地があった。
 - **`path_patterns.contains` の大文字小文字正規化**: `contains` エントリをビルド時に小文字化するようにした。ランタイム側は URI を `toLowerCase()` してから `includes()` で比較するため、ポリシーに `%2E%2E` のような大文字エントリを書いても絶対にマッチしない silent downgrade が発生していた。regex 拒否と同種の silent-downgrade を両形式で塞ぐ。
 - **`auth_gate.header` の小文字化**: CloudFront Functions ではヘッダキーが小文字でしか見えないため、生成コードの `tokenHeaderName` を強制的に小文字化する。ポリシーで `header: X-Edge-Token` と書かれていた場合、従来は `req.headers[...]` のルックアップが常に undefined となり、正規リクエストまで拒否される不具合があった。
+- **JWT alg 混同攻撃対策**: `verifyJwtRS256` / `verifyJwtHS256`（AWS）および `verifyJwt`（Cloudflare）は、署名検証を走らせる前に JWT の `header.alg` をゲートごとのホワイトリストと照合するようにした。`alg=none` は常に拒否し、デフォルトではそのゲートに設定された `algorithm` のみを受け付ける。`auth_gate.allowed_algorithms: [...]` は、すべてのエントリが `auth_gate.algorithm` で選ばれる単一の verifier と一致する場合のみ受け付ける。`algorithm: RS256` + `allowed_algorithms: ["HS256"]` のように verifier が検証できないアルゴリズムを混ぜるとビルドを明示的にエラーで落とす（silent に誤った verifier に流れて全リクエストが認証失敗する事故を防ぐ）。従来は偽造された `alg=none` や、RS256 → HS256 への alg 差し替え（公開鍵を HMAC 秘密鍵として扱わせるクラシックな攻撃）で署名検証を迂回できる余地があった。
+- **JWT clock skew 許容幅**: `exp` / `nbf` チェックで許容する時刻ずれを `auth_gate.clock_skew_sec` で設定可能にした（デフォルト 30 秒、0〜600 秒にクランプ）。従来は数秒のずれで有効トークンが境界上で弾かれる余地があった。
+- **X-Forwarded-For スプーフィング対策**: CloudFront Functions、Lambda@Edge origin-request、Cloudflare Workers のいずれも、クライアント由来の `x-forwarded-for` ヘッダをデフォルトで剥ぎ取るようにした。実際のクライアント IP は CDN が付与するヘッダ（`cloudfront-viewer-address` / `cf-connecting-ip`）から取得できるため、入力値を信頼すると下流のレートリミット、IP allowlist、監査ログを汚染される。信頼できるリバースプロキシ配下で運用する場合は `request.trust_forwarded_for: true` で明示的にオプトインする。
+- **Host ヘッダ allowlist（オプション）**: `request.allowed_hosts: [...]` により、エッジで Host ヘッダの allowlist を強制できる。完全一致および `*.example.com` の wildcard prefix をサポートし、大文字小文字を区別せず、ポート番号は無視する。未設定時は従来通り Host をチェックしない。
 
 ### 追加
 

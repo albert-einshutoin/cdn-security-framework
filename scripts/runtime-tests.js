@@ -140,6 +140,73 @@ console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases
   }
 })();
 
+// X-Forwarded-For stripping: by default (trustForwardedFor=false), client-
+// supplied XFF must be stripped before reaching origin.
+(function runXForwardedForStripTests() {
+  const event = buildEvent('GET', '/not-protected', {
+    'user-agent': 'Mozilla',
+    'x-forwarded-for': '127.0.0.1, 10.0.0.1',
+  });
+  const result = handler(event);
+  const passed = result && result.uri !== undefined
+    && result.headers && !result.headers['x-forwarded-for'];
+  if (!passed) {
+    console.error('FAIL: x-forwarded-for should be stripped by default, got', result && result.headers);
+    viewerFailed++;
+  } else {
+    console.log('OK: x-forwarded-for stripped from incoming request');
+  }
+})();
+
+// Host allowlist: we compile a standalone template instance with allowedHosts
+// set so we can assert the reject/accept paths without touching the main
+// policy.
+(function runHostAllowlistTests() {
+  const cfgCode = [
+    'const CFG = {',
+    '  mode: "enforce",',
+    '  allowMethods: ["GET"],',
+    '  maxQueryLength: 1024,',
+    '  maxQueryParams: 30,',
+    '  maxUriLength: 2048,',
+    '  dropQueryKeys: new Set([]),',
+    '  uaDenyContains: [],',
+    '  blockPathContains: [],',
+    '  blockPathRegexes: [],',
+    '  normalizePath: { collapseSlashes: false, removeDotSegments: false },',
+    '  requiredHeaders: [],',
+    '  allowedHosts: ["api.example.com", "*.cdn.example.com"],',
+    '  trustForwardedFor: false,',
+    '  cors: null,',
+    '  authGates: [],',
+    '};',
+  ].join('\n');
+  const h = compileViewerTemplate(cfgCode);
+  if (!h) { viewerFailed++; return; }
+
+  const cases = [
+    ['host-allow: api.example.com accepted', buildEvent('GET', '/', { host: 'api.example.com' }), 'allow'],
+    ['host-allow: matches wildcard *.cdn.example.com', buildEvent('GET', '/', { host: 'edge.cdn.example.com' }), 'allow'],
+    ['host-allow: matches wildcard case-insensitively', buildEvent('GET', '/', { host: 'EDGE.CDN.EXAMPLE.COM' }), 'allow'],
+    ['host-allow: strips :port for match', buildEvent('GET', '/', { host: 'api.example.com:8443' }), 'allow'],
+    ['host-allow: rejects unknown host', buildEvent('GET', '/', { host: 'evil.example.com' }), 400],
+    ['host-allow: rejects missing host', buildEvent('GET', '/', {}), 400],
+    ['host-allow: wildcard does not match parent domain', buildEvent('GET', '/', { host: 'cdn.example.com' }), 400],
+  ];
+  for (const [name, event, expected] of cases) {
+    const result = h(event);
+    const allowed = result && !result.statusCode && result.uri !== undefined;
+    const got = allowed ? 'allow' : (result && result.statusCode);
+    const ok = (expected === 'allow' && allowed) || (typeof expected === 'number' && got === expected);
+    if (!ok) {
+      console.error('FAIL:', name, '| expected', expected, 'got', got);
+      viewerFailed++;
+    } else {
+      console.log('OK:', name);
+    }
+  }
+})();
+
 // =========================================================================
 // Section 1b: viewer-request.js monitor mode tests
 // =========================================================================
@@ -450,6 +517,66 @@ async function runOriginRequestTests() {
       }),
       '401'],
 
+    // alg confusion: alg=none must be rejected
+    ['origin: GET /api/data alg=none rejected',
+      buildLambdaEdgeEvent('/api/data', {
+        'Authorization': 'Bearer ' + (function () {
+          const header = { alg: 'none', typ: 'JWT' };
+          const payload = { sub: 'user', iss: 'test-issuer', aud: 'test-audience', exp: nowSec + 3600 };
+          const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64')
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+          return enc(header) + '.' + enc(payload) + '.';
+        })(),
+      }),
+      '401'],
+
+    // alg confusion: alg=RS256 on an HS256 gate must be rejected (wrong alg,
+    // before any signature math runs).
+    ['origin: GET /api/data alg=RS256 on HS256 gate rejected',
+      buildLambdaEdgeEvent('/api/data', {
+        'Authorization': 'Bearer ' + (function () {
+          const header = { alg: 'RS256', typ: 'JWT' };
+          const payload = { sub: 'user', iss: 'test-issuer', aud: 'test-audience', exp: nowSec + 3600 };
+          const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64')
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+          const data = enc(header) + '.' + enc(payload);
+          const sig = crypto.createHmac('sha256', testSecret).update(data).digest('base64')
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+          return data + '.' + sig;
+        })(),
+      }),
+      '401'],
+
+    // Clock skew: token expired 15s ago is still accepted with default 30s skew
+    ['origin: GET /api/data just-expired JWT accepted within clock skew',
+      buildLambdaEdgeEvent('/api/data', {
+        'Authorization': 'Bearer ' + createHS256Jwt({
+          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
+          exp: nowSec - 15,
+        }, testSecret),
+      }),
+      'allow'],
+
+    // Clock skew: token expired way beyond skew is still rejected
+    ['origin: GET /api/data long-expired JWT rejected past clock skew',
+      buildLambdaEdgeEvent('/api/data', {
+        'Authorization': 'Bearer ' + createHS256Jwt({
+          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
+          exp: nowSec - 600,
+        }, testSecret),
+      }),
+      '401'],
+
+    // Clock skew: token valid-from 15s in future is still accepted
+    ['origin: GET /api/data near-future nbf accepted within clock skew',
+      buildLambdaEdgeEvent('/api/data', {
+        'Authorization': 'Bearer ' + createHS256Jwt({
+          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
+          exp: nowSec + 3600, nbf: nowSec + 15,
+        }, testSecret),
+      }),
+      'allow'],
+
     // --- Signed URL tests ---
     ['origin: GET /assets/file.png valid signed URL',
       buildLambdaEdgeEvent('/assets/file.png', {},
@@ -480,8 +607,22 @@ async function runOriginRequestTests() {
     if (!(await runAsyncCase(name, event, expected))) originFailed++;
   }
 
-  console.log('--- origin-request (enforce): ' + (originCases.length - originFailed) + '/' + originCases.length + ' passed ---');
-  return { failed: originFailed, total: originCases.length };
+  // X-Forwarded-For stripping at origin (defense-in-depth).
+  const xffEvent = buildLambdaEdgeEvent('/other/file', {
+    'x-forwarded-for': '1.2.3.4, 5.6.7.8',
+  });
+  const xffResult = await originHandler(xffEvent);
+  const xffStripped = xffResult && xffResult.uri !== undefined && !xffResult.headers['x-forwarded-for'];
+  if (!xffStripped) {
+    console.error('FAIL: origin should strip client-supplied x-forwarded-for, headers=',
+      xffResult && xffResult.headers);
+    originFailed++;
+  } else {
+    console.log('OK: origin strips client-supplied x-forwarded-for');
+  }
+
+  console.log('--- origin-request (enforce): ' + (originCases.length + 1 - originFailed) + '/' + (originCases.length + 1) + ' passed ---');
+  return { failed: originFailed, total: originCases.length + 1 };
 }
 
 // Monitor mode tests: blocking checks should pass through

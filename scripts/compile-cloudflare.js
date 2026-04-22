@@ -75,7 +75,19 @@ function getWorkerAuthGates() {
     } else if (authType === 'basic_auth') {
       gateConfig.credentialsEnv = gate.credentials_env || 'BASIC_AUTH_CREDS';
     } else if (authType === 'jwt') {
-      gateConfig.algorithm = gate.algorithm || 'RS256';
+      const algorithm = gate.algorithm || 'RS256';
+      gateConfig.algorithm = algorithm;
+      // Cloudflare Workers runtime uses a single verifier per gate selected by
+      // `algorithm`. `allowed_algorithms` can only restrict acceptance to that
+      // verifier — cross-alg entries would cause silent auth outage and are
+      // rejected at build time via `validateAuthGates`.
+      const userAllowed = Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0
+        ? gate.allowed_algorithms.filter((a) => typeof a === 'string' && a !== 'none' && a === algorithm)
+        : null;
+      gateConfig.allowed_algorithms = userAllowed && userAllowed.length > 0 ? userAllowed : [algorithm];
+      gateConfig.clock_skew_sec = Number.isFinite(Number(gate.clock_skew_sec))
+        ? Math.max(0, Math.min(600, Number(gate.clock_skew_sec)))
+        : 30;
       gateConfig.jwks_url = gate.jwks_url || '';
       gateConfig.issuer = gate.issuer || '';
       gateConfig.audience = gate.audience || '';
@@ -104,6 +116,11 @@ const requiredHeaders = block.header_missing || ['user-agent'];
 const resHeaders = policy.response_headers || {};
 const corsConfig = resHeaders.cors || null;
 const originAuth = (policy.origin || {}).auth || null;
+const rawAllowedHosts = Array.isArray(request.allowed_hosts) ? request.allowed_hosts : [];
+const allowedHosts = rawAllowedHosts
+  .map((h) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
+  .filter(Boolean);
+const trustForwardedFor = request.trust_forwarded_for === true;
 
 const cfgCode = [
   'const CFG = {',
@@ -119,6 +136,8 @@ const cfgCode = [
   `  blockPathRegexes: ${regexesLiteralCode(blockPathRegexSources)},`,
   `  normalizePath: { collapseSlashes: ${!!pathNormalize.collapse_slashes}, removeDotSegments: ${!!pathNormalize.remove_dot_segments} },`,
   `  requiredHeaders: ${JSON.stringify(requiredHeaders)},`,
+  `  allowedHosts: ${JSON.stringify(allowedHosts)},`,
+  `  trustForwardedFor: ${trustForwardedFor ? 'true' : 'false'},`,
   `  cors: ${JSON.stringify(corsConfig)},`,
   `  authGates: ${JSON.stringify(authGates)},`,
   `  originAuth: ${JSON.stringify(originAuth)},`,
