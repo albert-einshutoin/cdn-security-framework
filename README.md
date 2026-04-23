@@ -102,6 +102,7 @@ This framework addresses these with **"policy-driven" + "runtime separation"**.
 See [IaC integration](docs/iac.md) for Terraform / CDK / WAF usage.
 
 ### Operational docs
+- [CLI reference](docs/cli.md) — `init` / `build` / `emit-waf` / `doctor` / `migrate`
 - [Archetypes](docs/archetypes.md) — app-shaped policy presets (SPA, REST API, admin, microservice)
 - [Secret rotation runbook](docs/runbooks/secret-rotation.md) — JWT / JWKS / signed URL / admin token / origin secret
 - [Schema migration](docs/schema-migration.md) — how `policy/schema.json` evolves and the `migrate` CLI
@@ -164,6 +165,14 @@ npm run test:security-baseline
 ```
 
 Runs runtime, unit, drift, and security-baseline checks used by CI.
+
+### 4.5 Diagnose (optional but recommended before first deploy)
+
+```bash
+npx cdn-security doctor
+```
+
+One-shot pass/fail report: Node version, policy parseability / schema version, every env var referenced by auth gates (`EDGE_ADMIN_TOKEN`, `JWT_SECRET`, `ORIGIN_SECRET`, ...), `dist/edge/` writability, and `npm ls` cleanliness. Writes `doctor-report.json` for CI capture. See [CLI reference](docs/cli.md) for details.
 
 ### 5. Deploy
 
