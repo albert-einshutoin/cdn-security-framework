@@ -3,6 +3,7 @@
   "title": "CDN Security Framework Policy",
   "description": "Schema for policy/base.yml and policy/profiles/*.yml (v1)",
   "type": "object",
+  "additionalProperties": false,
   "required": ["version", "request", "response_headers"],
   "properties": {
     "version": { "type": "integer", "const": 1 },
@@ -10,6 +11,7 @@
     "metadata": {
       "description": "Optional profile / policy metadata. `risk_level` hints the intended security posture — `permissive` triggers a build-time warning so operators do not accidentally ship a loose policy to production.",
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "risk_level": {
           "description": "Intended posture: strict, balanced, or permissive. Build warns on permissive and can be hard-failed with --fail-on-permissive.",
@@ -21,13 +23,19 @@
     },
     "defaults": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "mode": { "enum": ["enforce", "monitor"] },
-        "response": { "type": "object", "properties": { "add_security_headers": { "type": "boolean" } } }
+        "response": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "add_security_headers": { "type": "boolean" } }
+        }
       }
     },
     "request": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["allow_methods"],
       "properties": {
         "allow_methods": { "type": "array", "items": { "type": "string" } },
@@ -42,6 +50,7 @@
         },
         "limits": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "max_query_length": {
               "description": "Maximum querystring length in bytes. Requests exceeding this are rejected at the edge.",
@@ -77,6 +86,7 @@
         },
         "block": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "path_patterns": {
               "oneOf": [
@@ -102,10 +112,12 @@
         },
         "normalize": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "drop_query_keys": { "type": "array", "items": { "type": "string" } },
             "path": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "collapse_slashes": { "type": "boolean" },
                 "remove_dot_segments": { "type": "boolean" }
@@ -119,12 +131,18 @@
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["name", "match"],
         "properties": {
           "name": { "type": "string" },
-          "match": { "type": "object", "properties": { "path_prefixes": { "type": "array", "items": { "type": "string" } } } },
+          "match": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "path_prefixes": { "type": "array", "items": { "type": "string" } } }
+          },
           "auth_gate": {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
               "type": { "enum": ["static_token", "basic_auth", "jwt", "signed_url"] },
               "header": { "type": "string" },
@@ -164,13 +182,22 @@
               }
             }
           },
-          "response": { "type": "object", "properties": { "cache_control": { "type": "string" } } },
-          "request": { "type": "object", "properties": { "allow_methods": { "type": "array", "items": { "type": "string" } } } }
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "cache_control": { "type": "string" } }
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "allow_methods": { "type": "array", "items": { "type": "string" } } }
+          }
         }
       }
     },
     "response_headers": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "hsts": { "type": "string" },
         "x_content_type_options": { "type": "string" },
@@ -222,6 +249,7 @@
         },
         "cors": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "allow_origins": { "type": "array", "items": { "type": "string" } },
             "allow_methods": { "type": "array", "items": { "type": "string" } },
@@ -238,6 +266,7 @@
         },
         "cookie_attributes": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "secure": { "type": "boolean" },
             "http_only": { "type": "boolean" },
@@ -248,9 +277,11 @@
     },
     "firewall": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "waf": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "rate_limit": {
               "description": "Per-IP request ceiling over the 5-minute WAF rate-based window. AWS WAFv2 accepts 100..2,000,000,000. Legacy single global rule; prefer `rate_limit_rules` for per-route / per-key controls.",
@@ -312,6 +343,7 @@
         },
         "geo": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "block_countries": { "type": "array", "items": { "type": "string" } },
             "allow_countries": { "type": "array", "items": { "type": "string" } }
@@ -319,6 +351,7 @@
         },
         "ip": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "allowlist": { "type": "array", "items": { "type": "string" } },
             "blocklist": { "type": "array", "items": { "type": "string" } }
@@ -352,9 +385,11 @@
     },
     "transport": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "tls": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "minimum_version": { "enum": ["TLSv1.2", "TLSv1.3"] },
             "security_policy": { "type": "string" }
@@ -362,25 +397,66 @@
         },
         "http": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "versions": { "type": "array", "items": { "enum": ["http1.1", "http2", "http3"] } }
           }
         }
       }
     },
+    "observability": {
+      "description": "Edge log emission + correlation ID propagation. JSON format lets CloudWatch Logs Insights / Cloudflare Logpush parse fields directly. Issue #21, #22.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "log_format": {
+          "description": "`json` (default) emits structured JSON on every block / monitor path. `text` keeps the legacy unstructured `[monitor] <code> <msg>` shape for backward compatibility.",
+          "enum": ["json", "text"]
+        },
+        "correlation_id_header": {
+          "description": "Incoming request header that carries a trace / correlation ID. Common values: `traceparent` (W3C Trace Context), `x-request-id`. The value is copied into log records and forwarded to origin so you can pivot from edge logs to app logs.",
+          "type": "string"
+        },
+        "sample_rate": {
+          "description": "Fraction of allow-path requests that emit an `event:\"allow\"` log record (0 disables; 1 logs every request). Block-path logs always emit. Default 0.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "audit_log_auth": {
+          "description": "When true, every successful auth gate pass emits `{event:\"auth_pass\", gate_name, sub, uri, method}`. Off by default — enable for security incident response. Raw tokens are never logged.",
+          "type": "boolean"
+        },
+        "audit_hash_sub": {
+          "description": "When true and `audit_log_auth` is enabled, `sub` is hashed (SHA-256 hex, first 16 chars) before emission to avoid PII in logs.",
+          "type": "boolean"
+        }
+      }
+    },
     "origin": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "auth": {
+          "description": "Origin authentication secret injected by the edge runtime. When `type: custom_header`, both `header` (non-empty) and `secret_env` (env var name matching `^[A-Z][A-Z0-9_]*$`) are required. The edge refuses to forward the header when the env var resolves to empty at build/runtime — preventing a silent auth-bypass where origin would otherwise see `X-Origin-Verify: ` and allow the request on trust. See docs/iac.md#origin-auth.",
           "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
           "properties": {
             "type": { "enum": ["custom_header"] },
-            "header": { "type": "string" },
-            "secret_env": { "type": "string" }
-          }
+            "header": { "type": "string", "minLength": 1 },
+            "secret_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "type": { "const": "custom_header" } } },
+              "then": { "required": ["header", "secret_env"] }
+            }
+          ]
         },
         "timeout": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "connect": {
               "description": "Origin connect timeout in seconds. CloudFront caps this at 10s.",

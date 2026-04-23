@@ -1,0 +1,87 @@
+# Archetype: internal admin panel.
+# Use when: internal tooling, back-office, ops dashboards.
+# Threat focus: credential theft, session hijack, CSRF, lateral movement.
+# Base profile: strict plus static_token and no caching.
+
+version: 1
+project: example-admin-panel
+
+metadata:
+  risk_level: strict
+  description: "Admin panel: static_token gate + no-store + strict CSP + narrow method set. When to use: internal admin UI behind a CDN. Combine with L7 IP allowlist / VPN / WAF geo-block."
+
+defaults:
+  mode: "enforce"
+  response:
+    add_security_headers: true
+
+request:
+  allow_methods: ["GET", "HEAD", "POST"]
+
+  limits:
+    max_query_length: 512
+    max_query_params: 20
+    max_uri_length: 1024
+
+  block:
+    path_patterns:
+      contains:
+        - "/../"
+        - "%2e%2e"
+        - ".git/"
+        - ".env"
+    ua_contains:
+      - "sqlmap"
+      - "nikto"
+      - "acunetix"
+      - "masscan"
+      - "curl"
+      - "wget"
+      - "python-requests"
+    header_missing:
+      - "user-agent"
+
+routes:
+  - name: admin
+    match:
+      path_prefixes: ["/"]
+    auth_gate:
+      type: "static_token"
+      header: "x-edge-token"
+      token_env: "EDGE_ADMIN_TOKEN"
+    response:
+      cache_control: "no-store"
+    request:
+      allow_methods: ["GET", "HEAD", "POST"]
+
+observability:
+  log_format: "json"
+  correlation_id_header: "traceparent"
+  audit_log_auth: true
+  audit_hash_sub: true
+
+response_headers:
+  hsts: "max-age=31536000; includeSubDomains; preload"
+  x_content_type_options: "nosniff"
+  referrer_policy: "no-referrer"
+  permissions_policy: "camera=(), microphone=(), geolocation=(), payment=()"
+  csp_public: "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';"
+  csp_admin:  "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';"
+  coop: "same-origin"
+  coep: "require-corp"
+
+firewall:
+  waf:
+    rate_limit: 500
+    scope: CLOUDFRONT
+    managed_rules:
+      - "AWSManagedRulesCommonRuleSet"
+      - "AWSManagedRulesKnownBadInputsRuleSet"
+      - "AWSManagedRulesIPReputationList"
+      - "AWSManagedRulesAnonymousIpList"
+    rate_limit_rules:
+      - name: "admin-ip-limit"
+        limit: 200
+        aggregate_key_type: "IP"
+        action: "block"
+        priority: 1

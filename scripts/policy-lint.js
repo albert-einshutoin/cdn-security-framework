@@ -59,7 +59,11 @@ function main() {
     process.exit(1);
   }
 
-  const ajv = new Ajv({ allErrors: true, strict: false });
+  // strict: true flips on schema-authoring lint (typos in keywords / unknown
+  // formats). strictRequired is off because our origin.auth `allOf/if/then`
+  // conditionally requires properties that live in the parent scope — AJV's
+  // strictRequired check would reject that pattern even though it is valid.
+  const ajv = new Ajv({ allErrors: true, strict: true, strictRequired: false, allowUnionTypes: true });
   const validate = ajv.compile(schema);
   const valid = validate(policy);
   if (!valid) {
@@ -115,6 +119,15 @@ function main() {
     const loggingEnabled = waf.logging && waf.logging.enabled === true;
     if (waf.scope === 'CLOUDFRONT' && !loggingEnabled) {
       warnings.push('firewall.waf.logging is not enabled while scope=CLOUDFRONT. PCI-DSS / SOC2 require WAF log retention — set logging.enabled: true and supply destination_arn_env.');
+    }
+  }
+
+  // origin.auth.custom_header env-var presence check (best-effort; env may be CI-only)
+  const originAuth = policy && policy.origin && policy.origin.auth;
+  if (originAuth && originAuth.type === 'custom_header' && originAuth.secret_env) {
+    const envVal = process.env[originAuth.secret_env];
+    if (envVal !== undefined && envVal.length === 0) {
+      warnings.push('origin.auth.secret_env "' + originAuth.secret_env + '" is set but empty in the current shell. The edge will refuse to forward the origin-auth header, breaking origin trust. Unset the env or supply a value.');
     }
   }
 

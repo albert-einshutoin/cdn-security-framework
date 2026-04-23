@@ -1,0 +1,106 @@
+{
+  "resource": {
+    "aws_wafv2_rule_group": {
+      "example-microservice-origin-rate-limit": {
+        "name": "example-microservice-origin-rate-limit",
+        "scope": "REGIONAL",
+        "capacity": 2,
+        "rule": [
+          {
+            "name": "rate-based-rule",
+            "priority": 1,
+            "action": {
+              "block": {}
+            },
+            "statement": {
+              "rate_based_statement": {
+                "limit": 5000,
+                "aggregate_key_type": "IP"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-microservice-origin-rate-limit",
+              "sampled_requests_enabled": true
+            }
+          }
+        ],
+        "visibility_config": {
+          "cloudwatch_metrics_enabled": true,
+          "metric_name": "example-microservice-origin-rule-group",
+          "sampled_requests_enabled": true
+        }
+      }
+    },
+    "aws_wafv2_web_acl": {
+      "example-microservice-origin-waf-acl": {
+        "name": "example-microservice-origin-waf-acl",
+        "scope": "REGIONAL",
+        "default_action": {
+          "allow": {}
+        },
+        "rule": [
+          {
+            "name": "AWS-AWSManagedRulesCommonRuleSet",
+            "priority": 10,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesCommonRuleSet"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-microservice-origin-AWSManagedRulesCommonRuleSet",
+              "sampled_requests_enabled": true
+            }
+          },
+          {
+            "name": "AWS-AWSManagedRulesKnownBadInputsRuleSet",
+            "priority": 11,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesKnownBadInputsRuleSet"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-microservice-origin-AWSManagedRulesKnownBadInputsRuleSet",
+              "sampled_requests_enabled": true
+            }
+          },
+          {
+            "name": "AWS-AWSManagedRulesIPReputationList",
+            "priority": 12,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesIPReputationList"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-microservice-origin-AWSManagedRulesIPReputationList",
+              "sampled_requests_enabled": true
+            }
+          }
+        ],
+        "visibility_config": {
+          "cloudwatch_metrics_enabled": true,
+          "metric_name": "example-microservice-origin-waf-acl",
+          "sampled_requests_enabled": true
+        }
+      }
+    }
+  }
+}

@@ -7,6 +7,7 @@ const path = require('path');
 const {
   DEFAULT_CONTAINS,
   parsePathPatterns,
+  hasCatastrophicBacktrackShape,
   regexesLiteralCode,
   getAuthGates,
   validateAuthGates,
@@ -16,6 +17,7 @@ const {
   hasFailOnPermissiveFlag,
   warnIfPermissive,
   warnSignedUrlReplay,
+  validateOriginAuth,
 } = require('./lib/compile-core');
 
 function test(name, fn) {
@@ -91,6 +93,40 @@ test('parsePathPatterns rejects invalid regex at build time', () => {
     () => parsePathPatterns({ regex: ['[unterminated'] }),
     /Invalid regex/,
   );
+});
+
+test('parsePathPatterns rejects nested-quantifier ReDoS shapes at build time', () => {
+  // Classic `(a+)+` family — the edge DoS shape we refuse to ship.
+  assert.throws(
+    () => parsePathPatterns({ regex: ['^(a+)+$'] }),
+    /ReDoS safety check/,
+  );
+  assert.throws(
+    () => parsePathPatterns({ regex: ['(.*)*'] }),
+    /ReDoS safety check/,
+  );
+  // With `(?i)` inline flag — must also trigger after the prefix is stripped.
+  assert.throws(
+    () => parsePathPatterns({ regex: ['(?i)(x+)+'] }),
+    /ReDoS safety check/,
+  );
+});
+
+test('parsePathPatterns accepts well-formed regex without stacked quantifiers', () => {
+  const { regexSources } = parsePathPatterns({
+    regex: ['(?i)\\.git/', '\\.env$', '^/api/v[12]/'],
+  });
+  assert.deepStrictEqual(regexSources, ['(?i)\\.git/', '\\.env$', '^/api/v[12]/']);
+});
+
+test('hasCatastrophicBacktrackShape flags canonical ReDoS family and passes safe patterns', () => {
+  assert.strictEqual(hasCatastrophicBacktrackShape('^(a+)+$'), true);
+  assert.strictEqual(hasCatastrophicBacktrackShape('(.*)*'), true);
+  assert.strictEqual(hasCatastrophicBacktrackShape('(x{1,5})+'), true);
+  assert.strictEqual(hasCatastrophicBacktrackShape('(?i)(a+)+'), true);
+  assert.strictEqual(hasCatastrophicBacktrackShape('\\.git/'), false);
+  assert.strictEqual(hasCatastrophicBacktrackShape('^/api/[a-z]+$'), false);
+  assert.strictEqual(hasCatastrophicBacktrackShape(''), false);
 });
 
 test('parsePathPatterns rejects regex-like entries under object-form contains', () => {
@@ -1153,6 +1189,169 @@ test('response_headers.clear_site_data_types override honored', () => {
     }, { outDir: tmpDir, allowPlaceholderToken: true });
     const resp = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
     assert.match(resp, /clearSiteDataTypes: \["cache","cookies"\]/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build: observability config injects with safe defaults when unset', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-default-'));
+  try {
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const vr = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    assert.match(vr, /"logFormat":"json"/);
+    assert.match(vr, /"auditLogAuth":false/);
+    assert.match(vr, /"correlationHeader":""/);
+    assert.match(vr, /"sampleRate":0/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build: observability honors configured log_format/correlation/audit fields', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-explicit-'));
+  try {
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      observability: {
+        log_format: 'text',
+        correlation_id_header: 'X-Request-ID',
+        sample_rate: 0.25,
+        audit_log_auth: true,
+        audit_hash_sub: true,
+      },
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const vr = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    assert.match(vr, /"logFormat":"text"/);
+    // Header name is lowercased for CFF-style indexed lookup
+    assert.match(vr, /"correlationHeader":"x-request-id"/);
+    assert.match(vr, /"sampleRate":0\.25/);
+    assert.match(vr, /"auditLogAuth":true/);
+    assert.match(vr, /"auditHashSub":true/);
+    const origin = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.match(origin, /"auditLogAuth":true/);
+    assert.match(origin, /"correlationHeader":"x-request-id"/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build: observability clamps sample_rate to [0,1] range', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-clamp-'));
+  try {
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      observability: { sample_rate: 42 },
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const vr = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    // 42 is clamped down to 1
+    assert.match(vr, /"sampleRate":1/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('viewer-request: structured JSON block log includes status, block_reason, uri', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-runtime-'));
+  try {
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      observability: { log_format: 'json', correlation_id_header: 'traceparent' },
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+
+    const captured = [];
+    const origLog = console.log;
+    console.log = (line) => { captured.push(String(line)); };
+    let handler;
+    try {
+      // Evaluate compiled CFF function and capture its handler.
+      const mod = eval('(function(){' + code + '; return handler;})()');
+      handler = mod;
+      // POST not in allow_methods → should block with 405.
+      handler({ request: { method: 'POST', uri: '/anything', querystring: '', headers: { 'traceparent': { value: '00-abc-123' } } } });
+    } finally {
+      console.log = origLog;
+    }
+
+    const jsonLine = captured.find((l) => l.indexOf('"event":"block"') !== -1);
+    assert.ok(jsonLine, 'expected a block JSON log; got: ' + captured.join('\n'));
+    const parsed = JSON.parse(jsonLine);
+    assert.strictEqual(parsed.event, 'block');
+    assert.strictEqual(parsed.status, 405);
+    assert.strictEqual(parsed.method, 'POST');
+    assert.strictEqual(parsed.uri, '/anything');
+    assert.strictEqual(parsed.correlation_id, '00-abc-123');
+    assert.ok(typeof parsed.ts === 'number' && parsed.ts > 0);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('validateOriginAuth warns when secret_env is unset (non-strict)', () => {
+  const policy = { origin: { auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'NONEXISTENT_FOR_TEST' } } };
+  const warnings = [];
+  const logger = { warn: (s) => warnings.push(String(s)), error: () => {} };
+  const result = validateOriginAuth(policy, { env: {}, strict: false, logger });
+  assert.strictEqual(result.errors.length, 0);
+  assert.ok(result.warnings.some((w) => /NONEXISTENT_FOR_TEST/.test(w)));
+  assert.ok(warnings.some((w) => /origin-auth/.test(w)));
+});
+
+test('validateOriginAuth errors in strict mode when secret_env is unset', () => {
+  const policy = { origin: { auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'NONEXISTENT_FOR_TEST' } } };
+  const logger = { warn: () => {}, error: () => {} };
+  assert.throws(() => validateOriginAuth(policy, { env: {}, strict: true, logger }), /origin-auth validation failed/);
+});
+
+test('validateOriginAuth errors in strict mode when secret_env is empty string', () => {
+  const policy = { origin: { auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'MY_SECRET' } } };
+  const logger = { warn: () => {}, error: () => {} };
+  assert.throws(() => validateOriginAuth(policy, { env: { MY_SECRET: '' }, strict: true, logger }), /origin-auth validation failed/);
+});
+
+test('validateOriginAuth passes when secret_env resolves to non-empty value', () => {
+  const policy = { origin: { auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'MY_SECRET' } } };
+  const logger = { warn: () => {}, error: () => {} };
+  const result = validateOriginAuth(policy, { env: { MY_SECRET: 's3cr3t' }, strict: true, logger });
+  assert.strictEqual(result.errors.length, 0);
+  assert.strictEqual(result.warnings.length, 0);
+});
+
+test('validateOriginAuth is a no-op when origin.auth is absent', () => {
+  const logger = { warn: () => {}, error: () => {} };
+  const result = validateOriginAuth({}, { env: {}, strict: true, logger });
+  assert.strictEqual(result.errors.length, 0);
+  assert.strictEqual(result.warnings.length, 0);
+});
+
+test('origin-request refuses to forward origin-auth header when env is empty', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-test-origin-auth-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: { hsts: 'max-age=1' },
+      origin: { auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'ORIGIN_AUTH_TEST_NOT_SET' } },
+    };
+    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge/origin-request.js'), 'utf8');
+    // Ensure the runtime code guards against a blank env var before forwarding.
+    assert.match(code, /origin_auth_secret_missing/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
