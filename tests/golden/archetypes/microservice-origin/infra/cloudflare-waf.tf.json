@@ -1,0 +1,101 @@
+{
+  "variable": {
+    "cloudflare_zone_id": {
+      "description": "Cloudflare zone ID to attach rulesets to. Sourced from $CLOUDFLARE_ZONE_ID or equivalent in CI.",
+      "type": "string"
+    },
+    "cloudflare_account_id": {
+      "description": "Cloudflare account ID. Required when attaching account-scoped rulesets / lists. Sourced from $CLOUDFLARE_ACCOUNT_ID.",
+      "type": "string"
+    }
+  },
+  "resource": {
+    "cloudflare_ruleset": {
+      "example-microservice-origin_custom": {
+        "zone_id": "${var.cloudflare_zone_id}",
+        "name": "example-microservice-origin-custom",
+        "description": "CDN Security Framework: custom firewall rules (geo/IP/UA/fingerprint)",
+        "kind": "zone",
+        "phase": "http_request_firewall_custom",
+        "rules": [
+          {
+            "ref": "rule_1",
+            "description": "User-Agent blocklist",
+            "enabled": true,
+            "expression": "(lower(http.user_agent) contains \"sqlmap\" or lower(http.user_agent) contains \"nikto\" or lower(http.user_agent) contains \"acunetix\" or lower(http.user_agent) contains \"masscan\")",
+            "action": "block",
+            "action_parameters": {
+              "response": null
+            }
+          }
+        ]
+      },
+      "example-microservice-origin_ratelimit": {
+        "zone_id": "${var.cloudflare_zone_id}",
+        "name": "example-microservice-origin-ratelimit",
+        "description": "CDN Security Framework: rate limits",
+        "kind": "zone",
+        "phase": "http_ratelimit",
+        "rules": [
+          {
+            "ref": "rate_1",
+            "description": "Global IP rate limit (legacy)",
+            "enabled": true,
+            "expression": "true",
+            "action": "block",
+            "action_parameters": {
+              "response": null
+            },
+            "ratelimit": {
+              "characteristics": [
+                "ip.src"
+              ],
+              "period": 300,
+              "requests_per_period": 5000,
+              "mitigation_timeout": 600
+            }
+          }
+        ]
+      },
+      "example-microservice-origin_managed": {
+        "zone_id": "${var.cloudflare_zone_id}",
+        "name": "example-microservice-origin-managed",
+        "description": "CDN Security Framework: managed ruleset bindings",
+        "kind": "zone",
+        "phase": "http_request_firewall_managed",
+        "rules": [
+          {
+            "ref": "managed_1",
+            "description": "AWS managed rule mapped to Cloudflare: AWSManagedRulesCommonRuleSet",
+            "enabled": true,
+            "expression": "true",
+            "action": "execute",
+            "action_parameters": {
+              "id": "efb7b8c949ac4650a09736fc376e9aee"
+            }
+          },
+          {
+            "ref": "managed_2",
+            "description": "AWS managed rule mapped to Cloudflare: AWSManagedRulesKnownBadInputsRuleSet",
+            "enabled": true,
+            "expression": "true",
+            "action": "execute",
+            "action_parameters": {
+              "id": "4814384a9e5d4991b9815dcfc25d2f1f"
+            }
+          },
+          {
+            "ref": "managed_3",
+            "description": "AWS managed rule mapped to Cloudflare: AWSManagedRulesIPReputationList",
+            "enabled": true,
+            "expression": "true",
+            "action": "execute",
+            "action_parameters": {
+              "id": "c2e184081120413c86c3ab7e14069605"
+            }
+          }
+        ]
+      }
+    }
+  }
+}

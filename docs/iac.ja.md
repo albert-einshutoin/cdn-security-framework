@@ -155,3 +155,44 @@ distribution.addBehavior('*', origin, {
 | **WAF (Terraform)** | `dist/infra/waf-rules.tf.json` を Terraform の設定に含め、Web ACL でルールグループを参照。 |
 
 `policy/security.yml` を変更したら `npx cdn-security build` を再実行し、続けて Terraform または CDK を実行すると、デプロイされる Edge と WAF がポリシーと一致します。
+
+---
+
+## Origin Auth（custom_header）
+
+<a id="origin-auth"></a>
+
+`origin.auth.type: custom_header` を設定すると、エッジが共有シークレットを `X-Origin-Verify`（既定）などのヘッダとして付与し、オリジンはそれを検証して「エッジ経由のトラフィックのみ信頼」できます。値は環境変数から読み込みます。
+
+```yaml
+origin:
+  auth:
+    type: custom_header
+    header: X-Origin-Verify
+    secret_env: ORIGIN_AUTH_SECRET   # ^[A-Z][A-Z0-9_]*$ に一致
+```
+
+- **`header`**: 必須（空文字不可）。
+- **`secret_env`**: 必須。`^[A-Z][A-Z0-9_]*$` にマッチしない名前は schema lint で弾かれる（存在しない env を参照するミスを防止）。
+- **ビルド時チェック**: `node scripts/compile.js --strict-origin-auth` を指定すると、指定 env が未設定 / 空のときビルドをハードフェイルします。フラグ無しでは `[origin-auth]` 警告のみ。**CI では必ず `--strict-origin-auth` を付ける** ことを推奨。
+- **ランタイム挙動**: ランタイムで env が空のとき、エッジは **ヘッダを付与しません**。オリジン側は既定で拒否する構成にしてください（そうでないと、空の `X-Origin-Verify` を「エッジから」と誤認する可能性）。エッジは `event:"error", block_reason:"origin_auth_secret_missing"` の JSON ログを出すので観測性で拾えます。
+
+### Terraform 例（env 経由で Lambda@Edge に渡す）
+
+```hcl
+variable "origin_auth_secret" {
+  type      = string
+  sensitive = true
+}
+
+resource "aws_lambda_function" "origin_request" {
+  function_name = "edge-origin-request"
+  environment {
+    variables = {
+      ORIGIN_AUTH_SECRET = var.origin_auth_secret
+    }
+  }
+}
+```
+
+`TF_VAR_origin_auth_secret` はシークレットストア（AWS Secrets Manager, Vault, CI Secrets）から供給してください。`policy/security.yml` は git で管理されるので **絶対に値を書かないこと**。

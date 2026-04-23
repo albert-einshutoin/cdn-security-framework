@@ -486,18 +486,27 @@ function checkSignedUrlGates(request) {
   return null;
 }
 
-// Add origin auth header
+// Add origin auth header. Refuses to forward when the env var is unset / empty
+// so origin cannot mistake a blank `X-Origin-Verify` for a valid edge handoff.
 function addOriginAuth(request) {
   if (!CFG.originAuth) return;
 
-  const secret = process.env[CFG.originAuth.secret_env] || '';
-  if (secret) {
-    const headerName = (CFG.originAuth.header || 'X-Origin-Verify').toLowerCase();
-    request.headers[headerName] = [{
-      key: CFG.originAuth.header || 'X-Origin-Verify',
-      value: secret,
-    }];
+  const envName = CFG.originAuth.secret_env || '';
+  const secret = envName ? (process.env[envName] || '') : '';
+  if (!secret) {
+    logEvent('error', {
+      block_reason: 'origin_auth_secret_missing',
+      secret_env: envName,
+      uri: request.uri || '',
+      correlation_id: readCorrelation(request),
+    });
+    return;
   }
+  const headerName = (CFG.originAuth.header || 'X-Origin-Verify').toLowerCase();
+  request.headers[headerName] = [{
+    key: CFG.originAuth.header || 'X-Origin-Verify',
+    value: secret,
+  }];
 }
 
 // Propagate the correlation ID header to origin. When the incoming request

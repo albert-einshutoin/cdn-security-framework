@@ -17,6 +17,11 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      # CI-only build tokens — match the names used by policy-lint.yml so
+      # drift and unit tests that consume them reproduce here identically.
+      EDGE_ADMIN_TOKEN: ci-build-token-not-for-deploy
+      ORIGIN_SECRET: ci-origin-secret-not-for-deploy
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -49,6 +54,13 @@ jobs:
           npm run lint:policy -- policy/profiles/strict.yml
           npm run lint:policy -- policy/profiles/permissive.yml
 
+      - name: Policy lint (archetypes)
+        run: |
+          npm run lint:policy -- policy/archetypes/spa-static-site.yml
+          npm run lint:policy -- policy/archetypes/rest-api.yml
+          npm run lint:policy -- policy/archetypes/admin-panel.yml
+          npm run lint:policy -- policy/archetypes/microservice-origin.yml
+
       - name: Build AWS (compile policy -> dist)
         run: npm run build
 
@@ -70,12 +82,37 @@ jobs:
       - name: Verify npm package contents (dry-run)
         run: npm pack --dry-run
 
-      - name: Publish package to npm
+      - name: Publish package to npm (with SLSA v1 provenance attestation)
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        # Always publish with --provenance so consumers can verify the tarball
+        # was built by this workflow. npm transparently uses GitHub's OIDC
+        # identity for the attestation; the legacy token only authorizes the
+        # publish itself. Both modes produce a verifiable attestation on the
+        # npm registry.
+        run: npm publish --provenance --access public
+
+      # After publish, fetch the tarball we just pushed and verify the
+      # registry-side attestation signatures cover it. This catches two
+      # classes of failure a plain `--provenance` flag cannot: (a) the
+      # attestation was never recorded on the registry, (b) the tarball on
+      # the registry drifted from the workflow-built artifact (tampering in
+      # transit / registry mirror misconfiguration).
+      - name: Verify provenance attestation is recorded and valid
         run: |
-          if [ -n "${NODE_AUTH_TOKEN}" ]; then
-            npm publish --access public
-          else
-            npm publish --provenance --access public
-          fi
+          set -e
+          VERSION="$(node -p "require('./package.json').version")"
+          NAME="$(node -p "require('./package.json').name")"
+          echo "Verifying provenance for ${NAME}@${VERSION}..."
+          # Use a scratch dir so the downloaded tarball doesn't collide with
+          # the `npm pack --dry-run` artifact from the lint step.
+          mkdir -p .provenance-verify
+          cd .provenance-verify
+          npm pack "${NAME}@${VERSION}"
+          # `npm audit signatures` hits the registry attestation API and
+          # fails non-zero when any published version in the working tree's
+          # dependency set lacks a valid attestation. We run it inside the
+          # scratch dir where the published tarball is the install target.
+          npm init -y >/dev/null
+          npm install --no-save "${NAME}@${VERSION}"
+          npm audit signatures

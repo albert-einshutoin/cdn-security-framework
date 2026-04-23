@@ -1,0 +1,70 @@
+# Archetype: Single-Page App / static site hosting.
+# Use when: hosting a built SPA (React/Vue/Svelte) or a static marketing site.
+# Threat focus: XSS, cache poisoning, unauthenticated admin exposure.
+# Base profile: balanced (strict if you control all client code).
+
+version: 1
+project: example-spa-static-site
+
+metadata:
+  risk_level: balanced
+  description: "SPA / static site: strict CSP, path-traversal blocking. When to use: hosting a built SPA or static site from CloudFront/Cloudflare. No write API on this origin."
+
+defaults:
+  mode: "enforce"
+  response:
+    add_security_headers: true
+
+request:
+  # Static sites never need PUT/DELETE/PATCH. HEAD allowed for CDN probes.
+  allow_methods: ["GET", "HEAD"]
+
+  limits:
+    max_query_length: 512
+    max_query_params: 20
+    max_uri_length: 1024
+
+  block:
+    path_patterns:
+      contains:
+        - "/../"
+        - "%2e%2e"
+        - ".git/"
+        - ".env"
+    ua_contains:
+      - "sqlmap"
+      - "nikto"
+      - "acunetix"
+      - "masscan"
+    header_missing:
+      - "user-agent"
+
+  normalize:
+    drop_query_keys:
+      - "utm_source"
+      - "utm_medium"
+      - "utm_campaign"
+      - "utm_term"
+      - "utm_content"
+      - "gclid"
+      - "fbclid"
+
+response_headers:
+  hsts: "max-age=31536000; includeSubDomains; preload"
+  x_content_type_options: "nosniff"
+  referrer_policy: "strict-origin-when-cross-origin"
+  permissions_policy: "camera=(), microphone=(), geolocation=()"
+  # Nonce-based CSP: the edge injects a per-request nonce. Inline scripts in
+  # your SPA shell must reference `{{nonce}}` (substitution is documented in
+  # docs/response-headers.md). object-src 'none' closes Flash/plugin vectors.
+  csp_nonce: true
+  csp_public: "default-src 'self'; script-src 'self' 'nonce-{{nonce}}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self';"
+
+firewall:
+  waf:
+    rate_limit: 2000
+    scope: CLOUDFRONT
+    managed_rules:
+      - "AWSManagedRulesCommonRuleSet"
+      - "AWSManagedRulesKnownBadInputsRuleSet"
+      - "AWSManagedRulesIPReputationList"
