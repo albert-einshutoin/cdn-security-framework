@@ -15,6 +15,8 @@
 | `coep` | `require-corp` / `credentialless` / `unsafe-none` | 未設定 | `Cross-Origin-Embedder-Policy`。 |
 | `corp` | `same-site` / `same-origin` / `cross-origin` | 未設定 | `Cross-Origin-Resource-Policy`。 |
 | `reporting_endpoints` | string | `""` | `Reporting-Endpoints`（`Report-To` の後継 RFC）へそのまま載せる値。 |
+| `clear_site_data_paths` | string[] | `[]` | 前方一致でマッチしたパスに対し 2xx/3xx 時に `Clear-Site-Data` と `Cache-Control: no-store` を付与する。ログアウト／セッション終了エンドポイント向け。 |
+| `clear_site_data_types` | string[] | `["cache","cookies","storage"]` | 発行する `Clear-Site-Data` ディレクティブ。許可値: `cache`, `cookies`, `storage`, `executionContexts`, `*`。 |
 
 ## 挙動
 
@@ -78,9 +80,25 @@ response_headers:
   csp_report_only: "default-src 'self'; script-src 'self'; report-to csp"
 ```
 
+### ログアウト時の Clear-Site-Data
+
+セッション終了エンドポイントを明示する:
+
+```yaml
+response_headers:
+  clear_site_data_paths:
+    - /auth/logout
+    - /session/end
+  # 任意の上書き。既定は ["cache","cookies","storage"]。
+  # clear_site_data_types: ["cache", "cookies", "storage", "executionContexts"]
+```
+
+エッジは `Clear-Site-Data` を 2xx/3xx のレスポンスに限って発行し、ログアウト失敗時にローカル状態を巻き戻してしまうのを防ぐ。同じレスポンスに `Cache-Control: no-store` を強制付与し、下流キャッシュが別ユーザーへディレクティブを使い回すのも防ぐ。
+
 ## 脅威対応
 
 - Issue #8 — `force_vary_auth` により、認証ユーザー間の共有キャッシュ汚染を防ぐ。
+- Issue #20 — `clear_site_data_paths` により、ログアウトエンドポイントで `Clear-Site-Data` と `no-store` を発行し、中間装置によるキャッシュ再生を防ぐ。
 - Issue #10 — COOP/COEP/CORP によりクロスオリジン分離を有効にし、フレーミング/埋め込みリスクを下げる。
 - Issue #11 — per-response CSP nonce により `'unsafe-inline'` を不要にする。
 - Issue #13 — Cloudflare ターゲットが複数 `Set-Cookie` を壊さずに属性を書き換える。AWS ターゲットは単一 Cookie 前提を明示する。

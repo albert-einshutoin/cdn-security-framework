@@ -343,6 +343,17 @@ export default {
       if (r) return r;
     }
 
+    // Header count cap (issue #9). Applied before path normalization because
+    // origins that parse header maps don't care about URI shape.
+    if (CFG.maxHeaderCount && CFG.maxHeaderCount > 0) {
+      let headerCount = 0;
+      request.headers.forEach(() => { headerCount++; });
+      if (headerCount > CFG.maxHeaderCount) {
+        const r = shouldBlock(431, 'Request Header Fields Too Large');
+        if (r) return r;
+      }
+    }
+
     url.pathname = normalizePath(url.pathname);
 
     const pathLower = url.pathname.toLowerCase();
@@ -579,6 +590,18 @@ export default {
       if (lower.indexOf('authorization') === -1) tokens.push('Authorization');
       if (lower.indexOf('cookie') === -1) tokens.push('Cookie');
       out.headers.set('Vary', tokens.join(', '));
+    }
+
+    // Clear-Site-Data on configured logout paths (issue #20). Only on 2xx/3xx.
+    const status = out.status;
+    const isSuccess = status >= 200 && status < 400;
+    const hitsClearPath = (RESPONSE_CFG.clearSiteDataPaths || []).some((p: string) =>
+      url.pathname === p || url.pathname.startsWith(p + '/'),
+    );
+    if (hitsClearPath && isSuccess) {
+      const types = (RESPONSE_CFG.clearSiteDataTypes || []).map((t: string) => '"' + t + '"');
+      if (types.length > 0) out.headers.set('Clear-Site-Data', types.join(', '));
+      out.headers.set('Cache-Control', 'no-store');
     }
 
     out.headers.delete('x-powered-by');

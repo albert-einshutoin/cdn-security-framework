@@ -154,6 +154,7 @@ const cfgCode = [
   `  maxQueryParams: ${Number(limits.max_query_params) || 30},`,
   `  maxUriLength: ${Number(limits.max_uri_length) || 2048},`,
   `  maxHeaderSize: ${Number(limits.max_header_size) || 0},`,
+  `  maxHeaderCount: ${Number.isFinite(Number(limits.max_header_count)) ? Math.max(1, Math.min(500, Number(limits.max_header_count))) : 64},`,
   `  dropQueryKeys: new Set(${JSON.stringify(dropQueryKeysArray)}),`,
   `  uaDenyContains: ${JSON.stringify(block.ua_contains || ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests'])},`,
   `  blockPathContains: ${JSON.stringify(blockPathContains)},`,
@@ -209,6 +210,16 @@ const responseCfgCode = [
   `  adminCacheControl: ${JSON.stringify(adminCacheControl)},`,
   `  authProtectedPrefixes: ${JSON.stringify(authProtectedPrefixesForResp)},`,
   `  forceVaryAuth: ${forceVaryAuth ? 'true' : 'false'},`,
+  `  clearSiteDataPaths: ${JSON.stringify(
+    Array.isArray(resHeaders.clear_site_data_paths)
+      ? resHeaders.clear_site_data_paths.filter((s) => typeof s === 'string' && s.trim())
+      : []
+  )},`,
+  `  clearSiteDataTypes: ${JSON.stringify(
+    Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
+      ? resHeaders.clear_site_data_types
+      : ['cache', 'cookies', 'storage']
+  )},`,
   `  cors: ${JSON.stringify(corsConfig)},`,
   `  cookie_attributes: ${JSON.stringify(resHeaders.cookie_attributes || null)},`,
   '};',
