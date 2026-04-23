@@ -66,6 +66,12 @@
               "type": "integer",
               "minimum": 1,
               "maximum": 65536
+            },
+            "max_header_count": {
+              "description": "Maximum number of request headers allowed at the edge. Protects origin parsers from hash-collision / amplification under small-but-many-headers payloads. Exceeding this returns 431 (Request Header Fields Too Large). Default 64.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
             }
           }
         },
@@ -203,6 +209,16 @@
         "force_vary_auth": {
           "description": "When true (default), every path covered by any auth gate receives `Cache-Control: no-store, no-cache, must-revalidate` + `Vary: Authorization, Cookie` at viewer-response. Prevents CDN edge caches from serving one user's authenticated response to another. Set false only if you understand the cache-poisoning risk (e.g., all protected responses are user-independent, such as prerendered public dashboards).",
           "type": "boolean"
+        },
+        "clear_site_data_paths": {
+          "description": "Paths on which to emit `Clear-Site-Data: \"cache\", \"cookies\", \"storage\"` + force `Cache-Control: no-store`. Use for logout / session-invalidation endpoints so the browser drops cached data even if the origin response is cached. Entries are prefix-matched (match when URI equals or starts with prefix + `/`). Only applied on 2xx and 3xx responses to avoid clobbering failed logouts.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "clear_site_data_types": {
+          "description": "Override the default directive set for Clear-Site-Data. Default: `[\"cache\",\"cookies\",\"storage\"]`. `executionContexts` forces the browser to reload the top-level frame and every same-origin frame.",
+          "type": "array",
+          "items": { "enum": ["cache", "cookies", "storage", "executionContexts", "*"] }
         },
         "cors": {
           "type": "object",

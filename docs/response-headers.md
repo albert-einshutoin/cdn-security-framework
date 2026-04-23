@@ -15,6 +15,8 @@ The `response_headers` section of `policy/security.yml` drives what the viewer-r
 | `coep` | `require-corp` \| `credentialless` \| `unsafe-none` | unset | `Cross-Origin-Embedder-Policy`. |
 | `corp` | `same-site` \| `same-origin` \| `cross-origin` | unset | `Cross-Origin-Resource-Policy`. |
 | `reporting_endpoints` | string | `""` | Verbatim `Reporting-Endpoints` value (RFC replacement for `Report-To`). |
+| `clear_site_data_paths` | string[] | `[]` | Paths (prefix match) on which to emit `Clear-Site-Data` + force `Cache-Control: no-store` on 2xx/3xx. Use for logout / session-invalidation endpoints so browsers drop cached data. |
+| `clear_site_data_types` | string[] | `["cache","cookies","storage"]` | Directive list for the emitted `Clear-Site-Data` header. Allowed: `cache`, `cookies`, `storage`, `executionContexts`, `*`. |
 
 ## Behavior at a glance
 
@@ -78,9 +80,25 @@ response_headers:
   csp_report_only: "default-src 'self'; script-src 'self'; report-to csp"
 ```
 
+### Clear-Site-Data on logout
+
+Configure the exact endpoint where a session terminates:
+
+```yaml
+response_headers:
+  clear_site_data_paths:
+    - /auth/logout
+    - /session/end
+  # Optional override — default is ["cache","cookies","storage"].
+  # clear_site_data_types: ["cache", "cookies", "storage", "executionContexts"]
+```
+
+The edge emits `Clear-Site-Data` only when the origin response is 2xx or 3xx so that a failed logout does not wipe the user's local state. `Cache-Control: no-store` is forced on the same response to prevent downstream caches from replaying the directive to a different user.
+
 ## Threat coverage
 
 - Issue #8 — `force_vary_auth` prevents shared-cache leakage between authenticated users.
+- Issue #20 — `clear_site_data_paths` delivers `Clear-Site-Data` on logout endpoints + forces `no-store` so intermediaries don't cache the termination.
 - Issue #10 — COOP/COEP/CORP unlock cross-origin-isolation and reduce framing/embedding risk.
 - Issue #11 — per-response CSP nonces remove the need for `'unsafe-inline'`.
 - Issue #13 — Cloudflare target rewrites Set-Cookie attributes without corrupting multi-cookie responses; AWS target documents the single-cookie limit.

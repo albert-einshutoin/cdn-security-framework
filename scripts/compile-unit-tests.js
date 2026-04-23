@@ -1051,6 +1051,113 @@ test('response_headers: csp_nonce=true emits substitution hook and Report-Only c
   }
 });
 
+test('request.limits.max_header_count defaults to 64 and is clamped to 1..500', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-hc-'));
+  try {
+    const base = { version: 1, request: { allow_methods: ['GET'] }, response_headers: {}, routes: [] };
+
+    // Default
+    build(base, { outDir: tmpDir, allowPlaceholderToken: true });
+    let vr = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    assert.match(vr, /maxHeaderCount: 64,/);
+
+    // Custom
+    build({ ...base, request: { ...base.request, limits: { max_header_count: 128 } } },
+      { outDir: tmpDir, allowPlaceholderToken: true });
+    vr = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    assert.match(vr, /maxHeaderCount: 128,/);
+
+    // Clamp high
+    build({ ...base, request: { ...base.request, limits: { max_header_count: 9999 } } },
+      { outDir: tmpDir, allowPlaceholderToken: true });
+    vr = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    assert.match(vr, /maxHeaderCount: 500,/);
+
+    // Clamp low
+    build({ ...base, request: { ...base.request, limits: { max_header_count: 0 } } },
+      { outDir: tmpDir, allowPlaceholderToken: true });
+    vr = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    assert.match(vr, /maxHeaderCount: 1,/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('viewer-request enforces max_header_count with 431', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-hc-rt-'));
+  try {
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'], limits: { max_header_count: 3 } },
+      response_headers: {},
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    // Extract handler and invoke it in isolation via Function ctor
+    const sandbox = { handler: null };
+    const run = new Function('sandbox', code + '\nsandbox.handler = handler;');
+    run(sandbox);
+
+    const event = {
+      request: {
+        method: 'GET',
+        uri: '/',
+        querystring: '',
+        headers: {
+          'user-agent': { value: 'Mozilla' },
+          'x-a': { value: '1' },
+          'x-b': { value: '2' },
+          'x-c': { value: '3' },
+          'x-d': { value: '4' },
+        },
+      },
+    };
+    const result = sandbox.handler(event);
+    assert.strictEqual(result.statusCode, 431);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('response_headers.clear_site_data_paths emits directive + no-store on 2xx', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-csd-'));
+  try {
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {
+        clear_site_data_paths: ['/logout', '/session/end'],
+      },
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const resp = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
+    assert.match(resp, /clearSiteDataPaths: \["\/logout","\/session\/end"\]/);
+    assert.match(resp, /clearSiteDataTypes: \["cache","cookies","storage"\]/);
+    assert.match(resp, /Clear-Site-Data/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('response_headers.clear_site_data_types override honored', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-csd-t-'));
+  try {
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {
+        clear_site_data_paths: ['/logout'],
+        clear_site_data_types: ['cache', 'cookies'],
+      },
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const resp = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
+    assert.match(resp, /clearSiteDataTypes: \["cache","cookies"\]/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

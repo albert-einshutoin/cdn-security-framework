@@ -24,6 +24,7 @@ const CFG = {
   maxQueryLength: 512,
   maxQueryParams: 20,
   maxUriLength: 1024,
+  maxHeaderCount: 64,
   dropQueryKeys: new Set(["utm_source","utm_medium","utm_campaign","utm_term","utm_content","gclid","fbclid"]),
   uaDenyContains: ["sqlmap","nikto","acunetix","masscan","python-requests","zgrab","nmap","curl","wget","scanner"],
   blockPathContains: ["/../","..","%2e%2e","%2e%2e"],
@@ -145,6 +146,18 @@ const CFG = {
   function blockIfUriTooLong(req) {
     if ((req.uri || '').length > CFG.maxUriLength) {
       return resp(414, 'URI Too Long');
+    }
+    return null;
+  }
+
+  function blockIfTooManyHeaders(req) {
+    if (!CFG.maxHeaderCount || CFG.maxHeaderCount <= 0) return null;
+    var h = req.headers || {};
+    // Count normalized header names. `headers` keys are already lower-cased by CF.
+    var n = 0;
+    for (var k in h) { if (Object.prototype.hasOwnProperty.call(h, k)) n++; }
+    if (n > CFG.maxHeaderCount) {
+      return resp(431, 'Request Header Fields Too Large');
     }
     return null;
   }
@@ -297,6 +310,11 @@ const CFG = {
     // 2) URI length check
     const uriLen = shouldBlock(blockIfUriTooLong(req));
     if (uriLen) return uriLen;
+
+    // 2b) Header count cap (issue #9) — 431 protects origin parsers from
+    //     hash-collision / amplification under small-but-many-headers payloads.
+    const hc = shouldBlock(blockIfTooManyHeaders(req));
+    if (hc) return hc;
 
     // 3) Path normalization
     normalizePath(req);

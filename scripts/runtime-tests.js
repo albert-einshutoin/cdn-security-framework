@@ -97,6 +97,25 @@ const cases = [
 
   // Query normalization (drop utm_* keys)
   ['GET / with utm params (should be stripped)', buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, 'utm_source=google&foo=bar'), 'allow'],
+
+  // Phase A-4: Header count cap (issue #9). Default is 64 from the compiler.
+  // 64 headers (incl. user-agent) must pass; 65 must get 431.
+  ['GET / with 64 headers (boundary)',
+    (() => {
+      const h = { 'user-agent': 'Mozilla' };
+      for (let i = 0; i < 63; i++) h['x-filler-' + i] = 'v';
+      return buildEvent('GET', '/', h);
+    })(),
+    'allow',
+  ],
+  ['GET / with 65 headers (over cap)',
+    (() => {
+      const h = { 'user-agent': 'Mozilla' };
+      for (let i = 0; i < 64; i++) h['x-filler-' + i] = 'v';
+      return buildEvent('GET', '/', h);
+    })(),
+    431,
+  ],
 ];
 
 let viewerFailed = 0;

@@ -41,6 +41,8 @@ const RESPONSE_CFG = {
   adminCacheControl: "no-store",
   authProtectedPrefixes: ["/admin","/docs","/swagger"],
   forceVaryAuth: true,
+  clearSiteDataPaths: [],
+  clearSiteDataTypes: ["cache","cookies","storage"],
   cors: null,
   cookie_attributes: null,
 };
@@ -120,6 +122,20 @@ function handler(event) {
     if (tokens.indexOf('authorization') === -1) tokens.push('Authorization');
     if (tokens.indexOf('cookie') === -1) tokens.push('Cookie');
     set(h, "Vary", tokens.join(', '));
+  }
+
+  // Clear-Site-Data on configured logout paths (issue #20). Only applied on
+  // 2xx / 3xx to avoid clobbering failed logouts. Forces no-store so a
+  // downstream cache cannot replay the cleared response to a returning user.
+  var status = parseInt(res.statusCode, 10) || 0;
+  var isSuccess = status >= 200 && status < 400;
+  var hitsClearPath = (RESPONSE_CFG.clearSiteDataPaths || []).some(function (p) {
+    return uri === p || uri.startsWith(p + "/");
+  });
+  if (hitsClearPath && isSuccess) {
+    var types = (RESPONSE_CFG.clearSiteDataTypes || []).map(function (t) { return '"' + t + '"'; });
+    if (types.length > 0) set(h, "Clear-Site-Data", types.join(', '));
+    set(h, "Cache-Control", "no-store");
   }
 
   if (h["x-powered-by"]) delete h["x-powered-by"];

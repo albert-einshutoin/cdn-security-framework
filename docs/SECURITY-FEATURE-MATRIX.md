@@ -52,6 +52,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | **Query length limit** | Supported | `request.limits.max_query_length` → 414 if exceeded. |
 | **Query param count limit** | Supported | `request.limits.max_query_params` → 400 if exceeded. |
 | **Header size limit** | Supported | `request.limits.max_header_size` → 431 if exceeded. Lambda@Edge / Cloudflare only. |
+| **Header count limit** | Supported | `request.limits.max_header_count` (default 64, clamped 1..500) → 431 if exceeded. Enforced in CFF viewer-request and Cloudflare Worker entry. |
 | **Path normalization** | Supported | `request.normalize.path.collapse_slashes`, `remove_dot_segments` clean up URIs. |
 | **Query normalization** | Supported | `request.normalize.drop_query_keys` strips tracking params (utm_*, gclid, etc.). |
 | **Required headers** | Supported | `request.block.header_missing` checks for required headers (generalized, not just UA). |

@@ -133,6 +133,18 @@
     return null;
   }
 
+  function blockIfTooManyHeaders(req) {
+    if (!CFG.maxHeaderCount || CFG.maxHeaderCount <= 0) return null;
+    var h = req.headers || {};
+    // Count normalized header names. `headers` keys are already lower-cased by CF.
+    var n = 0;
+    for (var k in h) { if (Object.prototype.hasOwnProperty.call(h, k)) n++; }
+    if (n > CFG.maxHeaderCount) {
+      return resp(431, 'Request Header Fields Too Large');
+    }
+    return null;
+  }
+
   function normalizePath(req) {
     let p = req.uri || '/';
     if (CFG.normalizePath.collapseSlashes) {
@@ -281,6 +293,11 @@
     // 2) URI length check
     const uriLen = shouldBlock(blockIfUriTooLong(req));
     if (uriLen) return uriLen;
+
+    // 2b) Header count cap (issue #9) — 431 protects origin parsers from
+    //     hash-collision / amplification under small-but-many-headers payloads.
+    const hc = shouldBlock(blockIfTooManyHeaders(req));
+    if (hc) return hc;
 
     // 3) Path normalization
     normalizePath(req);

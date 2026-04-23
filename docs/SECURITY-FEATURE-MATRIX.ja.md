@@ -54,6 +54,7 @@
 | **クエリ長制限** | ✅ 対応 | `request.limits.max_query_length` → 超過時 414。 |
 | **クエリパラム数制限** | ✅ 対応 | `request.limits.max_query_params` → 超過時 400。 |
 | **ヘッダーサイズ制限** | ✅ 対応 | `request.limits.max_header_size` → 超過時 431。Lambda@Edge / Cloudflare 限定。 |
+| **ヘッダー数制限** | ✅ 対応 | `request.limits.max_header_count`（既定 64、1..500 にクランプ）→ 超過時 431。CFF viewer-request と Cloudflare Worker の入口で適用。 |
 | **パス正規化** | ✅ 対応 | `request.normalize.path.collapse_slashes`, `remove_dot_segments` で URI をクリーンアップ。 |
 | **クエリ正規化** | ✅ 対応 | `request.normalize.drop_query_keys` でトラッキングパラメータ（utm_*、gclid 等）を除去。 |
 | **必須ヘッダー** | ✅ 対応 | `request.block.header_missing` で必須ヘッダーをチェック（UA 以外も対応）。 |
