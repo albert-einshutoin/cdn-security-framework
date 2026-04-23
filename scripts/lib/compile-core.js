@@ -389,6 +389,51 @@ function hasFailOnPermissiveFlag(argv) {
   return Array.isArray(argv) && argv.includes('--fail-on-permissive');
 }
 
+function hasStrictOriginAuthFlag(argv) {
+  return Array.isArray(argv) && argv.includes('--strict-origin-auth');
+}
+
+// Verify that when origin.auth.type=custom_header is configured, the env var
+// named by `secret_env` is present and non-empty in the build environment.
+// Called with { strict: true } under --strict-origin-auth and as a warning
+// otherwise, so dev builds keep working while CI can fail closed.
+function validateOriginAuth(policy, options = {}) {
+  const env = options.env || process.env;
+  const strict = options.strict === true;
+  const logger = options.logger || console;
+
+  const auth = policy && policy.origin && policy.origin.auth;
+  if (!auth || auth.type !== 'custom_header') return { warnings: [], errors: [] };
+
+  const warnings = [];
+  const errors = [];
+  const envName = auth.secret_env || '';
+  if (!envName) {
+    errors.push('origin.auth.secret_env is required when type=custom_header');
+  } else {
+    const v = env[envName];
+    if (v === undefined) {
+      (strict ? errors : warnings).push(
+        `origin.auth.secret_env "${envName}" is not set in the build environment. Origin will see an empty auth header at runtime unless the env is populated.`
+      );
+    } else if (v.length === 0) {
+      (strict ? errors : warnings).push(
+        `origin.auth.secret_env "${envName}" is set but empty. The edge will refuse to forward the origin-auth header, breaking origin trust.`
+      );
+    }
+  }
+
+  warnings.forEach((w) => logger.warn('[origin-auth] ' + w));
+  if (errors.length > 0 && strict) {
+    logger.error('origin-auth validation failed (--strict-origin-auth):');
+    errors.forEach((e) => logger.error('  - ' + e));
+    const err = new Error('origin-auth validation failed');
+    err.validationErrors = errors;
+    throw err;
+  }
+  return { warnings, errors };
+}
+
 // Heuristic: paths that usually mutate state and therefore deserve replay
 // protection rather than just an expiry window. Matching is permissive (any
 // prefix that contains one of these substrings) because write patterns vary
@@ -673,6 +718,7 @@ function main(argv = process.argv.slice(2)) {
   const { policyPath, outDir } = parseArgs(argv, repoRoot);
   const allowPlaceholderToken = hasAllowPlaceholderFlag(argv);
   const failOnPermissive = hasFailOnPermissiveFlag(argv);
+  const strictOriginAuth = hasStrictOriginAuthFlag(argv);
   let policy;
 
   try {
@@ -696,6 +742,12 @@ function main(argv = process.argv.slice(2)) {
   warnSignedUrlReplay(policy);
 
   validateAuthGates(policy, { allowPlaceholderToken });
+
+  try {
+    validateOriginAuth(policy, { strict: strictOriginAuth });
+  } catch (e) {
+    process.exit(1);
+  }
 
   try {
     const outputs = build(policy, { outDir, rootDir: repoRoot, allowPlaceholderToken });
@@ -727,6 +779,8 @@ module.exports = {
   buildObsConfig,
   hasAllowPlaceholderFlag,
   hasFailOnPermissiveFlag,
+  hasStrictOriginAuthFlag,
+  validateOriginAuth,
   warnIfPermissive,
   warnSignedUrlReplay,
   validateJwksUrl,

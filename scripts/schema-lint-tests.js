@@ -219,6 +219,150 @@ test('lint rejects auth_gate.cache_ttl_sec above 1 day', () => {
   }
 });
 
+test('lint rejects unknown key at top level (additionalProperties:false)', () => {
+  const yaml = basePolicy({}) + '\ntypo_top_level: whatever\n';
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result = runLint(file);
+    assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+    assert.match(result.stderr + result.stdout, /additionalProperty|typo_top_level|additional properties/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint rejects unknown key under request.limits', () => {
+  const yaml = `
+version: 1
+project: schema-lint-test
+request:
+  allow_methods: ["GET"]
+  limits:
+    max_query_length: 1024
+    ratelimit: 100
+response_headers:
+  hsts: "max-age=31536000"
+`;
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result = runLint(file);
+    assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+    assert.match(result.stderr + result.stdout, /additional|ratelimit/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint rejects unknown key under firewall.waf', () => {
+  const yaml = basePolicy({
+    extra: `firewall:
+  waf:
+    scope: CLOUDFRONT
+    rate_limite: 500
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result = runLint(file);
+    assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+    assert.match(result.stderr + result.stdout, /additional|rate_limite/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint rejects unknown key inside routes[]', () => {
+  const yaml = basePolicy({
+    extra: `routes:
+  - name: a
+    match:
+      path_prefixes: ["/a"]
+    cache_control: "no-store"
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result = runLint(file);
+    assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+    assert.match(result.stderr + result.stdout, /additional|cache_control/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint rejects origin.auth custom_header missing secret_env', () => {
+  const yaml = basePolicy({
+    extra: `origin:
+  auth:
+    type: custom_header
+    header: X-Origin-Verify
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result = runLint(file);
+    assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+    assert.match(result.stderr + result.stdout, /secret_env|required/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint rejects origin.auth.secret_env not matching env-var convention', () => {
+  const yaml = basePolicy({
+    extra: `origin:
+  auth:
+    type: custom_header
+    header: X-Origin-Verify
+    secret_env: "lowercase name"
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result = runLint(file);
+    assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+    assert.match(result.stderr + result.stdout, /pattern|secret_env/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint rejects origin.auth.custom_header missing header', () => {
+  const yaml = basePolicy({
+    extra: `origin:
+  auth:
+    type: custom_header
+    secret_env: ORIGIN_SECRET
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result = runLint(file);
+    assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+    assert.match(result.stderr + result.stdout, /header|required/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint accepts complete origin.auth.custom_header', () => {
+  const yaml = basePolicy({
+    extra: `origin:
+  auth:
+    type: custom_header
+    header: X-Origin-Verify
+    secret_env: ORIGIN_SECRET
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result = runLint(file);
+    assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

@@ -608,10 +608,21 @@ export default {
       forwardHeaders.delete(h);
     }
     if (CFG.originAuth && CFG.originAuth.type === 'custom_header') {
-      const secret = env[CFG.originAuth.secret_env || ''] || '';
+      const envName = CFG.originAuth.secret_env || '';
+      const secret = envName ? (env[envName] || '') : '';
       if (secret) {
         const headerName = CFG.originAuth.header || 'X-Origin-Verify';
         forwardHeaders.set(headerName, secret);
+      } else {
+        console.log(JSON.stringify({
+          ts: new Date().toISOString(),
+          level: 'error',
+          event: 'error',
+          block_reason: 'origin_auth_secret_missing',
+          secret_env: envName,
+          uri: ctx.uri,
+          correlation_id: ctx.correlationId,
+        }));
       }
     }
     // Forward signed-URL nonce so origin can enforce single-use. The edge
