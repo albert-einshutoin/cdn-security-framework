@@ -71,6 +71,28 @@ node scripts/policy-lint.js policy/base.yml
 
 ---
 
+## Numeric field bounds
+
+Policy lint (`npm run lint:policy`) rejects values outside these ranges to catch
+footguns (zero/negative limits, runaway caches, WAF-incompatible rate ceilings)
+early. If your environment genuinely needs a value outside these bounds, open an
+issue with the use case.
+
+| Field | Min | Max | Notes |
+|--------|-----|-----|-------|
+| `request.limits.max_query_length` | 1 | 65,536 | Bytes |
+| `request.limits.max_query_params` | 1 | 1,024 | Keys |
+| `request.limits.max_uri_length` | 1 | 8,192 | Bytes |
+| `request.limits.max_header_size` | 1 | 65,536 | Bytes |
+| `routes[].auth_gate.clock_skew_sec` | 0 | 600 | Seconds |
+| `routes[].auth_gate.cache_ttl_sec` | 0 | 86,400 | Seconds (1 day) |
+| `response_headers.cors.max_age` | 0 | 86,400 | Seconds (browser CORS cap) |
+| `firewall.waf.rate_limit` | 100 | 2,000,000,000 | AWS WAFv2 rate-based window |
+| `origin.timeout.connect` | 1 | 10 | CloudFront cap |
+| `origin.timeout.read` | 1 | 60 | CloudFront cap |
+
+---
+
 ## Related
 
 * [Policy and runtime sync](../docs/policy-runtime-sync.md) — how to keep policy and runtimes in sync.

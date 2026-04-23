@@ -31,10 +31,30 @@
         "limits": {
           "type": "object",
           "properties": {
-            "max_query_length": { "type": "integer" },
-            "max_query_params": { "type": "integer" },
-            "max_uri_length": { "type": "integer" },
-            "max_header_size": { "type": "integer" }
+            "max_query_length": {
+              "description": "Maximum querystring length in bytes. Requests exceeding this are rejected at the edge.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "max_query_params": {
+              "description": "Maximum number of querystring keys. Protects against HTTP parameter pollution and cache poisoning.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024
+            },
+            "max_uri_length": {
+              "description": "Maximum request URI (path + query) length in bytes.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8192
+            },
+            "max_header_size": {
+              "description": "Maximum individual request header value size in bytes.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            }
           }
         },
         "block": {
@@ -108,7 +128,12 @@
               "issuer": { "type": "string" },
               "audience": { "type": "string" },
               "secret_env": { "type": "string" },
-              "cache_ttl_sec": { "type": "integer" },
+              "cache_ttl_sec": {
+                "description": "TTL (seconds) for cached gate material (for example, JWKS responses). Bounded to 24h to force rotation windows.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 86400
+              },
               "expires_param": { "type": "string" },
               "signature_param": { "type": "string" }
             }
@@ -135,7 +160,12 @@
             "allow_headers": { "type": "array", "items": { "type": "string" } },
             "expose_headers": { "type": "array", "items": { "type": "string" } },
             "allow_credentials": { "type": "boolean" },
-            "max_age": { "type": "integer" }
+            "max_age": {
+              "description": "CORS preflight cache duration in seconds. Most browsers cap this at 86400 (Chrome) or 7200 (Firefox).",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            }
           }
         },
         "cookie_attributes": {
@@ -154,7 +184,12 @@
         "waf": {
           "type": "object",
           "properties": {
-            "rate_limit": { "type": "integer" },
+            "rate_limit": {
+              "description": "Per-IP request ceiling over the 5-minute WAF rate-based window. AWS WAFv2 accepts 100..2,000,000,000.",
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 2000000000
+            },
             "scope": { "enum": ["REGIONAL", "CLOUDFRONT"] },
             "managed_rules": { "type": "array", "items": { "type": "string" } },
             "ja3_fingerprints": { "type": "array", "items": { "type": "string" } },
@@ -210,8 +245,18 @@
         "timeout": {
           "type": "object",
           "properties": {
-            "connect": { "type": "integer" },
-            "read": { "type": "integer" }
+            "connect": {
+              "description": "Origin connect timeout in seconds. CloudFront caps this at 10s.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "read": {
+              "description": "Origin read/response timeout in seconds. CloudFront caps this at 60s.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60
+            }
           }
         }
       }
