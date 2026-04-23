@@ -101,6 +101,13 @@ This framework addresses these with **"policy-driven" + "runtime separation"**.
 
 See [IaC integration](docs/iac.md) for Terraform / CDK / WAF usage.
 
+### Operational docs
+- [CLI reference](docs/cli.md) — `init` / `build` / `emit-waf` / `doctor` / `migrate`
+- [Archetypes](docs/archetypes.md) — app-shaped policy presets (SPA, REST API, admin, microservice)
+- [Secret rotation runbook](docs/runbooks/secret-rotation.md) — JWT / JWKS / signed URL / admin token / origin secret
+- [Schema migration](docs/schema-migration.md) — how `policy/schema.json` evolves and the `migrate` CLI
+- [Supply chain](docs/supply-chain.md) — SLSA v1 provenance and `npm audit signatures`
+
 ---
 
 ## Policy and Runtimes
@@ -125,9 +132,10 @@ npm install --save-dev cdn-security-framework
 npx cdn-security init
 ```
 
-Answer the prompts (platform: AWS / Cloudflare, profile: Strict / Balanced / Permissive). This creates `policy/security.yml` and `policy/profiles/<profile>.yml`.
+Answer the prompts. You can start from a **profile** (`strict` / `balanced` / `permissive`) or an **archetype** (`spa-static-site`, `rest-api`, `admin-panel`, `microservice-origin`). This creates `policy/security.yml` and a reference copy under `policy/profiles/` or `policy/archetypes/`.
 
 Or non-interactive: `npx cdn-security init --platform aws --profile balanced --force`
+Or with an archetype: `npx cdn-security init --platform aws --archetype rest-api --force`
 
 ### 3. Edit and build
 
@@ -157,6 +165,14 @@ npm run test:security-baseline
 ```
 
 Runs runtime, unit, drift, and security-baseline checks used by CI.
+
+### 4.5 Diagnose (optional but recommended before first deploy)
+
+```bash
+npx cdn-security doctor
+```
+
+One-shot pass/fail report: Node version, policy parseability / schema version, every env var referenced by auth gates (`EDGE_ADMIN_TOKEN`, `JWT_SECRET`, `ORIGIN_SECRET`, ...), `dist/edge/` writability, and `npm ls` cleanliness. Writes `doctor-report.json` for CI capture. See [CLI reference](docs/cli.md) for details.
 
 ### 5. Deploy
 
