@@ -4,9 +4,9 @@ name: Policy Lint & Build Check
 
 on:
   push:
-    branches: [main]
+    branches: [main, develop]
   pull_request:
-    branches: [main]
+    branches: [main, develop]
   workflow_dispatch:
 
 permissions:
@@ -25,16 +25,19 @@ jobs:
       # This is not a production secret — real deployments use GitHub Secrets.
       EDGE_ADMIN_TOKEN: ci-build-token-not-for-deploy
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
           node-version: '20'
           cache: 'npm'
 
       - name: Install dependencies
         run: npm ci
+
+      - name: npm audit (block HIGH/CRITICAL vulnerabilities)
+        run: npm audit --audit-level=high
 
       - name: Policy lint (security / base)
         run: |
