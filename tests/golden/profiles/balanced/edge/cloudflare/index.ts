@@ -23,6 +23,8 @@ const CFG = {
   cors: null,
   authGates: [{"name":"admin","protectedPrefixes":["/admin","/docs","/swagger"],"type":"static_token","tokenHeaderName":"x-edge-token","tokenEnv":"EDGE_ADMIN_TOKEN"}],
   originAuth: null,
+  jwksStaleIfErrorSec: 3600,
+  jwksNegativeCacheSec: 60,
 };
 
 const RESPONSE_CFG = {
@@ -48,6 +50,9 @@ type JwksCacheEntry = {
 };
 
 const jwksCache = new Map<string, JwksCacheEntry>();
+
+type JwksNegativeEntry = { failedAt: number; reason: string };
+const jwksNegativeCache = new Map<string, JwksNegativeEntry>();
 
 function deny(code: number, msg: string) {
   return new Response(msg, { status: code, headers: { 'cache-control': 'no-store' } });
@@ -93,10 +98,20 @@ function decodeJwtPart(part: string): any {
 }
 
 function timingSafeEqual(a: string, b: string): boolean {
-  if (a.length !== b.length) return false;
-  let diff = 0;
-  for (let i = 0; i < a.length; i++) {
-    diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  // Iterates at least PAD (64) positions so short tokens (the common case)
+  // take constant time regardless of prefix match — avoids the admin-prefix
+  // timing oracle in threat-model §12. Longer tokens scale with max(|a|, |b|),
+  // same as Go's hmac.Equal. No early-exit on length mismatch.
+  const PAD = 64;
+  const sa = typeof a === 'string' ? a : '';
+  const sb = typeof b === 'string' ? b : '';
+  let len = sa.length > sb.length ? sa.length : sb.length;
+  if (len < PAD) len = PAD;
+  let diff = (sa.length ^ sb.length) | 0;
+  for (let i = 0; i < len; i++) {
+    const ca = i < sa.length ? sa.charCodeAt(i) : 0;
+    const cb = i < sb.length ? sb.charCodeAt(i) : 0;
+    diff |= (ca ^ cb);
   }
   return diff === 0;
 }
@@ -139,19 +154,49 @@ async function fetchJwks(jwksUrl: string, ttlSec: number): Promise<Array<Record<
   }
   const now = Date.now();
   const cached = jwksCache.get(jwksUrl);
+
+  // Fresh window — serve cache
   if (cached && (now - cached.fetchedAt) < ttlSec * 1000) {
     return cached.keys;
   }
 
-  // `redirect: 'error'` forces Workers' fetch to refuse any 3xx, so an
-  // attacker who briefly controls the JWKS host cannot redirect us to a
-  // cloud-metadata endpoint or a different tenant's IdP.
-  const res = await fetch(jwksUrl, { method: 'GET', redirect: 'error' });
-  if (!res.ok) throw new Error('Failed to fetch JWKS: ' + res.status);
-  const body = await res.json();
-  const keys = Array.isArray(body?.keys) ? body.keys : [];
-  jwksCache.set(jwksUrl, { fetchedAt: now, keys });
-  return keys;
+  const staleIfErrorSec: number = typeof (CFG as any).jwksStaleIfErrorSec === 'number' ? (CFG as any).jwksStaleIfErrorSec : 3600;
+  const negativeCacheSec: number = typeof (CFG as any).jwksNegativeCacheSec === 'number' ? (CFG as any).jwksNegativeCacheSec : 60;
+  const staleWindowMs = (ttlSec + staleIfErrorSec) * 1000;
+  const negativeWindowMs = negativeCacheSec * 1000;
+
+  // Honor negative cache — skip re-fetch if we just failed and have stale
+  // keys to serve. Prevents hammering a broken IdP.
+  const neg = jwksNegativeCache.get(jwksUrl);
+  if (neg && (now - neg.failedAt) < negativeWindowMs) {
+    if (cached && (now - cached.fetchedAt) < staleWindowMs) {
+      console.log('[jwks] serving stale keys (negative cache active)');
+      return cached.keys;
+    }
+    throw new Error('JWKS fetch skipped (negative cache): ' + neg.reason);
+  }
+
+  try {
+    // `redirect: 'error'` forces Workers' fetch to refuse any 3xx, so an
+    // attacker who briefly controls the JWKS host cannot redirect us to a
+    // cloud-metadata endpoint or a different tenant's IdP.
+    const res = await fetch(jwksUrl, { method: 'GET', redirect: 'error' });
+    if (!res.ok) throw new Error('Failed to fetch JWKS: ' + res.status);
+    const body = await res.json();
+    const keys = Array.isArray((body as any)?.keys) ? (body as any).keys : [];
+    jwksCache.set(jwksUrl, { fetchedAt: now, keys });
+    jwksNegativeCache.delete(jwksUrl);
+    return keys;
+  } catch (err: any) {
+    jwksNegativeCache.set(jwksUrl, { failedAt: now, reason: err?.message || 'unknown' });
+    // Stale-if-error: keep serving the last known-good keys during the
+    // stale-if-error window so an IdP outage doesn't cause 100% 401.
+    if (cached && (now - cached.fetchedAt) < staleWindowMs) {
+      console.log('[jwks] refresh failed, serving stale keys:', err?.message);
+      return cached.keys;
+    }
+    throw err;
+  }
 }
 
 function isJwtAlgAllowed(headerAlg: unknown, gate: any, expected: string): boolean {
@@ -207,8 +252,16 @@ async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ va
 
   if (gate.algorithm === 'RS256') {
     if (!gate.jwks_url) return { valid: false, error: 'JWKS URL missing' };
-    const keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
-    const jwk = keys.find((k) => k.kid === header.kid && k.kty === 'RSA');
+    let keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
+    let jwk = keys.find((k) => k.kid === header.kid && k.kty === 'RSA');
+    // Key rotation: if `kid` is not in our cache, invalidate and refetch once
+    // — the IdP may have rotated keys since our last fetch. This prevents a
+    // "stuck isolate" 401 storm after rotation.
+    if (!jwk) {
+      jwksCache.delete(gate.jwks_url);
+      keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
+      jwk = keys.find((k) => k.kid === header.kid && k.kty === 'RSA');
+    }
     if (!jwk) return { valid: false, error: 'JWK key not found' };
 
     const verifyKey = await crypto.subtle.importKey(

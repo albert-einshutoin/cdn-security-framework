@@ -240,6 +240,18 @@
               "description": "Exact-match hostname allowlist for any `routes[].auth_gate.jwks_url`. Comparison is case-insensitive. Wildcards are not supported — list each IdP host explicitly.",
               "type": "array",
               "items": { "type": "string" }
+            },
+            "stale_if_error_sec": {
+              "description": "Window (seconds, default 3600, max 86400) to keep serving an expired JWKS cache entry if a refresh fails. Protects against IdP outages causing 100% auth failure. Set to 0 to disable.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "negative_cache_sec": {
+              "description": "TTL (seconds, default 60, max 600) for caching JWKS fetch failures to avoid hammering a broken IdP with retries. Set to 0 to disable.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 600
             }
           }
         }

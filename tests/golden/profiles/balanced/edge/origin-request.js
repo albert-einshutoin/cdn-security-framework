@@ -24,11 +24,23 @@ const CFG = {
   jwtGates: [],
   signedUrlGates: [],
   originAuth: null,
+  jwksStaleIfErrorSec: 3600,
+  jwksNegativeCacheSec: 60,
 };
 
-// JWKS cache (persists across Lambda container reuse)
+// JWKS cache (persists across Lambda container reuse).
+// Each entry: { keys, time }  — time is ms since epoch of last successful fetch.
+// Negative cache: { failedAt } — records last fetch failure timestamp to
+// avoid hammering a broken IdP.
 let jwksCache = {};
-const JWKS_CACHE_TTL = 3600000; // 1 hour
+let jwksNegativeCache = {};
+const JWKS_CACHE_TTL = 600000; // 10 min fresh window (issue #41 default)
+function jwksStaleIfErrorMs() {
+  return (CFG && typeof CFG.jwksStaleIfErrorSec === 'number' ? CFG.jwksStaleIfErrorSec : 3600) * 1000;
+}
+function jwksNegativeCacheMs() {
+  return (CFG && typeof CFG.jwksNegativeCacheSec === 'number' ? CFG.jwksNegativeCacheSec : 60) * 1000;
+}
 
 function resp(statusCode, body) {
   return {
@@ -83,17 +95,8 @@ function isUnsafeJwksUrl(rawUrl) {
   return null;
 }
 
-// Fetch JWKS from URL with caching
-async function fetchJwks(url) {
-  const unsafe = isUnsafeJwksUrl(url);
-  if (unsafe) {
-    throw new Error('JWKS URL rejected: ' + unsafe);
-  }
-  const now = Date.now();
-  if (jwksCache[url] && (now - jwksCache[url].time) < JWKS_CACHE_TTL) {
-    return jwksCache[url].keys;
-  }
-
+// Raw network fetch (no cache). Caller handles caching policy.
+function fetchJwksNetwork(url) {
   return new Promise((resolve, reject) => {
     const req = https.get(url, (res) => {
       // Refuse to follow cross-origin redirects (302 to 169.254.169.254,
@@ -114,7 +117,6 @@ async function fetchJwks(url) {
       res.on('end', () => {
         try {
           const jwks = JSON.parse(data);
-          jwksCache[url] = { keys: jwks.keys, time: now };
           resolve(jwks.keys);
         } catch (e) {
           reject(e);
@@ -129,8 +131,56 @@ async function fetchJwks(url) {
   });
 }
 
+// Fetch JWKS with:
+// - Fresh cache window (JWKS_CACHE_TTL, 10 min)
+// - Negative cache on failure (CFG.jwksNegativeCacheSec) to avoid hammering
+//   a broken IdP
+// - Stale-if-error (CFG.jwksStaleIfErrorSec) — on refresh failure, keep
+//   serving the last known-good keys until this window expires
+async function fetchJwks(url) {
+  const unsafe = isUnsafeJwksUrl(url);
+  if (unsafe) {
+    throw new Error('JWKS URL rejected: ' + unsafe);
+  }
+  const now = Date.now();
+  const cached = jwksCache[url];
+
+  // Serve fresh cache
+  if (cached && (now - cached.time) < JWKS_CACHE_TTL) {
+    return cached.keys;
+  }
+
+  // Honor negative cache window
+  const neg = jwksNegativeCache[url];
+  if (neg && (now - neg.failedAt) < jwksNegativeCacheMs()) {
+    // If we have stale-but-within-stale-window keys, keep serving them
+    if (cached && (now - cached.time) < (JWKS_CACHE_TTL + jwksStaleIfErrorMs())) {
+      console.log('[jwks] serving stale keys (negative cache active)');
+      return cached.keys;
+    }
+    throw new Error('JWKS fetch skipped (negative cache): ' + (neg.reason || 'unknown'));
+  }
+
+  try {
+    const keys = await fetchJwksNetwork(url);
+    jwksCache[url] = { keys, time: now };
+    delete jwksNegativeCache[url];
+    return keys;
+  } catch (err) {
+    jwksNegativeCache[url] = { failedAt: now, reason: err && err.message };
+    // Stale-if-error: fall back to last known-good keys if still within the
+    // stale-if-error window
+    if (cached && (now - cached.time) < (JWKS_CACHE_TTL + jwksStaleIfErrorMs())) {
+      console.log('[jwks] refresh failed, serving stale keys:', err && err.message);
+      return cached.keys;
+    }
+    throw err;
+  }
+}
+
 function invalidateJwksCache(url) {
   delete jwksCache[url];
+  delete jwksNegativeCache[url];
 }
 
 // Base64URL decode

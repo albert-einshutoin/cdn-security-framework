@@ -138,6 +138,13 @@ const allowedHosts = rawAllowedHosts
   .map((h) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
   .filter(Boolean);
 const trustForwardedFor = request.trust_forwarded_for === true;
+const jwksGlobal = (policy.firewall || {}).jwks || {};
+const jwksStaleIfError = Number.isFinite(Number(jwksGlobal.stale_if_error_sec))
+  ? Math.max(0, Math.min(86400, Number(jwksGlobal.stale_if_error_sec)))
+  : 3600;
+const jwksNegativeCache = Number.isFinite(Number(jwksGlobal.negative_cache_sec))
+  ? Math.max(0, Math.min(600, Number(jwksGlobal.negative_cache_sec)))
+  : 60;
 
 const cfgCode = [
   'const CFG = {',
@@ -158,6 +165,8 @@ const cfgCode = [
   `  cors: ${JSON.stringify(corsConfig)},`,
   `  authGates: ${JSON.stringify(authGates)},`,
   `  originAuth: ${JSON.stringify(originAuth)},`,
+  `  jwksStaleIfErrorSec: ${jwksStaleIfError},`,
+  `  jwksNegativeCacheSec: ${jwksNegativeCache},`,
   '};',
 ].join('\n');
 
