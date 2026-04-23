@@ -150,6 +150,91 @@ function regexesLiteralCode(regexSources) {
   return '[' + literals.join(', ') + ']';
 }
 
+// Reject JWKS URLs that point at loopback, private, link-local, or other
+// internal address ranges. An attacker who can influence the JWKS URL at
+// build time (via a policy PR) or at runtime (via a regression that lets a
+// client seed the cache) could otherwise force the edge to fetch cloud
+// metadata endpoints (169.254.169.254) or internal services.
+const JWKS_DISALLOWED_HOSTNAMES = new Set([
+  'localhost',
+  'ip6-localhost',
+  'ip6-loopback',
+  'broadcasthost',
+]);
+
+function isPrivateIPv4Literal(hostname) {
+  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
+  if (!m) return false;
+  const octets = m.slice(1, 5).map(Number);
+  if (octets.some((o) => o < 0 || o > 255)) return false;
+  const [a, b] = octets;
+  if (a === 10) return true;                             // 10.0.0.0/8
+  if (a === 127) return true;                            // loopback
+  if (a === 172 && b >= 16 && b <= 31) return true;      // 172.16.0.0/12
+  if (a === 192 && b === 168) return true;               // 192.168.0.0/16
+  if (a === 169 && b === 254) return true;               // link-local / metadata
+  if (a === 100 && b >= 64 && b <= 127) return true;     // CGN 100.64.0.0/10
+  if (a === 0) return true;                              // 0.0.0.0/8
+  if (a >= 224) return true;                             // multicast / reserved
+  return false;
+}
+
+function isPrivateIPv6Literal(hostname) {
+  const h = hostname.startsWith('[') && hostname.endsWith(']')
+    ? hostname.slice(1, -1).toLowerCase()
+    : hostname.toLowerCase();
+  if (!h.includes(':')) return false;
+  if (h === '::' || h === '::1') return true;
+  if (h.startsWith('fe80:') || h.startsWith('fe80::')) return true;   // link-local
+  if (h.startsWith('fc') || h.startsWith('fd')) return true;          // ULA fc00::/7
+  // IPv4-mapped IPv6 (::ffff:a.b.c.d). Node's WHATWG URL normalizes the
+  // trailing IPv4 to hex (e.g. ::ffff:127.0.0.1 → ::ffff:7f00:1), so we
+  // reject the entire `::ffff:` family. Legitimate public IdPs never serve
+  // JWKS behind an IPv4-mapped literal — they use a real v4 or v6 address.
+  if (h.startsWith('::ffff:')) return true;
+  return false;
+}
+
+function validateJwksUrl(rawUrl, allowedHosts) {
+  if (typeof rawUrl !== 'string' || rawUrl.trim() === '') {
+    return { ok: false, reason: 'jwks_url is empty' };
+  }
+  let parsed;
+  try {
+    parsed = new URL(rawUrl);
+  } catch {
+    return { ok: false, reason: `jwks_url is not a valid URL: ${rawUrl}` };
+  }
+  if (parsed.protocol !== 'https:') {
+    return { ok: false, reason: `jwks_url must use https:// (got ${parsed.protocol})` };
+  }
+  if (parsed.username || parsed.password) {
+    return { ok: false, reason: 'jwks_url must not contain userinfo (user:pass@host)' };
+  }
+  const hostname = (parsed.hostname || '').toLowerCase();
+  if (!hostname) {
+    return { ok: false, reason: 'jwks_url has empty hostname' };
+  }
+  if (JWKS_DISALLOWED_HOSTNAMES.has(hostname)) {
+    return { ok: false, reason: `jwks_url hostname "${hostname}" is a loopback alias` };
+  }
+  if (isPrivateIPv4Literal(hostname) || isPrivateIPv6Literal(parsed.hostname)) {
+    return { ok: false, reason: `jwks_url hostname "${hostname}" resolves to a private/loopback/link-local range` };
+  }
+  if (Array.isArray(allowedHosts) && allowedHosts.length > 0) {
+    const normalized = allowedHosts
+      .map((h) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
+      .filter(Boolean);
+    if (!normalized.includes(hostname)) {
+      return {
+        ok: false,
+        reason: `jwks_url hostname "${hostname}" is not in firewall.jwks.allowed_hosts (${normalized.join(', ')})`,
+      };
+    }
+  }
+  return { ok: true, hostname };
+}
+
 function validateAuthGates(policy, options = {}) {
   const exitOnError = options.exitOnError !== false;
   const logger = options.logger || console;
@@ -157,6 +242,7 @@ function validateAuthGates(policy, options = {}) {
   const allowPlaceholderToken = options.allowPlaceholderToken === true;
   const routes = policy.routes || [];
   const errors = [];
+  const jwksAllowedHosts = ((policy.firewall || {}).jwks || {}).allowed_hosts;
 
   for (const route of routes) {
     const gate = route.auth_gate;
@@ -168,6 +254,12 @@ function validateAuthGates(policy, options = {}) {
       const alg = gate.algorithm || 'RS256';
       if (alg === 'RS256' && !gate.jwks_url) {
         errors.push(`Route "${name}": JWT+RS256 requires "jwks_url"`);
+      }
+      if (gate.jwks_url) {
+        const v = validateJwksUrl(gate.jwks_url, jwksAllowedHosts);
+        if (!v.ok) {
+          errors.push(`Route "${name}": ${v.reason}`);
+        }
       }
       if (alg === 'HS256' && !gate.secret_env) {
         errors.push(`Route "${name}": JWT+HS256 requires "secret_env"`);
@@ -534,6 +626,7 @@ module.exports = {
   hasAllowPlaceholderFlag,
   hasFailOnPermissiveFlag,
   warnIfPermissive,
+  validateJwksUrl,
   build,
   main,
   PLACEHOLDER_TOKEN,

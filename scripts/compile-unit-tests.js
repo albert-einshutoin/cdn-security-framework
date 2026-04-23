@@ -10,6 +10,7 @@ const {
   regexesLiteralCode,
   getAuthGates,
   validateAuthGates,
+  validateJwksUrl,
   build,
   PLACEHOLDER_TOKEN,
   hasFailOnPermissiveFlag,
@@ -589,6 +590,107 @@ test('warnIfPermissive fails when failOnPermissive is true', () => {
   assert.deepStrictEqual(result, { warned: true, failed: true });
   assert.strictEqual(captured.length, 2);
   assert.match(captured[1], /refusing to build a permissive policy/);
+});
+
+test('validateJwksUrl accepts well-formed public https URLs', () => {
+  assert.deepStrictEqual(
+    validateJwksUrl('https://idp.example.com/.well-known/jwks.json').ok,
+    true,
+  );
+  assert.deepStrictEqual(
+    validateJwksUrl('https://login.microsoftonline.com/common/discovery/v2.0/keys').ok,
+    true,
+  );
+});
+
+test('validateJwksUrl rejects non-https schemes', () => {
+  assert.strictEqual(validateJwksUrl('http://idp.example.com/jwks.json').ok, false);
+  assert.strictEqual(validateJwksUrl('file:///etc/passwd').ok, false);
+  assert.strictEqual(validateJwksUrl('ftp://example.com/jwks.json').ok, false);
+});
+
+test('validateJwksUrl rejects URLs with userinfo', () => {
+  const r = validateJwksUrl('https://user:pass@idp.example.com/jwks.json');
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, /userinfo/);
+});
+
+test('validateJwksUrl rejects loopback / private / link-local hostnames', () => {
+  const cases = [
+    'https://localhost/jwks.json',
+    'https://127.0.0.1/jwks.json',
+    'https://127.5.5.5/jwks.json',
+    'https://10.0.0.1/jwks.json',
+    'https://10.255.255.254/jwks.json',
+    'https://192.168.1.1/jwks.json',
+    'https://172.16.0.1/jwks.json',
+    'https://172.31.255.255/jwks.json',
+    'https://169.254.169.254/latest/meta-data/',
+    'https://0.0.0.0/jwks.json',
+    'https://[::1]/jwks.json',
+    'https://[fe80::1]/jwks.json',
+    'https://[fc00::1]/jwks.json',
+    'https://[::ffff:127.0.0.1]/jwks.json',
+  ];
+  for (const url of cases) {
+    const r = validateJwksUrl(url);
+    assert.strictEqual(r.ok, false, `should reject ${url}`);
+  }
+});
+
+test('validateJwksUrl enforces allowed_hosts when provided', () => {
+  const allow = ['idp.example.com', 'Auth.Example.Com'];
+  assert.strictEqual(validateJwksUrl('https://idp.example.com/jwks.json', allow).ok, true);
+  assert.strictEqual(validateJwksUrl('https://auth.example.com/jwks.json', allow).ok, true);
+  const r = validateJwksUrl('https://evil.example.com/jwks.json', allow);
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, /firewall\.jwks\.allowed_hosts/);
+});
+
+test('validateAuthGates rejects jwks_url in private/loopback ranges', () => {
+  const policy = {
+    routes: [
+      {
+        name: 'metadata-ssrf',
+        auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://169.254.169.254/latest/' },
+      },
+    ],
+  };
+  assert.throws(
+    () => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }),
+    (err) => Array.isArray(err.validationErrors)
+      && err.validationErrors.some((e) => /metadata-ssrf/.test(e) && /private\/loopback/.test(e)),
+  );
+});
+
+test('validateAuthGates rejects jwks_url outside firewall.jwks.allowed_hosts', () => {
+  const policy = {
+    firewall: { jwks: { allowed_hosts: ['idp.example.com'] } },
+    routes: [
+      {
+        name: 'wrong-idp',
+        auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://attacker.example/jwks.json' },
+      },
+    ],
+  };
+  assert.throws(
+    () => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }),
+    (err) => Array.isArray(err.validationErrors)
+      && err.validationErrors.some((e) => /wrong-idp/.test(e) && /allowed_hosts/.test(e)),
+  );
+});
+
+test('validateAuthGates accepts jwks_url on allowed_hosts (case-insensitive)', () => {
+  const policy = {
+    firewall: { jwks: { allowed_hosts: ['IDP.Example.COM'] } },
+    routes: [
+      {
+        name: 'good-idp',
+        auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://idp.example.com/jwks.json' },
+      },
+    ],
+  };
+  validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true });
 });
 
 if (process.exitCode) {

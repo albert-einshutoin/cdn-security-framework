@@ -54,8 +54,33 @@ function checkHeaderSize(request) {
   return null;
 }
 
+// Defense-in-depth check before every outbound JWKS fetch. The build-time
+// validator already rejects unsafe URLs, but runtime re-validation limits
+// the blast radius of any future regression (cache-poisoning, config hot-
+// reload bugs, operator typo bypassing lint) that allows an http:// or
+// private-range URL to reach here.
+function isUnsafeJwksUrl(rawUrl) {
+  let u;
+  try { u = new URL(rawUrl); } catch { return 'malformed URL'; }
+  if (u.protocol !== 'https:') return 'non-https scheme';
+  if (u.username || u.password) return 'userinfo present';
+  const host = (u.hostname || '').toLowerCase();
+  if (!host || host === 'localhost') return 'loopback hostname';
+  if (/^127\./.test(host) || host === '::1' || host === '[::1]') return 'loopback literal';
+  if (/^10\./.test(host)) return 'rfc1918 10/8';
+  if (/^192\.168\./.test(host)) return 'rfc1918 192.168/16';
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return 'rfc1918 172.16/12';
+  if (/^169\.254\./.test(host)) return 'link-local / metadata';
+  if (/^0\./.test(host)) return 'reserved 0/8';
+  return null;
+}
+
 // Fetch JWKS from URL with caching
 async function fetchJwks(url) {
+  const unsafe = isUnsafeJwksUrl(url);
+  if (unsafe) {
+    throw new Error('JWKS URL rejected: ' + unsafe);
+  }
   const now = Date.now();
   if (jwksCache[url] && (now - jwksCache[url].time) < JWKS_CACHE_TTL) {
     return jwksCache[url].keys;
@@ -63,6 +88,19 @@ async function fetchJwks(url) {
 
   return new Promise((resolve, reject) => {
     const req = https.get(url, (res) => {
+      // Refuse to follow cross-origin redirects (302 to 169.254.169.254,
+      // to http://, etc.). Node's https.get does not follow redirects by
+      // default, but be explicit in case that ever changes.
+      if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400) {
+        res.resume();
+        reject(new Error('JWKS fetch refused redirect: ' + res.statusCode));
+        return;
+      }
+      if (res.statusCode !== 200) {
+        res.resume();
+        reject(new Error('JWKS fetch failed: ' + res.statusCode));
+        return;
+      }
       let data = '';
       res.on('data', (chunk) => { data += chunk; });
       res.on('end', () => {
@@ -388,6 +426,24 @@ exports.handler = async (event) => {
     // origin and may be invoked without a preceding CFF in some setups.
     if (req && req.headers && !CFG.trustForwardedFor) {
       delete req.headers['x-forwarded-for'];
+    }
+
+    // Request-smuggling defense: strip hop-by-hop headers before origin
+    // forward. Any client-supplied `Transfer-Encoding: chunked`,
+    // `Connection: ...`, or `Upgrade` can desynchronize the CloudFront ↔
+    // origin framing (CL.TE / TE.CL / H2.TE) and smuggle a second request.
+    // CloudFront itself re-frames the request, so these headers carry no
+    // legitimate meaning from the viewer.
+    if (req && req.headers) {
+      delete req.headers['transfer-encoding'];
+      delete req.headers['connection'];
+      delete req.headers['keep-alive'];
+      delete req.headers['te'];
+      delete req.headers['upgrade'];
+      delete req.headers['proxy-connection'];
+      delete req.headers['proxy-authenticate'];
+      delete req.headers['proxy-authorization'];
+      delete req.headers['trailer'];
     }
 
     // Header size check (Lambda@Edge can access all headers)
