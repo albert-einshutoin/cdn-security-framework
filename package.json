@@ -9,7 +9,7 @@
     "build": "node scripts/compile.js",
     "lint:policy": "node scripts/policy-lint.js",
     "test:runtime": "node scripts/runtime-tests.js && node scripts/cloudflare-runtime-tests.js",
-    "test:unit": "node scripts/compile-unit-tests.js && node scripts/infra-unit-tests.js && node scripts/schema-lint-tests.js",
+    "test:unit": "node scripts/compile-unit-tests.js && node scripts/infra-unit-tests.js && node scripts/schema-lint-tests.js && node scripts/doctor-unit-tests.js && node scripts/emit-waf-unit-tests.js",
     "test:drift": "node scripts/check-drift.js",
     "test:security-baseline": "node scripts/security-baseline-check.js",
     "test:fuzz": "node scripts/regex-fuzz-tests.js",
@@ -41,6 +41,7 @@
     "scripts/",
     "templates/",
     "policy/profiles/",
+    "policy/archetypes/",
     "policy/schema.json"
   ],
   "repository": {
