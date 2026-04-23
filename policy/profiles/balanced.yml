@@ -4,6 +4,10 @@
 version: 1
 project: example-cdn-security
 
+metadata:
+  risk_level: balanced
+  description: "Default profile: balanced security vs compatibility for typical web/API traffic."
+
 defaults:
   mode: "enforce"          # enforce | monitor (monitor needs logging/metrics)
   response:

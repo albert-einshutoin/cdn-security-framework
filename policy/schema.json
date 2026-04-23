@@ -7,6 +7,18 @@
   "properties": {
     "version": { "type": "integer", "const": 1 },
     "project": { "type": "string" },
+    "metadata": {
+      "description": "Optional profile / policy metadata. `risk_level` hints the intended security posture — `permissive` triggers a build-time warning so operators do not accidentally ship a loose policy to production.",
+      "type": "object",
+      "properties": {
+        "risk_level": {
+          "description": "Intended posture: strict, balanced, or permissive. Build warns on permissive and can be hard-failed with --fail-on-permissive.",
+          "enum": ["strict", "balanced", "permissive"]
+        },
+        "description": { "type": "string" },
+        "owner": { "type": "string" }
+      }
+    },
     "defaults": {
       "type": "object",
       "properties": {

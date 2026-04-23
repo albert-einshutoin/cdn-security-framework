@@ -5,6 +5,10 @@
 version: 1
 project: example-cdn-security
 
+metadata:
+  risk_level: permissive
+  description: "Permissive profile: intentionally loose. NOT recommended for production — build prints a warning and can be hard-failed with --fail-on-permissive."
+
 defaults:
   mode: "enforce"
   response:

@@ -93,8 +93,21 @@ issue with the use case.
 
 ---
 
+## Permissive profile warning
+
+The `permissive` profile is tagged `metadata.risk_level: permissive`. Whenever the compiler sees that tag it prints a warning to stderr and, if `--fail-on-permissive` is passed, exits non-zero. Gate production CI with:
+
+```bash
+npx cdn-security build --fail-on-permissive
+```
+
+See [docs/profiles.md](../docs/profiles.md) for the full profile comparison and the recommended dev/prod gate pattern.
+
+---
+
 ## Related
 
+* [Profiles](../docs/profiles.md) — how to choose a profile and gate permissive in production CI.
 * [Policy and runtime sync](../docs/policy-runtime-sync.md) — how to keep policy and runtimes in sync.
 * [Architecture](../docs/architecture.md) — policy-driven design.
 

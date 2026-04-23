@@ -293,6 +293,28 @@ function hasAllowPlaceholderFlag(argv) {
   return Array.isArray(argv) && argv.includes('--allow-placeholder-token');
 }
 
+function hasFailOnPermissiveFlag(argv) {
+  return Array.isArray(argv) && argv.includes('--fail-on-permissive');
+}
+
+function warnIfPermissive(policy, options = {}) {
+  const failOnPermissive = options.failOnPermissive === true;
+  const logger = options.logger || console;
+  const risk = policy && policy.metadata && policy.metadata.risk_level;
+  if (risk !== 'permissive') {
+    return { warned: false, failed: false };
+  }
+  const msg =
+    '[WARN] metadata.risk_level is "permissive" — this profile is intentionally loose and NOT recommended for production. ' +
+    'See docs/profiles.md. Pass --fail-on-permissive in CI to hard-fail.';
+  logger.error(msg);
+  if (failOnPermissive) {
+    logger.error('[ERROR] --fail-on-permissive set; refusing to build a permissive policy.');
+    return { warned: true, failed: true };
+  }
+  return { warned: true, failed: false };
+}
+
 function build(policy, options = {}) {
   const rootDir = options.rootDir || repoRoot;
   const outDir = options.outDir || path.join(rootDir, 'dist');
@@ -460,6 +482,7 @@ function build(policy, options = {}) {
 function main(argv = process.argv.slice(2)) {
   const { policyPath, outDir } = parseArgs(argv, repoRoot);
   const allowPlaceholderToken = hasAllowPlaceholderFlag(argv);
+  const failOnPermissive = hasFailOnPermissiveFlag(argv);
   let policy;
 
   try {
@@ -470,6 +493,12 @@ function main(argv = process.argv.slice(2)) {
       process.exit(1);
     }
     console.error('Error: failed to parse policy YAML:', e.message);
+    process.exit(1);
+  }
+
+  // Surface permissive-profile warning before wasting build time.
+  const permissive = warnIfPermissive(policy, { failOnPermissive });
+  if (permissive.failed) {
     process.exit(1);
   }
 
@@ -503,6 +532,8 @@ module.exports = {
   regexesLiteralCode,
   getAuthGates,
   hasAllowPlaceholderFlag,
+  hasFailOnPermissiveFlag,
+  warnIfPermissive,
   build,
   main,
   PLACEHOLDER_TOKEN,
