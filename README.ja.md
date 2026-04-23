@@ -1,5 +1,7 @@
 # CDN セキュリティフレームワーク
 
+> **言語:** [English](./README.md) · 日本語
+
 ## 概要
 
 **CDN Security Framework** は、CloudFront / CloudFront Functions / Lambda@Edge / Cloudflare Workers など、

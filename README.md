@@ -1,5 +1,7 @@
 # README.md
 
+> **Languages:** English · [日本語](./README.ja.md)
+
 ## CDN Security Framework
 
 [![CI](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/policy-lint.yml/badge.svg)](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/policy-lint.yml)
