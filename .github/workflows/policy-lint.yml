@@ -75,8 +75,11 @@ jobs:
       - name: Runtime tests (AWS + Cloudflare)
         run: npm run test:runtime
 
-      - name: Unit tests (compiler core)
+      - name: Unit tests (compiler core + doctor + emit-waf)
         run: npm run test:unit
+
+      - name: CLI doctor self-check (uses repo's own policy)
+        run: node bin/cli.js doctor --no-report
 
       - name: ReDoS fuzz (user-supplied regexes must not backtrack catastrophically)
         run: npm run test:fuzz
