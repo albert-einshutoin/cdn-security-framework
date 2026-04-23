@@ -118,6 +118,17 @@ This document organizes threats that this Edge Security Framework is designed to
 
 **Framework**: The AWS origin-request Lambda and Cloudflare Worker both delete `transfer-encoding`, `connection`, `keep-alive`, `te`, `upgrade`, `proxy-connection`, `proxy-authenticate`, `proxy-authorization`, and `trailer` from the forwarded request. The CDN re-frames the request, so none of these carry legitimate viewer intent.
 
+### 11. Signed URL Replay
+
+| Threat | Edge responsibility | WAF / Origin |
+|--------|---------------------|---------------|
+| Signed URL for `/download/a.pdf` reused against sibling path `/download/b.pdf` | `exact_path: true` binds signature to a single URI | — |
+| Single signed URL replayed repeatedly within its TTL | `nonce_param` binds per-URL nonce into HMAC + edge forwards `X-Signed-URL-Nonce` | Origin enforces single-use (e.g., Redis `SET NX`) |
+| Nonce tampered to collide with another session | Nonce included in HMAC input (`uri + exp + '|' + nonce`); tampering invalidates signature | — |
+| Write endpoint (POST/PUT/DELETE) protected by long-lived signed URL | Compile-time warning when `signed_url` gate hits write-like prefix without `nonce_param` | — |
+
+**Framework**: See `docs/signed-urls.md` for signing rules, nonce format (16–256 chars, URL-safe unreserved), and origin-side enforcement pattern. Edge enforces signature + nonce binding; single-use still requires origin cooperation because edge functions are stateless per invocation.
+
 ---
 
 ## What This Framework Does Not Mitigate

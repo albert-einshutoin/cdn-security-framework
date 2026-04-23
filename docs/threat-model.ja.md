@@ -119,6 +119,17 @@ Edge / WAF / Origin のどのレイヤーが担当するかを明確にします
 
 **フレームワーク**: AWS origin-request Lambda と Cloudflare Worker の両方で、転送前に `transfer-encoding`、`connection`、`keep-alive`、`te`、`upgrade`、`proxy-connection`、`proxy-authenticate`、`proxy-authorization`、`trailer` を削除。CDN 自身がリクエストを再フレーム化するため、これらのヘッダーに正当なビューワー意図は存在しない。
 
+### 11. 署名付き URL のリプレイ
+
+| 脅威 | Edge の責務 | WAF / Origin |
+|------|-------------|--------------|
+| `/download/a.pdf` の署名 URL が兄弟パス `/download/b.pdf` に再利用される | `exact_path: true` で 1 パスに束ねる | — |
+| 1 本の署名 URL が TTL 内で繰り返し使われる | `nonce_param` で HMAC 入力にノンスを束ね、エッジが `X-Signed-URL-Nonce` を転送 | オリジンで単回利用を強制（例: Redis `SET NX`） |
+| ノンスを書き換えて他セッションと衝突させる | ノンスは HMAC 入力 (`uri + exp + '|' + nonce`) に含まれ、改ざんで署名が失敗 | — |
+| 書き込み系（POST/PUT/DELETE）を長寿命の署名 URL で保護 | `signed_url` が書き込み系プレフィックスに適用され、`nonce_param` 未設定のときはビルド時に警告 | — |
+
+**フレームワーク**: 署名ルール、ノンス書式（16〜256 文字、URL セーフ unreserved）、オリジン側のパターンは `docs/signed-urls.ja.md` を参照。エッジは署名とノンス束縛を検証するが、単回利用はエッジ関数がステートレスであるためオリジン側との協調が必須。
+
 ---
 
 ## 本フレームワークが対象としないもの

@@ -406,6 +406,14 @@ function createSignedUrlParams(uri, expiresSec, secret) {
   return 'exp=' + expiresSec + '&sig=' + sig;
 }
 
+function createSignedUrlWithNonce(uri, expiresSec, secret, nonce) {
+  const signData = uri + String(expiresSec) + '|' + nonce;
+  const sig = crypto.createHmac('sha256', secret)
+    .update(signData)
+    .digest('base64url');
+  return 'exp=' + expiresSec + '&nonce=' + nonce + '&sig=' + sig;
+}
+
 async function runOriginRequestTests() {
   const testSecret = HS256_SECRET;
   process.env.JWT_TEST_SECRET = testSecret;
@@ -433,7 +441,19 @@ async function runOriginRequestTests() {
     '    algorithm: "HMAC-SHA256",',
     '    secret_env: "URL_SIGNING_SECRET",',
     '    expires_param: "exp",',
-    '    signature_param: "sig"',
+    '    signature_param: "sig",',
+    '    exact_path: false,',
+    '    nonce_param: ""',
+    '  }, {',
+    '    name: "one-time-download",',
+    '    protectedPrefixes: ["/download/report.pdf"],',
+    '    type: "signed_url",',
+    '    algorithm: "HMAC-SHA256",',
+    '    secret_env: "URL_SIGNING_SECRET",',
+    '    expires_param: "exp",',
+    '    signature_param: "sig",',
+    '    exact_path: true,',
+    '    nonce_param: "nonce"',
     '  }],',
     '  originAuth: null',
     '};',
@@ -600,6 +620,28 @@ async function runOriginRequestTests() {
     ['origin: GET /other/file not protected by signed URL',
       buildLambdaEdgeEvent('/other/file', {}, ''),
       'allow'],
+
+    // --- exact_path: reject sibling-path replay ---
+    ['origin: exact_path rejects sibling path with valid signature for /download/report.pdf',
+      buildLambdaEdgeEvent('/download/leaked.pdf', {},
+        createSignedUrlWithNonce('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET, 'nonce-0123456789abcdef')),
+      'allow'],
+
+    // --- nonce_param required: accept when present, reject when missing ---
+    ['origin: exact_path + nonce accepts well-formed one-time URL',
+      buildLambdaEdgeEvent('/download/report.pdf', {},
+        createSignedUrlWithNonce('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET, 'nonce-0123456789abcdef')),
+      'allow'],
+
+    ['origin: exact_path + nonce rejects when nonce missing',
+      buildLambdaEdgeEvent('/download/report.pdf', {},
+        createSignedUrlParams('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET)),
+      '403'],
+
+    ['origin: exact_path + nonce rejects short/invalid nonce',
+      buildLambdaEdgeEvent('/download/report.pdf', {},
+        createSignedUrlWithNonce('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET, 'short')),
+      '403'],
   ];
 
   let originFailed = 0;
@@ -621,8 +663,52 @@ async function runOriginRequestTests() {
     console.log('OK: origin strips client-supplied x-forwarded-for');
   }
 
-  console.log('--- origin-request (enforce): ' + (originCases.length + 1 - originFailed) + '/' + (originCases.length + 1) + ' passed ---');
-  return { failed: originFailed, total: originCases.length + 1 };
+  // Hop-by-hop / smuggling header stripping (defense-in-depth).
+  const smugEvent = buildLambdaEdgeEvent('/other/file', {
+    'transfer-encoding': 'chunked',
+    'connection': 'close',
+    'upgrade': 'websocket',
+    'te': 'trailers',
+    'keep-alive': 'timeout=5',
+    'proxy-connection': 'keep-alive',
+    'trailer': 'Expires',
+  });
+  const smugResult = await originHandler(smugEvent);
+  const smugStripped = smugResult && smugResult.uri !== undefined
+    && !smugResult.headers['transfer-encoding']
+    && !smugResult.headers['connection']
+    && !smugResult.headers['upgrade']
+    && !smugResult.headers['te']
+    && !smugResult.headers['keep-alive']
+    && !smugResult.headers['proxy-connection']
+    && !smugResult.headers['trailer'];
+  if (!smugStripped) {
+    console.error('FAIL: origin should strip hop-by-hop / smuggling headers, headers=',
+      smugResult && smugResult.headers);
+    originFailed++;
+  } else {
+    console.log('OK: origin strips hop-by-hop smuggling headers');
+  }
+
+  // Nonce forwarding: successful signed_url verification must set
+  // X-Signed-URL-Nonce on the forwarded request.
+  const nonceVal = 'nonce-0123456789abcdef';
+  const nonceEvent = buildLambdaEdgeEvent('/download/report.pdf', {},
+    createSignedUrlWithNonce('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET, nonceVal));
+  const nonceResult = await originHandler(nonceEvent);
+  const nonceHeader = nonceResult && nonceResult.headers && nonceResult.headers['x-signed-url-nonce'];
+  const nonceOk = Array.isArray(nonceHeader) && nonceHeader[0] && nonceHeader[0].value === nonceVal;
+  if (!nonceOk) {
+    console.error('FAIL: origin should forward X-Signed-URL-Nonce, got=',
+      nonceResult && nonceResult.headers && nonceResult.headers['x-signed-url-nonce']);
+    originFailed++;
+  } else {
+    console.log('OK: origin forwards X-Signed-URL-Nonce header to origin');
+  }
+
+  const extraAsserts = 3;
+  console.log('--- origin-request (enforce): ' + (originCases.length + extraAsserts - originFailed) + '/' + (originCases.length + extraAsserts) + ' passed ---');
+  return { failed: originFailed, total: originCases.length + extraAsserts };
 }
 
 // Monitor mode tests: blocking checks should pass through
