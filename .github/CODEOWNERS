@@ -1,0 +1,26 @@
+# CODEOWNERS for cdn-security-framework
+# Reviewers listed here are automatically requested on PRs touching the path.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Default owner for everything
+*                               @albert-einshutoin
+
+# Security-critical surfaces — require extra scrutiny
+/policy/schema.json             @albert-einshutoin
+/scripts/lib/                   @albert-einshutoin
+/scripts/compile.js             @albert-einshutoin
+/scripts/compile-cloudflare.js  @albert-einshutoin
+/scripts/compile-infra.js       @albert-einshutoin
+/scripts/policy-lint.js         @albert-einshutoin
+/scripts/security-baseline.js   @albert-einshutoin
+/templates/                     @albert-einshutoin
+
+# Supply-chain / release
+/.github/workflows/             @albert-einshutoin
+/.github/CODEOWNERS             @albert-einshutoin
+/.github/dependabot.yml         @albert-einshutoin
+/package.json                   @albert-einshutoin
+/package-lock.json              @albert-einshutoin
+
+# Policy disclosures
+SECURITY.md                     @albert-einshutoin

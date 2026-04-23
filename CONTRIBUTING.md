@@ -52,6 +52,23 @@ Release is automated by tag:
 
 ---
 
+## Supply-chain policy
+
+- **SHA-pin GitHub Actions.** Use a full 40-character commit SHA with the tag as a
+  trailing comment, for example:
+  `uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4`.
+  Dependabot will propose updates weekly; review the diff before merging.
+- **Do not introduce `uses: <action>@<tag>` without a SHA.** The CI should reject these
+  once the lint gate is added.
+- **npm dependencies** are tracked by Dependabot (`.github/dependabot.yml`). High or
+  Critical vulnerabilities reported by `npm audit` block the PR.
+- **Security-sensitive paths** (schema, compiler, templates, workflows) require
+  CODEOWNERS review (`.github/CODEOWNERS`).
+- **Release integrity**: the tag-driven release workflow publishes with
+  `npm publish --provenance` when no `NPM_TOKEN` is configured.
+
+---
+
 ## Repository layout
 
 - `docs/` – Architecture, threat model, decision matrix, quick start (English + `.ja`).
