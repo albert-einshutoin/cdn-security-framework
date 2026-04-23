@@ -101,6 +101,7 @@ Terraform / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.md) を参照。
 
 ### 運用ドキュメント
 - [CLI リファレンス](docs/cli.ja.md) — `init` / `build` / `emit-waf` / `doctor` / `migrate`
+- [プログラマティック API](docs/programmatic-api.ja.md) — `require('cdn-security-framework')` で CI / IaC から直接呼び出し
 - [アーキタイプ](docs/archetypes.ja.md) — アプリ形状別プリセット（SPA / REST API / 管理画面 / マイクロサービス）
 - [シークレットローテーション runbook](docs/runbooks/secret-rotation.ja.md) — JWT / JWKS / 署名付き URL / 管理トークン / origin シークレット
 - [スキーママイグレーション](docs/schema-migration.ja.md) — `policy/schema.json` のバージョン契約と `migrate` CLI

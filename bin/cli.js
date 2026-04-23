@@ -138,82 +138,38 @@ program
   .option('--rule-group-only', 'AWS only: generate WAF rule groups without aws_wafv2_web_acl output')
   .option('--fail-on-permissive', 'Exit non-zero when policy.metadata.risk_level is "permissive" (gate for production CI)')
   .action((opts) => {
+    const { compile } = require(path.join(pkgRoot, 'lib'));
     const cwd = process.cwd();
     let policyPath = opts.policy;
     if (!policyPath) {
       const security = path.join(cwd, 'policy', 'security.yml');
       const base = path.join(cwd, 'policy', 'base.yml');
       policyPath = fs.existsSync(security) ? security : base;
-    } else if (!path.isAbsolute(policyPath)) {
-      policyPath = path.join(cwd, policyPath);
-    }
-    const outDir = path.isAbsolute(opts.outDir) ? opts.outDir : path.join(cwd, opts.outDir);
-
-    if (!fs.existsSync(policyPath)) {
-      console.error('[ERROR] Policy file not found:', policyPath);
-      process.exit(1);
     }
 
-    // Lint
-    const lintPath = path.join(pkgRoot, 'scripts', 'policy-lint.js');
-    const { spawnSync } = require('child_process');
-    const lintResult = spawnSync(process.execPath, [lintPath, policyPath], {
-      stdio: 'inherit',
+    const result = compile({
+      policyPath,
+      outDir: opts.outDir,
+      target: opts.target,
+      outputMode: opts.outputMode,
+      ruleGroupOnly: !!opts.ruleGroupOnly,
+      failOnPermissive: !!opts.failOnPermissive,
       cwd,
+      pkgRoot,
     });
-    if (lintResult.status !== 0) {
-      console.error('[ERROR] Policy validation failed.');
+
+    result.warnings.forEach((w) => console.warn(w));
+
+    if (!result.ok) {
+      result.errors.forEach((e) => console.error('[ERROR]', e));
       process.exit(1);
     }
+
     console.log('[INFO] Validating policy... OK');
-
-    const permissiveFlag = opts.failOnPermissive ? ['--fail-on-permissive'] : [];
-
-    if (opts.target === 'aws') {
-      console.log('[INFO] Target: AWS CloudFront Functions');
-      const compilePath = path.join(pkgRoot, 'scripts', 'compile.js');
-      const compileResult = spawnSync(process.execPath, [
-        compilePath,
-        '--policy', policyPath,
-        '--out-dir', outDir,
-        ...permissiveFlag,
-      ], { stdio: 'inherit', cwd });
-      if (compileResult.status !== 0) process.exit(1);
-      console.log('[SUCCESS] Generated ' + path.join(outDir, 'edge', 'viewer-request.js'));
-      console.log('[SUCCESS] Generated ' + path.join(outDir, 'edge', 'viewer-response.js'));
-      console.log('[SUCCESS] Generated ' + path.join(outDir, 'edge', 'origin-request.js'));
-      const compileInfraPath = path.join(pkgRoot, 'scripts', 'compile-infra.js');
-      const compileInfraResult = spawnSync(process.execPath, [
-        compileInfraPath,
-        '--policy', policyPath,
-        '--out-dir', outDir,
-        '--output-mode', opts.outputMode,
-        ...(opts.ruleGroupOnly ? ['--rule-group-only'] : []),
-      ], { stdio: 'inherit', cwd });
-      if (compileInfraResult.status !== 0) process.exit(1);
-      console.log('[SUCCESS] Generated ' + path.join(outDir, 'infra', '*.tf.json'));
-    } else if (opts.target === 'cloudflare') {
-      console.log('[INFO] Target: Cloudflare Workers');
-      const compileCfPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare.js');
-      const compileCfResult = spawnSync(process.execPath, [
-        compileCfPath,
-        '--policy', policyPath,
-        '--out-dir', outDir,
-        ...permissiveFlag,
-      ], { stdio: 'inherit', cwd });
-      if (compileCfResult.status !== 0) process.exit(1);
-      console.log('[SUCCESS] Generated ' + path.join(outDir, 'edge', 'cloudflare', 'index.ts'));
-      const compileCfWafPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare-waf.js');
-      const compileCfWafResult = spawnSync(process.execPath, [
-        compileCfWafPath,
-        '--policy', policyPath,
-        '--out-dir', outDir,
-      ], { stdio: 'inherit', cwd });
-      if (compileCfWafResult.status !== 0) process.exit(1);
-      console.log('[SUCCESS] Generated ' + path.join(outDir, 'infra', 'cloudflare-waf.tf.json'));
-    } else {
-      console.error('[ERROR] Unknown target:', opts.target);
-      process.exit(1);
+    console.log('[INFO] Target:', result.target === 'aws' ? 'AWS CloudFront Functions' : 'Cloudflare Workers');
+    result.edgeFiles.forEach((f) => console.log('[SUCCESS] Generated ' + f));
+    if (result.infraFiles.length > 0) {
+      console.log('[SUCCESS] Generated ' + path.join(result.outDir, 'infra', '*.tf.json'));
     }
   });
 
@@ -244,66 +200,37 @@ program
   .option('--rule-group-only', 'AWS only: generate WAF rule groups without aws_wafv2_web_acl output')
   .option('--format <format>', 'Output format: terraform | cloudformation | cdk (terraform is the only format currently generated; others return exit 2)', 'terraform')
   .action((opts) => {
+    const { emitWaf } = require(path.join(pkgRoot, 'lib'));
     const cwd = process.cwd();
     let policyPath = opts.policy;
     if (!policyPath) {
       const security = path.join(cwd, 'policy', 'security.yml');
       const base = path.join(cwd, 'policy', 'base.yml');
       policyPath = fs.existsSync(security) ? security : base;
-    } else if (!path.isAbsolute(policyPath)) {
-      policyPath = path.join(cwd, policyPath);
-    }
-    const outDir = path.isAbsolute(opts.outDir) ? opts.outDir : path.join(cwd, opts.outDir);
-
-    if (!fs.existsSync(policyPath)) {
-      console.error('[ERROR] Policy file not found:', policyPath);
-      process.exit(1);
-    }
-    if (!['aws', 'cloudflare'].includes(opts.target)) {
-      console.error('[ERROR] Unknown target:', opts.target, '(expected aws | cloudflare)');
-      process.exit(1);
-    }
-    if (!['terraform', 'cloudformation', 'cdk'].includes(opts.format)) {
-      console.error('[ERROR] Unknown --format:', opts.format, '(expected terraform | cloudformation | cdk)');
-      process.exit(1);
-    }
-    if (opts.format !== 'terraform') {
-      console.error(`[ERROR] --format ${opts.format} is not yet implemented. Only terraform is generated today; cloudformation and cdk are reserved flags with stub rejection so pipelines fail loudly rather than silently falling back.`);
-      process.exit(2);
     }
 
-    // Lint first — emit-waf still goes through schema validation so a broken
-    // policy does not silently produce half a waf-rules.tf.json.
-    const { spawnSync } = require('child_process');
-    const lintPath = path.join(pkgRoot, 'scripts', 'policy-lint.js');
-    const lintResult = spawnSync(process.execPath, [lintPath, policyPath], { stdio: 'inherit', cwd });
-    if (lintResult.status !== 0) {
-      console.error('[ERROR] Policy validation failed.');
-      process.exit(1);
+    const result = emitWaf({
+      policyPath,
+      outDir: opts.outDir,
+      target: opts.target,
+      format: opts.format,
+      outputMode: opts.outputMode,
+      ruleGroupOnly: !!opts.ruleGroupOnly,
+      cwd,
+      pkgRoot,
+    });
+
+    result.warnings.forEach((w) => console.warn(w));
+
+    if (!result.ok) {
+      result.errors.forEach((e) => console.error('[ERROR]', e));
+      // Reserved format = exit 2 so pipelines notice silent-fallback is not an option.
+      process.exit(result.formatNotImplemented ? 2 : 1);
     }
 
-    if (opts.target === 'aws') {
-      console.log('[INFO] Target: AWS WAFv2 / CloudFront infra');
-      const compileInfraPath = path.join(pkgRoot, 'scripts', 'compile-infra.js');
-      const compileInfraResult = spawnSync(process.execPath, [
-        compileInfraPath,
-        '--policy', policyPath,
-        '--out-dir', outDir,
-        '--output-mode', opts.outputMode,
-        ...(opts.ruleGroupOnly ? ['--rule-group-only'] : []),
-      ], { stdio: 'inherit', cwd });
-      if (compileInfraResult.status !== 0) process.exit(1);
-      console.log('[SUCCESS] Generated ' + path.join(outDir, 'infra', '*.tf.json'));
-    } else {
-      console.log('[INFO] Target: Cloudflare WAF');
-      const compileCfWafPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare-waf.js');
-      const compileCfWafResult = spawnSync(process.execPath, [
-        compileCfWafPath,
-        '--policy', policyPath,
-        '--out-dir', outDir,
-      ], { stdio: 'inherit', cwd });
-      if (compileCfWafResult.status !== 0) process.exit(1);
-      console.log('[SUCCESS] Generated ' + path.join(outDir, 'infra', 'cloudflare-waf.tf.json'));
+    console.log('[INFO] Target:', result.target === 'aws' ? 'AWS WAFv2 / CloudFront infra' : 'Cloudflare WAF');
+    if (result.infraFiles.length > 0) {
+      console.log('[SUCCESS] Generated ' + path.join(result.outDir, 'infra', '*.tf.json'));
     }
   });
 
@@ -314,45 +241,31 @@ program
   .option('--to <version>', 'Target schema version', '1')
   .option('--write', 'Write the migrated policy back in place (no-op on v1)')
   .action((opts) => {
+    const { migratePolicy } = require(path.join(pkgRoot, 'lib'));
     const cwd = process.cwd();
     const policyPath = path.isAbsolute(opts.policy) ? opts.policy : path.join(cwd, opts.policy);
-    if (!fs.existsSync(policyPath)) {
-      console.error('[ERROR] Policy file not found:', policyPath);
-      process.exit(1);
-    }
-    const yaml = require('js-yaml');
-    const doc = yaml.load(fs.readFileSync(policyPath, 'utf8'));
-    const fromVersion = doc && doc.version;
-    const toVersion = Number(opts.to);
 
-    if (fromVersion === undefined) {
-      console.error('[ERROR] Policy has no `version` field. Add `version: 1` and retry.');
-      process.exit(1);
-    }
-    if (Number.isNaN(toVersion)) {
-      console.error('[ERROR] --to must be a number. Got:', opts.to);
-      process.exit(1);
+    const result = migratePolicy({
+      policyPath,
+      toVersion: opts.to,
+      cwd,
+    });
+
+    if (result.fromVersion !== undefined) {
+      console.log('[INFO] Policy:', policyPath);
+      console.log('[INFO] Current schema version:', result.fromVersion);
+      console.log('[INFO] Target schema version: ', result.toVersion);
     }
 
-    console.log('[INFO] Policy:', policyPath);
-    console.log('[INFO] Current schema version:', fromVersion);
-    console.log('[INFO] Target schema version: ', toVersion);
-
-    if (fromVersion === toVersion) {
+    if (result.ok && result.noop) {
       console.log('[OK] Already at target version — no migration needed.');
       process.exit(0);
     }
-    if (toVersion < fromVersion) {
-      console.error('[ERROR] Downgrade migrations are not supported.');
-      process.exit(1);
-    }
 
-    // Forward migrations are registered here when a new schema version ships.
-    // The contract: each step is a pure function (v_n policy) -> (v_n+1 policy).
-    // v1 is currently the only shipped schema, so there is nothing to run.
-    console.error(`[ERROR] No migration path from v${fromVersion} to v${toVersion} is registered in this CLI version.`);
-    console.error('        See docs/schema-migration.md for the migration policy and supported versions.');
-    process.exit(2);
+    if (!result.ok) {
+      result.errors.forEach((e) => console.error('[ERROR]', e));
+      process.exit(result.reservedExit2 ? 2 : 1);
+    }
   });
 
 program.parse();
