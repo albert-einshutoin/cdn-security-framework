@@ -70,6 +70,12 @@ routes:
     request:
       allow_methods: ["GET", "HEAD", "POST"]
 
+observability:
+  log_format: "json"
+  correlation_id_header: "traceparent"
+  audit_log_auth: true
+  audit_hash_sub: true
+
 response_headers:
   hsts: "max-age=31536000; includeSubDomains; preload"
   x_content_type_options: "nosniff"

@@ -1158,6 +1158,114 @@ test('response_headers.clear_site_data_types override honored', () => {
   }
 });
 
+test('build: observability config injects with safe defaults when unset', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-default-'));
+  try {
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const vr = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    assert.match(vr, /"logFormat":"json"/);
+    assert.match(vr, /"auditLogAuth":false/);
+    assert.match(vr, /"correlationHeader":""/);
+    assert.match(vr, /"sampleRate":0/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build: observability honors configured log_format/correlation/audit fields', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-explicit-'));
+  try {
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      observability: {
+        log_format: 'text',
+        correlation_id_header: 'X-Request-ID',
+        sample_rate: 0.25,
+        audit_log_auth: true,
+        audit_hash_sub: true,
+      },
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const vr = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    assert.match(vr, /"logFormat":"text"/);
+    // Header name is lowercased for CFF-style indexed lookup
+    assert.match(vr, /"correlationHeader":"x-request-id"/);
+    assert.match(vr, /"sampleRate":0\.25/);
+    assert.match(vr, /"auditLogAuth":true/);
+    assert.match(vr, /"auditHashSub":true/);
+    const origin = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.match(origin, /"auditLogAuth":true/);
+    assert.match(origin, /"correlationHeader":"x-request-id"/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build: observability clamps sample_rate to [0,1] range', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-clamp-'));
+  try {
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      observability: { sample_rate: 42 },
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const vr = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    // 42 is clamped down to 1
+    assert.match(vr, /"sampleRate":1/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('viewer-request: structured JSON block log includes status, block_reason, uri', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-runtime-'));
+  try {
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      observability: { log_format: 'json', correlation_id_header: 'traceparent' },
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+
+    const captured = [];
+    const origLog = console.log;
+    console.log = (line) => { captured.push(String(line)); };
+    let handler;
+    try {
+      // Evaluate compiled CFF function and capture its handler.
+      const mod = eval('(function(){' + code + '; return handler;})()');
+      handler = mod;
+      // POST not in allow_methods → should block with 405.
+      handler({ request: { method: 'POST', uri: '/anything', querystring: '', headers: { 'traceparent': { value: '00-abc-123' } } } });
+    } finally {
+      console.log = origLog;
+    }
+
+    const jsonLine = captured.find((l) => l.indexOf('"event":"block"') !== -1);
+    assert.ok(jsonLine, 'expected a block JSON log; got: ' + captured.join('\n'));
+    const parsed = JSON.parse(jsonLine);
+    assert.strictEqual(parsed.event, 'block');
+    assert.strictEqual(parsed.status, 405);
+    assert.strictEqual(parsed.method, 'POST');
+    assert.strictEqual(parsed.uri, '/anything');
+    assert.strictEqual(parsed.correlation_id, '00-abc-123');
+    assert.ok(typeof parsed.ts === 'number' && parsed.ts > 0);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

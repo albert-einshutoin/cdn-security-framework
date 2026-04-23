@@ -438,6 +438,27 @@ function warnIfPermissive(policy, options = {}) {
   return { warned: true, failed: false };
 }
 
+// Normalize observability config for injection into edge CFG objects.
+// Kept next to the compiler so every target (CFF / Lambda@Edge / Worker)
+// sees identical defaults and casing.
+function buildObsConfig(policy) {
+  const obs = (policy && policy.observability) || {};
+  const format = obs.log_format === 'text' ? 'text' : 'json';
+  const correlationHeader = typeof obs.correlation_id_header === 'string' && obs.correlation_id_header.trim()
+    ? obs.correlation_id_header.trim().toLowerCase()
+    : '';
+  let sampleRate = Number(obs.sample_rate);
+  if (!Number.isFinite(sampleRate) || sampleRate < 0) sampleRate = 0;
+  if (sampleRate > 1) sampleRate = 1;
+  return {
+    logFormat: format,
+    correlationHeader,
+    sampleRate,
+    auditLogAuth: obs.audit_log_auth === true,
+    auditHashSub: obs.audit_hash_sub === true,
+  };
+}
+
 function build(policy, options = {}) {
   const rootDir = options.rootDir || repoRoot;
   const outDir = options.outDir || path.join(rootDir, 'dist');
@@ -467,6 +488,8 @@ function build(policy, options = {}) {
     .filter(Boolean);
   const trustForwardedFor = request.trust_forwarded_for === true;
 
+  const obsCfg = buildObsConfig(policy);
+
   const cfgCode = [
     'const CFG = {',
     `  mode: ${JSON.stringify(defaults.mode || 'enforce')},`,
@@ -485,6 +508,7 @@ function build(policy, options = {}) {
     `  trustForwardedFor: ${trustForwardedFor ? 'true' : 'false'},`,
     `  cors: ${JSON.stringify(corsConfig)},`,
     `  authGates: ${JSON.stringify(authGates)},`,
+    `  obs: ${JSON.stringify(obsCfg)},`,
     '};',
   ].join('\n');
 
@@ -619,6 +643,8 @@ function build(policy, options = {}) {
     ? Math.max(0, Math.min(600, Number(jwksGlobal.negative_cache_sec)))
     : 60;
 
+  const obsCfgOrigin = buildObsConfig(policy);
+
   const originCfgCode = [
     'const CFG = {',
     `  project: ${JSON.stringify(policy.project || 'cdn-security')},`,
@@ -630,6 +656,7 @@ function build(policy, options = {}) {
     `  originAuth: ${JSON.stringify(originAuth)},`,
     `  jwksStaleIfErrorSec: ${jwksStaleIfError},`,
     `  jwksNegativeCacheSec: ${jwksNegativeCache},`,
+    `  obs: ${JSON.stringify(obsCfgOrigin)},`,
     '};',
   ].join('\n');
 
@@ -697,6 +724,7 @@ module.exports = {
   compileRegexOrThrow,
   regexesLiteralCode,
   getAuthGates,
+  buildObsConfig,
   hasAllowPlaceholderFlag,
   hasFailOnPermissiveFlag,
   warnIfPermissive,

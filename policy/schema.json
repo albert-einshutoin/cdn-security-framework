@@ -368,6 +368,34 @@
         }
       }
     },
+    "observability": {
+      "description": "Edge log emission + correlation ID propagation. JSON format lets CloudWatch Logs Insights / Cloudflare Logpush parse fields directly. Issue #21, #22.",
+      "type": "object",
+      "properties": {
+        "log_format": {
+          "description": "`json` (default) emits structured JSON on every block / monitor path. `text` keeps the legacy unstructured `[monitor] <code> <msg>` shape for backward compatibility.",
+          "enum": ["json", "text"]
+        },
+        "correlation_id_header": {
+          "description": "Incoming request header that carries a trace / correlation ID. Common values: `traceparent` (W3C Trace Context), `x-request-id`. The value is copied into log records and forwarded to origin so you can pivot from edge logs to app logs.",
+          "type": "string"
+        },
+        "sample_rate": {
+          "description": "Fraction of allow-path requests that emit an `event:\"allow\"` log record (0 disables; 1 logs every request). Block-path logs always emit. Default 0.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "audit_log_auth": {
+          "description": "When true, every successful auth gate pass emits `{event:\"auth_pass\", gate_name, sub, uri, method}`. Off by default — enable for security incident response. Raw tokens are never logged.",
+          "type": "boolean"
+        },
+        "audit_hash_sub": {
+          "description": "When true and `audit_log_auth` is enabled, `sub` is hashed (SHA-256 hex, first 16 chars) before emission to avoid PII in logs.",
+          "type": "boolean"
+        }
+      }
+    },
     "origin": {
       "type": "object",
       "properties": {

@@ -15,6 +15,7 @@ const {
   hasFailOnPermissiveFlag,
   warnIfPermissive,
   warnSignedUrlReplay,
+  buildObsConfig,
 } = require('./lib/compile-core');
 
 const repoRoot = path.join(__dirname, '..');
@@ -177,6 +178,7 @@ const cfgCode = [
   `  jwksNegativeCacheSec: ${jwksNegativeCache},`,
   `  geoBlockCountries: new Set(${JSON.stringify(geoBlockCountries)}),`,
   `  geoAllowCountries: new Set(${JSON.stringify(geoAllowCountries)}),`,
+  `  obs: ${JSON.stringify(buildObsConfig(policy))},`,
   '};',
 ].join('\n');
 

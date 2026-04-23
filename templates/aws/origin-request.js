@@ -422,8 +422,21 @@ async function checkJwtGates(request) {
     if (result.payload) {
       request.headers['x-jwt-sub'] = [{ key: 'X-JWT-Sub', value: result.payload.sub || '' }];
     }
+
+    if (CFG.obs && CFG.obs.auditLogAuth) {
+      const rawSub = (result.payload && result.payload.sub) || '';
+      logEvent('audit', {
+        auth_event: 'auth_pass',
+        gate_type: 'jwt',
+        gate_name: gate.name || '',
+        sub: CFG.obs.auditHashSub ? hashSub(rawSub) : rawSub,
+        method: request.method,
+        uri,
+        correlation_id: readCorrelation(request),
+      });
+    }
   }
-  
+
   return null;
 }
 
@@ -456,6 +469,18 @@ function checkSignedUrlGates(request) {
         value: result.nonce,
       }];
     }
+
+    if (CFG.obs && CFG.obs.auditLogAuth) {
+      logEvent('audit', {
+        auth_event: 'auth_pass',
+        gate_type: 'signed_url',
+        gate_name: gate.name || '',
+        sub: '',
+        method: request.method,
+        uri,
+        correlation_id: readCorrelation(request),
+      });
+    }
   }
 
   return null;
@@ -475,16 +500,69 @@ function addOriginAuth(request) {
   }
 }
 
+// Propagate the correlation ID header to origin. When the incoming request
+// already carries the header, preserve it; otherwise mint a lightweight ID so
+// origin logs can always join back to edge logs. Issue #21.
+function propagateCorrelation(request) {
+  if (!CFG.obs || !CFG.obs.correlationHeader || !request || !request.headers) return;
+  const headerName = CFG.obs.correlationHeader;
+  const existing = request.headers[headerName];
+  const hasIncoming = !!(existing && existing[0] && existing[0].value);
+  if (hasIncoming) return;
+  // Lambda@Edge has crypto available — use randomUUID as a cheap ID.
+  const id = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+  const canonical = headerName.replace(/(^|-)([a-z])/g, (_, d, c) => d + c.toUpperCase());
+  request.headers[headerName] = [{ key: canonical, value: id }];
+}
+
+// Structured log emitter for Lambda@Edge. Same JSON shape as the CloudFront
+// Functions viewer-request layer so downstream Log Insights queries can
+// aggregate across layers with a single query.
+function logEvent(event, fields) {
+  if (CFG.obs && CFG.obs.logFormat === 'text') {
+    console.log('[' + event + ']',
+      fields && fields.status != null ? fields.status : '',
+      fields && fields.block_reason ? fields.block_reason : '');
+    return;
+  }
+  const rec = { ts: Date.now(), level: event === 'block' ? 'warn' : 'info', event };
+  if (fields) {
+    for (const k of Object.keys(fields)) {
+      if (fields[k] != null && fields[k] !== '') rec[k] = fields[k];
+    }
+  }
+  console.log(JSON.stringify(rec));
+}
+
+function readCorrelation(request) {
+  if (!CFG.obs || !CFG.obs.correlationHeader) return '';
+  const h = request && request.headers && request.headers[CFG.obs.correlationHeader];
+  return (h && h[0] && h[0].value) || '';
+}
+
+function hashSub(sub) {
+  if (!sub) return '';
+  return crypto.createHash('sha256').update(String(sub)).digest('hex').slice(0, 16);
+}
+
 // Monitor mode: log and allow instead of blocking
 function shouldBlock(checkResult, request) {
   if (!checkResult) return null;
+  const status = parseInt(checkResult.status, 10);
+  const reason = checkResult.statusDescription || checkResult.body || 'blocked';
+  const base = {
+    status,
+    block_reason: reason,
+    method: request && request.method,
+    uri: (request && request.uri) || '/',
+    correlation_id: readCorrelation(request),
+  };
   if (CFG.mode === 'monitor') {
-    console.log('[monitor]', checkResult.status, checkResult.statusDescription,
-      'uri=' + (request && request.uri || '/'));
+    logEvent('monitor', base);
     return null;
   }
+  logEvent('block', base);
   // In enforce mode, strip detailed error messages from client responses
-  const status = parseInt(checkResult.status, 10);
   if (status === 401) {
     return resp(401, 'Unauthorized');
   } else if (status === 403) {
@@ -538,9 +616,13 @@ exports.handler = async (event) => {
     // Add origin auth header
     addOriginAuth(req);
 
+    // Propagate correlation / trace header to origin so origin logs can join
+    // edge block/allow logs.
+    propagateCorrelation(req);
+
     return req;
   } catch (err) {
-    console.log('[origin-request] unexpected error:', err.message || err);
+    logEvent('error', { block_reason: 'unexpected_error: ' + (err && (err.message || err)), uri: '/' });
     return resp(502, 'Bad Gateway');
   }
 };

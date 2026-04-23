@@ -13,19 +13,50 @@ This document describes recommended **logging and metrics** for the Edge Securit
 
 ---
 
-## Recommended Log Fields (when a request is blocked)
+## Structured JSON Logs (generated runtime)
 
-When the Edge Security Layer returns 4xx (400, 401, 403, 405, 414), log at least:
+When `observability.log_format: json` is set (default), the generated viewer-request / origin-request / Cloudflare Worker emit one JSON line per decision to `console.log`. Fields:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| `block_reason` | Why the request was blocked | `method_not_allowed`, `path_traversal`, `ua_denied`, `query_limit`, `admin_unauthorized` |
-| `status_code` | HTTP status returned | `400`, `401`, `403`, `405`, `414` |
-| `method` | Request method | `GET`, `OPTIONS` |
-| `uri` or `path` | Request URI (sanitized; avoid logging full query if sensitive) | `/admin`, `/foo/../bar` |
-| `user_agent` | User-Agent (optional; may be long or sensitive) | Truncate or hash in strict environments |
+| `ts` | ISO-8601 timestamp | `2026-04-23T12:34:56.789Z` |
+| `level` | `info` on block/monitor/audit, `error` on runtime error | `info` |
+| `event` | `block`, `monitor` (monitor mode), `audit`, `error` | `block` |
+| `status` | HTTP status returned | `405` |
+| `block_reason` | Why the request was blocked (see mapping below) | `method_not_allowed` |
+| `method` | Request method | `POST` |
+| `uri` | Request URI path (without query by default) | `/admin` |
+| `correlation_id` | Value of the configured correlation header (minted at origin if absent) | `00-4bf9...-01` |
 
-Optional: `request_id`, `timestamp`, `region` / `edge_location` (if your CDN provides them).
+Audit events (`audit_log_auth: true`) add:
+
+| Field | Description |
+|-------|-------------|
+| `auth_event` | `auth_pass` on successful JWT / signed URL |
+| `gate_type` | `jwt`, `signed_url`, `static_token` |
+| `gate_name` | Route's `name:` from policy |
+| `sub` | JWT `sub` — hashed to first 16 hex of SHA-256 when `audit_hash_sub: true` |
+
+Example block event:
+
+```json
+{"ts":"2026-04-23T12:34:56.789Z","level":"info","event":"block","status":405,"block_reason":"method_not_allowed","method":"POST","uri":"/anything","correlation_id":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
+```
+
+### Policy
+
+```yaml
+observability:
+  log_format: "json"               # "json" (default) or "text"
+  correlation_id_header: "traceparent"  # or "x-request-id"
+  sample_rate: 1                   # 0..1; currently advisory (block/audit always emit)
+  audit_log_auth: true             # emit audit events on auth gate success
+  audit_hash_sub: true             # SHA-256 truncate sub to 16 hex (PII-safe)
+```
+
+### Correlation propagation
+
+At Lambda@Edge / Worker, if the incoming request does **not** carry `correlation_id_header`, the runtime mints one (`crypto.randomUUID` / `crypto.getRandomValues`) and sets it on the forwarded request. Downstream services then see a consistent ID across edge logs, WAF logs, and origin logs.
 
 ---
 

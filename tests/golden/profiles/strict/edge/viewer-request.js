@@ -35,6 +35,7 @@ const CFG = {
   trustForwardedFor: false,
   cors: null,
   authGates: [{"name":"admin","protectedPrefixes":["/admin","/docs","/swagger","/api/admin","/internal"],"type":"static_token","tokenHeaderName":"x-edge-token","tokenEnv":"EDGE_ADMIN_TOKEN","token":"ci-build-token-not-for-deploy","tokenIsPlaceholder":false}],
+  obs: {"logFormat":"json","correlationHeader":"traceparent","sampleRate":0,"auditLogAuth":true,"auditHashSub":true},
 };
 
   function resp(statusCode, body) {
@@ -49,12 +50,48 @@ const CFG = {
     };
   }
 
-  function shouldBlock(checkResult) {
+  // Structured log emitter. CloudFront Functions supports console.log + JSON.stringify
+  // on flat primitives (our records only contain those). `event` distinguishes
+  // block / monitor / audit records for downstream Logs Insights queries.
+  function logEvent(event, fields) {
+    if (CFG.obs && CFG.obs.logFormat === 'text') {
+      console.log('[' + event + ']',
+        fields && fields.status != null ? fields.status : '',
+        fields && fields.block_reason ? fields.block_reason : '');
+      return;
+    }
+    var rec = { ts: Date.now(), level: event === 'block' ? 'warn' : 'info', event: event };
+    if (fields) {
+      for (var k in fields) {
+        if (Object.prototype.hasOwnProperty.call(fields, k) && fields[k] != null && fields[k] !== '') {
+          rec[k] = fields[k];
+        }
+      }
+    }
+    console.log(JSON.stringify(rec));
+  }
+
+  function readCorrelation(req) {
+    if (!CFG.obs || !CFG.obs.correlationHeader) return '';
+    var h = req && req.headers && req.headers[CFG.obs.correlationHeader];
+    return (h && h.value) || '';
+  }
+
+  function shouldBlock(checkResult, req) {
     if (!checkResult) return null;
+    var reason = (checkResult.body && String(checkResult.body)) || 'blocked';
+    var base = {
+      status: checkResult.statusCode,
+      block_reason: reason,
+      method: req && req.method,
+      uri: req && req.uri,
+      correlation_id: req ? readCorrelation(req) : '',
+    };
     if (CFG.mode === 'monitor') {
-      console.log('[monitor]', checkResult.statusCode, checkResult.body || '');
+      logEvent('monitor', base);
       return null;
     }
+    logEvent('block', base);
     return checkResult;
   }
 
@@ -300,43 +337,43 @@ const CFG = {
     if (preflight) return preflight;
 
     // 0c) Host allowlist (early reject — cheaper than running every check)
-    const host = shouldBlock(blockIfHostNotAllowed(req));
+    const host = shouldBlock(blockIfHostNotAllowed(req), req);
     if (host) return host;
 
     // 1) Method allowlist
-    const m = shouldBlock(blockIfMethodNotAllowed(req));
+    const m = shouldBlock(blockIfMethodNotAllowed(req), req);
     if (m) return m;
 
     // 2) URI length check
-    const uriLen = shouldBlock(blockIfUriTooLong(req));
+    const uriLen = shouldBlock(blockIfUriTooLong(req), req);
     if (uriLen) return uriLen;
 
     // 2b) Header count cap (issue #9) — 431 protects origin parsers from
     //     hash-collision / amplification under small-but-many-headers payloads.
-    const hc = shouldBlock(blockIfTooManyHeaders(req));
+    const hc = shouldBlock(blockIfTooManyHeaders(req), req);
     if (hc) return hc;
 
     // 3) Path normalization
     normalizePath(req);
 
     // 4) Path traversal (coarse)
-    const t = shouldBlock(blockIfTraversal(req));
+    const t = shouldBlock(blockIfTraversal(req), req);
     if (t) return t;
 
     // 5) Required headers check
-    const hm = shouldBlock(blockIfHeaderMissing(req));
+    const hm = shouldBlock(blockIfHeaderMissing(req), req);
     if (hm) return hm;
 
     // 6) UA sanity (deny list)
-    const u = shouldBlock(blockIfBadUA(req));
+    const u = shouldBlock(blockIfBadUA(req), req);
     if (u) return u;
 
     // 7) Query guard + normalize
-    const q = shouldBlock(guardAndNormalizeQuery(req));
+    const q = shouldBlock(guardAndNormalizeQuery(req), req);
     if (q) return q;
 
     // 8) Auth gates (static token, basic auth)
-    const auth = shouldBlock(checkAuthGates(req));
+    const auth = shouldBlock(checkAuthGates(req), req);
     if (auth) return auth;
 
     return req;
