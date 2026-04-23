@@ -164,6 +164,14 @@ program
       ], { stdio: 'inherit', cwd });
       if (compileCfResult.status !== 0) process.exit(1);
       console.log('[SUCCESS] Generated ' + path.join(outDir, 'edge', 'cloudflare', 'index.ts'));
+      const compileCfWafPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare-waf.js');
+      const compileCfWafResult = spawnSync(process.execPath, [
+        compileCfWafPath,
+        '--policy', policyPath,
+        '--out-dir', outDir,
+      ], { stdio: 'inherit', cwd });
+      if (compileCfWafResult.status !== 0) process.exit(1);
+      console.log('[SUCCESS] Generated ' + path.join(outDir, 'infra', 'cloudflare-waf.tf.json'));
     } else {
       console.error('[ERROR] Unknown target:', opts.target);
       process.exit(1);

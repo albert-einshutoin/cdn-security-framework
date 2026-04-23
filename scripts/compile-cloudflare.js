@@ -145,6 +145,13 @@ const jwksStaleIfError = Number.isFinite(Number(jwksGlobal.stale_if_error_sec))
 const jwksNegativeCache = Number.isFinite(Number(jwksGlobal.negative_cache_sec))
   ? Math.max(0, Math.min(600, Number(jwksGlobal.negative_cache_sec)))
   : 60;
+const fwGeo = (policy.firewall || {}).geo || {};
+const geoBlockCountries = Array.isArray(fwGeo.block_countries)
+  ? fwGeo.block_countries.map((c) => String(c || '').trim().toUpperCase()).filter(Boolean)
+  : [];
+const geoAllowCountries = Array.isArray(fwGeo.allow_countries)
+  ? fwGeo.allow_countries.map((c) => String(c || '').trim().toUpperCase()).filter(Boolean)
+  : [];
 
 const cfgCode = [
   'const CFG = {',
@@ -168,6 +175,8 @@ const cfgCode = [
   `  originAuth: ${JSON.stringify(originAuth)},`,
   `  jwksStaleIfErrorSec: ${jwksStaleIfError},`,
   `  jwksNegativeCacheSec: ${jwksNegativeCache},`,
+  `  geoBlockCountries: new Set(${JSON.stringify(geoBlockCountries)}),`,
+  `  geoAllowCountries: new Set(${JSON.stringify(geoAllowCountries)}),`,
   '};',
 ].join('\n');
 

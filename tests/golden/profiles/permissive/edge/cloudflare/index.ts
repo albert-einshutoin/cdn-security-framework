@@ -26,6 +26,8 @@ const CFG = {
   originAuth: null,
   jwksStaleIfErrorSec: 3600,
   jwksNegativeCacheSec: 60,
+  geoBlockCountries: new Set([]),
+  geoAllowCountries: new Set([]),
 };
 
 const RESPONSE_CFG = {
@@ -374,6 +376,24 @@ export default {
     if (!isHostAllowed(request.headers.get('host') || url.hostname)) {
       const r = shouldBlock(400, 'Host Not Allowed');
       if (r) return r;
+    }
+
+    // Geo enforcement (issue #12). request.cf.country is free and arrives before
+    // any auth/JWKS work. Block list wins; allow list (non-empty) rejects any
+    // country not explicitly enumerated. `T1` / empty represent Tor / unknown —
+    // the allow list rejects them by design; block lists that include 'T1'
+    // get the opt-in.
+    {
+      const country = (request as any).cf && (request as any).cf.country
+        ? String((request as any).cf.country).toUpperCase()
+        : '';
+      if (CFG.geoBlockCountries.size > 0 && country && CFG.geoBlockCountries.has(country)) {
+        const r = shouldBlock(403, 'Geo Blocked');
+        if (r) return r;
+      } else if (CFG.geoAllowCountries.size > 0 && (!country || !CFG.geoAllowCountries.has(country))) {
+        const r = shouldBlock(403, 'Geo Blocked');
+        if (r) return r;
+      }
     }
 
     if (request.method === 'OPTIONS' && CFG.cors) {

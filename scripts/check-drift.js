@@ -13,6 +13,7 @@ const expectedFiles = [
   'edge/origin-request.js',
   'edge/cloudflare/index.ts',
   'infra/waf-rules.tf.json',
+  'infra/cloudflare-waf.tf.json',
 ];
 
 const scenarios = [
@@ -48,6 +49,10 @@ function runBuild(policyPath, outDir) {
     stdio: 'inherit',
   });
   execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile-infra.js'), '--policy', policyPath, '--out-dir', outDir], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  });
+  execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile-cloudflare-waf.js'), '--policy', policyPath, '--out-dir', outDir], {
     cwd: repoRoot,
     stdio: 'inherit',
   });
