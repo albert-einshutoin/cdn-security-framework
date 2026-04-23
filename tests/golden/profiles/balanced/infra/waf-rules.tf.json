@@ -31,6 +31,76 @@
           "sampled_requests_enabled": true
         }
       }
+    },
+    "aws_wafv2_web_acl": {
+      "example-cdn-security-waf-acl": {
+        "name": "example-cdn-security-waf-acl",
+        "scope": "REGIONAL",
+        "default_action": {
+          "allow": {}
+        },
+        "rule": [
+          {
+            "name": "AWS-AWSManagedRulesCommonRuleSet",
+            "priority": 10,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesCommonRuleSet"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-cdn-security-AWSManagedRulesCommonRuleSet",
+              "sampled_requests_enabled": true
+            }
+          },
+          {
+            "name": "AWS-AWSManagedRulesKnownBadInputsRuleSet",
+            "priority": 11,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesKnownBadInputsRuleSet"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-cdn-security-AWSManagedRulesKnownBadInputsRuleSet",
+              "sampled_requests_enabled": true
+            }
+          },
+          {
+            "name": "AWS-AWSManagedRulesIPReputationList",
+            "priority": 12,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesIPReputationList"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-cdn-security-AWSManagedRulesIPReputationList",
+              "sampled_requests_enabled": true
+            }
+          }
+        ],
+        "visibility_config": {
+          "cloudwatch_metrics_enabled": true,
+          "metric_name": "example-cdn-security-waf-acl",
+          "sampled_requests_enabled": true
+        }
+      }
     }
   }
 }

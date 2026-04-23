@@ -66,12 +66,35 @@ const wafRules = [];
 let priority = 1;
 const fingerprintActionType = (waf.fingerprint_action === 'count') ? 'count' : 'block';
 
-// Rate limit rule
+// Custom block response (referenced by every block action when configured)
+const blockResponse = waf.block_response || null;
+const blockResponseKey = blockResponse ? 'cdn_sec_block' : null;
+function blockAction() {
+  if (blockResponseKey) {
+    return {
+      block: {
+        custom_response: {
+          response_code: Number(blockResponse.status_code) || 403,
+          custom_response_body_key: blockResponseKey,
+        },
+      },
+    };
+  }
+  return { block: {} };
+}
+
+function actionFor(actionName) {
+  if (actionName === 'count') return { count: {} };
+  if (actionName === 'captcha') return { captcha: {} };
+  return blockAction();
+}
+
+// Rate limit rule (legacy single global rule)
 if (waf.rate_limit) {
   wafRules.push({
     name: 'rate-based-rule',
     priority: priority++,
-    action: { block: {} },
+    action: blockAction(),
     statement: {
       rate_based_statement: {
         limit: Number(waf.rate_limit) || 2000,
@@ -84,6 +107,35 @@ if (waf.rate_limit) {
       sampled_requests_enabled: true,
     },
   });
+}
+
+// rate_limit_rules[] — fine-grained per-URI / per-key rate limits
+if (Array.isArray(waf.rate_limit_rules)) {
+  for (const rule of waf.rate_limit_rules) {
+    if (!rule || !rule.name || !rule.limit) continue;
+    const aggregateKeyType = rule.aggregate_key_type || 'IP';
+    const rateStmt = {
+      limit: Number(rule.limit),
+      aggregate_key_type: aggregateKeyType,
+    };
+    if (aggregateKeyType === 'CUSTOM_KEYS' && Array.isArray(rule.custom_keys)) {
+      rateStmt.custom_key = rule.custom_keys;
+    }
+    if (rule.scope_down_statement && typeof rule.scope_down_statement === 'object') {
+      rateStmt.scope_down_statement = rule.scope_down_statement;
+    }
+    wafRules.push({
+      name: rule.name,
+      priority: Number(rule.priority) || priority++,
+      action: actionFor(rule.action),
+      statement: { rate_based_statement: rateStmt },
+      visibility_config: {
+        cloudwatch_metrics_enabled: true,
+        metric_name: projectName + '-' + rule.name,
+        sampled_requests_enabled: true,
+      },
+    });
+  }
 }
 
 function addFingerprintRules(fieldName, fingerprints, rulePrefix, metricPrefix) {
@@ -117,20 +169,28 @@ function addFingerprintRules(fieldName, fingerprints, rulePrefix, metricPrefix) 
 addFingerprintRules('ja3_fingerprint', waf.ja3_fingerprints, 'ja3', 'ja3');
 addFingerprintRules('ja4_fingerprint', waf.ja4_fingerprints, 'ja4', 'ja4');
 
+const ruleGroupDef = {
+  name: projectName + '-rate-limit',
+  scope,
+  capacity: Math.max(2, wafRules.length * 2 || 2),
+  rule: wafRules,
+  visibility_config: {
+    cloudwatch_metrics_enabled: true,
+    metric_name: projectName + '-rule-group',
+    sampled_requests_enabled: true,
+  },
+};
+if (blockResponse) {
+  ruleGroupDef.custom_response_body = [{
+    key: blockResponseKey,
+    content: blockResponse.body || 'Forbidden',
+    content_type: blockResponse.content_type || 'TEXT_PLAIN',
+  }];
+}
 const tfWafJson = {
   resource: {
     aws_wafv2_rule_group: {
-      [projectName + '-rate-limit']: {
-        name: projectName + '-rate-limit',
-        scope,
-        capacity: Math.max(2, wafRules.length * 2 || 2),
-        rule: wafRules,
-        visibility_config: {
-          cloudwatch_metrics_enabled: true,
-          metric_name: projectName + '-rule-group',
-          sampled_requests_enabled: true,
-        },
-      },
+      [projectName + '-rate-limit']: ruleGroupDef,
     },
   },
 };
@@ -141,34 +201,66 @@ if (waf.managed_rules && waf.managed_rules.length > 0) {
     console.log('[INFO] output-mode=rule-group: skipping aws_wafv2_web_acl generation.');
     console.log('[INFO] managed_rules are intentionally not emitted because AWS managed rule groups can only be attached from Web ACL.');
   } else {
-    tfWafJson.resource.aws_wafv2_web_acl = {
-      [projectName + '-waf-acl']: {
-        name: projectName + '-waf-acl',
-        scope,
-        default_action: { allow: {} },
-        rule: waf.managed_rules.map((ruleName, idx) => ({
-          name: `AWS-${ruleName}`,
-          priority: 10 + idx,
-          override_action: { none: {} },
-          statement: {
-            managed_rule_group_statement: {
-              vendor_name: 'AWS',
-              name: ruleName,
-            },
+    const webAclName = projectName + '-waf-acl';
+    const webAcl = {
+      name: webAclName,
+      scope,
+      default_action: { allow: {} },
+      rule: waf.managed_rules.map((ruleName, idx) => ({
+        name: `AWS-${ruleName}`,
+        priority: 10 + idx,
+        override_action: { none: {} },
+        statement: {
+          managed_rule_group_statement: {
+            vendor_name: 'AWS',
+            name: ruleName,
           },
-          visibility_config: {
-            cloudwatch_metrics_enabled: true,
-            metric_name: `${projectName}-${ruleName}`,
-            sampled_requests_enabled: true,
-          },
-        })),
+        },
         visibility_config: {
           cloudwatch_metrics_enabled: true,
-          metric_name: projectName + '-waf-acl',
+          metric_name: `${projectName}-${ruleName}`,
           sampled_requests_enabled: true,
         },
+      })),
+      visibility_config: {
+        cloudwatch_metrics_enabled: true,
+        metric_name: webAclName,
+        sampled_requests_enabled: true,
       },
     };
+    if (blockResponse) {
+      webAcl.custom_response_body = [{
+        key: blockResponseKey,
+        content: blockResponse.body || 'Forbidden',
+        content_type: blockResponse.content_type || 'TEXT_PLAIN',
+      }];
+    }
+    tfWafJson.resource.aws_wafv2_web_acl = { [webAclName]: webAcl };
+
+    // Logging configuration
+    const logging = waf.logging || {};
+    if (logging.enabled) {
+      const arnEnv = logging.destination_arn_env || 'WAF_LOG_DESTINATION_ARN';
+      const arnVarName = arnEnv.toLowerCase();
+      tfWafJson.variable = tfWafJson.variable || {};
+      tfWafJson.variable[arnVarName] = {
+        description: `WAF log destination ARN (Kinesis Firehose / S3 / CloudWatch Logs). Sourced from $${arnEnv}.`,
+        type: 'string',
+      };
+      const redactedFields = (logging.redacted_fields || []).map((field) => {
+        if (field === 'authorization' || field === 'cookie' || field === 'x-api-key' || field === 'x-csrf-token' || field === 'set-cookie') {
+          return { single_header: { name: field } };
+        }
+        return { single_header: { name: field } };
+      });
+      tfWafJson.resource.aws_wafv2_logging_configuration = {
+        [webAclName + '-logging']: {
+          log_destination_configs: ['${var.' + arnVarName + '}'],
+          resource_arn: '${aws_wafv2_web_acl.' + webAclName + '.arn}',
+          redacted_fields: redactedFields,
+        },
+      };
+    }
   }
 }
 

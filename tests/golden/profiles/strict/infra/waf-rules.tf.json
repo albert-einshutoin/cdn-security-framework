@@ -3,14 +3,178 @@
     "aws_wafv2_rule_group": {
       "example-cdn-security-rate-limit": {
         "name": "example-cdn-security-rate-limit",
-        "scope": "REGIONAL",
-        "capacity": 2,
-        "rule": [],
+        "scope": "CLOUDFRONT",
+        "capacity": 4,
+        "rule": [
+          {
+            "name": "global-ip-limit",
+            "priority": 1,
+            "action": {
+              "block": {
+                "custom_response": {
+                  "response_code": 403,
+                  "custom_response_body_key": "cdn_sec_block"
+                }
+              }
+            },
+            "statement": {
+              "rate_based_statement": {
+                "limit": 2000,
+                "aggregate_key_type": "IP"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-cdn-security-global-ip-limit",
+              "sampled_requests_enabled": true
+            }
+          },
+          {
+            "name": "login-ip-limit",
+            "priority": 2,
+            "action": {
+              "block": {
+                "custom_response": {
+                  "response_code": 403,
+                  "custom_response_body_key": "cdn_sec_block"
+                }
+              }
+            },
+            "statement": {
+              "rate_based_statement": {
+                "limit": 100,
+                "aggregate_key_type": "IP",
+                "scope_down_statement": {
+                  "byte_match_statement": {
+                    "field_to_match": {
+                      "uri_path": {}
+                    },
+                    "positional_constraint": "STARTS_WITH",
+                    "search_string": "/login",
+                    "text_transformation": [
+                      {
+                        "priority": 0,
+                        "type": "LOWERCASE"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-cdn-security-login-ip-limit",
+              "sampled_requests_enabled": true
+            }
+          }
+        ],
         "visibility_config": {
           "cloudwatch_metrics_enabled": true,
           "metric_name": "example-cdn-security-rule-group",
           "sampled_requests_enabled": true
-        }
+        },
+        "custom_response_body": [
+          {
+            "key": "cdn_sec_block",
+            "content": "blocked",
+            "content_type": "TEXT_PLAIN"
+          }
+        ]
+      }
+    },
+    "aws_wafv2_web_acl": {
+      "example-cdn-security-waf-acl": {
+        "name": "example-cdn-security-waf-acl",
+        "scope": "CLOUDFRONT",
+        "default_action": {
+          "allow": {}
+        },
+        "rule": [
+          {
+            "name": "AWS-AWSManagedRulesCommonRuleSet",
+            "priority": 10,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesCommonRuleSet"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-cdn-security-AWSManagedRulesCommonRuleSet",
+              "sampled_requests_enabled": true
+            }
+          },
+          {
+            "name": "AWS-AWSManagedRulesKnownBadInputsRuleSet",
+            "priority": 11,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesKnownBadInputsRuleSet"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-cdn-security-AWSManagedRulesKnownBadInputsRuleSet",
+              "sampled_requests_enabled": true
+            }
+          },
+          {
+            "name": "AWS-AWSManagedRulesIPReputationList",
+            "priority": 12,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesIPReputationList"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-cdn-security-AWSManagedRulesIPReputationList",
+              "sampled_requests_enabled": true
+            }
+          },
+          {
+            "name": "AWS-AWSManagedRulesAnonymousIpList",
+            "priority": 13,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesAnonymousIpList"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-cdn-security-AWSManagedRulesAnonymousIpList",
+              "sampled_requests_enabled": true
+            }
+          }
+        ],
+        "visibility_config": {
+          "cloudwatch_metrics_enabled": true,
+          "metric_name": "example-cdn-security-waf-acl",
+          "sampled_requests_enabled": true
+        },
+        "custom_response_body": [
+          {
+            "key": "cdn_sec_block",
+            "content": "blocked",
+            "content_type": "TEXT_PLAIN"
+          }
+        ]
       }
     }
   }

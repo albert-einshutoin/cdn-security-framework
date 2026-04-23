@@ -96,6 +96,33 @@ function main() {
     errors.push('  - firewall.waf.fingerprint_action must be "block" or "count"');
   }
 
+  // Non-fatal warnings for production-grade WAF hygiene.
+  const warnings = [];
+  const mode = (policy && policy.defaults && policy.defaults.mode) || null;
+  const isEnforce = mode === 'enforce';
+  const hasWaf = policy && policy.firewall && policy.firewall.waf;
+  if (isEnforce && hasWaf) {
+    const managed = Array.isArray(waf.managed_rules) ? waf.managed_rules : [];
+    const hasCoreSignal = managed.some((r) =>
+      r === 'AWSManagedRulesBotControlRuleSet' ||
+      r === 'AWSManagedRulesATPRuleSet' ||
+      r === 'AWSManagedRulesIPReputationList' ||
+      r === 'AWSManagedRulesAnonymousIpList'
+    );
+    if (!hasCoreSignal) {
+      warnings.push('firewall.waf.managed_rules does not include any of BotControl / ATP / IPReputation / AnonymousIp. Consider adding at least IPReputation + AnonymousIp for production enforce mode.');
+    }
+    const loggingEnabled = waf.logging && waf.logging.enabled === true;
+    if (waf.scope === 'CLOUDFRONT' && !loggingEnabled) {
+      warnings.push('firewall.waf.logging is not enabled while scope=CLOUDFRONT. PCI-DSS / SOC2 require WAF log retention — set logging.enabled: true and supply destination_arn_env.');
+    }
+  }
+
+  if (warnings.length > 0) {
+    console.warn('Policy lint warnings:', policyPath);
+    warnings.forEach((w) => console.warn('  - ' + w));
+  }
+
   if (errors.length > 0) {
     console.error('Policy lint failed:', policyPath);
     errors.forEach((e) => console.error(e));
