@@ -13,19 +13,50 @@
 
 ---
 
-## 推奨ログフィールド（ブロック時）
+## 構造化 JSON ログ（生成ランタイム）
 
-Edge セキュリティレイヤーが 4xx（400, 401, 403, 405, 414）を返したときに、少なくとも以下をログすることを推奨します。
+`observability.log_format: json`（既定）を指定すると、生成された viewer-request / origin-request / Cloudflare Worker は判定 1 件につき 1 行の JSON を `console.log` に出力します。フィールド:
 
 | フィールド | 説明 | 例 |
 |------------|------|-----|
-| `block_reason` | ブロック理由 | `method_not_allowed`, `path_traversal`, `ua_denied`, `query_limit`, `admin_unauthorized` |
-| `status_code` | 返した HTTP ステータス | `400`, `401`, `403`, `405`, `414` |
-| `method` | リクエストメソッド | `GET`, `OPTIONS` |
-| `uri` または `path` | リクエスト URI（サニタイズ推奨；クエリがセンシティブな場合は全文を出さない） | `/admin`, `/foo/../bar` |
-| `user_agent` | User-Agent（任意；長い・センシティブな場合は省略やハッシュ化） | 厳格な環境では切り詰めやハッシュ |
+| `ts` | ISO-8601 タイムスタンプ | `2026-04-23T12:34:56.789Z` |
+| `level` | block/monitor/audit は `info`、実行エラーは `error` | `info` |
+| `event` | `block` / `monitor`（monitor モード）/ `audit` / `error` | `block` |
+| `status` | 返した HTTP ステータス | `405` |
+| `block_reason` | ブロック理由（下表参照） | `method_not_allowed` |
+| `method` | リクエストメソッド | `POST` |
+| `uri` | URI パス（既定ではクエリを除く） | `/admin` |
+| `correlation_id` | 設定した相関ヘッダーの値（無ければ origin で採番） | `00-4bf9...-01` |
 
-任意: `request_id`, `timestamp`, `region` / `edge_location`（CDN が提供する場合）。
+監査イベント（`audit_log_auth: true`）は追加で:
+
+| フィールド | 説明 |
+|------------|------|
+| `auth_event` | JWT / 署名 URL 検証成功で `auth_pass` |
+| `gate_type` | `jwt` / `signed_url` / `static_token` |
+| `gate_name` | ポリシーの route `name:` |
+| `sub` | JWT の `sub`。`audit_hash_sub: true` のとき SHA-256 先頭 16 hex |
+
+ブロックイベント例:
+
+```json
+{"ts":"2026-04-23T12:34:56.789Z","level":"info","event":"block","status":405,"block_reason":"method_not_allowed","method":"POST","uri":"/anything","correlation_id":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
+```
+
+### ポリシー
+
+```yaml
+observability:
+  log_format: "json"               # "json"（既定）または "text"
+  correlation_id_header: "traceparent"  # もしくは "x-request-id"
+  sample_rate: 1                   # 0..1（現状は advisory — block/audit は常時出力）
+  audit_log_auth: true             # 認証ゲート成功時に audit イベントを出す
+  audit_hash_sub: true             # sub を SHA-256 先頭 16 hex にハッシュ（PII 対策）
+```
+
+### 相関 ID 伝播
+
+Lambda@Edge / Worker は受信リクエストに `correlation_id_header` が無いとき自動採番（`crypto.randomUUID` / `crypto.getRandomValues`）して origin への転送ヘッダに付与します。これにより Edge / WAF / Origin のログを同一 ID で串刺しできます。
 
 ---
 

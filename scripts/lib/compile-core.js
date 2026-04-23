@@ -62,6 +62,21 @@ function compileRegexOrThrow(source, context) {
   }
 }
 
+// Catch the classic `(a+)+` / `([^x]+)*` / `(a|a)+` family: a group that itself
+// carries a quantifier metacharacter inside, followed by an outer quantifier.
+// Over-approximate on purpose — no legitimate path_patterns regex in this
+// project needs stacked quantifiers, so false positives cost us nothing while
+// false negatives would ship a runtime DoS to the edge. Paired with the
+// runtime timeout fuzz in scripts/regex-fuzz-tests.js for defense in depth.
+function hasCatastrophicBacktrackShape(src) {
+  if (typeof src !== 'string' || src.length === 0) return false;
+  // Strip the optional `(?i)` etc. inline-flag prefix so the heuristic sees
+  // the same pattern body the engine will.
+  const body = src.replace(/^\(\?[ims]+\)/, '');
+  const nested = /\(([^()]*[+*?{][^()]*)\)[+*?{]/;
+  return nested.test(body);
+}
+
 function looksLikeRegex(s) {
   // Heuristic: presence of common regex metacharacters suggests a regex intent.
   return /[\\(){}\[\]|^$+?*]|\.\{|\\\\/.test(s);
@@ -127,9 +142,19 @@ function parsePathPatterns(pathPatterns) {
       // must also be lowercase or they never match. Normalize at build time.
       contains.push(s.toLowerCase());
     }
-    // Validate each regex compiles successfully at build time.
+    // Validate each regex compiles successfully at build time and reject the
+    // classic nested-quantifier shape `(a+)+` family that triggers catastrophic
+    // backtracking at runtime (effectively a DoS on the edge).
     for (const src of regexSources) {
       compileRegexOrThrow(src, 'request.block.path_patterns.regex');
+      if (hasCatastrophicBacktrackShape(src)) {
+        throw new Error(
+          `request.block.path_patterns.regex: pattern rejected by ReDoS safety check ` +
+          `(nested-quantifier shape triggers catastrophic backtracking): ${JSON.stringify(src)}. ` +
+          `Rewrite without stacking quantifiers — for example, use a character class like ` +
+          `[a-z]+ instead of (a+)+.`
+        );
+      }
     }
     if (contains.length === 0 && regexSources.length === 0) {
       return { contains: DEFAULT_CONTAINS.slice(), regexSources: [] };
@@ -389,6 +414,51 @@ function hasFailOnPermissiveFlag(argv) {
   return Array.isArray(argv) && argv.includes('--fail-on-permissive');
 }
 
+function hasStrictOriginAuthFlag(argv) {
+  return Array.isArray(argv) && argv.includes('--strict-origin-auth');
+}
+
+// Verify that when origin.auth.type=custom_header is configured, the env var
+// named by `secret_env` is present and non-empty in the build environment.
+// Called with { strict: true } under --strict-origin-auth and as a warning
+// otherwise, so dev builds keep working while CI can fail closed.
+function validateOriginAuth(policy, options = {}) {
+  const env = options.env || process.env;
+  const strict = options.strict === true;
+  const logger = options.logger || console;
+
+  const auth = policy && policy.origin && policy.origin.auth;
+  if (!auth || auth.type !== 'custom_header') return { warnings: [], errors: [] };
+
+  const warnings = [];
+  const errors = [];
+  const envName = auth.secret_env || '';
+  if (!envName) {
+    errors.push('origin.auth.secret_env is required when type=custom_header');
+  } else {
+    const v = env[envName];
+    if (v === undefined) {
+      (strict ? errors : warnings).push(
+        `origin.auth.secret_env "${envName}" is not set in the build environment. Origin will see an empty auth header at runtime unless the env is populated.`
+      );
+    } else if (v.length === 0) {
+      (strict ? errors : warnings).push(
+        `origin.auth.secret_env "${envName}" is set but empty. The edge will refuse to forward the origin-auth header, breaking origin trust.`
+      );
+    }
+  }
+
+  warnings.forEach((w) => logger.warn('[origin-auth] ' + w));
+  if (errors.length > 0 && strict) {
+    logger.error('origin-auth validation failed (--strict-origin-auth):');
+    errors.forEach((e) => logger.error('  - ' + e));
+    const err = new Error('origin-auth validation failed');
+    err.validationErrors = errors;
+    throw err;
+  }
+  return { warnings, errors };
+}
+
 // Heuristic: paths that usually mutate state and therefore deserve replay
 // protection rather than just an expiry window. Matching is permissive (any
 // prefix that contains one of these substrings) because write patterns vary
@@ -438,6 +508,27 @@ function warnIfPermissive(policy, options = {}) {
   return { warned: true, failed: false };
 }
 
+// Normalize observability config for injection into edge CFG objects.
+// Kept next to the compiler so every target (CFF / Lambda@Edge / Worker)
+// sees identical defaults and casing.
+function buildObsConfig(policy) {
+  const obs = (policy && policy.observability) || {};
+  const format = obs.log_format === 'text' ? 'text' : 'json';
+  const correlationHeader = typeof obs.correlation_id_header === 'string' && obs.correlation_id_header.trim()
+    ? obs.correlation_id_header.trim().toLowerCase()
+    : '';
+  let sampleRate = Number(obs.sample_rate);
+  if (!Number.isFinite(sampleRate) || sampleRate < 0) sampleRate = 0;
+  if (sampleRate > 1) sampleRate = 1;
+  return {
+    logFormat: format,
+    correlationHeader,
+    sampleRate,
+    auditLogAuth: obs.audit_log_auth === true,
+    auditHashSub: obs.audit_hash_sub === true,
+  };
+}
+
 function build(policy, options = {}) {
   const rootDir = options.rootDir || repoRoot;
   const outDir = options.outDir || path.join(rootDir, 'dist');
@@ -467,6 +558,8 @@ function build(policy, options = {}) {
     .filter(Boolean);
   const trustForwardedFor = request.trust_forwarded_for === true;
 
+  const obsCfg = buildObsConfig(policy);
+
   const cfgCode = [
     'const CFG = {',
     `  mode: ${JSON.stringify(defaults.mode || 'enforce')},`,
@@ -485,6 +578,7 @@ function build(policy, options = {}) {
     `  trustForwardedFor: ${trustForwardedFor ? 'true' : 'false'},`,
     `  cors: ${JSON.stringify(corsConfig)},`,
     `  authGates: ${JSON.stringify(authGates)},`,
+    `  obs: ${JSON.stringify(obsCfg)},`,
     '};',
   ].join('\n');
 
@@ -619,6 +713,8 @@ function build(policy, options = {}) {
     ? Math.max(0, Math.min(600, Number(jwksGlobal.negative_cache_sec)))
     : 60;
 
+  const obsCfgOrigin = buildObsConfig(policy);
+
   const originCfgCode = [
     'const CFG = {',
     `  project: ${JSON.stringify(policy.project || 'cdn-security')},`,
@@ -630,6 +726,7 @@ function build(policy, options = {}) {
     `  originAuth: ${JSON.stringify(originAuth)},`,
     `  jwksStaleIfErrorSec: ${jwksStaleIfError},`,
     `  jwksNegativeCacheSec: ${jwksNegativeCache},`,
+    `  obs: ${JSON.stringify(obsCfgOrigin)},`,
     '};',
   ].join('\n');
 
@@ -646,6 +743,7 @@ function main(argv = process.argv.slice(2)) {
   const { policyPath, outDir } = parseArgs(argv, repoRoot);
   const allowPlaceholderToken = hasAllowPlaceholderFlag(argv);
   const failOnPermissive = hasFailOnPermissiveFlag(argv);
+  const strictOriginAuth = hasStrictOriginAuthFlag(argv);
   let policy;
 
   try {
@@ -669,6 +767,12 @@ function main(argv = process.argv.slice(2)) {
   warnSignedUrlReplay(policy);
 
   validateAuthGates(policy, { allowPlaceholderToken });
+
+  try {
+    validateOriginAuth(policy, { strict: strictOriginAuth });
+  } catch (e) {
+    process.exit(1);
+  }
 
   try {
     const outputs = build(policy, { outDir, rootDir: repoRoot, allowPlaceholderToken });
@@ -695,10 +799,14 @@ module.exports = {
   parsePathPatterns,
   extractRegex,
   compileRegexOrThrow,
+  hasCatastrophicBacktrackShape,
   regexesLiteralCode,
   getAuthGates,
+  buildObsConfig,
   hasAllowPlaceholderFlag,
   hasFailOnPermissiveFlag,
+  hasStrictOriginAuthFlag,
+  validateOriginAuth,
   warnIfPermissive,
   warnSignedUrlReplay,
   validateJwksUrl,

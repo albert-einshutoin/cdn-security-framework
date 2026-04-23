@@ -1,5 +1,7 @@
 # CDN セキュリティフレームワーク
 
+> **言語:** [English](./README.md) · 日本語
+
 ## 概要
 
 **CDN Security Framework** は、CloudFront / CloudFront Functions / Lambda@Edge / Cloudflare Workers など、
@@ -97,6 +99,13 @@
 
 Terraform / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.md) を参照。
 
+### 運用ドキュメント
+- [CLI リファレンス](docs/cli.ja.md) — `init` / `build` / `emit-waf` / `doctor` / `migrate`
+- [アーキタイプ](docs/archetypes.ja.md) — アプリ形状別プリセット（SPA / REST API / 管理画面 / マイクロサービス）
+- [シークレットローテーション runbook](docs/runbooks/secret-rotation.ja.md) — JWT / JWKS / 署名付き URL / 管理トークン / origin シークレット
+- [スキーママイグレーション](docs/schema-migration.ja.md) — `policy/schema.json` のバージョン契約と `migrate` CLI
+- [サプライチェーン](docs/supply-chain.ja.md) — SLSA v1 provenance と `npm audit signatures`
+
 ---
 
 ## ポリシーとランタイム
@@ -145,6 +154,14 @@ npm run test:security-baseline
 ```
 
 CI と同じ runtime / unit / drift / security-baseline チェックを実行します。
+
+### 4.5 環境診断（初回デプロイ前の任意実行、推奨）
+
+```bash
+npx cdn-security doctor
+```
+
+Node バージョン、ポリシーのパース/スキーマバージョン、認証ゲートが参照する全環境変数（`EDGE_ADMIN_TOKEN`・`JWT_SECRET`・`ORIGIN_SECRET` など）、`dist/edge/` の書き込み可否、`npm ls` の健全性を一括で pass/fail 判定します。CI でアーティファクト化できる `doctor-report.json` も書き出します。詳細は [CLI リファレンス](docs/cli.ja.md)。
 
 ### 5. デプロイ
 

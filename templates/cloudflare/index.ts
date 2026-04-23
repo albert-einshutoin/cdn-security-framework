@@ -25,11 +25,60 @@ function deny(code: number, msg: string) {
   return new Response(msg, { status: code, headers: { 'cache-control': 'no-store' } });
 }
 
-function shouldBlock(code: number, msg: string): Response | null {
+type ReqCtx = { method: string; uri: string; correlationId: string };
+
+// Structured log emitter. Shape matches the AWS side so downstream pipelines
+// can aggregate across CDN vendors with a single schema. Issue #21.
+function logEvent(event: string, fields: Record<string, any>) {
+  if (CFG.obs && CFG.obs.logFormat === 'text') {
+    console.log('[' + event + ']', fields.status != null ? fields.status : '',
+      fields.block_reason ? fields.block_reason : '');
+    return;
+  }
+  const rec: Record<string, any> = { ts: Date.now(), level: event === 'block' ? 'warn' : 'info', event };
+  for (const k of Object.keys(fields)) {
+    if (fields[k] != null && fields[k] !== '') rec[k] = fields[k];
+  }
+  console.log(JSON.stringify(rec));
+}
+
+function readCorrelation(req: Request | null): string {
+  if (!CFG.obs || !CFG.obs.correlationHeader || !req) return '';
+  return req.headers.get(CFG.obs.correlationHeader) || '';
+}
+
+function reqCtx(req: Request | null): ReqCtx {
+  if (!req) return { method: '', uri: '/', correlationId: '' };
+  let uri = '/';
+  try { uri = new URL(req.url).pathname; } catch (_e) { /* ignore */ }
+  return { method: req.method, uri, correlationId: readCorrelation(req) };
+}
+
+async function hashSub(sub: string): Promise<string> {
+  if (!sub) return '';
+  const data = new TextEncoder().encode(sub);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  const bytes = new Uint8Array(digest);
+  let hex = '';
+  for (let i = 0; i < bytes.length && hex.length < 16; i++) {
+    hex += bytes[i].toString(16).padStart(2, '0');
+  }
+  return hex.slice(0, 16);
+}
+
+function shouldBlock(code: number, msg: string, ctx?: ReqCtx | null): Response | null {
+  const base = {
+    status: code,
+    block_reason: msg,
+    method: ctx && ctx.method,
+    uri: ctx && ctx.uri,
+    correlation_id: ctx && ctx.correlationId,
+  };
   if (CFG.mode === 'monitor') {
-    console.log('[monitor]', code, msg);
+    logEvent('monitor', base);
     return null;
   }
+  logEvent('block', base);
   return deny(code, msg);
 }
 
@@ -320,6 +369,7 @@ function handleCorsPreflight(request: Request): Response | null {
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
+    const ctx = reqCtx(request);
 
     const preflight = handleCorsPreflight(request);
     if (preflight) return preflight;
@@ -327,7 +377,7 @@ export default {
     // Host allowlist — reject requests whose Host does not match before running
     // any other checks.
     if (!isHostAllowed(request.headers.get('host') || url.hostname)) {
-      const r = shouldBlock(400, 'Host Not Allowed');
+      const r = shouldBlock(400, 'Host Not Allowed', ctx);
       if (r) return r;
     }
 
@@ -341,10 +391,10 @@ export default {
         ? String((request as any).cf.country).toUpperCase()
         : '';
       if (CFG.geoBlockCountries.size > 0 && country && CFG.geoBlockCountries.has(country)) {
-        const r = shouldBlock(403, 'Geo Blocked');
+        const r = shouldBlock(403, 'Geo Blocked', ctx);
         if (r) return r;
       } else if (CFG.geoAllowCountries.size > 0 && (!country || !CFG.geoAllowCountries.has(country))) {
-        const r = shouldBlock(403, 'Geo Blocked');
+        const r = shouldBlock(403, 'Geo Blocked', ctx);
         if (r) return r;
       }
     }
@@ -352,12 +402,12 @@ export default {
     if (request.method === 'OPTIONS' && CFG.cors) {
       // let through non-matching origin preflight
     } else if (!CFG.allowMethods.has(request.method)) {
-      const r = shouldBlock(405, 'Method Not Allowed');
+      const r = shouldBlock(405, 'Method Not Allowed', ctx);
       if (r) return r;
     }
 
     if (url.pathname.length > CFG.maxUriLength) {
-      const r = shouldBlock(414, 'URI Too Long');
+      const r = shouldBlock(414, 'URI Too Long', ctx);
       if (r) return r;
     }
 
@@ -367,7 +417,7 @@ export default {
       let headerCount = 0;
       request.headers.forEach(() => { headerCount++; });
       if (headerCount > CFG.maxHeaderCount) {
-        const r = shouldBlock(431, 'Request Header Fields Too Large');
+        const r = shouldBlock(431, 'Request Header Fields Too Large', ctx);
         if (r) return r;
       }
     }
@@ -377,13 +427,13 @@ export default {
     const pathLower = url.pathname.toLowerCase();
     for (const m of CFG.blockPathContains) {
       if (pathLower.includes(m)) {
-        const r = shouldBlock(400, 'Bad Request');
+        const r = shouldBlock(400, 'Bad Request', ctx);
         if (r) return r;
       }
     }
     for (const re of CFG.blockPathRegexes) {
       if (re.test(url.pathname)) {
-        const r = shouldBlock(400, 'Bad Request');
+        const r = shouldBlock(400, 'Bad Request', ctx);
         if (r) return r;
       }
     }
@@ -391,7 +441,7 @@ export default {
     for (const h of CFG.requiredHeaders) {
       const val = request.headers.get(h);
       if (!val) {
-        const r = shouldBlock(400, 'Missing ' + h);
+        const r = shouldBlock(400, 'Missing ' + h, ctx);
         if (r) return r;
       }
     }
@@ -402,32 +452,32 @@ export default {
         totalSize += key.length + value.length;
       });
       if (totalSize > CFG.maxHeaderSize) {
-        const r = shouldBlock(431, 'Request Header Fields Too Large');
+        const r = shouldBlock(431, 'Request Header Fields Too Large', ctx);
         if (r) return r;
       }
     }
 
     const ua = request.headers.get('user-agent') || '';
     if (ua && ua.length > 512) {
-      const r = shouldBlock(400, 'User-Agent Too Long');
+      const r = shouldBlock(400, 'User-Agent Too Long', ctx);
       if (r) return r;
     }
     const uaLower = ua.toLowerCase();
     for (const s of CFG.uaDenyContains) {
       if (uaLower.includes(s)) {
-        const r = shouldBlock(403, 'Forbidden');
+        const r = shouldBlock(403, 'Forbidden', ctx);
         if (r) return r;
       }
     }
 
     const qs = url.search.slice(1);
     if (qs.length > CFG.maxQueryLength) {
-      const r = shouldBlock(414, 'URI Too Long');
+      const r = shouldBlock(414, 'URI Too Long', ctx);
       if (r) return r;
     }
     const parts = qs ? qs.split('&') : [];
     if (parts.length > CFG.maxQueryParams) {
-      const r = shouldBlock(400, 'Too many query params');
+      const r = shouldBlock(400, 'Too many query params', ctx);
       if (r) return r;
     }
 
@@ -450,12 +500,12 @@ export default {
         const expectedToken = env[gate.tokenEnv] || '';
         if (!expectedToken) {
           console.error('[auth] static_token env missing:', gate.tokenEnv);
-          const r = shouldBlock(503, 'Auth misconfigured');
+          const r = shouldBlock(503, 'Auth misconfigured', ctx);
           if (r) return r;
           continue;
         }
         if (!timingSafeEqual(tok, expectedToken)) {
-          const r = shouldBlock(401, 'Unauthorized');
+          const r = shouldBlock(401, 'Unauthorized', ctx);
           if (r) return r;
         }
       } else if (gate.type === 'basic_auth') {
@@ -463,7 +513,7 @@ export default {
         const expectedCreds = env[gate.credentialsEnv] || '';
         if (!expectedCreds) {
           console.error('[auth] basic_auth env missing:', gate.credentialsEnv);
-          const r = shouldBlock(503, 'Auth misconfigured');
+          const r = shouldBlock(503, 'Auth misconfigured', ctx);
           if (r) return r;
           continue;
         }
@@ -492,26 +542,48 @@ export default {
       } else if (gate.type === 'jwt') {
         const authHeader = request.headers.get('authorization') || '';
         if (!authHeader.startsWith('Bearer ')) {
-          const r = shouldBlock(401, 'Missing or invalid Authorization header');
+          const r = shouldBlock(401, 'Missing or invalid Authorization header', ctx);
           if (r) return r;
           continue;
         }
         const token = authHeader.slice(7);
         const verified = await verifyJwt(gate, token, env);
         if (!verified.valid) {
-          const r = shouldBlock(401, verified.error || 'Invalid token');
+          const r = shouldBlock(401, verified.error || 'Invalid token', ctx);
           if (r) return r;
           continue;
+        }
+        if (CFG.obs && CFG.obs.auditLogAuth) {
+          const rawSub = (verified.payload && verified.payload.sub) || '';
+          logEvent('audit', {
+            auth_event: 'auth_pass',
+            gate_type: 'jwt',
+            gate_name: gate.name || '',
+            sub: CFG.obs.auditHashSub ? await hashSub(rawSub) : rawSub,
+            method: ctx.method,
+            uri: ctx.uri,
+            correlation_id: ctx.correlationId,
+          });
         }
       } else if (gate.type === 'signed_url') {
         const verified = await verifySignedUrl(gate, url, env);
         if (!verified.valid) {
-          const r = shouldBlock(403, verified.error || 'Invalid signature');
+          const r = shouldBlock(403, verified.error || 'Invalid signature', ctx);
           if (r) return r;
           continue;
         }
         if (gate.nonce_param && verified.nonce) {
           signedUrlNonce = verified.nonce;
+        }
+        if (CFG.obs && CFG.obs.auditLogAuth) {
+          logEvent('audit', {
+            auth_event: 'auth_pass',
+            gate_type: 'signed_url',
+            gate_name: gate.name || '',
+            method: ctx.method,
+            uri: ctx.uri,
+            correlation_id: ctx.correlationId,
+          });
         }
       }
     }
@@ -536,10 +608,21 @@ export default {
       forwardHeaders.delete(h);
     }
     if (CFG.originAuth && CFG.originAuth.type === 'custom_header') {
-      const secret = env[CFG.originAuth.secret_env || ''] || '';
+      const envName = CFG.originAuth.secret_env || '';
+      const secret = envName ? (env[envName] || '') : '';
       if (secret) {
         const headerName = CFG.originAuth.header || 'X-Origin-Verify';
         forwardHeaders.set(headerName, secret);
+      } else {
+        console.log(JSON.stringify({
+          ts: new Date().toISOString(),
+          level: 'error',
+          event: 'error',
+          block_reason: 'origin_auth_secret_missing',
+          secret_env: envName,
+          uri: ctx.uri,
+          correlation_id: ctx.correlationId,
+        }));
       }
     }
     // Forward signed-URL nonce so origin can enforce single-use. The edge
@@ -547,6 +630,18 @@ export default {
     // re-use (SET NX in KV/Redis).
     if (signedUrlNonce) {
       forwardHeaders.set('X-Signed-URL-Nonce', signedUrlNonce);
+    }
+
+    // Propagate correlation / trace header so origin logs can join edge logs.
+    // When the header is missing, mint one so every request has a stable ID.
+    if (CFG.obs && CFG.obs.correlationHeader) {
+      const incoming = request.headers.get(CFG.obs.correlationHeader);
+      if (!incoming) {
+        const buf = new Uint8Array(16);
+        crypto.getRandomValues(buf);
+        const id = Array.from(buf, (b: number) => b.toString(16).padStart(2, '0')).join('');
+        forwardHeaders.set(CFG.obs.correlationHeader, id);
+      }
     }
 
     const res = await fetch(new Request(url.toString(), {

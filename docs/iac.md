@@ -156,3 +156,45 @@ distribution.addBehavior('*', origin, {
 | **WAF (Terraform)** | Use `dist/infra/waf-rules.tf.json` in your Terraform config (same directory or module) and attach the rule group to your Web ACL. |
 
 Re-run `npx cdn-security build` whenever you change `policy/security.yml`; then re-run Terraform or CDK so the deployed Edge and WAF match the policy.
+
+---
+
+## Origin Auth
+
+<a id="origin-auth"></a>
+
+When `origin.auth.type: custom_header` is configured, the edge injects a shared secret header (default `X-Origin-Verify`) read from an environment variable at build/runtime:
+
+```yaml
+origin:
+  auth:
+    type: custom_header
+    header: X-Origin-Verify
+    secret_env: ORIGIN_AUTH_SECRET   # must match ^[A-Z][A-Z0-9_]*$
+```
+
+- **`header`** is required (non-empty string).
+- **`secret_env`** is required and must match `^[A-Z][A-Z0-9_]*$`. The schema rejects lowercase / spaced names so you cannot accidentally reference a non-existent env var.
+- **Build-time check**: pass `--strict-origin-auth` to `node scripts/compile.js` to hard-fail when `secret_env` is unset or empty in the build environment. Without the flag the build emits a non-fatal `[origin-auth]` warning — useful for local development but **you should wire `--strict-origin-auth` into CI** so a misconfigured env never ships.
+- **Runtime behavior**: if the env resolves to empty at runtime, the edge **refuses** to forward the header (origin should deny by default; otherwise the miswire silently falls back to trusting anything reaching origin). The edge emits a JSON error log (`event:"error", block_reason:"origin_auth_secret_missing"`) so the miswire is visible in observability.
+
+### Terraform example (env-backed Lambda@Edge)
+
+```hcl
+variable "origin_auth_secret" {
+  type      = string
+  sensitive = true
+}
+
+resource "aws_lambda_function" "origin_request" {
+  function_name = "edge-origin-request"
+  # ... filename / role ...
+  environment {
+    variables = {
+      ORIGIN_AUTH_SECRET = var.origin_auth_secret
+    }
+  }
+}
+```
+
+Supply `TF_VAR_origin_auth_secret` via your secret store (AWS Secrets Manager, Vault, CI secret). Do **not** put the value in `policy/security.yml` — the policy file is checked into git.

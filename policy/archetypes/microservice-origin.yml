@@ -1,0 +1,70 @@
+# Archetype: internal microservice origin.
+# Use when: CDN fronts a backend microservice exposing a service-to-service API.
+# Threat focus: direct-origin bypass, request smuggling, overly permissive methods.
+# Base profile: balanced with narrow method set and signed origin header.
+
+version: 1
+project: example-microservice-origin
+
+metadata:
+  risk_level: balanced
+  description: "Microservice origin: signed origin header, strict methods, small body limits. When to use: backend microservice behind the CDN. Origin must only accept requests via this edge."
+
+defaults:
+  mode: "enforce"
+  response:
+    add_security_headers: true
+
+request:
+  allow_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE"]
+
+  limits:
+    max_query_length: 512
+    max_query_params: 20
+    max_uri_length: 1024
+    max_header_count: 40
+
+  block:
+    path_patterns:
+      contains:
+        - "/../"
+        - "%2e%2e"
+    ua_contains:
+      - "sqlmap"
+      - "nikto"
+      - "acunetix"
+      - "masscan"
+
+observability:
+  log_format: "json"
+  correlation_id_header: "traceparent"
+  audit_log_auth: true
+  audit_hash_sub: true
+
+response_headers:
+  hsts: "max-age=31536000; includeSubDomains; preload"
+  x_content_type_options: "nosniff"
+  referrer_policy: "no-referrer"
+  permissions_policy: "camera=(), microphone=(), geolocation=()"
+  csp_public: "default-src 'none'; frame-ancestors 'none';"
+
+origin:
+  timeout:
+    connect: 5
+    read: 30
+  # Edge signs every origin request with ORIGIN_SECRET so the origin can
+  # reject anything that didn't come through this CDN. Combine with an
+  # origin-side ACL that requires this header.
+  auth:
+    type: custom_header
+    header: "x-edge-secret"
+    secret_env: "ORIGIN_SECRET"
+
+firewall:
+  waf:
+    rate_limit: 5000
+    scope: REGIONAL
+    managed_rules:
+      - "AWSManagedRulesCommonRuleSet"
+      - "AWSManagedRulesKnownBadInputsRuleSet"
+      - "AWSManagedRulesIPReputationList"

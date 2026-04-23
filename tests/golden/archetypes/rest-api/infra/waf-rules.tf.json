@@ -1,0 +1,157 @@
+{
+  "resource": {
+    "aws_wafv2_rule_group": {
+      "example-rest-api-rate-limit": {
+        "name": "example-rest-api-rate-limit",
+        "scope": "REGIONAL",
+        "capacity": 4,
+        "rule": [
+          {
+            "name": "rate-based-rule",
+            "priority": 1,
+            "action": {
+              "block": {}
+            },
+            "statement": {
+              "rate_based_statement": {
+                "limit": 5000,
+                "aggregate_key_type": "IP"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-rest-api-rate-limit",
+              "sampled_requests_enabled": true
+            }
+          },
+          {
+            "name": "auth-ip-limit",
+            "priority": 1,
+            "action": {
+              "block": {}
+            },
+            "statement": {
+              "rate_based_statement": {
+                "limit": 200,
+                "aggregate_key_type": "IP",
+                "scope_down_statement": {
+                  "byte_match_statement": {
+                    "field_to_match": {
+                      "uri_path": {}
+                    },
+                    "positional_constraint": "STARTS_WITH",
+                    "search_string": "/api/auth",
+                    "text_transformation": [
+                      {
+                        "priority": 0,
+                        "type": "LOWERCASE"
+                      }
+                    ]
+                  }
+                }
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-rest-api-auth-ip-limit",
+              "sampled_requests_enabled": true
+            }
+          }
+        ],
+        "visibility_config": {
+          "cloudwatch_metrics_enabled": true,
+          "metric_name": "example-rest-api-rule-group",
+          "sampled_requests_enabled": true
+        }
+      }
+    },
+    "aws_wafv2_web_acl": {
+      "example-rest-api-waf-acl": {
+        "name": "example-rest-api-waf-acl",
+        "scope": "REGIONAL",
+        "default_action": {
+          "allow": {}
+        },
+        "rule": [
+          {
+            "name": "AWS-AWSManagedRulesCommonRuleSet",
+            "priority": 10,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesCommonRuleSet"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-rest-api-AWSManagedRulesCommonRuleSet",
+              "sampled_requests_enabled": true
+            }
+          },
+          {
+            "name": "AWS-AWSManagedRulesKnownBadInputsRuleSet",
+            "priority": 11,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesKnownBadInputsRuleSet"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-rest-api-AWSManagedRulesKnownBadInputsRuleSet",
+              "sampled_requests_enabled": true
+            }
+          },
+          {
+            "name": "AWS-AWSManagedRulesSQLiRuleSet",
+            "priority": 12,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesSQLiRuleSet"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-rest-api-AWSManagedRulesSQLiRuleSet",
+              "sampled_requests_enabled": true
+            }
+          },
+          {
+            "name": "AWS-AWSManagedRulesIPReputationList",
+            "priority": 13,
+            "override_action": {
+              "none": {}
+            },
+            "statement": {
+              "managed_rule_group_statement": {
+                "vendor_name": "AWS",
+                "name": "AWSManagedRulesIPReputationList"
+              }
+            },
+            "visibility_config": {
+              "cloudwatch_metrics_enabled": true,
+              "metric_name": "example-rest-api-AWSManagedRulesIPReputationList",
+              "sampled_requests_enabled": true
+            }
+          }
+        ],
+        "visibility_config": {
+          "cloudwatch_metrics_enabled": true,
+          "metric_name": "example-rest-api-waf-acl",
+          "sampled_requests_enabled": true
+        }
+      }
+    }
+  }
+}

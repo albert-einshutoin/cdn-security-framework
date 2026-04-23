@@ -24,6 +24,9 @@ jobs:
       # at runtime, so static_token values are baked into the build artifact.
       # This is not a production secret — real deployments use GitHub Secrets.
       EDGE_ADMIN_TOKEN: ci-build-token-not-for-deploy
+      # Origin-auth secret is consumed by the microservice-origin archetype
+      # during drift checks; same CI-only convention applies.
+      ORIGIN_SECRET: ci-origin-secret-not-for-deploy
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -49,6 +52,13 @@ jobs:
           npm run lint:policy -- policy/profiles/strict.yml
           npm run lint:policy -- policy/profiles/permissive.yml
 
+      - name: Policy lint (archetypes)
+        run: |
+          npm run lint:policy -- policy/archetypes/spa-static-site.yml
+          npm run lint:policy -- policy/archetypes/rest-api.yml
+          npm run lint:policy -- policy/archetypes/admin-panel.yml
+          npm run lint:policy -- policy/archetypes/microservice-origin.yml
+
       - name: Build AWS (compile policy → dist)
         run: npm run build
 
@@ -65,14 +75,26 @@ jobs:
       - name: Runtime tests (AWS + Cloudflare)
         run: npm run test:runtime
 
-      - name: Unit tests (compiler core)
+      - name: Unit tests (compiler core + doctor + emit-waf)
         run: npm run test:unit
+
+      - name: CLI doctor self-check (uses repo's own policy)
+        run: node bin/cli.js doctor --no-report
+
+      - name: ReDoS fuzz (user-supplied regexes must not backtrack catastrophically)
+        run: npm run test:fuzz
+
+      - name: Cloudflare Worker integration tests (Node-native fetch harness)
+        run: npm run test:cloudflare-integration
 
       - name: Drift check (base + profiles vs golden generated artifacts)
         run: npm run test:drift
 
       - name: Security baseline check (OWASP mapping + CI guardrails)
         run: npm run test:security-baseline
+
+      - name: Coverage (c8, fail below 80% lines)
+        run: npm run test:coverage
 
       - name: Verify npm package contents (dry-run)
         run: npm pack --dry-run
