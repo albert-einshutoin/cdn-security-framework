@@ -90,8 +90,21 @@ node scripts/policy-lint.js policy/base.yml
 
 ---
 
+## permissive プロファイル警告
+
+`permissive` プロファイルには `metadata.risk_level: permissive` タグが付いています。コンパイラはこのタグを検出するたびに stderr に警告を出し、`--fail-on-permissive` が付いていれば非 0 終了します。本番 CI では必ず次のようにゲートしてください:
+
+```bash
+npx cdn-security build --fail-on-permissive
+```
+
+プロファイル比較と、推奨される dev/prod ゲート運用の詳細は [docs/profiles.ja.md](../docs/profiles.ja.md) を参照してください。
+
+---
+
 ## 関連
 
+* [プロファイル](../docs/profiles.ja.md) — プロファイル選択と本番 CI の permissive ゲート。
 * [ポリシーとランタイムの同期](../docs/policy-runtime-sync.ja.md) — ポリシーとランタイムの同期方法。
 * [アーキテクチャ](../docs/architecture.ja.md) — ポリシー駆動の設計。
 

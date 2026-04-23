@@ -5,6 +5,10 @@
 version: 1
 project: example-cdn-security
 
+metadata:
+  risk_level: strict
+  description: "Maximum edge hardening; intended for surfaces with tight client control."
+
 defaults:
   mode: "enforce"
   response:

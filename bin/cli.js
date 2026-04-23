@@ -97,6 +97,7 @@ program
   .option('-t, --target <platform>', 'Target platform (aws | cloudflare)', 'aws')
   .option('--output-mode <mode>', 'AWS infra output mode: full | rule-group', 'full')
   .option('--rule-group-only', 'AWS only: generate WAF rule groups without aws_wafv2_web_acl output')
+  .option('--fail-on-permissive', 'Exit non-zero when policy.metadata.risk_level is "permissive" (gate for production CI)')
   .action((opts) => {
     const cwd = process.cwd();
     let policyPath = opts.policy;
@@ -127,6 +128,8 @@ program
     }
     console.log('[INFO] Validating policy... OK');
 
+    const permissiveFlag = opts.failOnPermissive ? ['--fail-on-permissive'] : [];
+
     if (opts.target === 'aws') {
       console.log('[INFO] Target: AWS CloudFront Functions');
       const compilePath = path.join(pkgRoot, 'scripts', 'compile.js');
@@ -134,6 +137,7 @@ program
         compilePath,
         '--policy', policyPath,
         '--out-dir', outDir,
+        ...permissiveFlag,
       ], { stdio: 'inherit', cwd });
       if (compileResult.status !== 0) process.exit(1);
       console.log('[SUCCESS] Generated ' + path.join(outDir, 'edge', 'viewer-request.js'));
@@ -156,6 +160,7 @@ program
         compileCfPath,
         '--policy', policyPath,
         '--out-dir', outDir,
+        ...permissiveFlag,
       ], { stdio: 'inherit', cwd });
       if (compileCfResult.status !== 0) process.exit(1);
       console.log('[SUCCESS] Generated ' + path.join(outDir, 'edge', 'cloudflare', 'index.ts'));

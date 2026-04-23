@@ -12,6 +12,8 @@ const {
   regexesLiteralCode,
   validateAuthGates,
   hasAllowPlaceholderFlag,
+  hasFailOnPermissiveFlag,
+  warnIfPermissive,
 } = require('./lib/compile-core');
 
 const repoRoot = path.join(__dirname, '..');
@@ -24,9 +26,11 @@ for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '--policy' && argv[i + 1]) { policyPath = argv[++i]; continue; }
   if (argv[i] === '--out-dir' && argv[i + 1]) { outDir = argv[++i]; continue; }
   if (argv[i] === '--allow-placeholder-token') { continue; }
+  if (argv[i] === '--fail-on-permissive') { continue; }
   if (!argv[i].startsWith('--')) { policyPath = argv[i]; }
 }
 const allowPlaceholderToken = hasAllowPlaceholderFlag(argv);
+const failOnPermissive = hasFailOnPermissiveFlag(argv);
 
 let policy;
 try {
@@ -38,6 +42,11 @@ try {
     process.exit(1);
   }
   console.error('Error: failed to parse policy YAML:', e.message);
+  process.exit(1);
+}
+
+const permissive = warnIfPermissive(policy, { failOnPermissive });
+if (permissive.failed) {
   process.exit(1);
 }
 

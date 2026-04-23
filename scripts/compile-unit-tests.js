@@ -12,6 +12,8 @@ const {
   validateAuthGates,
   build,
   PLACEHOLDER_TOKEN,
+  hasFailOnPermissiveFlag,
+  warnIfPermissive,
 } = require('./lib/compile-core');
 
 function test(name, fn) {
@@ -542,6 +544,51 @@ test('build clamps clock_skew_sec to 0..600', () => {
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
+});
+
+test('hasFailOnPermissiveFlag detects the flag', () => {
+  assert.strictEqual(hasFailOnPermissiveFlag(['--fail-on-permissive']), true);
+  assert.strictEqual(hasFailOnPermissiveFlag(['--policy', 'x', '--fail-on-permissive']), true);
+  assert.strictEqual(hasFailOnPermissiveFlag(['--policy', 'x']), false);
+  assert.strictEqual(hasFailOnPermissiveFlag([]), false);
+  assert.strictEqual(hasFailOnPermissiveFlag(undefined), false);
+  assert.strictEqual(hasFailOnPermissiveFlag(null), false);
+});
+
+test('warnIfPermissive returns no-op when metadata.risk_level is not permissive', () => {
+  const captured = [];
+  const logger = { error: (msg) => captured.push(msg) };
+  const r1 = warnIfPermissive({}, { logger });
+  const r2 = warnIfPermissive({ metadata: { risk_level: 'strict' } }, { logger });
+  const r3 = warnIfPermissive({ metadata: { risk_level: 'balanced' } }, { logger });
+  const r4 = warnIfPermissive(null, { logger });
+  assert.deepStrictEqual(r1, { warned: false, failed: false });
+  assert.deepStrictEqual(r2, { warned: false, failed: false });
+  assert.deepStrictEqual(r3, { warned: false, failed: false });
+  assert.deepStrictEqual(r4, { warned: false, failed: false });
+  assert.strictEqual(captured.length, 0);
+});
+
+test('warnIfPermissive warns but does not fail when failOnPermissive is false', () => {
+  const captured = [];
+  const logger = { error: (msg) => captured.push(msg) };
+  const result = warnIfPermissive({ metadata: { risk_level: 'permissive' } }, { logger });
+  assert.deepStrictEqual(result, { warned: true, failed: false });
+  assert.strictEqual(captured.length, 1);
+  assert.match(captured[0], /metadata\.risk_level is "permissive"/);
+  assert.match(captured[0], /--fail-on-permissive/);
+});
+
+test('warnIfPermissive fails when failOnPermissive is true', () => {
+  const captured = [];
+  const logger = { error: (msg) => captured.push(msg) };
+  const result = warnIfPermissive(
+    { metadata: { risk_level: 'permissive' } },
+    { logger, failOnPermissive: true },
+  );
+  assert.deepStrictEqual(result, { warned: true, failed: true });
+  assert.strictEqual(captured.length, 2);
+  assert.match(captured[1], /refusing to build a permissive policy/);
 });
 
 if (process.exitCode) {
