@@ -104,7 +104,20 @@ jobs:
       - name: Verify npm package contents (dry-run)
         run: npm pack --dry-run
 
+      - name: Check whether npm version already exists
+        id: npm_version
+        run: |
+          VERSION="$(node -p "require('./package.json').version")"
+          NAME="$(node -p "require('./package.json').name")"
+          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+            echo "${NAME}@${VERSION} already exists on npm; skipping publish and running verification only."
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish package to npm (with SLSA v1 provenance attestation)
+        if: steps.npm_version.outputs.exists != 'true'
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         # Always publish with --provenance so consumers can verify the tarball
@@ -128,8 +141,8 @@ jobs:
           echo "Verifying provenance for ${NAME}@${VERSION}..."
           # Use a scratch dir so the downloaded tarball doesn't collide with
           # the `npm pack --dry-run` artifact from the lint step.
-          mkdir -p .provenance-verify
-          cd .provenance-verify
+          mkdir -p provenance-verify
+          cd provenance-verify
           npm pack "${NAME}@${VERSION}"
           # `npm audit signatures` hits the registry attestation API and
           # fails non-zero when any published version in the working tree's

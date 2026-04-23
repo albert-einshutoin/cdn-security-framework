@@ -3,7 +3,7 @@
   "version": "1.1.0",
   "description": "Policy-driven CDN edge security. Init YAML with npx cdn-security init, then npx cdn-security build to generate runtime code.",
   "bin": {
-    "cdn-security": "./bin/cli.js"
+    "cdn-security": "bin/cli.js"
   },
   "scripts": {
     "build": "node scripts/compile.js",
@@ -46,7 +46,7 @@
   ],
   "repository": {
     "type": "git",
-    "url": "https://github.com/albert-einshutoin/cdn-security-framework.git"
+    "url": "git+https://github.com/albert-einshutoin/cdn-security-framework.git"
   },
   "homepage": "https://github.com/albert-einshutoin/cdn-security-framework#readme",
   "bugs": {
