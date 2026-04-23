@@ -183,6 +183,11 @@ for (const route of routes) {
   }
 }
 
+const authProtectedPrefixesForResp = Array.from(new Set(
+  (authGates || []).flatMap((g) => Array.isArray(g.protectedPrefixes) ? g.protectedPrefixes : []),
+));
+const forceVaryAuth = resHeaders.force_vary_auth !== false;
+
 const responseCfgCode = [
   'const RESPONSE_CFG = {',
   '  headers: {',
@@ -193,8 +198,17 @@ const responseCfgCode = [
   '  },',
   `  csp_public: ${JSON.stringify(resHeaders.csp_public || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';")},`,
   `  csp_admin: ${JSON.stringify(resHeaders.csp_admin || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';")},`,
+  `  csp_report_only: ${JSON.stringify(resHeaders.csp_report_only || '')},`,
+  `  csp_report_uri: ${JSON.stringify(resHeaders.csp_report_uri || '')},`,
+  `  csp_nonce: ${resHeaders.csp_nonce === true ? 'true' : 'false'},`,
+  `  coop: ${JSON.stringify(resHeaders.coop || '')},`,
+  `  coep: ${JSON.stringify(resHeaders.coep || '')},`,
+  `  corp: ${JSON.stringify(resHeaders.corp || '')},`,
+  `  reporting_endpoints: ${JSON.stringify(resHeaders.reporting_endpoints || '')},`,
   `  adminPathPrefixes: ${JSON.stringify(adminPathPrefixes)},`,
   `  adminCacheControl: ${JSON.stringify(adminCacheControl)},`,
+  `  authProtectedPrefixes: ${JSON.stringify(authProtectedPrefixesForResp)},`,
+  `  forceVaryAuth: ${forceVaryAuth ? 'true' : 'false'},`,
   `  cors: ${JSON.stringify(corsConfig)},`,
   `  cookie_attributes: ${JSON.stringify(resHeaders.cookie_attributes || null)},`,
   '};',

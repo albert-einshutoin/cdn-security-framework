@@ -139,7 +139,18 @@ Edge / WAF / Origin のどのレイヤーが担当するかを明確にします
 
 **フレームワーク**: CloudFront Functions（`viewer-request.js`）と Cloudflare Workers（`index.ts`）の双方で、`static_token` と `basic_auth` は 64 ポジションパディングの定時間比較を使う。特性と制限は `docs/auth.ja.md` を参照。
 
-### 13. JWKS 障害 / キー回転の可用性
+### 13. 認証済みパスにおける共有キャッシュ汚染
+
+| 脅威 | Edge の責務 | WAF / Origin |
+|------|-------------|--------------|
+| 認証ゲート配下でオリジンがキャッシュ可能なレスポンスを返したとき、下流の共有キャッシュが利用者 A のレスポンスを利用者 B に返す | すべての auth-gate プレフィックスに対し `Cache-Control: no-store, no-cache, must-revalidate, private` と `Vary: Authorization, Cookie` を強制 | — |
+| Cloudflare Worker 経路で `Set-Cookie` 属性を書き換える際に複数 Cookie レスポンスを壊す | `Headers#getSetCookie()` を使い、Cookie 単位で正規表現アンカー付きの属性判定をする | — |
+| nonce 伝達手段がないためインライン `<script>` が `'unsafe-inline'` を要求する | per-response nonce（Cloudflare は `crypto.getRandomValues`、AWS は `Math.random`）を生成し、`'nonce-PLACEHOLDER'` を置換して `X-CSP-Nonce` で共有する | — |
+| CSP を本番展開する前に違反を観測できず、リリースが止まる | `csp_report_only` により強制 CSP と並行して `Content-Security-Policy-Report-Only` を返す | — |
+
+**フレームワーク**: `response_headers.force_vary_auth`（既定 on）が全 `auth_gate.match.path_prefixes` の和集合を `authProtectedPrefixes` にまとめ、ヒット時に no-store + Vary を強制する。CSP nonce、COOP/COEP/CORP、Reporting-Endpoints、Report-Only CSP はすべて `response_headers` から生成される。プラットフォーム上の制限とフィールド一覧: `docs/response-headers.ja.md`。
+
+### 14. JWKS 障害 / キー回転の可用性
 
 | 脅威 | Edge の責務 | WAF / Origin |
 |------|-------------|--------------|

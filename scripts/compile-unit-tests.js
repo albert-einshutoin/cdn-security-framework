@@ -937,6 +937,120 @@ test('constantTimeEqual (compiled) returns correct boolean for matches and misma
   }
 });
 
+test('response_headers: authProtectedPrefixes is union of every auth gate prefix', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-resp-union-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET', 'POST'] },
+      response_headers: {},
+      routes: [
+        {
+          name: 'admin',
+          match: { path_prefixes: ['/admin', '/docs'] },
+          auth_gate: { type: 'static_token', header: 'x-admin', token_env: 'ADMIN_TOKEN' },
+        },
+        {
+          name: 'api',
+          match: { path_prefixes: ['/api'] },
+          auth_gate: {
+            type: 'jwt', algorithm: 'RS256',
+            jwks_url: 'https://idp.example.com/jwks.json',
+          },
+        },
+        {
+          name: 'dl',
+          match: { path_prefixes: ['/download'] },
+          auth_gate: {
+            type: 'signed_url', secret_env: 'URL_SIGNING_SECRET',
+            exact_path: true, nonce_param: 'nonce',
+          },
+        },
+      ],
+    };
+    process.env.ADMIN_TOKEN = 'test';
+    build(policy, { outDir: tmpDir });
+    const resp = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
+    assert.match(resp, /authProtectedPrefixes: \["\/admin","\/docs","\/api","\/download"\]/);
+    assert.match(resp, /forceVaryAuth: true/);
+  } finally {
+    delete process.env.ADMIN_TOKEN;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('response_headers: force_vary_auth=false disables Vary/no-store override', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-resp-off-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: { force_vary_auth: false },
+      routes: [{
+        name: 'admin', match: { path_prefixes: ['/admin'] },
+        auth_gate: { type: 'static_token', header: 'x-admin', token_env: 'ADMIN_TOKEN' },
+      }],
+    };
+    process.env.ADMIN_TOKEN = 'test';
+    build(policy, { outDir: tmpDir });
+    const resp = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
+    assert.match(resp, /forceVaryAuth: false/);
+  } finally {
+    delete process.env.ADMIN_TOKEN;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('response_headers: emits COOP/COEP/CORP/Reporting-Endpoints when configured', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-resp-iso-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {
+        coop: 'same-origin',
+        coep: 'require-corp',
+        corp: 'same-origin',
+        reporting_endpoints: 'csp="https://r.example.com/csp"',
+      },
+      routes: [],
+    };
+    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
+    const resp = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
+    assert.match(resp, /coop: "same-origin"/);
+    assert.match(resp, /coep: "require-corp"/);
+    assert.match(resp, /corp: "same-origin"/);
+    assert.match(resp, /reporting_endpoints: "csp=\\"https:\/\/r\.example\.com\/csp\\""/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('response_headers: csp_nonce=true emits substitution hook and Report-Only copy', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-resp-csp-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {
+        csp_nonce: true,
+        csp_public: "default-src 'self'; script-src 'self' 'nonce-PLACEHOLDER'",
+        csp_report_only: "default-src 'self'; report-to csp",
+      },
+      routes: [],
+    };
+    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
+    const resp = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
+    assert.match(resp, /csp_nonce: true/);
+    assert.match(resp, /csp_report_only: "default-src/);
+    // Template must have nonce substitution hook + Report-Only emission path
+    assert.match(resp, /'nonce-PLACEHOLDER'/);
+    assert.match(resp, /Content-Security-Policy-Report-Only/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

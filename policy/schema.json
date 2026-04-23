@@ -172,6 +172,38 @@
         "permissions_policy": { "type": "string" },
         "csp_public": { "type": "string" },
         "csp_admin": { "type": "string" },
+        "csp_report_only": {
+          "description": "CSP value to emit in Content-Security-Policy-Report-Only header for staged rollout. Pair with csp_report_uri. Browsers will warn but not block violations — use to validate policy before setting csp_public/csp_admin.",
+          "type": "string"
+        },
+        "csp_report_uri": {
+          "description": "URL for CSP violation reports. Emitted as `report-uri` directive if set. Prefer report-to + Reporting-Endpoints for modern browsers.",
+          "type": "string"
+        },
+        "csp_nonce": {
+          "description": "Generate a per-response nonce and substitute `'nonce-PLACEHOLDER'` in csp_public / csp_admin with the value. The nonce is also exposed as `x-csp-nonce` response header so origin templates can reference it. Cloudflare uses crypto.getRandomValues; CFF falls back to Math.random (lower entropy; documented).",
+          "type": "boolean"
+        },
+        "coop": {
+          "description": "Cross-Origin-Opener-Policy. Together with COEP, isolates the browsing context and re-enables SharedArrayBuffer / high-precision timers. `same-origin` is the strict default.",
+          "enum": ["same-origin", "same-origin-allow-popups", "unsafe-none"]
+        },
+        "coep": {
+          "description": "Cross-Origin-Embedder-Policy. `require-corp` blocks embedding of any cross-origin resource that does not explicitly opt in via CORP. `credentialless` is a softer alternative for third-party subresources.",
+          "enum": ["require-corp", "credentialless", "unsafe-none"]
+        },
+        "corp": {
+          "description": "Cross-Origin-Resource-Policy. Controls whether other origins may embed this resource.",
+          "enum": ["same-origin", "same-site", "cross-origin"]
+        },
+        "reporting_endpoints": {
+          "description": "Value for the Reporting-Endpoints header (e.g., `csp-endpoint=\"https://example.com/csp\"`). Used with `report-to` directive in CSP.",
+          "type": "string"
+        },
+        "force_vary_auth": {
+          "description": "When true (default), every path covered by any auth gate receives `Cache-Control: no-store, no-cache, must-revalidate` + `Vary: Authorization, Cookie` at viewer-response. Prevents CDN edge caches from serving one user's authenticated response to another. Set false only if you understand the cache-poisoning risk (e.g., all protected responses are user-independent, such as prerendered public dashboards).",
+          "type": "boolean"
+        },
         "cors": {
           "type": "object",
           "properties": {
