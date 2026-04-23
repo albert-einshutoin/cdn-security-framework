@@ -13,19 +13,50 @@ This document describes recommended **logging and metrics** for the Edge Securit
 
 ---
 
-## Recommended Log Fields (when a request is blocked)
+## Structured JSON Logs (generated runtime)
 
-When the Edge Security Layer returns 4xx (400, 401, 403, 405, 414), log at least:
+When `observability.log_format: json` is set (default), the generated viewer-request / origin-request / Cloudflare Worker emit one JSON line per decision to `console.log`. Fields:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| `block_reason` | Why the request was blocked | `method_not_allowed`, `path_traversal`, `ua_denied`, `query_limit`, `admin_unauthorized` |
-| `status_code` | HTTP status returned | `400`, `401`, `403`, `405`, `414` |
-| `method` | Request method | `GET`, `OPTIONS` |
-| `uri` or `path` | Request URI (sanitized; avoid logging full query if sensitive) | `/admin`, `/foo/../bar` |
-| `user_agent` | User-Agent (optional; may be long or sensitive) | Truncate or hash in strict environments |
+| `ts` | ISO-8601 timestamp | `2026-04-23T12:34:56.789Z` |
+| `level` | `info` on block/monitor/audit, `error` on runtime error | `info` |
+| `event` | `block`, `monitor` (monitor mode), `audit`, `error` | `block` |
+| `status` | HTTP status returned | `405` |
+| `block_reason` | Why the request was blocked (see mapping below) | `method_not_allowed` |
+| `method` | Request method | `POST` |
+| `uri` | Request URI path (without query by default) | `/admin` |
+| `correlation_id` | Value of the configured correlation header (minted at origin if absent) | `00-4bf9...-01` |
 
-Optional: `request_id`, `timestamp`, `region` / `edge_location` (if your CDN provides them).
+Audit events (`audit_log_auth: true`) add:
+
+| Field | Description |
+|-------|-------------|
+| `auth_event` | `auth_pass` on successful JWT / signed URL |
+| `gate_type` | `jwt`, `signed_url`, `static_token` |
+| `gate_name` | Route's `name:` from policy |
+| `sub` | JWT `sub` — hashed to first 16 hex of SHA-256 when `audit_hash_sub: true` |
+
+Example block event:
+
+```json
+{"ts":"2026-04-23T12:34:56.789Z","level":"info","event":"block","status":405,"block_reason":"method_not_allowed","method":"POST","uri":"/anything","correlation_id":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
+```
+
+### Policy
+
+```yaml
+observability:
+  log_format: "json"               # "json" (default) or "text"
+  correlation_id_header: "traceparent"  # or "x-request-id"
+  sample_rate: 1                   # 0..1; currently advisory (block/audit always emit)
+  audit_log_auth: true             # emit audit events on auth gate success
+  audit_hash_sub: true             # SHA-256 truncate sub to 16 hex (PII-safe)
+```
+
+### Correlation propagation
+
+At Lambda@Edge / Worker, if the incoming request does **not** carry `correlation_id_header`, the runtime mints one (`crypto.randomUUID` / `crypto.getRandomValues`) and sets it on the forwarded request. Downstream services then see a consistent ID across edge logs, WAF logs, and origin logs.
 
 ---
 
@@ -76,6 +107,65 @@ For responses that pass through the Edge Security Layer, the framework adds secu
 
 * [Architecture](architecture.md) — Edge vs WAF vs Origin.
 * [Threat model](threat-model.md) — threats addressed at the edge.
+
+---
+
+## WAF Logging (AWS)
+
+`firewall.waf.logging` renders `aws_wafv2_logging_configuration` alongside the web ACL. The compiler adds a Terraform variable for the destination ARN so the ARN itself stays in your secret manager / CI pipeline rather than the policy file.
+
+```yaml
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    logging:
+      enabled: true
+      destination_arn_env: "WAF_LOG_DESTINATION_ARN"
+      redacted_fields:
+        - "authorization"
+        - "cookie"
+        - "x-api-key"
+```
+
+### Destination choices
+
+- **Kinesis Firehose → S3**: canonical low-cost path; supports >10k records/sec and cross-region delivery. Required for PCI / SOC2 retention windows above 30 days.
+- **CloudWatch Logs**: cheapest when you already query in CW Insights; watch the per-log-group rate limits.
+- **S3 direct**: only if you do not need stream replay and accept eventual consistency.
+
+Regardless of destination, the ARN must satisfy `aws_wafv2_logging_configuration` naming — Kinesis Firehose names must start with `aws-waf-logs-`.
+
+### Redaction
+
+`redacted_fields` drops the listed request fields from every log record before it leaves the WAF. Accepted values: `authorization`, `cookie`, `set-cookie`, `x-api-key`, `x-csrf-token`. Redaction happens inside AWS WAF — downstream pipelines never see the raw value. Add `cookie` + `authorization` at minimum for anything that handles authenticated traffic.
+
+### Lint warning
+
+`npm run lint:policy` emits a non-fatal warning when `defaults.mode == enforce`, `firewall.waf.scope == CLOUDFRONT`, and logging is not enabled:
+
+```
+Policy lint warnings: policy/security.yml
+  - firewall.waf.logging is not enabled while scope=CLOUDFRONT. PCI-DSS / SOC2 require WAF log retention — set logging.enabled: true and supply destination_arn_env.
+```
+
+This is advisory — REGIONAL scope skips the warning because ALB + WAF logs are often captured via ALB access logs already.
+
+### Managed-rule coverage lint
+
+Same lint pass warns when enforce-mode policies omit every one of BotControl / ATP / IPReputationList / AnonymousIpList. These four are where operators most frequently forget to opt in and are responsible for the vast majority of "why didn't the WAF catch this?" retros. The warning does not fail the build — adopt the rules you need for your risk posture.
+
+### Custom block response
+
+`firewall.waf.block_response` surfaces a branded page instead of the vanilla WAF 403 (which leaks the vendor). Emitted as `custom_response_bodies` on both the rule group and web ACL so any block rule can reference it via `custom_response_body_key: cdn_sec_block`.
+
+```yaml
+firewall:
+  waf:
+    block_response:
+      status_code: 403
+      body: "Access denied. Reference: {RID}"
+      content_type: "TEXT_PLAIN"
+```
 
 ---
 

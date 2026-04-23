@@ -5,6 +5,10 @@
 version: 1
 project: example-cdn-security
 
+metadata:
+  risk_level: strict
+  description: "Maximum edge hardening; intended for surfaces with tight client control."
+
 defaults:
   mode: "enforce"
   response:
@@ -20,11 +24,15 @@ request:
 
   block:
     path_patterns:
-      - "(?i)\\.{2}/"
-      - "(?i)%2e%2e"
-      - "(?i)%2f\\.\\./"
-      - "(?i)\\.\\.%2f"
-      - "(?i)\\\\.\\.\\\\"
+      contains:
+        - "/../"
+        - ".."
+        - "%2e%2e"
+        - "%2E%2E"
+      regex:
+        - "(?i)%2f\\.\\./"
+        - "(?i)\\.\\.%2f"
+        - "(?i)\\\\\\.\\.\\\\"
     ua_contains:
       - "sqlmap"
       - "nikto"
@@ -62,6 +70,12 @@ routes:
     request:
       allow_methods: ["GET", "HEAD", "POST"]
 
+observability:
+  log_format: "json"
+  correlation_id_header: "traceparent"
+  audit_log_auth: true
+  audit_hash_sub: true
+
 response_headers:
   hsts: "max-age=31536000; includeSubDomains; preload"
   x_content_type_options: "nosniff"
@@ -69,3 +83,40 @@ response_headers:
   permissions_policy: "camera=(), microphone=(), geolocation=(), payment=()"
   csp_public: "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self';"
   csp_admin:  "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';"
+
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    managed_rules:
+      - "AWSManagedRulesCommonRuleSet"
+      - "AWSManagedRulesKnownBadInputsRuleSet"
+      - "AWSManagedRulesIPReputationList"
+      - "AWSManagedRulesAnonymousIpList"
+    rate_limit_rules:
+      - name: "global-ip-limit"
+        limit: 2000
+        aggregate_key_type: "IP"
+        priority: 1
+        action: "block"
+      - name: "login-ip-limit"
+        limit: 100
+        aggregate_key_type: "IP"
+        action: "block"
+        priority: 2
+        scope_down_statement:
+          byte_match_statement:
+            field_to_match: { uri_path: {} }
+            positional_constraint: "STARTS_WITH"
+            search_string: "/login"
+            text_transformation: [{ priority: 0, type: "LOWERCASE" }]
+    block_response:
+      status_code: 403
+      body: "blocked"
+      content_type: "TEXT_PLAIN"
+    logging:
+      enabled: false
+      destination_arn_env: "WAF_LOG_DESTINATION_ARN"
+      redacted_fields:
+        - "authorization"
+        - "cookie"
+        - "x-api-key"

@@ -3,45 +3,121 @@
   "title": "CDN Security Framework Policy",
   "description": "Schema for policy/base.yml and policy/profiles/*.yml (v1)",
   "type": "object",
+  "additionalProperties": false,
   "required": ["version", "request", "response_headers"],
   "properties": {
     "version": { "type": "integer", "const": 1 },
     "project": { "type": "string" },
+    "metadata": {
+      "description": "Optional profile / policy metadata. `risk_level` hints the intended security posture — `permissive` triggers a build-time warning so operators do not accidentally ship a loose policy to production.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "risk_level": {
+          "description": "Intended posture: strict, balanced, or permissive. Build warns on permissive and can be hard-failed with --fail-on-permissive.",
+          "enum": ["strict", "balanced", "permissive"]
+        },
+        "description": { "type": "string" },
+        "owner": { "type": "string" }
+      }
+    },
     "defaults": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "mode": { "enum": ["enforce", "monitor"] },
-        "response": { "type": "object", "properties": { "add_security_headers": { "type": "boolean" } } }
+        "response": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "add_security_headers": { "type": "boolean" } }
+        }
       }
     },
     "request": {
       "type": "object",
+      "additionalProperties": false,
       "required": ["allow_methods"],
       "properties": {
         "allow_methods": { "type": "array", "items": { "type": "string" } },
+        "allowed_hosts": {
+          "description": "Optional Host header allowlist. When set, requests whose Host does not match any entry are rejected at the edge. Entries support exact match (api.example.com) and wildcard prefix (*.example.com).",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "trust_forwarded_for": {
+          "description": "If false (default), any client-supplied X-Forwarded-For header is stripped before the request reaches origin auth / logging. Enable only when the edge sits behind a trusted upstream proxy that you intentionally want to honor.",
+          "type": "boolean"
+        },
         "limits": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
-            "max_query_length": { "type": "integer" },
-            "max_query_params": { "type": "integer" },
-            "max_uri_length": { "type": "integer" },
-            "max_header_size": { "type": "integer" }
+            "max_query_length": {
+              "description": "Maximum querystring length in bytes. Requests exceeding this are rejected at the edge.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "max_query_params": {
+              "description": "Maximum number of querystring keys. Protects against HTTP parameter pollution and cache poisoning.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1024
+            },
+            "max_uri_length": {
+              "description": "Maximum request URI (path + query) length in bytes.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 8192
+            },
+            "max_header_size": {
+              "description": "Maximum individual request header value size in bytes.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 65536
+            },
+            "max_header_count": {
+              "description": "Maximum number of request headers allowed at the edge. Protects origin parsers from hash-collision / amplification under small-but-many-headers payloads. Exceeding this returns 431 (Request Header Fields Too Large). Default 64.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 500
+            }
           }
         },
         "block": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
-            "path_patterns": { "type": "array", "items": { "type": "string" } },
+            "path_patterns": {
+              "oneOf": [
+                {
+                  "description": "Legacy shape: list of literal substrings. Regex-style entries are rejected at build time; use the object form instead.",
+                  "type": "array",
+                  "items": { "type": "string" }
+                },
+                {
+                  "description": "Typed shape: literal substrings under contains, RegExp sources under regex (compiled at build time).",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "contains": { "type": "array", "items": { "type": "string" } },
+                    "regex": { "type": "array", "items": { "type": "string" } }
+                  }
+                }
+              ]
+            },
             "ua_contains": { "type": "array", "items": { "type": "string" } },
             "header_missing": { "type": "array", "items": { "type": "string" } }
           }
         },
         "normalize": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "drop_query_keys": { "type": "array", "items": { "type": "string" } },
             "path": {
               "type": "object",
+              "additionalProperties": false,
               "properties": {
                 "collapse_slashes": { "type": "boolean" },
                 "remove_dot_segments": { "type": "boolean" }
@@ -55,34 +131,73 @@
       "type": "array",
       "items": {
         "type": "object",
+        "additionalProperties": false,
         "required": ["name", "match"],
         "properties": {
           "name": { "type": "string" },
-          "match": { "type": "object", "properties": { "path_prefixes": { "type": "array", "items": { "type": "string" } } } },
+          "match": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "path_prefixes": { "type": "array", "items": { "type": "string" } } }
+          },
           "auth_gate": {
             "type": "object",
+            "additionalProperties": false,
             "properties": {
               "type": { "enum": ["static_token", "basic_auth", "jwt", "signed_url"] },
               "header": { "type": "string" },
               "token_env": { "type": "string" },
               "credentials_env": { "type": "string" },
               "algorithm": { "enum": ["HS256", "RS256", "ES256", "HMAC-SHA256"] },
+              "allowed_algorithms": {
+                "description": "Optional whitelist of JWT header `alg` values accepted at verify time. If omitted, only the gate's configured `algorithm` is accepted. `none` is always rejected.",
+                "type": "array",
+                "items": { "enum": ["HS256", "RS256", "ES256"] }
+              },
+              "clock_skew_sec": {
+                "description": "Tolerance (in seconds) applied to JWT exp/nbf checks. Default 30.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 600
+              },
               "jwks_url": { "type": "string" },
               "issuer": { "type": "string" },
               "audience": { "type": "string" },
               "secret_env": { "type": "string" },
-              "cache_ttl_sec": { "type": "integer" },
+              "cache_ttl_sec": {
+                "description": "TTL (seconds) for cached gate material (for example, JWKS responses). Bounded to 24h to force rotation windows.",
+                "type": "integer",
+                "minimum": 0,
+                "maximum": 86400
+              },
               "expires_param": { "type": "string" },
-              "signature_param": { "type": "string" }
+              "signature_param": { "type": "string" },
+              "exact_path": {
+                "description": "If true, signed-URL gates require the request URI to exactly match a protected prefix. If false (default, back-compat), any URI under the prefix is acceptable — which lets an attacker replay a signature issued for one sibling path against another. Archetypes for sensitive downloads should always set `true`.",
+                "type": "boolean"
+              },
+              "nonce_param": {
+                "description": "Optional query-parameter name carrying a per-URL nonce (e.g. `nonce`). When set, the edge forwards the nonce to origin as `X-Signed-URL-Nonce` so origin can enforce single-use (SET NX in Redis / KV). The edge alone cannot enforce replay protection — origin cooperation is required. See docs/signed-urls.md.",
+                "type": "string"
+              }
             }
           },
-          "response": { "type": "object", "properties": { "cache_control": { "type": "string" } } },
-          "request": { "type": "object", "properties": { "allow_methods": { "type": "array", "items": { "type": "string" } } } }
+          "response": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "cache_control": { "type": "string" } }
+          },
+          "request": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": { "allow_methods": { "type": "array", "items": { "type": "string" } } }
+          }
         }
       }
     },
     "response_headers": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "hsts": { "type": "string" },
         "x_content_type_options": { "type": "string" },
@@ -90,19 +205,68 @@
         "permissions_policy": { "type": "string" },
         "csp_public": { "type": "string" },
         "csp_admin": { "type": "string" },
+        "csp_report_only": {
+          "description": "CSP value to emit in Content-Security-Policy-Report-Only header for staged rollout. Pair with csp_report_uri. Browsers will warn but not block violations — use to validate policy before setting csp_public/csp_admin.",
+          "type": "string"
+        },
+        "csp_report_uri": {
+          "description": "URL for CSP violation reports. Emitted as `report-uri` directive if set. Prefer report-to + Reporting-Endpoints for modern browsers.",
+          "type": "string"
+        },
+        "csp_nonce": {
+          "description": "Generate a per-response nonce and substitute `'nonce-PLACEHOLDER'` in csp_public / csp_admin with the value. The nonce is also exposed as `x-csp-nonce` response header so origin templates can reference it. Cloudflare uses crypto.getRandomValues; CFF falls back to Math.random (lower entropy; documented).",
+          "type": "boolean"
+        },
+        "coop": {
+          "description": "Cross-Origin-Opener-Policy. Together with COEP, isolates the browsing context and re-enables SharedArrayBuffer / high-precision timers. `same-origin` is the strict default.",
+          "enum": ["same-origin", "same-origin-allow-popups", "unsafe-none"]
+        },
+        "coep": {
+          "description": "Cross-Origin-Embedder-Policy. `require-corp` blocks embedding of any cross-origin resource that does not explicitly opt in via CORP. `credentialless` is a softer alternative for third-party subresources.",
+          "enum": ["require-corp", "credentialless", "unsafe-none"]
+        },
+        "corp": {
+          "description": "Cross-Origin-Resource-Policy. Controls whether other origins may embed this resource.",
+          "enum": ["same-origin", "same-site", "cross-origin"]
+        },
+        "reporting_endpoints": {
+          "description": "Value for the Reporting-Endpoints header (e.g., `csp-endpoint=\"https://example.com/csp\"`). Used with `report-to` directive in CSP.",
+          "type": "string"
+        },
+        "force_vary_auth": {
+          "description": "When true (default), every path covered by any auth gate receives `Cache-Control: no-store, no-cache, must-revalidate` + `Vary: Authorization, Cookie` at viewer-response. Prevents CDN edge caches from serving one user's authenticated response to another. Set false only if you understand the cache-poisoning risk (e.g., all protected responses are user-independent, such as prerendered public dashboards).",
+          "type": "boolean"
+        },
+        "clear_site_data_paths": {
+          "description": "Paths on which to emit `Clear-Site-Data: \"cache\", \"cookies\", \"storage\"` + force `Cache-Control: no-store`. Use for logout / session-invalidation endpoints so the browser drops cached data even if the origin response is cached. Entries are prefix-matched (match when URI equals or starts with prefix + `/`). Only applied on 2xx and 3xx responses to avoid clobbering failed logouts.",
+          "type": "array",
+          "items": { "type": "string" }
+        },
+        "clear_site_data_types": {
+          "description": "Override the default directive set for Clear-Site-Data. Default: `[\"cache\",\"cookies\",\"storage\"]`. `executionContexts` forces the browser to reload the top-level frame and every same-origin frame.",
+          "type": "array",
+          "items": { "enum": ["cache", "cookies", "storage", "executionContexts", "*"] }
+        },
         "cors": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "allow_origins": { "type": "array", "items": { "type": "string" } },
             "allow_methods": { "type": "array", "items": { "type": "string" } },
             "allow_headers": { "type": "array", "items": { "type": "string" } },
             "expose_headers": { "type": "array", "items": { "type": "string" } },
             "allow_credentials": { "type": "boolean" },
-            "max_age": { "type": "integer" }
+            "max_age": {
+              "description": "CORS preflight cache duration in seconds. Most browsers cap this at 86400 (Chrome) or 7200 (Firefox).",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            }
           }
         },
         "cookie_attributes": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "secure": { "type": "boolean" },
             "http_only": { "type": "boolean" },
@@ -113,13 +277,65 @@
     },
     "firewall": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "waf": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
-            "rate_limit": { "type": "integer" },
+            "rate_limit": {
+              "description": "Per-IP request ceiling over the 5-minute WAF rate-based window. AWS WAFv2 accepts 100..2,000,000,000. Legacy single global rule; prefer `rate_limit_rules` for per-route / per-key controls.",
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 2000000000
+            },
+            "rate_limit_rules": {
+              "description": "Fine-grained rate-limit rules. Each entry renders as one `aws_wafv2_rule_group` rule with its own `rate_based_statement` and optional `scope_down_statement` so you can scope by URI, auth state, or header keys without hand-editing Terraform. `limit` is per 5-minute window (AWS WAFv2 accepts 100..2,000,000,000). `aggregate_key_type` defaults to `IP`; `FORWARDED_IP` follows the `X-Forwarded-For` chain and `CUSTOM_KEYS` lets you pass a raw `custom_keys` block. `scope_down_statement` is forwarded verbatim as a raw JSON object — schema-free because AWS WAFv2 ships dozens of statement kinds; lint only checks the shell.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "limit"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": { "type": "string", "pattern": "^[a-zA-Z0-9-]+$", "minLength": 1, "maxLength": 64 },
+                  "limit": { "type": "integer", "minimum": 100, "maximum": 2000000000 },
+                  "aggregate_key_type": { "enum": ["IP", "FORWARDED_IP", "CUSTOM_KEYS"] },
+                  "custom_keys": { "type": "array", "items": { "type": "object" } },
+                  "scope_down_statement": { "type": "object" },
+                  "priority": { "type": "integer", "minimum": 1, "maximum": 10000 },
+                  "action": { "enum": ["block", "count", "captcha"] }
+                }
+              }
+            },
             "scope": { "enum": ["REGIONAL", "CLOUDFRONT"] },
-            "managed_rules": { "type": "array", "items": { "type": "string" } },
+            "managed_rules": {
+              "description": "AWS WAFv2 managed rule group names (vendor: AWS). Common pick-list: AWSManagedRulesCommonRuleSet (core OWASP Top 10), AWSManagedRulesKnownBadInputsRuleSet, AWSManagedRulesSQLiRuleSet, AWSManagedRulesLinuxRuleSet, AWSManagedRulesUnixRuleSet, AWSManagedRulesBotControlRuleSet (bot scoring, paid), AWSManagedRulesATPRuleSet (account-takeover, paid, scope_down to /login recommended), AWSManagedRulesIPReputationList (reputation-blocked), AWSManagedRulesAnonymousIpList (Tor / open proxies). Lint warns when defaults.mode == enforce and none of BotControl / ATP / IPReputation / AnonymousIp appear in the array. Entries not in the recommended set still compile — free-form string is intentional so you can opt into vendor additions without a framework release.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "block_response": {
+              "description": "Custom response body attached to every WAF rule whose action is `block`. AWS WAFv2 uses `custom_response_bodies` on the web ACL and references it with `custom_response_body_key` on the block action. Set `status_code` to override the default 403. When omitted, AWS WAFv2 returns its own 403 page (which leaks the CDN vendor).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "status_code": { "type": "integer", "minimum": 200, "maximum": 600 },
+                "body": { "type": "string" },
+                "content_type": { "enum": ["TEXT_PLAIN", "TEXT_HTML", "APPLICATION_JSON"] }
+              }
+            },
+            "logging": {
+              "description": "WAF logging configuration. When `enabled: true`, the compiler emits an `aws_wafv2_logging_configuration` block targeting `destination_arn_env` (env-backed Terraform variable reference). `redacted_fields` drops sensitive request fields from the log record — `authorization`, `cookie`, `x-api-key`, and `set-cookie` are the usual candidates. Lint warns when `scope == CLOUDFRONT` and logging is disabled because compliance frameworks (PCI-DSS, SOC2) require WAF log retention.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "destination_arn_env": { "type": "string" },
+                "redacted_fields": {
+                  "type": "array",
+                  "items": { "enum": ["authorization", "cookie", "set-cookie", "x-api-key", "x-csrf-token"] }
+                }
+              }
+            },
             "ja3_fingerprints": { "type": "array", "items": { "type": "string" } },
             "ja4_fingerprints": { "type": "array", "items": { "type": "string" } },
             "fingerprint_action": { "enum": ["block", "count"] }
@@ -127,6 +343,7 @@
         },
         "geo": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "block_countries": { "type": "array", "items": { "type": "string" } },
             "allow_countries": { "type": "array", "items": { "type": "string" } }
@@ -134,18 +351,45 @@
         },
         "ip": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "allowlist": { "type": "array", "items": { "type": "string" } },
             "blocklist": { "type": "array", "items": { "type": "string" } }
+          }
+        },
+        "jwks": {
+          "description": "JWKS outbound-fetch guardrails. When `allowed_hosts` is set, the build refuses any JWT gate whose `jwks_url` hostname is not on the list, preventing SSRF into internal metadata endpoints. Regardless of this setting, the compiler also rejects non-HTTPS URLs and URLs that resolve to loopback, private, or link-local literals.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allowed_hosts": {
+              "description": "Exact-match hostname allowlist for any `routes[].auth_gate.jwks_url`. Comparison is case-insensitive. Wildcards are not supported — list each IdP host explicitly.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "stale_if_error_sec": {
+              "description": "Window (seconds, default 3600, max 86400) to keep serving an expired JWKS cache entry if a refresh fails. Protects against IdP outages causing 100% auth failure. Set to 0 to disable.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 86400
+            },
+            "negative_cache_sec": {
+              "description": "TTL (seconds, default 60, max 600) for caching JWKS fetch failures to avoid hammering a broken IdP with retries. Set to 0 to disable.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 600
+            }
           }
         }
       }
     },
     "transport": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "tls": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "minimum_version": { "enum": ["TLSv1.2", "TLSv1.3"] },
             "security_policy": { "type": "string" }
@@ -153,28 +397,79 @@
         },
         "http": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
             "versions": { "type": "array", "items": { "enum": ["http1.1", "http2", "http3"] } }
           }
         }
       }
     },
+    "observability": {
+      "description": "Edge log emission + correlation ID propagation. JSON format lets CloudWatch Logs Insights / Cloudflare Logpush parse fields directly. Issue #21, #22.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "log_format": {
+          "description": "`json` (default) emits structured JSON on every block / monitor path. `text` keeps the legacy unstructured `[monitor] <code> <msg>` shape for backward compatibility.",
+          "enum": ["json", "text"]
+        },
+        "correlation_id_header": {
+          "description": "Incoming request header that carries a trace / correlation ID. Common values: `traceparent` (W3C Trace Context), `x-request-id`. The value is copied into log records and forwarded to origin so you can pivot from edge logs to app logs.",
+          "type": "string"
+        },
+        "sample_rate": {
+          "description": "Fraction of allow-path requests that emit an `event:\"allow\"` log record (0 disables; 1 logs every request). Block-path logs always emit. Default 0.",
+          "type": "number",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "audit_log_auth": {
+          "description": "When true, every successful auth gate pass emits `{event:\"auth_pass\", gate_name, sub, uri, method}`. Off by default — enable for security incident response. Raw tokens are never logged.",
+          "type": "boolean"
+        },
+        "audit_hash_sub": {
+          "description": "When true and `audit_log_auth` is enabled, `sub` is hashed (SHA-256 hex, first 16 chars) before emission to avoid PII in logs.",
+          "type": "boolean"
+        }
+      }
+    },
     "origin": {
       "type": "object",
+      "additionalProperties": false,
       "properties": {
         "auth": {
+          "description": "Origin authentication secret injected by the edge runtime. When `type: custom_header`, both `header` (non-empty) and `secret_env` (env var name matching `^[A-Z][A-Z0-9_]*$`) are required. The edge refuses to forward the header when the env var resolves to empty at build/runtime — preventing a silent auth-bypass where origin would otherwise see `X-Origin-Verify: ` and allow the request on trust. See docs/iac.md#origin-auth.",
           "type": "object",
+          "additionalProperties": false,
+          "required": ["type"],
           "properties": {
             "type": { "enum": ["custom_header"] },
-            "header": { "type": "string" },
-            "secret_env": { "type": "string" }
-          }
+            "header": { "type": "string", "minLength": 1 },
+            "secret_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+          },
+          "allOf": [
+            {
+              "if": { "properties": { "type": { "const": "custom_header" } } },
+              "then": { "required": ["header", "secret_env"] }
+            }
+          ]
         },
         "timeout": {
           "type": "object",
+          "additionalProperties": false,
           "properties": {
-            "connect": { "type": "integer" },
-            "read": { "type": "integer" }
+            "connect": {
+              "description": "Origin connect timeout in seconds. CloudFront caps this at 10s.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "read": {
+              "description": "Origin read/response timeout in seconds. CloudFront caps this at 60s.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 60
+            }
           }
         }
       }

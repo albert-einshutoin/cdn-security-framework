@@ -1,112 +1,149 @@
 #!/usr/bin/env node
 /**
- * Policy lint: validates policy YAML structure (required keys, types).
+ * Policy lint: validates policy YAML against policy/schema.json using ajv,
+ * then runs compile-core's auth-gate validator for cross-field checks that
+ * JSON Schema cannot express.
  * Usage: node scripts/policy-lint.js [path/to/policy.yml]
  * Default: policy/base.yml
- * No external dependencies; uses simple line-based checks.
  */
 
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
+const Ajv = require('ajv');
+const { validateAuthGates, parsePathPatterns } = require('./lib/compile-core');
 
-const policyPath = process.argv[2] || path.join(__dirname, '..', 'policy', 'base.yml');
-let content;
-try {
-  content = fs.readFileSync(policyPath, 'utf8');
-} catch (e) {
-  if (e.code === 'ENOENT') {
-    console.error('Error: policy file not found:', policyPath);
+const repoRoot = path.join(__dirname, '..');
+const schemaPath = path.join(repoRoot, 'policy', 'schema.json');
+const defaultPolicyPath = path.join(repoRoot, 'policy', 'base.yml');
+
+function loadJson(filePath) {
+  return JSON.parse(fs.readFileSync(filePath, 'utf8'));
+}
+
+function loadYaml(filePath) {
+  return yaml.load(fs.readFileSync(filePath, 'utf8'));
+}
+
+function formatAjvErrors(errors) {
+  return errors.map((err) => {
+    const loc = err.instancePath || '(root)';
+    const key = err.params && err.params.additionalProperty
+      ? ` (property "${err.params.additionalProperty}")`
+      : '';
+    return `  - ${loc} ${err.message}${key}`;
+  });
+}
+
+function main() {
+  const policyPath = process.argv[2] || defaultPolicyPath;
+  const errors = [];
+
+  let policy;
+  try {
+    policy = loadYaml(policyPath);
+  } catch (e) {
+    if (e.code === 'ENOENT') {
+      console.error('Error: policy file not found:', policyPath);
+      process.exit(1);
+    }
+    console.error('Error: failed to parse policy YAML:', e.message);
     process.exit(1);
   }
-  throw e;
-}
 
-const lines = content.split(/\r?\n/);
-const errors = [];
-
-// Required top-level keys (must appear in the file)
-const requiredTop = ['version', 'request', 'response_headers'];
-for (const key of requiredTop) {
-  if (!content.match(new RegExp('^' + key + '\\s*:', 'm'))) {
-    errors.push('Missing required top-level key: ' + key);
+  let schema;
+  try {
+    schema = loadJson(schemaPath);
+  } catch (e) {
+    console.error('Error: failed to load schema:', e.message);
+    process.exit(1);
   }
-}
 
-// version should be 1
-const versionMatch = content.match(/^version\s*:\s*(.+)/m);
-if (versionMatch) {
-  const v = versionMatch[1].trim();
-  if (v !== '1' && v !== '1.0') {
-    errors.push('Unsupported policy version: ' + v + ' (expected 1)');
+  // strict: true flips on schema-authoring lint (typos in keywords / unknown
+  // formats). strictRequired is off because our origin.auth `allOf/if/then`
+  // conditionally requires properties that live in the parent scope — AJV's
+  // strictRequired check would reject that pattern even though it is valid.
+  const ajv = new Ajv({ allErrors: true, strict: true, strictRequired: false, allowUnionTypes: true });
+  const validate = ajv.compile(schema);
+  const valid = validate(policy);
+  if (!valid) {
+    errors.push('Schema validation failed:');
+    errors.push(...formatAjvErrors(validate.errors || []));
   }
-} else if (!errors.some(e => e.includes('version'))) {
-  errors.push('Could not parse version');
-}
 
-// request.allow_methods or request: must exist
-if (!content.includes('request:') && !errors.some(e => e.includes('request'))) {
-  errors.push('Missing request section');
-}
-if (content.includes('request:') && !content.match(/allow_methods\s*:/m) && !content.match(/^\s+allow_methods\s*:/m)) {
-  errors.push('request section should contain allow_methods');
-}
-
-// response_headers: at least one header
-if (content.includes('response_headers:') && !content.match(/response_headers:[\s\S]*?^\s+\w+:/m) && !content.match(/hsts\s*:/m)) {
-  errors.push('response_headers section should define at least one header (e.g. hsts)');
-}
-
-// routes: if present, each route should have match and auth_gate or match only
-// (optional check) path_patterns if block.path_patterns - should be array-like
-const blockPathMatch = content.match(/path_patterns\s*:/);
-if (blockPathMatch && !content.includes('- "') && !content.includes("- '") && !content.match(/path_patterns\s*:\s*\[\s*\]/)) {
-  // might be empty array; allow
-  const after = content.indexOf('path_patterns');
-  const snippet = content.slice(after, after + 200);
-  if (!snippet.includes('- ') && !snippet.includes('[]')) {
-    errors.push('request.block.path_patterns should be a list (use - "pattern" lines)');
+  // path_patterns semantic checks (regex compilation, ambiguous legacy entries)
+  try {
+    const block = (policy && policy.request && policy.request.block) || {};
+    if (block.path_patterns !== undefined) {
+      parsePathPatterns(block.path_patterns);
+    }
+  } catch (e) {
+    errors.push(`  - request.block.path_patterns: ${e.message}`);
   }
-}
 
-// Auth gate field validation (structured check using js-yaml)
-try {
-  const parsed = yaml.load(content);
-  const routes = (parsed && parsed.routes) || [];
-  for (const route of routes) {
-    const gate = route.auth_gate;
-    if (!gate) continue;
-    const name = route.name || 'unnamed';
-    const authType = gate.type || 'static_token';
-
-    if (authType === 'jwt') {
-      const alg = gate.algorithm || 'RS256';
-      if (alg === 'RS256' && !gate.jwks_url) {
-        errors.push(`Route "${name}": JWT+RS256 requires "jwks_url"`);
-      }
-      if (alg === 'HS256' && !gate.secret_env) {
-        errors.push(`Route "${name}": JWT+HS256 requires "secret_env"`);
-      }
-    } else if (authType === 'signed_url') {
-      if (!gate.secret_env) {
-        errors.push(`Route "${name}": signed_url requires "secret_env"`);
-      }
+  // Cross-field auth gate validation (jwt/signed_url required fields).
+  // Allow missing token envs at lint time — they are enforced at build time.
+  try {
+    validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true });
+  } catch (e) {
+    if (Array.isArray(e.validationErrors)) {
+      errors.push('Auth gate validation failed:');
+      e.validationErrors.forEach((msg) => errors.push('  - ' + msg));
+    } else {
+      errors.push('Auth gate validation error: ' + e.message);
     }
   }
 
-  const waf = (parsed && parsed.firewall && parsed.firewall.waf) || {};
+  // WAF fingerprint_action sanity (ajv already enforces enum, but keep friendly message).
+  const waf = (policy && policy.firewall && policy.firewall.waf) || {};
   if (waf.fingerprint_action && !['block', 'count'].includes(waf.fingerprint_action)) {
-    errors.push('firewall.waf.fingerprint_action must be "block" or "count"');
+    errors.push('  - firewall.waf.fingerprint_action must be "block" or "count"');
   }
-} catch (e) {
-  errors.push('Failed to parse YAML for auth gate validation: ' + e.message);
+
+  // Non-fatal warnings for production-grade WAF hygiene.
+  const warnings = [];
+  const mode = (policy && policy.defaults && policy.defaults.mode) || null;
+  const isEnforce = mode === 'enforce';
+  const hasWaf = policy && policy.firewall && policy.firewall.waf;
+  if (isEnforce && hasWaf) {
+    const managed = Array.isArray(waf.managed_rules) ? waf.managed_rules : [];
+    const hasCoreSignal = managed.some((r) =>
+      r === 'AWSManagedRulesBotControlRuleSet' ||
+      r === 'AWSManagedRulesATPRuleSet' ||
+      r === 'AWSManagedRulesIPReputationList' ||
+      r === 'AWSManagedRulesAnonymousIpList'
+    );
+    if (!hasCoreSignal) {
+      warnings.push('firewall.waf.managed_rules does not include any of BotControl / ATP / IPReputation / AnonymousIp. Consider adding at least IPReputation + AnonymousIp for production enforce mode.');
+    }
+    const loggingEnabled = waf.logging && waf.logging.enabled === true;
+    if (waf.scope === 'CLOUDFRONT' && !loggingEnabled) {
+      warnings.push('firewall.waf.logging is not enabled while scope=CLOUDFRONT. PCI-DSS / SOC2 require WAF log retention — set logging.enabled: true and supply destination_arn_env.');
+    }
+  }
+
+  // origin.auth.custom_header env-var presence check (best-effort; env may be CI-only)
+  const originAuth = policy && policy.origin && policy.origin.auth;
+  if (originAuth && originAuth.type === 'custom_header' && originAuth.secret_env) {
+    const envVal = process.env[originAuth.secret_env];
+    if (envVal !== undefined && envVal.length === 0) {
+      warnings.push('origin.auth.secret_env "' + originAuth.secret_env + '" is set but empty in the current shell. The edge will refuse to forward the origin-auth header, breaking origin trust. Unset the env or supply a value.');
+    }
+  }
+
+  if (warnings.length > 0) {
+    console.warn('Policy lint warnings:', policyPath);
+    warnings.forEach((w) => console.warn('  - ' + w));
+  }
+
+  if (errors.length > 0) {
+    console.error('Policy lint failed:', policyPath);
+    errors.forEach((e) => console.error(e));
+    process.exit(1);
+  }
+
+  console.log('Policy lint OK:', policyPath);
+  process.exit(0);
 }
 
-if (errors.length > 0) {
-  console.error('Policy lint failed:', policyPath);
-  errors.forEach(e => console.error('  -', e));
-  process.exit(1);
-}
-
-console.log('Policy lint OK:', policyPath);
-process.exit(0);
+main();

@@ -1,0 +1,62 @@
+{
+  "variable": {
+    "cloudflare_zone_id": {
+      "description": "Cloudflare zone ID to attach rulesets to. Sourced from $CLOUDFLARE_ZONE_ID or equivalent in CI.",
+      "type": "string"
+    },
+    "cloudflare_account_id": {
+      "description": "Cloudflare account ID. Required when attaching account-scoped rulesets / lists. Sourced from $CLOUDFLARE_ACCOUNT_ID.",
+      "type": "string"
+    }
+  },
+  "resource": {
+    "cloudflare_ruleset": {
+      "example-cdn-security_custom": {
+        "zone_id": "${var.cloudflare_zone_id}",
+        "name": "example-cdn-security-custom",
+        "description": "CDN Security Framework: custom firewall rules (geo/IP/UA/fingerprint)",
+        "kind": "zone",
+        "phase": "http_request_firewall_custom",
+        "rules": [
+          {
+            "ref": "rule_1",
+            "description": "User-Agent blocklist",
+            "enabled": true,
+            "expression": "(lower(http.user_agent) contains \"sqlmap\" or lower(http.user_agent) contains \"nikto\" or lower(http.user_agent) contains \"acunetix\" or lower(http.user_agent) contains \"masscan\" or lower(http.user_agent) contains \"python-requests\")",
+            "action": "block",
+            "action_parameters": {
+              "response": null
+            }
+          }
+        ]
+      },
+      "example-cdn-security_ratelimit": {
+        "zone_id": "${var.cloudflare_zone_id}",
+        "name": "example-cdn-security-ratelimit",
+        "description": "CDN Security Framework: rate limits",
+        "kind": "zone",
+        "phase": "http_ratelimit",
+        "rules": [
+          {
+            "ref": "rate_1",
+            "description": "Global IP rate limit (legacy)",
+            "enabled": true,
+            "expression": "true",
+            "action": "block",
+            "action_parameters": {
+              "response": null
+            },
+            "ratelimit": {
+              "characteristics": [
+                "ip.src"
+              ],
+              "period": 300,
+              "requests_per_period": 2000,
+              "mitigation_timeout": 600
+            }
+          }
+        ]
+      }
+    }
+  }
+}

@@ -11,11 +11,11 @@
  *
  * Why this design:
  * - CloudFront Functions are ultra-low latency and stateless
- * - Rate limiting and bot behavior analysis are not available here; those belong to WAF/Shield
- *
- * You can also:
- * - Split rules by path (/api, /static) using Behavior separation
- * - Move stricter JWT validation to Lambda@Edge (e.g. RS256)
+ * - CloudFront Functions cannot read env vars at runtime, so static_token
+ *   values are embedded at build time. Treat dist/edge/viewer-request.js as a
+ *   secret artifact when static tokens are configured.
+ * - Rate limiting and bot behavior analysis are not available here; those
+ *   belong to WAF/Shield
  */
 
 // {{INJECT_CONFIG}}
@@ -32,31 +32,87 @@
     };
   }
 
-  function shouldBlock(checkResult) {
+  // Structured log emitter. CloudFront Functions supports console.log + JSON.stringify
+  // on flat primitives (our records only contain those). `event` distinguishes
+  // block / monitor / audit records for downstream Logs Insights queries.
+  function logEvent(event, fields) {
+    if (CFG.obs && CFG.obs.logFormat === 'text') {
+      console.log('[' + event + ']',
+        fields && fields.status != null ? fields.status : '',
+        fields && fields.block_reason ? fields.block_reason : '');
+      return;
+    }
+    var rec = { ts: Date.now(), level: event === 'block' ? 'warn' : 'info', event: event };
+    if (fields) {
+      for (var k in fields) {
+        if (Object.prototype.hasOwnProperty.call(fields, k) && fields[k] != null && fields[k] !== '') {
+          rec[k] = fields[k];
+        }
+      }
+    }
+    console.log(JSON.stringify(rec));
+  }
+
+  function readCorrelation(req) {
+    if (!CFG.obs || !CFG.obs.correlationHeader) return '';
+    var h = req && req.headers && req.headers[CFG.obs.correlationHeader];
+    return (h && h.value) || '';
+  }
+
+  function shouldBlock(checkResult, req) {
     if (!checkResult) return null;
+    var reason = (checkResult.body && String(checkResult.body)) || 'blocked';
+    var base = {
+      status: checkResult.statusCode,
+      block_reason: reason,
+      method: req && req.method,
+      uri: req && req.uri,
+      correlation_id: req ? readCorrelation(req) : '',
+    };
     if (CFG.mode === 'monitor') {
-      console.log('[monitor]', checkResult.statusCode, checkResult.body || '');
+      logEvent('monitor', base);
       return null;
     }
+    logEvent('block', base);
     return checkResult;
+  }
+
+  function constantTimeEqual(a, b) {
+    // Constant-time string equality for CFF (no SubtleCrypto / timingSafeEqual
+    // available). Always iterates at least PAD (64) positions so short tokens
+    // (the common case) take constant time regardless of prefix match.
+    // For tokens longer than PAD, iteration scales with max(|a|, |b|) — same
+    // behaviour as Go's hmac.Equal. No early-exit on length mismatch.
+    var PAD = 64;
+    var sa = typeof a === 'string' ? a : '';
+    var sb = typeof b === 'string' ? b : '';
+    var len = sa.length > sb.length ? sa.length : sb.length;
+    if (len < PAD) len = PAD;
+    var diff = (sa.length ^ sb.length) | 0;
+    for (var i = 0; i < len; i++) {
+      var ca = i < sa.length ? sa.charCodeAt(i) : 0;
+      var cb = i < sb.length ? sb.charCodeAt(i) : 0;
+      diff |= (ca ^ cb);
+    }
+    return diff === 0;
   }
 
   function handleCorsPreflight(req) {
     // Handle CORS preflight (OPTIONS) requests
     if (req.method !== 'OPTIONS' || !CFG.cors) return null;
-    
+
     const origin = req.headers['origin']?.value || '';
     if (!origin) return null;
-    
+
     const allowedOrigins = CFG.cors.allow_origins || [];
     const isAllowed = allowedOrigins.includes('*') || allowedOrigins.includes(origin);
     if (!isAllowed) return null;
-    
+
     const headers = {
       'access-control-allow-origin': { value: origin },
       'cache-control': { value: 'no-store' },
     };
-    
+
     if (CFG.cors.allow_methods) {
       headers['access-control-allow-methods'] = { value: CFG.cors.allow_methods.join(', ') };
     }
@@ -69,7 +125,7 @@
     if (CFG.cors.max_age) {
       headers['access-control-max-age'] = { value: String(CFG.cors.max_age) };
     }
-    
+
     return {
       statusCode: 204,
       statusDescription: 'No Content',
@@ -84,9 +140,43 @@
     return null;
   }
 
+  function blockIfHostNotAllowed(req) {
+    // Host header allowlist. When CFG.allowedHosts is empty, allowlist is
+    // disabled and any host is accepted. Entries are lowercase (normalized at
+    // build time). Supports `*.example.com` wildcard prefix.
+    if (!CFG.allowedHosts || CFG.allowedHosts.length === 0) return null;
+    var hostHeader = (req.headers['host'] && req.headers['host'].value) || '';
+    var host = hostHeader.toLowerCase();
+    // Strip optional :port suffix so :8443 etc. still match.
+    var colon = host.indexOf(':');
+    if (colon !== -1) host = host.slice(0, colon);
+    for (var i = 0; i < CFG.allowedHosts.length; i++) {
+      var allowed = CFG.allowedHosts[i];
+      if (allowed === host) return null;
+      if (allowed.length > 2 && allowed.charCodeAt(0) === 42 && allowed.charCodeAt(1) === 46) {
+        // '*.example.com' — match suffix including the dot
+        var suffix = allowed.slice(1);
+        if (host.length > suffix.length && host.slice(-suffix.length) === suffix) return null;
+      }
+    }
+    return resp(400, 'Host Not Allowed');
+  }
+
   function blockIfUriTooLong(req) {
     if ((req.uri || '').length > CFG.maxUriLength) {
       return resp(414, 'URI Too Long');
+    }
+    return null;
+  }
+
+  function blockIfTooManyHeaders(req) {
+    if (!CFG.maxHeaderCount || CFG.maxHeaderCount <= 0) return null;
+    var h = req.headers || {};
+    // Count normalized header names. `headers` keys are already lower-cased by CF.
+    var n = 0;
+    for (var k in h) { if (Object.prototype.hasOwnProperty.call(h, k)) n++; }
+    if (n > CFG.maxHeaderCount) {
+      return resp(431, 'Request Header Fields Too Large');
     }
     return null;
   }
@@ -97,7 +187,7 @@
       p = p.replace(/\/+/g, '/');
     }
     if (CFG.normalizePath.removeDotSegments) {
-      // RFC 3986 準拠の dot-segment 除去
+      // RFC 3986 dot-segment removal
       const segments = p.split('/');
       const out = [];
       for (const seg of segments) {
@@ -111,9 +201,13 @@
   }
 
   function blockIfTraversal(req) {
-    const uri = (req.uri || "").toLowerCase();
-    for (const m of CFG.blockPathMarks) {
-      if (uri.includes(m)) return resp(400, "Bad Request");
+    const uri = req.uri || "";
+    const lower = uri.toLowerCase();
+    for (const m of CFG.blockPathContains) {
+      if (lower.includes(m)) return resp(400, "Bad Request");
+    }
+    for (const re of CFG.blockPathRegexes) {
+      if (re.test(uri)) return resp(400, "Bad Request");
     }
     return null;
   }
@@ -128,7 +222,6 @@
 
   function blockIfBadUA(req) {
     const ua = req.headers["user-agent"]?.value || "";
-    // UA length check (if UA exists)
     if (ua && ua.length > 512) return resp(400, "User-Agent Too Long");
 
     const lower = (ua || "").toLowerCase();
@@ -146,7 +239,6 @@
     const parts = qs ? qs.split("&") : [];
     if (parts.length > CFG.maxQueryParams) return resp(400, "Too many query params");
 
-    // drop keys
     const kept = [];
     for (const p of parts) {
       if (!p) continue;
@@ -175,16 +267,16 @@
 
   function checkAuthGates(req) {
     const uri = req.uri || "/";
-    
+
     for (const gate of CFG.authGates) {
       const isProtected = gate.protectedPrefixes.some(
         (p) => uri === p || uri.startsWith(p + "/")
       );
       if (!isProtected) continue;
-      
+
       if (gate.type === 'static_token') {
         const token = req.headers[gate.tokenHeaderName]?.value || "";
-        if (token !== gate.token) {
+        if (!constantTimeEqual(token, gate.token)) {
           return resp(401, "Unauthorized");
         }
       } else if (gate.type === 'basic_auth') {
@@ -193,78 +285,78 @@
           return basicAuthResp();
         }
         const provided = authHeader.slice(6);
-        if (provided !== gate.credentials) {
+        if (!constantTimeEqual(provided, gate.credentials)) {
           return basicAuthResp();
         }
       }
       // jwt and signed_url types are handled in Lambda@Edge
-      
+
       // Signal to origin that request passed edge auth
       req.headers["x-edge-authenticated"] = { value: "1" };
     }
     return null;
   }
 
-  // Legacy adminGate for backward compatibility
-  function adminGate(req) {
-    if (!CFG.adminGate.enabled) return null;
-
-    const uri = req.uri || "/";
-    const isProtected = CFG.adminGate.protectedPrefixes.some(
-      (p) => uri === p || uri.startsWith(p + "/")
-    );
-    if (!isProtected) return null;
-
-    const token = req.headers[CFG.adminGate.tokenHeaderName]?.value || "";
-    if (token !== CFG.adminGate.token) {
-      return resp(401, "Unauthorized");
-    }
-
-    req.headers["x-edge-authenticated"] = { value: "1" };
-    return null;
-  }
-
   function handler(event) {
     const req = event.request;
 
-    // 0) CORS preflight handling
+    // 0a) Strip any client-supplied edge-auth marker. Only the edge itself is
+    //     allowed to set this; trusting an incoming value would let a client
+    //     spoof authenticated state to the origin.
+    if (req.headers) {
+      delete req.headers['x-edge-authenticated'];
+      // Strip client-supplied X-Forwarded-For unless explicitly trusted.
+      // CloudFront populates cloudfront-viewer-address for the real client IP;
+      // leaving a spoofed XFF header in place can poison downstream rate
+      // limiting, IP-based allowlists, and audit logs.
+      if (!CFG.trustForwardedFor) {
+        delete req.headers['x-forwarded-for'];
+      }
+    }
+
+    // 0b) CORS preflight handling
     const preflight = handleCorsPreflight(req);
     if (preflight) return preflight;
 
+    // 0c) Host allowlist (early reject — cheaper than running every check)
+    const host = shouldBlock(blockIfHostNotAllowed(req), req);
+    if (host) return host;
+
     // 1) Method allowlist
-    const m = shouldBlock(blockIfMethodNotAllowed(req));
+    const m = shouldBlock(blockIfMethodNotAllowed(req), req);
     if (m) return m;
 
     // 2) URI length check
-    const uriLen = shouldBlock(blockIfUriTooLong(req));
+    const uriLen = shouldBlock(blockIfUriTooLong(req), req);
     if (uriLen) return uriLen;
+
+    // 2b) Header count cap (issue #9) — 431 protects origin parsers from
+    //     hash-collision / amplification under small-but-many-headers payloads.
+    const hc = shouldBlock(blockIfTooManyHeaders(req), req);
+    if (hc) return hc;
 
     // 3) Path normalization
     normalizePath(req);
 
     // 4) Path traversal (coarse)
-    const t = shouldBlock(blockIfTraversal(req));
+    const t = shouldBlock(blockIfTraversal(req), req);
     if (t) return t;
 
     // 5) Required headers check
-    const hm = shouldBlock(blockIfHeaderMissing(req));
+    const hm = shouldBlock(blockIfHeaderMissing(req), req);
     if (hm) return hm;
 
     // 6) UA sanity (deny list)
-    const u = shouldBlock(blockIfBadUA(req));
+    const u = shouldBlock(blockIfBadUA(req), req);
     if (u) return u;
 
     // 7) Query guard + normalize
-    const q = shouldBlock(guardAndNormalizeQuery(req));
+    const q = shouldBlock(guardAndNormalizeQuery(req), req);
     if (q) return q;
 
-    // 8) Auth gates (includes Basic auth, static token, etc.)
-    const auth = shouldBlock(checkAuthGates(req));
+    // 8) Auth gates (static token, basic auth)
+    const auth = shouldBlock(checkAuthGates(req), req);
     if (auth) return auth;
-
-    // 9) Legacy admin gate (backward compatibility)
-    const g = shouldBlock(adminGate(req));
-    if (g) return g;
 
     return req;
   }

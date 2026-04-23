@@ -71,8 +71,40 @@ node scripts/policy-lint.js policy/base.yml
 
 ---
 
+## 数値フィールドの上下限
+
+`npm run lint:policy` は以下のレンジ外の値を拒否します。0 や負値、過大なキャッシュ、WAF 非互換の rate ceiling を早期に検出するためです。業務要件で上下限を超える必要がある場合はユースケースを添えて Issue を立ててください。
+
+| フィールド | 最小 | 最大 | 備考 |
+|------|------|------|------|
+| `request.limits.max_query_length` | 1 | 65,536 | バイト |
+| `request.limits.max_query_params` | 1 | 1,024 | キー数 |
+| `request.limits.max_uri_length` | 1 | 8,192 | バイト |
+| `request.limits.max_header_size` | 1 | 65,536 | バイト |
+| `routes[].auth_gate.clock_skew_sec` | 0 | 600 | 秒 |
+| `routes[].auth_gate.cache_ttl_sec` | 0 | 86,400 | 秒（1 日） |
+| `response_headers.cors.max_age` | 0 | 86,400 | 秒（ブラウザ CORS 上限） |
+| `firewall.waf.rate_limit` | 100 | 2,000,000,000 | AWS WAFv2 の 5 分レートウィンドウ |
+| `origin.timeout.connect` | 1 | 10 | CloudFront 上限 |
+| `origin.timeout.read` | 1 | 60 | CloudFront 上限 |
+
+---
+
+## permissive プロファイル警告
+
+`permissive` プロファイルには `metadata.risk_level: permissive` タグが付いています。コンパイラはこのタグを検出するたびに stderr に警告を出し、`--fail-on-permissive` が付いていれば非 0 終了します。本番 CI では必ず次のようにゲートしてください:
+
+```bash
+npx cdn-security build --fail-on-permissive
+```
+
+プロファイル比較と、推奨される dev/prod ゲート運用の詳細は [docs/profiles.ja.md](../docs/profiles.ja.md) を参照してください。
+
+---
+
 ## 関連
 
+* [プロファイル](../docs/profiles.ja.md) — プロファイル選択と本番 CI の permissive ゲート。
 * [ポリシーとランタイムの同期](../docs/policy-runtime-sync.ja.md) — ポリシーとランタイムの同期方法。
 * [アーキテクチャ](../docs/architecture.ja.md) — ポリシー駆動の設計。
 

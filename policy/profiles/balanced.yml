@@ -4,6 +4,10 @@
 version: 1
 project: example-cdn-security
 
+metadata:
+  risk_level: balanced
+  description: "Default profile: balanced security vs compatibility for typical web/API traffic."
+
 defaults:
   mode: "enforce"          # enforce | monitor (monitor needs logging/metrics)
   response:
@@ -66,3 +70,7 @@ firewall:
   waf:
     rate_limit: 2000
     scope: REGIONAL
+    managed_rules:
+      - "AWSManagedRulesCommonRuleSet"
+      - "AWSManagedRulesKnownBadInputsRuleSet"
+      - "AWSManagedRulesIPReputationList"

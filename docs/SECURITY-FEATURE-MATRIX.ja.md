@@ -28,8 +28,10 @@
 |------|------|------|
 | **Geo ブロック（国・地域制限）** | ✅ 対応 | `firewall.geo.block_countries` / `allow_countries` → `dist/infra/geo-restriction.tf.json` |
 | **IP 制限（許可リスト / 拒否リスト）** | ✅ 対応 | `firewall.ip.allowlist` / `blocklist` → `dist/infra/ip-sets.tf.json` |
-| **レート制限（DDoS 対策）** | ✅ 対応 | `firewall.waf.rate_limit` で `dist/infra/waf-rules.tf.json` にレートベースルールを出力。 |
-| **WAF マネージドルール（SQLi, XSS, OWASP Top 10）** | ✅ 対応 | `firewall.waf.managed_rules` 配列 → `dist/infra/waf-rules.tf.json` (aws_wafv2_web_acl)。 |
+| **レート制限（DDoS 対策）** | ✅ 対応 | `firewall.waf.rate_limit`（レガシーのグローバル） + `firewall.waf.rate_limit_rules[]`（URI／キー単位、scope_down 付き）。 |
+| **WAF マネージドルール（SQLi, XSS, OWASP Top 10）** | ✅ 対応 | `firewall.waf.managed_rules` 配列 → `aws_wafv2_web_acl`。enforce モードで BotControl / ATP / IPReputation / AnonymousIp が 1 つも無いと lint 警告。 |
+| **WAF カスタムブロックレスポンス** | ✅ 対応 | `firewall.waf.block_response`（status_code, body, content_type）→ `custom_response_bodies` + `custom_response_body_key`。ベンダーリークを排除。 |
+| **WAF ロギング + レッダクション** | ✅ 対応 | `firewall.waf.logging.{enabled, destination_arn_env, redacted_fields[]}` → `aws_wafv2_logging_configuration`。CLOUDFRONT スコープでロギング無効時に lint 警告。 |
 | **TLS 指紋ルール（JA3/JA4）** | ✅ 対応 | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints` と `fingerprint_action: block|count` に対応。 |
 
 ---
@@ -54,6 +56,7 @@
 | **クエリ長制限** | ✅ 対応 | `request.limits.max_query_length` → 超過時 414。 |
 | **クエリパラム数制限** | ✅ 対応 | `request.limits.max_query_params` → 超過時 400。 |
 | **ヘッダーサイズ制限** | ✅ 対応 | `request.limits.max_header_size` → 超過時 431。Lambda@Edge / Cloudflare 限定。 |
+| **ヘッダー数制限** | ✅ 対応 | `request.limits.max_header_count`（既定 64、1..500 にクランプ）→ 超過時 431。CFF viewer-request と Cloudflare Worker の入口で適用。 |
 | **パス正規化** | ✅ 対応 | `request.normalize.path.collapse_slashes`, `remove_dot_segments` で URI をクリーンアップ。 |
 | **クエリ正規化** | ✅ 対応 | `request.normalize.drop_query_keys` でトラッキングパラメータ（utm_*、gclid 等）を除去。 |
 | **必須ヘッダー** | ✅ 対応 | `request.block.header_missing` で必須ヘッダーをチェック（UA 以外も対応）。 |
@@ -86,7 +89,7 @@
 | カテゴリ | 対応済み | 部分対応 | 未対応 |
 |----------|----------|----------|--------|
 | **Transport** | HSTS, TLS 版, HTTP 版 | — | — |
-| **Firewall / Access** | レート制限, Geo, IP, WAF マネージド, JA3/JA4 指紋ルール | — | — |
+| **Firewall / Access** | レート制限（グローバル＋URI 単位）, Geo, IP, WAF マネージド, カスタムブロックレスポンス, ロギング, JA3/JA4 指紋ルール | — | — |
 | **Authentication** | トークン, Basic, JWT, 署名付き URL | — | — |
 | **Request Hygiene** | メソッド, URI/クエリ/ヘッダー制限, 正規化, UA ブロック, 必須ヘッダー, 指紋（JA3/JA4） | — | — |
 | **Response Security** | セキュリティヘッダー, CORS, Cookie 属性 | — | — |

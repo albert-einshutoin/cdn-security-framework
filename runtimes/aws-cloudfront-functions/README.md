@@ -23,7 +23,9 @@ Do **not** edit `viewer-request.js` in this directory by hand; it is replaced by
 
 ## Admin token
 
-Set `EDGE_ADMIN_TOKEN` in your environment or secrets; the build injects it at compile time when the variable is set. No manual replacement of `CFG.adminGate.token` in code.
+Set `EDGE_ADMIN_TOKEN` in your environment or secrets before running `npm run build`. CloudFront Functions cannot read env vars at runtime, so the token is baked into `dist/edge/viewer-request.js` via `CFG.authGates[].token` at compile time. Treat the generated artifact as a secret when static_token is configured.
+
+For non-production builds without a real token, pass `--allow-placeholder-token`; the build will embed a visible placeholder (`INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN`) and emit a loud warning.
 
 ## Verification (example)
 

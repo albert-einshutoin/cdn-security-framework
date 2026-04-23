@@ -27,8 +27,10 @@ try {
 // Run the script so handler() is defined (in global scope)
 eval(code);
 
-// ビルド時に EDGE_ADMIN_TOKEN 未設定なら BUILD_TIME_INJECTION が注入される
-const DEFAULT_TOKEN = process.env.EDGE_ADMIN_TOKEN || 'BUILD_TIME_INJECTION';
+// The build must have been invoked with EDGE_ADMIN_TOKEN set (see CI / npm script).
+// Fall back to the documented placeholder only for --allow-placeholder-token builds.
+const DEFAULT_TOKEN = process.env.EDGE_ADMIN_TOKEN
+  || 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
 
 function buildEvent(method, uri, headers, querystring) {
   const h = headers || {};
@@ -70,7 +72,7 @@ const cases = [
   ['GET /very-long-uri (2049 chars)', buildEvent('GET', '/' + 'a'.repeat(2048), { 'user-agent': 'Mozilla' }), 414],
 
   // Phase A-2: Path normalization is done but doesn't reject (just normalizes)
-  // Traversal patterns are blocked by blockPathMarks
+  // Traversal patterns are blocked by blockPathContains / blockPathRegexes
   ['GET /foo/../bar (traversal)', buildEvent('GET', '/foo/../bar', { 'user-agent': 'Mozilla' }), 400],
   ['GET / with %2e%2e', buildEvent('GET', '/x%2e%2e/y', { 'user-agent': 'Mozilla' }), 400],
 
@@ -95,6 +97,25 @@ const cases = [
 
   // Query normalization (drop utm_* keys)
   ['GET / with utm params (should be stripped)', buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, 'utm_source=google&foo=bar'), 'allow'],
+
+  // Phase A-4: Header count cap (issue #9). Default is 64 from the compiler.
+  // 64 headers (incl. user-agent) must pass; 65 must get 431.
+  ['GET / with 64 headers (boundary)',
+    (() => {
+      const h = { 'user-agent': 'Mozilla' };
+      for (let i = 0; i < 63; i++) h['x-filler-' + i] = 'v';
+      return buildEvent('GET', '/', h);
+    })(),
+    'allow',
+  ],
+  ['GET / with 65 headers (over cap)',
+    (() => {
+      const h = { 'user-agent': 'Mozilla' };
+      for (let i = 0; i < 64; i++) h['x-filler-' + i] = 'v';
+      return buildEvent('GET', '/', h);
+    })(),
+    431,
+  ],
 ];
 
 let viewerFailed = 0;
@@ -103,6 +124,107 @@ for (const [name, event, expected] of cases) {
 }
 
 console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases.length + ' passed ---');
+
+// x-edge-authenticated spoofing defense: the handler MUST strip any
+// client-supplied value before the origin sees it. If the caller does not
+// also supply a valid token the request must still fail auth.
+(function runEdgeAuthSpoofingTests() {
+  const spoofEvent = buildEvent('GET', '/admin', {
+    'user-agent': 'Mozilla',
+    'x-edge-authenticated': '1',
+  });
+  const result = handler(spoofEvent);
+  const blocked = result && result.statusCode === 401;
+  if (!blocked) {
+    console.error('FAIL: spoofed x-edge-authenticated on /admin should still 401, got', result && result.statusCode);
+    viewerFailed++;
+  } else {
+    console.log('OK: spoofed x-edge-authenticated on /admin still blocked (401)');
+  }
+
+  const passEvent = buildEvent('GET', '/not-protected', {
+    'user-agent': 'Mozilla',
+    'x-edge-authenticated': 'totally-fake',
+  });
+  const passResult = handler(passEvent);
+  const headerStripped = passResult
+    && passResult.uri !== undefined
+    && passResult.headers
+    && !passResult.headers['x-edge-authenticated'];
+  if (!headerStripped) {
+    console.error('FAIL: x-edge-authenticated leaked through on non-protected path', passResult && passResult.headers);
+    viewerFailed++;
+  } else {
+    console.log('OK: x-edge-authenticated stripped from incoming request');
+  }
+})();
+
+// X-Forwarded-For stripping: by default (trustForwardedFor=false), client-
+// supplied XFF must be stripped before reaching origin.
+(function runXForwardedForStripTests() {
+  const event = buildEvent('GET', '/not-protected', {
+    'user-agent': 'Mozilla',
+    'x-forwarded-for': '127.0.0.1, 10.0.0.1',
+  });
+  const result = handler(event);
+  const passed = result && result.uri !== undefined
+    && result.headers && !result.headers['x-forwarded-for'];
+  if (!passed) {
+    console.error('FAIL: x-forwarded-for should be stripped by default, got', result && result.headers);
+    viewerFailed++;
+  } else {
+    console.log('OK: x-forwarded-for stripped from incoming request');
+  }
+})();
+
+// Host allowlist: we compile a standalone template instance with allowedHosts
+// set so we can assert the reject/accept paths without touching the main
+// policy.
+(function runHostAllowlistTests() {
+  const cfgCode = [
+    'const CFG = {',
+    '  mode: "enforce",',
+    '  allowMethods: ["GET"],',
+    '  maxQueryLength: 1024,',
+    '  maxQueryParams: 30,',
+    '  maxUriLength: 2048,',
+    '  dropQueryKeys: new Set([]),',
+    '  uaDenyContains: [],',
+    '  blockPathContains: [],',
+    '  blockPathRegexes: [],',
+    '  normalizePath: { collapseSlashes: false, removeDotSegments: false },',
+    '  requiredHeaders: [],',
+    '  allowedHosts: ["api.example.com", "*.cdn.example.com"],',
+    '  trustForwardedFor: false,',
+    '  cors: null,',
+    '  authGates: [],',
+    '};',
+  ].join('\n');
+  const h = compileViewerTemplate(cfgCode);
+  if (!h) { viewerFailed++; return; }
+
+  const cases = [
+    ['host-allow: api.example.com accepted', buildEvent('GET', '/', { host: 'api.example.com' }), 'allow'],
+    ['host-allow: matches wildcard *.cdn.example.com', buildEvent('GET', '/', { host: 'edge.cdn.example.com' }), 'allow'],
+    ['host-allow: matches wildcard case-insensitively', buildEvent('GET', '/', { host: 'EDGE.CDN.EXAMPLE.COM' }), 'allow'],
+    ['host-allow: strips :port for match', buildEvent('GET', '/', { host: 'api.example.com:8443' }), 'allow'],
+    ['host-allow: rejects unknown host', buildEvent('GET', '/', { host: 'evil.example.com' }), 400],
+    ['host-allow: rejects missing host', buildEvent('GET', '/', {}), 400],
+    ['host-allow: wildcard does not match parent domain', buildEvent('GET', '/', { host: 'cdn.example.com' }), 400],
+  ];
+  for (const [name, event, expected] of cases) {
+    const result = h(event);
+    const allowed = result && !result.statusCode && result.uri !== undefined;
+    const got = allowed ? 'allow' : (result && result.statusCode);
+    const ok = (expected === 'allow' && allowed) || (typeof expected === 'number' && got === expected);
+    if (!ok) {
+      console.error('FAIL:', name, '| expected', expected, 'got', got);
+      viewerFailed++;
+    } else {
+      console.log('OK:', name);
+    }
+  }
+})();
 
 // =========================================================================
 // Section 1b: viewer-request.js monitor mode tests
@@ -139,16 +261,17 @@ function runViewerMonitorTests() {
     '  maxUriLength: 2048,',
     '  dropQueryKeys: new Set(["utm_source"]),',
     '  uaDenyContains: ["sqlmap"],',
-    '  blockPathMarks: ["/../", "%2e%2e"],',
+    '  blockPathContains: ["/../", "%2e%2e"],',
+    '  blockPathRegexes: [],',
     '  normalizePath: { collapseSlashes: true, removeDotSegments: true },',
     '  requiredHeaders: ["user-agent"],',
     '  cors: null,',
-    '  adminGate: { enabled: false, protectedPrefixes: [], tokenHeaderName: "x-edge-token", token: "" },',
     '  authGates: [{',
     '    name: "admin",',
     '    protectedPrefixes: ["/admin"],',
     '    type: "static_token",',
     '    tokenHeaderName: "x-edge-token",',
+    '    tokenEnv: "EDGE_ADMIN_TOKEN",',
     '    token: "test-token"',
     '  }],',
     '};',
@@ -302,6 +425,14 @@ function createSignedUrlParams(uri, expiresSec, secret) {
   return 'exp=' + expiresSec + '&sig=' + sig;
 }
 
+function createSignedUrlWithNonce(uri, expiresSec, secret, nonce) {
+  const signData = uri + String(expiresSec) + '|' + nonce;
+  const sig = crypto.createHmac('sha256', secret)
+    .update(signData)
+    .digest('base64url');
+  return 'exp=' + expiresSec + '&nonce=' + nonce + '&sig=' + sig;
+}
+
 async function runOriginRequestTests() {
   const testSecret = HS256_SECRET;
   process.env.JWT_TEST_SECRET = testSecret;
@@ -329,7 +460,19 @@ async function runOriginRequestTests() {
     '    algorithm: "HMAC-SHA256",',
     '    secret_env: "URL_SIGNING_SECRET",',
     '    expires_param: "exp",',
-    '    signature_param: "sig"',
+    '    signature_param: "sig",',
+    '    exact_path: false,',
+    '    nonce_param: ""',
+    '  }, {',
+    '    name: "one-time-download",',
+    '    protectedPrefixes: ["/download/report.pdf"],',
+    '    type: "signed_url",',
+    '    algorithm: "HMAC-SHA256",',
+    '    secret_env: "URL_SIGNING_SECRET",',
+    '    expires_param: "exp",',
+    '    signature_param: "sig",',
+    '    exact_path: true,',
+    '    nonce_param: "nonce"',
     '  }],',
     '  originAuth: null',
     '};',
@@ -413,6 +556,66 @@ async function runOriginRequestTests() {
       }),
       '401'],
 
+    // alg confusion: alg=none must be rejected
+    ['origin: GET /api/data alg=none rejected',
+      buildLambdaEdgeEvent('/api/data', {
+        'Authorization': 'Bearer ' + (function () {
+          const header = { alg: 'none', typ: 'JWT' };
+          const payload = { sub: 'user', iss: 'test-issuer', aud: 'test-audience', exp: nowSec + 3600 };
+          const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64')
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+          return enc(header) + '.' + enc(payload) + '.';
+        })(),
+      }),
+      '401'],
+
+    // alg confusion: alg=RS256 on an HS256 gate must be rejected (wrong alg,
+    // before any signature math runs).
+    ['origin: GET /api/data alg=RS256 on HS256 gate rejected',
+      buildLambdaEdgeEvent('/api/data', {
+        'Authorization': 'Bearer ' + (function () {
+          const header = { alg: 'RS256', typ: 'JWT' };
+          const payload = { sub: 'user', iss: 'test-issuer', aud: 'test-audience', exp: nowSec + 3600 };
+          const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64')
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+          const data = enc(header) + '.' + enc(payload);
+          const sig = crypto.createHmac('sha256', testSecret).update(data).digest('base64')
+            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
+          return data + '.' + sig;
+        })(),
+      }),
+      '401'],
+
+    // Clock skew: token expired 15s ago is still accepted with default 30s skew
+    ['origin: GET /api/data just-expired JWT accepted within clock skew',
+      buildLambdaEdgeEvent('/api/data', {
+        'Authorization': 'Bearer ' + createHS256Jwt({
+          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
+          exp: nowSec - 15,
+        }, testSecret),
+      }),
+      'allow'],
+
+    // Clock skew: token expired way beyond skew is still rejected
+    ['origin: GET /api/data long-expired JWT rejected past clock skew',
+      buildLambdaEdgeEvent('/api/data', {
+        'Authorization': 'Bearer ' + createHS256Jwt({
+          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
+          exp: nowSec - 600,
+        }, testSecret),
+      }),
+      '401'],
+
+    // Clock skew: token valid-from 15s in future is still accepted
+    ['origin: GET /api/data near-future nbf accepted within clock skew',
+      buildLambdaEdgeEvent('/api/data', {
+        'Authorization': 'Bearer ' + createHS256Jwt({
+          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
+          exp: nowSec + 3600, nbf: nowSec + 15,
+        }, testSecret),
+      }),
+      'allow'],
+
     // --- Signed URL tests ---
     ['origin: GET /assets/file.png valid signed URL',
       buildLambdaEdgeEvent('/assets/file.png', {},
@@ -436,6 +639,28 @@ async function runOriginRequestTests() {
     ['origin: GET /other/file not protected by signed URL',
       buildLambdaEdgeEvent('/other/file', {}, ''),
       'allow'],
+
+    // --- exact_path: reject sibling-path replay ---
+    ['origin: exact_path rejects sibling path with valid signature for /download/report.pdf',
+      buildLambdaEdgeEvent('/download/leaked.pdf', {},
+        createSignedUrlWithNonce('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET, 'nonce-0123456789abcdef')),
+      'allow'],
+
+    // --- nonce_param required: accept when present, reject when missing ---
+    ['origin: exact_path + nonce accepts well-formed one-time URL',
+      buildLambdaEdgeEvent('/download/report.pdf', {},
+        createSignedUrlWithNonce('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET, 'nonce-0123456789abcdef')),
+      'allow'],
+
+    ['origin: exact_path + nonce rejects when nonce missing',
+      buildLambdaEdgeEvent('/download/report.pdf', {},
+        createSignedUrlParams('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET)),
+      '403'],
+
+    ['origin: exact_path + nonce rejects short/invalid nonce',
+      buildLambdaEdgeEvent('/download/report.pdf', {},
+        createSignedUrlWithNonce('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET, 'short')),
+      '403'],
   ];
 
   let originFailed = 0;
@@ -443,8 +668,66 @@ async function runOriginRequestTests() {
     if (!(await runAsyncCase(name, event, expected))) originFailed++;
   }
 
-  console.log('--- origin-request (enforce): ' + (originCases.length - originFailed) + '/' + originCases.length + ' passed ---');
-  return { failed: originFailed, total: originCases.length };
+  // X-Forwarded-For stripping at origin (defense-in-depth).
+  const xffEvent = buildLambdaEdgeEvent('/other/file', {
+    'x-forwarded-for': '1.2.3.4, 5.6.7.8',
+  });
+  const xffResult = await originHandler(xffEvent);
+  const xffStripped = xffResult && xffResult.uri !== undefined && !xffResult.headers['x-forwarded-for'];
+  if (!xffStripped) {
+    console.error('FAIL: origin should strip client-supplied x-forwarded-for, headers=',
+      xffResult && xffResult.headers);
+    originFailed++;
+  } else {
+    console.log('OK: origin strips client-supplied x-forwarded-for');
+  }
+
+  // Hop-by-hop / smuggling header stripping (defense-in-depth).
+  const smugEvent = buildLambdaEdgeEvent('/other/file', {
+    'transfer-encoding': 'chunked',
+    'connection': 'close',
+    'upgrade': 'websocket',
+    'te': 'trailers',
+    'keep-alive': 'timeout=5',
+    'proxy-connection': 'keep-alive',
+    'trailer': 'Expires',
+  });
+  const smugResult = await originHandler(smugEvent);
+  const smugStripped = smugResult && smugResult.uri !== undefined
+    && !smugResult.headers['transfer-encoding']
+    && !smugResult.headers['connection']
+    && !smugResult.headers['upgrade']
+    && !smugResult.headers['te']
+    && !smugResult.headers['keep-alive']
+    && !smugResult.headers['proxy-connection']
+    && !smugResult.headers['trailer'];
+  if (!smugStripped) {
+    console.error('FAIL: origin should strip hop-by-hop / smuggling headers, headers=',
+      smugResult && smugResult.headers);
+    originFailed++;
+  } else {
+    console.log('OK: origin strips hop-by-hop smuggling headers');
+  }
+
+  // Nonce forwarding: successful signed_url verification must set
+  // X-Signed-URL-Nonce on the forwarded request.
+  const nonceVal = 'nonce-0123456789abcdef';
+  const nonceEvent = buildLambdaEdgeEvent('/download/report.pdf', {},
+    createSignedUrlWithNonce('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET, nonceVal));
+  const nonceResult = await originHandler(nonceEvent);
+  const nonceHeader = nonceResult && nonceResult.headers && nonceResult.headers['x-signed-url-nonce'];
+  const nonceOk = Array.isArray(nonceHeader) && nonceHeader[0] && nonceHeader[0].value === nonceVal;
+  if (!nonceOk) {
+    console.error('FAIL: origin should forward X-Signed-URL-Nonce, got=',
+      nonceResult && nonceResult.headers && nonceResult.headers['x-signed-url-nonce']);
+    originFailed++;
+  } else {
+    console.log('OK: origin forwards X-Signed-URL-Nonce header to origin');
+  }
+
+  const extraAsserts = 3;
+  console.log('--- origin-request (enforce): ' + (originCases.length + extraAsserts - originFailed) + '/' + (originCases.length + extraAsserts) + ' passed ---');
+  return { failed: originFailed, total: originCases.length + extraAsserts };
 }
 
 // Monitor mode tests: blocking checks should pass through

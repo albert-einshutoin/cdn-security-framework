@@ -13,6 +13,7 @@ const expectedFiles = [
   'edge/origin-request.js',
   'edge/cloudflare/index.ts',
   'infra/waf-rules.tf.json',
+  'infra/cloudflare-waf.tf.json',
 ];
 
 const scenarios = [
@@ -36,6 +37,26 @@ const scenarios = [
     policyPath: path.join(repoRoot, 'policy', 'profiles', 'permissive.yml'),
     goldenDir: path.join(repoRoot, 'tests', 'golden', 'profiles', 'permissive'),
   },
+  {
+    name: 'archetype:spa-static-site',
+    policyPath: path.join(repoRoot, 'policy', 'archetypes', 'spa-static-site.yml'),
+    goldenDir: path.join(repoRoot, 'tests', 'golden', 'archetypes', 'spa-static-site'),
+  },
+  {
+    name: 'archetype:rest-api',
+    policyPath: path.join(repoRoot, 'policy', 'archetypes', 'rest-api.yml'),
+    goldenDir: path.join(repoRoot, 'tests', 'golden', 'archetypes', 'rest-api'),
+  },
+  {
+    name: 'archetype:admin-panel',
+    policyPath: path.join(repoRoot, 'policy', 'archetypes', 'admin-panel.yml'),
+    goldenDir: path.join(repoRoot, 'tests', 'golden', 'archetypes', 'admin-panel'),
+  },
+  {
+    name: 'archetype:microservice-origin',
+    policyPath: path.join(repoRoot, 'policy', 'archetypes', 'microservice-origin.yml'),
+    goldenDir: path.join(repoRoot, 'tests', 'golden', 'archetypes', 'microservice-origin'),
+  },
 ];
 
 function runBuild(policyPath, outDir) {
@@ -48,6 +69,10 @@ function runBuild(policyPath, outDir) {
     stdio: 'inherit',
   });
   execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile-infra.js'), '--policy', policyPath, '--out-dir', outDir], {
+    cwd: repoRoot,
+    stdio: 'inherit',
+  });
+  execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile-cloudflare-waf.js'), '--policy', policyPath, '--out-dir', outDir], {
     cwd: repoRoot,
     stdio: 'inherit',
   });

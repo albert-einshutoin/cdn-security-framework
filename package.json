@@ -1,6 +1,6 @@
 {
   "name": "cdn-security-framework",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Policy-driven CDN edge security. Init YAML with npx cdn-security init, then npx cdn-security build to generate runtime code.",
   "bin": {
     "cdn-security": "./bin/cli.js"
@@ -9,17 +9,29 @@
     "build": "node scripts/compile.js",
     "lint:policy": "node scripts/policy-lint.js",
     "test:runtime": "node scripts/runtime-tests.js && node scripts/cloudflare-runtime-tests.js",
-    "test:unit": "node scripts/compile-unit-tests.js && node scripts/infra-unit-tests.js",
+    "test:unit": "node scripts/compile-unit-tests.js && node scripts/infra-unit-tests.js && node scripts/schema-lint-tests.js && node scripts/doctor-unit-tests.js && node scripts/emit-waf-unit-tests.js",
     "test:drift": "node scripts/check-drift.js",
     "test:security-baseline": "node scripts/security-baseline-check.js",
+    "test:fuzz": "node scripts/regex-fuzz-tests.js",
+    "test:cloudflare-integration": "node scripts/cloudflare-integration-tests.js",
+    "test:coverage": "c8 --reporter=text --reporter=lcov --include='scripts/**/*.js' --exclude='scripts/**/*-tests.js' --lines 80 --functions 75 --branches 70 npm run test:all",
+    "test:all": "npm run build && npm run test:unit && npm run test:runtime && npm run test:fuzz && npm run test:cloudflare-integration",
     "fingerprints:candidates": "node scripts/fingerprint-candidates.js"
   },
-  "keywords": ["cdn", "cloudfront", "edge", "security", "policy", "cli"],
+  "keywords": [
+    "cdn",
+    "cloudfront",
+    "edge",
+    "security",
+    "policy",
+    "cli"
+  ],
   "license": "MIT",
   "engines": {
     "node": ">=18"
   },
   "dependencies": {
+    "ajv": "^8.18.0",
     "commander": "^11.0.0",
     "inquirer": "^8.2.0",
     "js-yaml": "^4.1.0"
@@ -29,6 +41,7 @@
     "scripts/",
     "templates/",
     "policy/profiles/",
+    "policy/archetypes/",
     "policy/schema.json"
   ],
   "repository": {
@@ -38,5 +51,9 @@
   "homepage": "https://github.com/albert-einshutoin/cdn-security-framework#readme",
   "bugs": {
     "url": "https://github.com/albert-einshutoin/cdn-security-framework/issues"
+  },
+  "devDependencies": {
+    "c8": "^10.1.3",
+    "esbuild": "^0.28.0"
   }
 }
