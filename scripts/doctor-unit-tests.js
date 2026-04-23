@@ -96,6 +96,13 @@ test('checkNodeVersion: pass at >= MIN_NODE_MAJOR', () => {
   assert.strictEqual(r.status, 'pass');
 });
 
+test('checkNodeVersion: minimum matches package.json engines.node', () => {
+  const pkg = require(path.join(repoRoot, 'package.json'));
+  const match = /^>=\s*(\d+)/.exec(pkg.engines.node);
+  assert.ok(match, `unexpected engines.node format: ${pkg.engines.node}`);
+  assert.strictEqual(MIN_NODE_MAJOR, Number(match[1]));
+});
+
 test('checkNodeVersion: fail below MIN_NODE_MAJOR', () => {
   const r = checkNodeVersion(`v${MIN_NODE_MAJOR - 2}.5.0`);
   assert.strictEqual(r.status, 'fail');
