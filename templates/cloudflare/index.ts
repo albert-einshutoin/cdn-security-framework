@@ -199,7 +199,7 @@ async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ va
   return { valid: false, error: 'Unsupported JWT algorithm' };
 }
 
-async function verifySignedUrl(gate: any, url: URL, env: WorkerEnv): Promise<{ valid: boolean; error?: string }> {
+async function verifySignedUrl(gate: any, url: URL, env: WorkerEnv): Promise<{ valid: boolean; error?: string; nonce?: string | null }> {
   const exp = url.searchParams.get(gate.expires_param || 'exp');
   const sig = url.searchParams.get(gate.signature_param || 'sig');
   if (!exp || !sig) return { valid: false, error: 'Missing exp or sig' };
@@ -209,12 +209,22 @@ async function verifySignedUrl(gate: any, url: URL, env: WorkerEnv): Promise<{ v
     return { valid: false, error: 'URL expired' };
   }
 
+  let nonce: string | null = null;
+  if (gate.nonce_param) {
+    nonce = url.searchParams.get(gate.nonce_param);
+    if (!nonce) return { valid: false, error: 'Missing nonce' };
+    if (nonce.length < 16 || nonce.length > 256 || !/^[A-Za-z0-9._~-]+$/.test(nonce)) {
+      return { valid: false, error: 'Malformed nonce' };
+    }
+  }
+
   const secret = env[gate.secret_env] || '';
   if (!secret) return { valid: false, error: 'URL signing secret not configured' };
 
-  const expected = await hmacSha256Base64Url(secret, `${url.pathname}${exp}`);
+  const signData = `${url.pathname}${exp}` + (nonce ? `|${nonce}` : '');
+  const expected = await hmacSha256Base64Url(secret, signData);
   if (!timingSafeEqual(expected, sig)) return { valid: false, error: 'Invalid signature' };
-  return { valid: true };
+  return { valid: true, nonce };
 }
 
 function isHostAllowed(hostHeader: string): boolean {
@@ -343,8 +353,16 @@ export default {
 
     for (const k of CFG.dropQueryKeys) url.searchParams.delete(k);
 
+    // Nonce to forward to origin after a successful signed_url verification.
+    // Collected here and attached when we build the origin-facing Request.
+    let signedUrlNonce: string | null = null;
     for (const gate of CFG.authGates) {
-      const isProtected = gate.protectedPrefixes.some((p: string) => url.pathname === p || url.pathname.startsWith(p + '/'));
+      // signed_url gates may opt into exact_path matching to prevent a signature
+      // for /assets/ from being replayed against /assets/other-file.
+      const useExact = gate.type === 'signed_url' && gate.exact_path === true;
+      const isProtected = useExact
+        ? gate.protectedPrefixes.some((p: string) => url.pathname === p)
+        : gate.protectedPrefixes.some((p: string) => url.pathname === p || url.pathname.startsWith(p + '/'));
       if (!isProtected) continue;
 
       if (gate.type === 'static_token') {
@@ -412,6 +430,9 @@ export default {
           if (r) return r;
           continue;
         }
+        if (gate.nonce_param && verified.nonce) {
+          signedUrlNonce = verified.nonce;
+        }
       }
     }
 
@@ -440,6 +461,12 @@ export default {
         const headerName = CFG.originAuth.header || 'X-Origin-Verify';
         forwardHeaders.set(headerName, secret);
       }
+    }
+    // Forward signed-URL nonce so origin can enforce single-use. The edge
+    // cannot enforce replay protection statelessly — origin must reject
+    // re-use (SET NX in KV/Redis).
+    if (signedUrlNonce) {
+      forwardHeaders.set('X-Signed-URL-Nonce', signedUrlNonce);
     }
 
     const res = await fetch(new Request(url.toString(), {

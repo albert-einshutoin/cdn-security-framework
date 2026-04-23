@@ -389,6 +389,37 @@ function hasFailOnPermissiveFlag(argv) {
   return Array.isArray(argv) && argv.includes('--fail-on-permissive');
 }
 
+// Heuristic: paths that usually mutate state and therefore deserve replay
+// protection rather than just an expiry window. Matching is permissive (any
+// prefix that contains one of these substrings) because write patterns vary
+// by application convention.
+const SIGNED_URL_WRITE_PATH_HINTS = ['/api/', '/write', '/admin', '/upload', '/delete'];
+
+function warnSignedUrlReplay(policy, options = {}) {
+  const logger = options.logger || console;
+  const routes = policy.routes || [];
+  const warnings = [];
+  for (const route of routes) {
+    const gate = route.auth_gate;
+    if (!gate || gate.type !== 'signed_url') continue;
+    if (gate.nonce_param && typeof gate.nonce_param === 'string' && gate.nonce_param.trim()) continue;
+    const match = route.match || {};
+    const prefixes = match.path_prefixes || [];
+    const writeLike = prefixes.find((p) =>
+      SIGNED_URL_WRITE_PATH_HINTS.some((hint) => p.toLowerCase().includes(hint)),
+    );
+    if (writeLike) {
+      warnings.push(
+        `Route "${route.name || 'unnamed'}": signed_url protects ${JSON.stringify(writeLike)} but has no "nonce_param". ` +
+          'URLs are replayable within the expiry window — add nonce_param and enforce single-use at origin. See docs/signed-urls.md.',
+      );
+    }
+  }
+  if (warnings.length === 0) return { warned: false, warnings };
+  for (const w of warnings) logger.error('[WARN] ' + w);
+  return { warned: true, warnings };
+}
+
 function warnIfPermissive(policy, options = {}) {
   const failOnPermissive = options.failOnPermissive === true;
   const logger = options.logger || console;
@@ -545,6 +576,10 @@ function build(policy, options = {}) {
       secret_env: gate.secret_env || 'URL_SIGNING_SECRET',
       expires_param: gate.expires_param || 'exp',
       signature_param: gate.signature_param || 'sig',
+      exact_path: gate.exact_path === true,
+      nonce_param: typeof gate.nonce_param === 'string' && gate.nonce_param.trim()
+        ? gate.nonce_param.trim()
+        : '',
     };
   });
 
@@ -594,6 +629,9 @@ function main(argv = process.argv.slice(2)) {
     process.exit(1);
   }
 
+  // Non-fatal advisory: signed_url protecting write-like paths without nonce_param.
+  warnSignedUrlReplay(policy);
+
   validateAuthGates(policy, { allowPlaceholderToken });
 
   try {
@@ -626,6 +664,7 @@ module.exports = {
   hasAllowPlaceholderFlag,
   hasFailOnPermissiveFlag,
   warnIfPermissive,
+  warnSignedUrlReplay,
   validateJwksUrl,
   build,
   main,

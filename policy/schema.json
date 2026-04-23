@@ -147,7 +147,15 @@
                 "maximum": 86400
               },
               "expires_param": { "type": "string" },
-              "signature_param": { "type": "string" }
+              "signature_param": { "type": "string" },
+              "exact_path": {
+                "description": "If true, signed-URL gates require the request URI to exactly match a protected prefix. If false (default, back-compat), any URI under the prefix is acceptable — which lets an attacker replay a signature issued for one sibling path against another. Archetypes for sensitive downloads should always set `true`.",
+                "type": "boolean"
+              },
+              "nonce_param": {
+                "description": "Optional query-parameter name carrying a per-URL nonce (e.g. `nonce`). When set, the edge forwards the nonce to origin as `X-Signed-URL-Nonce` so origin can enforce single-use (SET NX in Redis / KV). The edge alone cannot enforce replay protection — origin cooperation is required. See docs/signed-urls.md.",
+                "type": "string"
+              }
             }
           },
           "response": { "type": "object", "properties": { "cache_control": { "type": "string" } } },

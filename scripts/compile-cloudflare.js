@@ -14,6 +14,7 @@ const {
   hasAllowPlaceholderFlag,
   hasFailOnPermissiveFlag,
   warnIfPermissive,
+  warnSignedUrlReplay,
 } = require('./lib/compile-core');
 
 const repoRoot = path.join(__dirname, '..');
@@ -49,6 +50,9 @@ const permissive = warnIfPermissive(policy, { failOnPermissive });
 if (permissive.failed) {
   process.exit(1);
 }
+
+// Non-fatal advisory: signed_url protecting write-like paths without nonce_param.
+warnSignedUrlReplay(policy);
 
 // Cloudflare Workers reads env at runtime for static_token/basic_auth, so build
 // does not require the actual token value. Only structural gate fields matter.
@@ -107,6 +111,10 @@ function getWorkerAuthGates() {
       gateConfig.secret_env = gate.secret_env || 'URL_SIGNING_SECRET';
       gateConfig.expires_param = gate.expires_param || 'exp';
       gateConfig.signature_param = gate.signature_param || 'sig';
+      gateConfig.exact_path = gate.exact_path === true;
+      gateConfig.nonce_param = typeof gate.nonce_param === 'string' && gate.nonce_param.trim()
+        ? gate.nonce_param.trim()
+        : '';
     }
 
     gates.push(gateConfig);

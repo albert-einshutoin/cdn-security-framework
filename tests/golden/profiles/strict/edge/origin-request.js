@@ -308,15 +308,30 @@ function verifySignedUrl(uri, querystring, gate) {
   const params = new URLSearchParams(querystring);
   const exp = params.get(gate.expires_param);
   const sig = params.get(gate.signature_param);
-  
+
   if (!exp || !sig) return { valid: false, error: 'Missing exp or sig' };
   if (Date.now() > parseInt(exp) * 1000) return { valid: false, error: 'URL expired' };
-  
-  // Compute expected signature: HMAC-SHA256(uri + exp, secret)
+
+  let nonce = null;
+  if (gate.nonce_param) {
+    nonce = params.get(gate.nonce_param);
+    if (!nonce) return { valid: false, error: 'Missing nonce' };
+    // Reject empty / overly long nonces before hitting origin. 16..256 chars
+    // matches a typical ULID/UUID/base64(16B) envelope; anything outside that
+    // is almost certainly crafted noise.
+    if (nonce.length < 16 || nonce.length > 256 || !/^[A-Za-z0-9._~-]+$/.test(nonce)) {
+      return { valid: false, error: 'Malformed nonce' };
+    }
+  }
+
+  // Compute expected signature: HMAC-SHA256(uri + exp [+ nonce], secret)
   const secret = process.env[gate.secret_env] || '';
   if (!secret) return { valid: false, error: 'Secret not configured' };
-  
-  const signData = uri + exp;
+
+  // When a nonce is part of the scheme, include it in the signed material so
+  // tampering with it invalidates the signature (origin still enforces single-
+  // use separately).
+  const signData = uri + exp + (nonce ? ('|' + nonce) : '');
   const expectedSig = crypto.createHmac('sha256', secret)
     .update(signData)
     .digest('base64url');
@@ -327,7 +342,7 @@ function verifySignedUrl(uri, querystring, gate) {
   const isValid = expectedBuf.length === providedBuf.length &&
     crypto.timingSafeEqual(expectedBuf, providedBuf);
 
-  return { valid: isValid };
+  return { valid: isValid, nonce };
 }
 
 // Check JWT auth gates
@@ -376,19 +391,33 @@ async function checkJwtGates(request) {
 function checkSignedUrlGates(request) {
   const uri = request.uri || '/';
   const qs = request.querystring || '';
-  
+
   for (const gate of CFG.signedUrlGates) {
-    const isProtected = gate.protectedPrefixes.some(
-      p => uri === p || uri.startsWith(p + '/')
-    );
+    // exact_path: signature is bound to the exact URI. Without it, a signed
+    // URL for /assets/ can be replayed against /assets/other-file if an
+    // operator accidentally signs a prefix. exact_path rejects any request
+    // whose URI is not one of the protected paths verbatim.
+    const isProtected = gate.exact_path
+      ? gate.protectedPrefixes.some((p) => uri === p)
+      : gate.protectedPrefixes.some((p) => uri === p || uri.startsWith(p + '/'));
     if (!isProtected) continue;
-    
+
     const result = verifySignedUrl(uri, qs, gate);
     if (!result.valid) {
       return resp(403, result.error || 'Invalid signature');
     }
+
+    // Forward the nonce to origin so it can enforce single-use (SET NX in
+    // Redis / conditional write in DynamoDB). The edge alone cannot enforce
+    // replay protection statelessly — origin cooperation is required.
+    if (gate.nonce_param && result.nonce && request.headers) {
+      request.headers['x-signed-url-nonce'] = [{
+        key: 'X-Signed-URL-Nonce',
+        value: result.nonce,
+      }];
+    }
   }
-  
+
   return null;
 }
 

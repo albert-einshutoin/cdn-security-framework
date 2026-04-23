@@ -15,6 +15,7 @@ const {
   PLACEHOLDER_TOKEN,
   hasFailOnPermissiveFlag,
   warnIfPermissive,
+  warnSignedUrlReplay,
 } = require('./lib/compile-core');
 
 function test(name, fn) {
@@ -691,6 +692,112 @@ test('validateAuthGates accepts jwks_url on allowed_hosts (case-insensitive)', (
     ],
   };
   validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true });
+});
+
+test('warnSignedUrlReplay flags write-like signed_url gates missing nonce_param', () => {
+  const captured = [];
+  const logger = { error: (m) => captured.push(m) };
+  const policy = {
+    routes: [
+      {
+        name: 'write-download',
+        match: { path_prefixes: ['/api/download'] },
+        auth_gate: { type: 'signed_url', secret_env: 'URL_SIGNING_SECRET' },
+      },
+    ],
+  };
+  const r = warnSignedUrlReplay(policy, { logger });
+  assert.strictEqual(r.warned, true);
+  assert.strictEqual(r.warnings.length, 1);
+  assert.match(captured[0], /write-download/);
+  assert.match(captured[0], /nonce_param/);
+});
+
+test('warnSignedUrlReplay stays silent for read-only paths', () => {
+  const captured = [];
+  const logger = { error: (m) => captured.push(m) };
+  const policy = {
+    routes: [
+      {
+        name: 'cdn-assets',
+        match: { path_prefixes: ['/assets'] },
+        auth_gate: { type: 'signed_url', secret_env: 'URL_SIGNING_SECRET' },
+      },
+    ],
+  };
+  const r = warnSignedUrlReplay(policy, { logger });
+  assert.strictEqual(r.warned, false);
+  assert.strictEqual(captured.length, 0);
+});
+
+test('warnSignedUrlReplay stays silent when nonce_param is set', () => {
+  const captured = [];
+  const logger = { error: (m) => captured.push(m) };
+  const policy = {
+    routes: [
+      {
+        name: 'write-download',
+        match: { path_prefixes: ['/api/download'] },
+        auth_gate: { type: 'signed_url', secret_env: 'URL_SIGNING_SECRET', nonce_param: 'nonce' },
+      },
+    ],
+  };
+  const r = warnSignedUrlReplay(policy, { logger });
+  assert.strictEqual(r.warned, false);
+  assert.strictEqual(captured.length, 0);
+});
+
+test('build emits signed_url gate with exact_path and nonce_param fields', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-signed-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      routes: [
+        {
+          name: 'one-time',
+          match: { path_prefixes: ['/api/download/report.pdf'] },
+          auth_gate: {
+            type: 'signed_url',
+            secret_env: 'URL_SIGNING_SECRET',
+            exact_path: true,
+            nonce_param: 'nonce',
+          },
+        },
+      ],
+    };
+    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
+    const origin = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.match(origin, /"exact_path":true/);
+    assert.match(origin, /"nonce_param":"nonce"/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build defaults exact_path=false and nonce_param="" when unspecified', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-signed-def-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      routes: [
+        {
+          name: 'legacy',
+          match: { path_prefixes: ['/assets'] },
+          auth_gate: { type: 'signed_url', secret_env: 'URL_SIGNING_SECRET' },
+        },
+      ],
+    };
+    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
+    const origin = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.match(origin, /"exact_path":false/);
+    assert.match(origin, /"nonce_param":""/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 if (process.exitCode) {
