@@ -1,0 +1,102 @@
+# Archetype: JSON REST API.
+# Use when: CDN fronts a JSON API; no HTML is served.
+# Threat focus: JWT bypass, CORS misconfiguration, method spoofing.
+# Base profile: balanced with API-specific hardening.
+
+version: 1
+project: example-rest-api
+
+metadata:
+  risk_level: balanced
+  description: "JSON REST API: JWT-gated /api/*, CORS allowlist, no-sniff everywhere. When to use: API origin serving JSON only. Browser clients call via configured CORS allowlist."
+
+defaults:
+  mode: "enforce"
+  response:
+    add_security_headers: true
+
+request:
+  allow_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+  limits:
+    max_query_length: 1024
+    max_query_params: 30
+    max_uri_length: 2048
+    max_header_count: 48
+
+  block:
+    path_patterns:
+      contains:
+        - "/../"
+        - "%2e%2e"
+    ua_contains:
+      - "sqlmap"
+      - "nikto"
+      - "acunetix"
+      - "masscan"
+    header_missing:
+      - "user-agent"
+
+routes:
+  - name: api
+    match:
+      path_prefixes: ["/api/"]
+    auth_gate:
+      type: "jwt"
+      algorithm: "RS256"
+      jwks_url: "https://auth.example.com/.well-known/jwks.json"
+      issuer: "https://auth.example.com/"
+      audience: "api.example.com"
+      clock_skew_sec: 30
+    response:
+      cache_control: "no-store"
+    request:
+      allow_methods: ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+
+observability:
+  log_format: "json"
+  correlation_id_header: "traceparent"
+  audit_log_auth: true
+  audit_hash_sub: true
+
+response_headers:
+  hsts: "max-age=31536000; includeSubDomains; preload"
+  x_content_type_options: "nosniff"
+  referrer_policy: "no-referrer"
+  permissions_policy: "camera=(), microphone=(), geolocation=()"
+  # CSP on API responses is defense-in-depth; prevents accidental HTML rendering.
+  csp_public: "default-src 'none'; frame-ancestors 'none';"
+  cors:
+    allow_origins:
+      - "https://app.example.com"
+    allow_methods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+    allow_headers: ["authorization", "content-type", "x-request-id"]
+    allow_credentials: true
+    max_age: 600
+
+firewall:
+  waf:
+    rate_limit: 5000
+    scope: REGIONAL
+    managed_rules:
+      - "AWSManagedRulesCommonRuleSet"
+      - "AWSManagedRulesKnownBadInputsRuleSet"
+      - "AWSManagedRulesSQLiRuleSet"
+      - "AWSManagedRulesIPReputationList"
+    rate_limit_rules:
+      - name: "auth-ip-limit"
+        limit: 200
+        aggregate_key_type: "IP"
+        action: "block"
+        priority: 1
+        scope_down_statement:
+          byte_match_statement:
+            field_to_match: { uri_path: {} }
+            positional_constraint: "STARTS_WITH"
+            search_string: "/api/auth"
+            text_transformation: [{ priority: 0, type: "LOWERCASE" }]
+  jwks:
+    stale_if_error_sec: 120
+    negative_cache_sec: 30
+    allowed_hosts:
+      - "auth.example.com"

@@ -101,6 +101,12 @@ This framework addresses these with **"policy-driven" + "runtime separation"**.
 
 See [IaC integration](docs/iac.md) for Terraform / CDK / WAF usage.
 
+### Operational docs
+- [Archetypes](docs/archetypes.md) — app-shaped policy presets (SPA, REST API, admin, microservice)
+- [Secret rotation runbook](docs/runbooks/secret-rotation.md) — JWT / JWKS / signed URL / admin token / origin secret
+- [Schema migration](docs/schema-migration.md) — how `policy/schema.json` evolves and the `migrate` CLI
+- [Supply chain](docs/supply-chain.md) — SLSA v1 provenance and `npm audit signatures`
+
 ---
 
 ## Policy and Runtimes
@@ -125,9 +131,10 @@ npm install --save-dev cdn-security-framework
 npx cdn-security init
 ```
 
-Answer the prompts (platform: AWS / Cloudflare, profile: Strict / Balanced / Permissive). This creates `policy/security.yml` and `policy/profiles/<profile>.yml`.
+Answer the prompts. You can start from a **profile** (`strict` / `balanced` / `permissive`) or an **archetype** (`spa-static-site`, `rest-api`, `admin-panel`, `microservice-origin`). This creates `policy/security.yml` and a reference copy under `policy/profiles/` or `policy/archetypes/`.
 
 Or non-interactive: `npx cdn-security init --platform aws --profile balanced --force`
+Or with an archetype: `npx cdn-security init --platform aws --archetype rest-api --force`
 
 ### 3. Edit and build
 

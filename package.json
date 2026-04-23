@@ -41,6 +41,7 @@
     "scripts/",
     "templates/",
     "policy/profiles/",
+    "policy/archetypes/",
     "policy/schema.json"
   ],
   "repository": {

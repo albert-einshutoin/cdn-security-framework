@@ -17,6 +17,11 @@ concurrency:
 jobs:
   publish:
     runs-on: ubuntu-latest
+    env:
+      # CI-only build tokens — match the names used by policy-lint.yml so
+      # drift and unit tests that consume them reproduce here identically.
+      EDGE_ADMIN_TOKEN: ci-build-token-not-for-deploy
+      ORIGIN_SECRET: ci-origin-secret-not-for-deploy
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
 
@@ -48,6 +53,13 @@ jobs:
           npm run lint:policy -- policy/profiles/balanced.yml
           npm run lint:policy -- policy/profiles/strict.yml
           npm run lint:policy -- policy/profiles/permissive.yml
+
+      - name: Policy lint (archetypes)
+        run: |
+          npm run lint:policy -- policy/archetypes/spa-static-site.yml
+          npm run lint:policy -- policy/archetypes/rest-api.yml
+          npm run lint:policy -- policy/archetypes/admin-panel.yml
+          npm run lint:policy -- policy/archetypes/microservice-origin.yml
 
       - name: Build AWS (compile policy -> dist)
         run: npm run build
