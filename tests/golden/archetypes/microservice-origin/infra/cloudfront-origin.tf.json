@@ -1,0 +1,8 @@
+{
+  "locals": {
+    "cdn_security_origin_config": {
+      "connection_timeout": 5,
+      "read_timeout": 30
+    }
+  }
+}

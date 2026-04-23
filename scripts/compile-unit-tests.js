@@ -7,6 +7,7 @@ const path = require('path');
 const {
   DEFAULT_CONTAINS,
   parsePathPatterns,
+  hasCatastrophicBacktrackShape,
   regexesLiteralCode,
   getAuthGates,
   validateAuthGates,
@@ -92,6 +93,40 @@ test('parsePathPatterns rejects invalid regex at build time', () => {
     () => parsePathPatterns({ regex: ['[unterminated'] }),
     /Invalid regex/,
   );
+});
+
+test('parsePathPatterns rejects nested-quantifier ReDoS shapes at build time', () => {
+  // Classic `(a+)+` family — the edge DoS shape we refuse to ship.
+  assert.throws(
+    () => parsePathPatterns({ regex: ['^(a+)+$'] }),
+    /ReDoS safety check/,
+  );
+  assert.throws(
+    () => parsePathPatterns({ regex: ['(.*)*'] }),
+    /ReDoS safety check/,
+  );
+  // With `(?i)` inline flag — must also trigger after the prefix is stripped.
+  assert.throws(
+    () => parsePathPatterns({ regex: ['(?i)(x+)+'] }),
+    /ReDoS safety check/,
+  );
+});
+
+test('parsePathPatterns accepts well-formed regex without stacked quantifiers', () => {
+  const { regexSources } = parsePathPatterns({
+    regex: ['(?i)\\.git/', '\\.env$', '^/api/v[12]/'],
+  });
+  assert.deepStrictEqual(regexSources, ['(?i)\\.git/', '\\.env$', '^/api/v[12]/']);
+});
+
+test('hasCatastrophicBacktrackShape flags canonical ReDoS family and passes safe patterns', () => {
+  assert.strictEqual(hasCatastrophicBacktrackShape('^(a+)+$'), true);
+  assert.strictEqual(hasCatastrophicBacktrackShape('(.*)*'), true);
+  assert.strictEqual(hasCatastrophicBacktrackShape('(x{1,5})+'), true);
+  assert.strictEqual(hasCatastrophicBacktrackShape('(?i)(a+)+'), true);
+  assert.strictEqual(hasCatastrophicBacktrackShape('\\.git/'), false);
+  assert.strictEqual(hasCatastrophicBacktrackShape('^/api/[a-z]+$'), false);
+  assert.strictEqual(hasCatastrophicBacktrackShape(''), false);
 });
 
 test('parsePathPatterns rejects regex-like entries under object-form contains', () => {
