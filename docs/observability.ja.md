@@ -79,6 +79,65 @@ Edge セキュリティレイヤーを通過したレスポンスには、フレ
 
 ---
 
+## WAF ロギング（AWS）
+
+`firewall.waf.logging` は Web ACL と同じファイルに `aws_wafv2_logging_configuration` を出力する。宛先 ARN 自体はポリシーに書かずシークレットマネージャ / CI から渡せるよう、コンパイラは Terraform 変数を自動生成する。
+
+```yaml
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    logging:
+      enabled: true
+      destination_arn_env: "WAF_LOG_DESTINATION_ARN"
+      redacted_fields:
+        - "authorization"
+        - "cookie"
+        - "x-api-key"
+```
+
+### 宛先の選び方
+
+- **Kinesis Firehose → S3**: 定番。>10k rec/s かつクロスリージョン配送可。PCI / SOC2 で 30 日超の保持要件があるならこれ。
+- **CloudWatch Logs**: 既に CW Insights で照会しているなら最安。ロググループ毎のレート制限に注意。
+- **S3 直送**: ストリーム再生不要で結果整合を受容できる場合のみ。
+
+宛先名は `aws_wafv2_logging_configuration` の規約に従う必要がある——Kinesis Firehose 名は `aws-waf-logs-` 始まり必須。
+
+### レッダクション
+
+`redacted_fields` は指定したリクエストフィールドを WAF 内部でログレコードから落とす。許可値: `authorization`, `cookie`, `set-cookie`, `x-api-key`, `x-csrf-token`。WAF の中で落とすので下流パイプラインに生値は流れない。認証トラフィックを扱うなら最低 `cookie` + `authorization` は推奨。
+
+### Lint 警告
+
+`npm run lint:policy` は `defaults.mode == enforce` かつ `firewall.waf.scope == CLOUDFRONT` でロギングが無効のとき、非致命的な警告を出す:
+
+```
+Policy lint warnings: policy/security.yml
+  - firewall.waf.logging is not enabled while scope=CLOUDFRONT. PCI-DSS / SOC2 require WAF log retention — set logging.enabled: true and supply destination_arn_env.
+```
+
+REGIONAL スコープでは ALB アクセスログで代替可能なケースが多いので警告しない。
+
+### マネージドルール網羅 Lint
+
+同じ Lint パスで、enforce モードなのに BotControl / ATP / IPReputationList / AnonymousIpList が一つも無い設定には警告を出す。この 4 つは「WAF でなぜ止められなかった？」の原因になりやすい群。警告のみでビルドは止めない。
+
+### カスタムブロックレスポンス
+
+`firewall.waf.block_response` で既定の WAF 403 ページ（ベンダー情報が漏れる）をブランド済みページに差し替える。ルールグループと Web ACL の双方に `custom_response_bodies` を出力するので、どのブロックルールからも `custom_response_body_key: cdn_sec_block` で参照できる。
+
+```yaml
+firewall:
+  waf:
+    block_response:
+      status_code: 403
+      body: "Access denied. Reference: {RID}"
+      content_type: "TEXT_PLAIN"
+```
+
+---
+
 ## フィンガープリント運用（JA3/JA4）
 
 JA3/JA4 は段階的に運用してください。

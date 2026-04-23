@@ -253,13 +253,58 @@
           "type": "object",
           "properties": {
             "rate_limit": {
-              "description": "Per-IP request ceiling over the 5-minute WAF rate-based window. AWS WAFv2 accepts 100..2,000,000,000.",
+              "description": "Per-IP request ceiling over the 5-minute WAF rate-based window. AWS WAFv2 accepts 100..2,000,000,000. Legacy single global rule; prefer `rate_limit_rules` for per-route / per-key controls.",
               "type": "integer",
               "minimum": 100,
               "maximum": 2000000000
             },
+            "rate_limit_rules": {
+              "description": "Fine-grained rate-limit rules. Each entry renders as one `aws_wafv2_rule_group` rule with its own `rate_based_statement` and optional `scope_down_statement` so you can scope by URI, auth state, or header keys without hand-editing Terraform. `limit` is per 5-minute window (AWS WAFv2 accepts 100..2,000,000,000). `aggregate_key_type` defaults to `IP`; `FORWARDED_IP` follows the `X-Forwarded-For` chain and `CUSTOM_KEYS` lets you pass a raw `custom_keys` block. `scope_down_statement` is forwarded verbatim as a raw JSON object — schema-free because AWS WAFv2 ships dozens of statement kinds; lint only checks the shell.",
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": ["name", "limit"],
+                "additionalProperties": false,
+                "properties": {
+                  "name": { "type": "string", "pattern": "^[a-zA-Z0-9-]+$", "minLength": 1, "maxLength": 64 },
+                  "limit": { "type": "integer", "minimum": 100, "maximum": 2000000000 },
+                  "aggregate_key_type": { "enum": ["IP", "FORWARDED_IP", "CUSTOM_KEYS"] },
+                  "custom_keys": { "type": "array", "items": { "type": "object" } },
+                  "scope_down_statement": { "type": "object" },
+                  "priority": { "type": "integer", "minimum": 1, "maximum": 10000 },
+                  "action": { "enum": ["block", "count", "captcha"] }
+                }
+              }
+            },
             "scope": { "enum": ["REGIONAL", "CLOUDFRONT"] },
-            "managed_rules": { "type": "array", "items": { "type": "string" } },
+            "managed_rules": {
+              "description": "AWS WAFv2 managed rule group names (vendor: AWS). Common pick-list: AWSManagedRulesCommonRuleSet (core OWASP Top 10), AWSManagedRulesKnownBadInputsRuleSet, AWSManagedRulesSQLiRuleSet, AWSManagedRulesLinuxRuleSet, AWSManagedRulesUnixRuleSet, AWSManagedRulesBotControlRuleSet (bot scoring, paid), AWSManagedRulesATPRuleSet (account-takeover, paid, scope_down to /login recommended), AWSManagedRulesIPReputationList (reputation-blocked), AWSManagedRulesAnonymousIpList (Tor / open proxies). Lint warns when defaults.mode == enforce and none of BotControl / ATP / IPReputation / AnonymousIp appear in the array. Entries not in the recommended set still compile — free-form string is intentional so you can opt into vendor additions without a framework release.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "block_response": {
+              "description": "Custom response body attached to every WAF rule whose action is `block`. AWS WAFv2 uses `custom_response_bodies` on the web ACL and references it with `custom_response_body_key` on the block action. Set `status_code` to override the default 403. When omitted, AWS WAFv2 returns its own 403 page (which leaks the CDN vendor).",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "status_code": { "type": "integer", "minimum": 200, "maximum": 600 },
+                "body": { "type": "string" },
+                "content_type": { "enum": ["TEXT_PLAIN", "TEXT_HTML", "APPLICATION_JSON"] }
+              }
+            },
+            "logging": {
+              "description": "WAF logging configuration. When `enabled: true`, the compiler emits an `aws_wafv2_logging_configuration` block targeting `destination_arn_env` (env-backed Terraform variable reference). `redacted_fields` drops sensitive request fields from the log record — `authorization`, `cookie`, `x-api-key`, and `set-cookie` are the usual candidates. Lint warns when `scope == CLOUDFRONT` and logging is disabled because compliance frameworks (PCI-DSS, SOC2) require WAF log retention.",
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "enabled": { "type": "boolean" },
+                "destination_arn_env": { "type": "string" },
+                "redacted_fields": {
+                  "type": "array",
+                  "items": { "enum": ["authorization", "cookie", "set-cookie", "x-api-key", "x-csrf-token"] }
+                }
+              }
+            },
             "ja3_fingerprints": { "type": "array", "items": { "type": "string" } },
             "ja4_fingerprints": { "type": "array", "items": { "type": "string" } },
             "fingerprint_action": { "enum": ["block", "count"] }

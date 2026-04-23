@@ -26,8 +26,10 @@ This document maps **which security-related YAML settings are supported** by cat
 |---------|--------|-------|
 | **Geo block (country/region)** | Supported | `firewall.geo.block_countries` / `allow_countries` → `dist/infra/geo-restriction.tf.json` |
 | **IP allowlist / blocklist** | Supported | `firewall.ip.allowlist` / `blocklist` → `dist/infra/ip-sets.tf.json` |
-| **Rate limiting (DDoS)** | Supported | `firewall.waf.rate_limit` → `dist/infra/waf-rules.tf.json` (rate-based rule). |
-| **WAF managed rules (SQLi, XSS, OWASP Top 10)** | Supported | `firewall.waf.managed_rules` array → `dist/infra/waf-rules.tf.json` (aws_wafv2_web_acl). |
+| **Rate limiting (DDoS)** | Supported | `firewall.waf.rate_limit` (legacy global) + `firewall.waf.rate_limit_rules[]` (per-URI / per-key with scope_down). |
+| **WAF managed rules (SQLi, XSS, OWASP Top 10)** | Supported | `firewall.waf.managed_rules` array → `aws_wafv2_web_acl`. Lint warns when BotControl / ATP / IPReputation / AnonymousIp are all missing in enforce mode. |
+| **WAF custom block response** | Supported | `firewall.waf.block_response` (status_code, body, content_type) → `custom_response_bodies` + `custom_response_body_key`. Removes vendor leak. |
+| **WAF logging + redaction** | Supported | `firewall.waf.logging.{enabled, destination_arn_env, redacted_fields[]}` → `aws_wafv2_logging_configuration`. Lint warns on CLOUDFRONT scope without logging. |
 | **TLS fingerprint rules (JA3/JA4)** | Supported | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints`, optional `fingerprint_action: block|count`. |
 
 ---
@@ -85,7 +87,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | Category | Supported | Partial | Not supported |
 |----------|-----------|---------|---------------|
 | **Transport** | HSTS, TLS version, HTTP version | — | — |
-| **Firewall / Access** | Rate limit, Geo, IP, WAF managed rules, JA3/JA4 fingerprint rules | — | — |
+| **Firewall / Access** | Rate limit (global + per-URI), Geo, IP, WAF managed rules, custom block response, logging, JA3/JA4 fingerprint rules | — | — |
 | **Authentication** | Token, Basic, JWT, Signed URL | — | — |
 | **Request Hygiene** | Method, URI/Query/Header limits, Normalization, UA block, Required headers, Fingerprint (JA3/JA4) | — | — |
 | **Response Security** | Security headers, CORS, Cookie attributes | — | — |

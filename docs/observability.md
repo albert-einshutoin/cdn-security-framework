@@ -79,6 +79,65 @@ For responses that pass through the Edge Security Layer, the framework adds secu
 
 ---
 
+## WAF Logging (AWS)
+
+`firewall.waf.logging` renders `aws_wafv2_logging_configuration` alongside the web ACL. The compiler adds a Terraform variable for the destination ARN so the ARN itself stays in your secret manager / CI pipeline rather than the policy file.
+
+```yaml
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    logging:
+      enabled: true
+      destination_arn_env: "WAF_LOG_DESTINATION_ARN"
+      redacted_fields:
+        - "authorization"
+        - "cookie"
+        - "x-api-key"
+```
+
+### Destination choices
+
+- **Kinesis Firehose → S3**: canonical low-cost path; supports >10k records/sec and cross-region delivery. Required for PCI / SOC2 retention windows above 30 days.
+- **CloudWatch Logs**: cheapest when you already query in CW Insights; watch the per-log-group rate limits.
+- **S3 direct**: only if you do not need stream replay and accept eventual consistency.
+
+Regardless of destination, the ARN must satisfy `aws_wafv2_logging_configuration` naming — Kinesis Firehose names must start with `aws-waf-logs-`.
+
+### Redaction
+
+`redacted_fields` drops the listed request fields from every log record before it leaves the WAF. Accepted values: `authorization`, `cookie`, `set-cookie`, `x-api-key`, `x-csrf-token`. Redaction happens inside AWS WAF — downstream pipelines never see the raw value. Add `cookie` + `authorization` at minimum for anything that handles authenticated traffic.
+
+### Lint warning
+
+`npm run lint:policy` emits a non-fatal warning when `defaults.mode == enforce`, `firewall.waf.scope == CLOUDFRONT`, and logging is not enabled:
+
+```
+Policy lint warnings: policy/security.yml
+  - firewall.waf.logging is not enabled while scope=CLOUDFRONT. PCI-DSS / SOC2 require WAF log retention — set logging.enabled: true and supply destination_arn_env.
+```
+
+This is advisory — REGIONAL scope skips the warning because ALB + WAF logs are often captured via ALB access logs already.
+
+### Managed-rule coverage lint
+
+Same lint pass warns when enforce-mode policies omit every one of BotControl / ATP / IPReputationList / AnonymousIpList. These four are where operators most frequently forget to opt in and are responsible for the vast majority of "why didn't the WAF catch this?" retros. The warning does not fail the build — adopt the rules you need for your risk posture.
+
+### Custom block response
+
+`firewall.waf.block_response` surfaces a branded page instead of the vanilla WAF 403 (which leaks the vendor). Emitted as `custom_response_bodies` on both the rule group and web ACL so any block rule can reference it via `custom_response_body_key: cdn_sec_block`.
+
+```yaml
+firewall:
+  waf:
+    block_response:
+      status_code: 403
+      body: "Access denied. Reference: {RID}"
+      content_type: "TEXT_PLAIN"
+```
+
+---
+
 ## Fingerprint Operations (JA3/JA4)
 
 For JA3/JA4 operations, use a staged rollout:

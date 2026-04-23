@@ -183,6 +183,149 @@ firewall:
   }
 });
 
+test('compile-infra emits rate_limit_rules[] with scope_down_statement and custom priority', () => {
+  const ctx = runCompileInfra(`
+version: 1
+project: rlr-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    rate_limit_rules:
+      - name: "global"
+        limit: 2000
+        aggregate_key_type: "IP"
+        action: "block"
+        priority: 1
+      - name: "login-tight"
+        limit: 50
+        aggregate_key_type: "IP"
+        action: "count"
+        priority: 2
+        scope_down_statement:
+          byte_match_statement:
+            field_to_match: { uri_path: {} }
+            positional_constraint: "STARTS_WITH"
+            search_string: "/login"
+            text_transformation: [{ priority: 0, type: "LOWERCASE" }]
+`);
+
+  try {
+    const waf = ctx.read('infra/waf-rules.tf.json');
+    const group = waf.resource.aws_wafv2_rule_group['rlr-test-rate-limit'];
+    const rateRules = group.rule.filter((r) => r.statement && r.statement.rate_based_statement);
+    assert.strictEqual(rateRules.length, 2);
+    assert.strictEqual(rateRules[0].name, 'global');
+    assert.strictEqual(rateRules[0].priority, 1);
+    assert.ok(rateRules[0].action.block);
+    assert.strictEqual(rateRules[1].name, 'login-tight');
+    assert.ok(rateRules[1].action.count);
+    assert.ok(rateRules[1].statement.rate_based_statement.scope_down_statement.byte_match_statement);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('compile-infra emits block_response custom_response_body on rule group + references it', () => {
+  const ctx = runCompileInfra(`
+version: 1
+project: br-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    rate_limit: 2000
+    managed_rules:
+      - "AWSManagedRulesCommonRuleSet"
+    block_response:
+      status_code: 451
+      body: "unavailable for legal reasons"
+      content_type: "TEXT_PLAIN"
+`);
+
+  try {
+    const waf = ctx.read('infra/waf-rules.tf.json');
+    const group = waf.resource.aws_wafv2_rule_group['br-test-rate-limit'];
+    assert.ok(Array.isArray(group.custom_response_body));
+    assert.strictEqual(group.custom_response_body[0].key, 'cdn_sec_block');
+    assert.strictEqual(group.custom_response_body[0].content, 'unavailable for legal reasons');
+
+    const rateRule = group.rule.find((r) => r.statement.rate_based_statement);
+    assert.strictEqual(rateRule.action.block.custom_response.response_code, 451);
+    assert.strictEqual(rateRule.action.block.custom_response.custom_response_body_key, 'cdn_sec_block');
+
+    const acl = waf.resource.aws_wafv2_web_acl['br-test-waf-acl'];
+    assert.ok(Array.isArray(acl.custom_response_body));
+    assert.strictEqual(acl.custom_response_body[0].key, 'cdn_sec_block');
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('compile-infra emits aws_wafv2_logging_configuration when logging.enabled', () => {
+  const ctx = runCompileInfra(`
+version: 1
+project: log-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    managed_rules:
+      - "AWSManagedRulesCommonRuleSet"
+    logging:
+      enabled: true
+      destination_arn_env: "WAF_LOG_DESTINATION_ARN"
+      redacted_fields:
+        - "authorization"
+        - "cookie"
+`);
+
+  try {
+    const waf = ctx.read('infra/waf-rules.tf.json');
+    const logging = waf.resource.aws_wafv2_logging_configuration['log-test-waf-acl-logging'];
+    assert.ok(logging);
+    assert.strictEqual(logging.log_destination_configs[0], '${var.waf_log_destination_arn}');
+    assert.strictEqual(logging.resource_arn, '${aws_wafv2_web_acl.log-test-waf-acl.arn}');
+    assert.strictEqual(logging.redacted_fields[0].single_header.name, 'authorization');
+    assert.strictEqual(logging.redacted_fields[1].single_header.name, 'cookie');
+    assert.ok(waf.variable && waf.variable.waf_log_destination_arn);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('compile-infra: logging is NOT emitted when logging.enabled is false/missing', () => {
+  const ctx = runCompileInfra(`
+version: 1
+project: nolog-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    managed_rules:
+      - "AWSManagedRulesCommonRuleSet"
+`);
+
+  try {
+    const waf = ctx.read('infra/waf-rules.tf.json');
+    assert.ok(!waf.resource.aws_wafv2_logging_configuration);
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }
