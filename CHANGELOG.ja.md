@@ -9,6 +9,8 @@
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-04-23
+
 ### セキュリティ / 破壊的変更
 
 - `request.block.path_patterns` を型付け: 従来のリテラル文字列配列（レガシー互換）に加え、`contains:` / `regex:` を持つオブジェクト形式を正式サポート。配列中に正規表現らしきエントリが混入した場合は、substring マッチへの暗黙フォールバックをせずビルド失敗とする。`strict` プロファイルはオブジェクト形式に移行済み。
@@ -66,5 +68,6 @@
 
 ---
 
-[Unreleased]: https://github.com/YOUR_ORG/YOUR_REPO/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/YOUR_ORG/YOUR_REPO/releases/tag/v0.1.0
+[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.0.0...v1.1.0
+[0.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/releases/tag/v0.1.0

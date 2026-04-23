@@ -1,6 +1,6 @@
 {
   "name": "cdn-security-framework",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "description": "Policy-driven CDN edge security. Init YAML with npx cdn-security init, then npx cdn-security build to generate runtime code.",
   "bin": {
     "cdn-security": "./bin/cli.js"

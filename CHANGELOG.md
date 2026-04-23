@@ -9,6 +9,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-04-23
+
 ### Security / Breaking
 
 - `request.block.path_patterns` is now typed: pass either an array of literal substrings (legacy) or an object with `contains:` and `regex:` keys. Ambiguous regex-like array entries fail the build instead of being silently downgraded to substring matches. Affected the `strict` profile (migrated to the object form).
@@ -66,5 +68,6 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/YOUR_ORG/YOUR_REPO/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/YOUR_ORG/YOUR_REPO/releases/tag/v0.1.0
+[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.0.0...v1.1.0
+[0.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/releases/tag/v0.1.0
