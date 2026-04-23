@@ -112,15 +112,42 @@ async function hmacSha256Base64Url(secret: string, message: string): Promise<str
   return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
 }
 
+// Runtime SSRF guard — mirrors the build-time validator in scripts/lib/
+// compile-core.js. Build already rejects unsafe URLs, but re-checking here
+// limits the blast radius of any future regression that lets an http:// or
+// private-range URL reach the fetcher.
+function isUnsafeJwksUrl(rawUrl: string): string | null {
+  let u: URL;
+  try { u = new URL(rawUrl); } catch { return 'malformed URL'; }
+  if (u.protocol !== 'https:') return 'non-https scheme';
+  if (u.username || u.password) return 'userinfo present';
+  const host = (u.hostname || '').toLowerCase();
+  if (!host || host === 'localhost') return 'loopback hostname';
+  if (/^127\./.test(host) || host === '::1' || host === '[::1]') return 'loopback literal';
+  if (/^10\./.test(host)) return 'rfc1918 10/8';
+  if (/^192\.168\./.test(host)) return 'rfc1918 192.168/16';
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return 'rfc1918 172.16/12';
+  if (/^169\.254\./.test(host)) return 'link-local / metadata';
+  if (/^0\./.test(host)) return 'reserved 0/8';
+  return null;
+}
+
 async function fetchJwks(jwksUrl: string, ttlSec: number): Promise<Array<Record<string, any>>> {
+  const unsafe = isUnsafeJwksUrl(jwksUrl);
+  if (unsafe) {
+    throw new Error('JWKS URL rejected: ' + unsafe);
+  }
   const now = Date.now();
   const cached = jwksCache.get(jwksUrl);
   if (cached && (now - cached.fetchedAt) < ttlSec * 1000) {
     return cached.keys;
   }
 
-  const res = await fetch(jwksUrl, { method: 'GET' });
-  if (!res.ok) throw new Error('Failed to fetch JWKS');
+  // `redirect: 'error'` forces Workers' fetch to refuse any 3xx, so an
+  // attacker who briefly controls the JWKS host cannot redirect us to a
+  // cloud-metadata endpoint or a different tenant's IdP.
+  const res = await fetch(jwksUrl, { method: 'GET', redirect: 'error' });
+  if (!res.ok) throw new Error('Failed to fetch JWKS: ' + res.status);
   const body = await res.json();
   const keys = Array.isArray(body?.keys) ? body.keys : [];
   jwksCache.set(jwksUrl, { fetchedAt: now, keys });
@@ -429,6 +456,14 @@ export default {
     // XFF value can poison downstream rate limiters, IP allowlists, and logs.
     if (!CFG.trustForwardedFor) {
       forwardHeaders.delete('x-forwarded-for');
+    }
+    // Request-smuggling defense: strip hop-by-hop headers before origin
+    // forward. Any client-supplied Transfer-Encoding / Connection / Upgrade
+    // can desynchronize Worker ↔ origin framing (CL.TE, TE.CL, H2.TE) and
+    // smuggle a second request. Cloudflare re-frames the request, so these
+    // headers carry no legitimate meaning from the viewer.
+    for (const h of ['transfer-encoding', 'connection', 'keep-alive', 'te', 'upgrade', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'trailer']) {
+      forwardHeaders.delete(h);
     }
     if (CFG.originAuth && CFG.originAuth.type === 'custom_header') {
       const secret = env[CFG.originAuth.secret_env || ''] || '';

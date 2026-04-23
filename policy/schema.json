@@ -222,6 +222,18 @@
             "allowlist": { "type": "array", "items": { "type": "string" } },
             "blocklist": { "type": "array", "items": { "type": "string" } }
           }
+        },
+        "jwks": {
+          "description": "JWKS outbound-fetch guardrails. When `allowed_hosts` is set, the build refuses any JWT gate whose `jwks_url` hostname is not on the list, preventing SSRF into internal metadata endpoints. Regardless of this setting, the compiler also rejects non-HTTPS URLs and URLs that resolve to loopback, private, or link-local literals.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "allowed_hosts": {
+              "description": "Exact-match hostname allowlist for any `routes[].auth_gate.jwks_url`. Comparison is case-insensitive. Wildcards are not supported — list each IdP host explicitly.",
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
         }
       }
     },

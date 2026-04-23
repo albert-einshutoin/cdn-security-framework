@@ -94,6 +94,32 @@ This document organizes threats that this Edge Security Framework is designed to
 
 ---
 
+### 9. JWKS SSRF (Server-Side Request Forgery via JWT gates)
+
+| Threat | Edge responsibility | WAF / Origin |
+|--------|---------------------|---------------|
+| Malicious or accidental `jwks_url` pointing at cloud metadata (`169.254.169.254`), loopback, RFC1918, or link-local ranges | Reject at build time and re-validate at runtime | — |
+| Attacker-controlled redirect from JWKS host to internal endpoint | Refuse 3xx responses (`redirect: 'error'` in Workers / explicit 3xx rejection in Lambda@Edge) | — |
+| Out-of-scope IdP host when policy has an explicit allowlist | Reject at build time via `firewall.jwks.allowed_hosts` | — |
+
+**Framework**:
+- Build-time validator (`validateJwksUrl`) enforces `https://`, rejects userinfo, loopback, RFC1918, link-local, IPv4-mapped IPv6, and optional `firewall.jwks.allowed_hosts` membership.
+- Runtime `fetchJwks` re-checks the URL and refuses any 3xx response.
+- Recommended operator practice: always set `firewall.jwks.allowed_hosts` in production to pin the exact IdP hostname(s).
+
+---
+
+### 10. HTTP Request Smuggling / Desync
+
+| Threat | Edge responsibility | WAF / Origin |
+|--------|---------------------|---------------|
+| Client-supplied `Transfer-Encoding: chunked` desynchronizing CloudFront/Worker ↔ origin framing (CL.TE / TE.CL / H2.TE) | Strip hop-by-hop headers before origin forward | — |
+| Client-supplied `Connection`, `Upgrade`, `TE`, `Keep-Alive`, `Proxy-*`, `Trailer` | Strip before origin forward | — |
+
+**Framework**: The AWS origin-request Lambda and Cloudflare Worker both delete `transfer-encoding`, `connection`, `keep-alive`, `te`, `upgrade`, `proxy-connection`, `proxy-authenticate`, `proxy-authorization`, and `trailer` from the forwarded request. The CDN re-frames the request, so none of these carry legitimate viewer intent.
+
+---
+
 ## What This Framework Does Not Mitigate
 
 * **Advanced bot behavior** (WAF / Bot Management).

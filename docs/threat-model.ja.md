@@ -95,6 +95,32 @@ Edge / WAF / Origin のどのレイヤーが担当するかを明確にします
 
 ---
 
+### 9. JWKS SSRF（JWT ゲート経由のサーバーサイドリクエストフォージェリ）
+
+| 脅威 | Edge の責務 | WAF / Origin |
+|------|-------------|--------------|
+| クラウドメタデータ（`169.254.169.254`）、ループバック、RFC1918、リンクローカルを指す悪意ある／誤った `jwks_url` | ビルド時に拒否、ランタイムで再検証 | — |
+| JWKS ホストから内部エンドポイントへの攻撃者制御リダイレクト | 3xx レスポンスを拒否（Workers: `redirect: 'error'`、Lambda@Edge: 明示的な 3xx 拒否） | — |
+| ポリシーに明示的な allowlist がある場合、範囲外の IdP ホスト | ビルド時に `firewall.jwks.allowed_hosts` で拒否 | — |
+
+**フレームワーク**:
+- ビルド時バリデータ（`validateJwksUrl`）が `https://` 必須、userinfo / loopback / RFC1918 / リンクローカル / IPv4-mapped IPv6 を拒否し、任意で `firewall.jwks.allowed_hosts` メンバーシップを強制。
+- ランタイムの `fetchJwks` が URL を再チェックし、3xx レスポンスを拒否。
+- 運用推奨: 本番環境では `firewall.jwks.allowed_hosts` を必ず設定し IdP ホスト名を固定する。
+
+---
+
+### 10. HTTP Request Smuggling / Desync
+
+| 脅威 | Edge の責務 | WAF / Origin |
+|------|-------------|--------------|
+| クライアント由来の `Transfer-Encoding: chunked` による CloudFront/Worker ↔ Origin フレーミングのデシンク（CL.TE / TE.CL / H2.TE） | Origin 転送前に hop-by-hop ヘッダーを除去 | — |
+| クライアント由来の `Connection`、`Upgrade`、`TE`、`Keep-Alive`、`Proxy-*`、`Trailer` | Origin 転送前に除去 | — |
+
+**フレームワーク**: AWS origin-request Lambda と Cloudflare Worker の両方で、転送前に `transfer-encoding`、`connection`、`keep-alive`、`te`、`upgrade`、`proxy-connection`、`proxy-authenticate`、`proxy-authorization`、`trailer` を削除。CDN 自身がリクエストを再フレーム化するため、これらのヘッダーに正当なビューワー意図は存在しない。
+
+---
+
 ## 本フレームワークが対象としないもの
 
 * **高度な Bot 挙動**（WAF / Bot Management）。
