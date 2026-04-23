@@ -6,6 +6,7 @@
 
 [![CI](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/policy-lint.yml/badge.svg)](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/policy-lint.yml)
 [![npm release](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/release-npm.yml/badge.svg)](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/release-npm.yml)
+[![coverage ≥ 80%](https://img.shields.io/badge/coverage-%E2%89%A580%25%20lines-brightgreen)](./.github/workflows/policy-lint.yml)
 
 **CDN Security Framework** is a **security design and implementation framework** that can be used across major CDN edge execution environments such as CloudFront, CloudFront Functions, Lambda@Edge, and Cloudflare Workers.
 

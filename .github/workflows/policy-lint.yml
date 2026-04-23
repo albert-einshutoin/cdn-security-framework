@@ -68,11 +68,20 @@ jobs:
       - name: Unit tests (compiler core)
         run: npm run test:unit
 
+      - name: ReDoS fuzz (user-supplied regexes must not backtrack catastrophically)
+        run: npm run test:fuzz
+
+      - name: Cloudflare Worker integration tests (Node-native fetch harness)
+        run: npm run test:cloudflare-integration
+
       - name: Drift check (base + profiles vs golden generated artifacts)
         run: npm run test:drift
 
       - name: Security baseline check (OWASP mapping + CI guardrails)
         run: npm run test:security-baseline
+
+      - name: Coverage (c8, fail below 80% lines)
+        run: npm run test:coverage
 
       - name: Verify npm package contents (dry-run)
         run: npm pack --dry-run

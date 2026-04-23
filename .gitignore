@@ -24,3 +24,10 @@ dist/
 /examples/*/node_modules/
 *.log
 .wrangler/
+
+# c8 coverage output
+coverage/
+.nyc_output/
+
+# Local dev override — users copy a profile here; never check it in
+policy/security.yml

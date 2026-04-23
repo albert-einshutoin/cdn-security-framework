@@ -62,6 +62,21 @@ function compileRegexOrThrow(source, context) {
   }
 }
 
+// Catch the classic `(a+)+` / `([^x]+)*` / `(a|a)+` family: a group that itself
+// carries a quantifier metacharacter inside, followed by an outer quantifier.
+// Over-approximate on purpose — no legitimate path_patterns regex in this
+// project needs stacked quantifiers, so false positives cost us nothing while
+// false negatives would ship a runtime DoS to the edge. Paired with the
+// runtime timeout fuzz in scripts/regex-fuzz-tests.js for defense in depth.
+function hasCatastrophicBacktrackShape(src) {
+  if (typeof src !== 'string' || src.length === 0) return false;
+  // Strip the optional `(?i)` etc. inline-flag prefix so the heuristic sees
+  // the same pattern body the engine will.
+  const body = src.replace(/^\(\?[ims]+\)/, '');
+  const nested = /\(([^()]*[+*?{][^()]*)\)[+*?{]/;
+  return nested.test(body);
+}
+
 function looksLikeRegex(s) {
   // Heuristic: presence of common regex metacharacters suggests a regex intent.
   return /[\\(){}\[\]|^$+?*]|\.\{|\\\\/.test(s);
@@ -127,9 +142,19 @@ function parsePathPatterns(pathPatterns) {
       // must also be lowercase or they never match. Normalize at build time.
       contains.push(s.toLowerCase());
     }
-    // Validate each regex compiles successfully at build time.
+    // Validate each regex compiles successfully at build time and reject the
+    // classic nested-quantifier shape `(a+)+` family that triggers catastrophic
+    // backtracking at runtime (effectively a DoS on the edge).
     for (const src of regexSources) {
       compileRegexOrThrow(src, 'request.block.path_patterns.regex');
+      if (hasCatastrophicBacktrackShape(src)) {
+        throw new Error(
+          `request.block.path_patterns.regex: pattern rejected by ReDoS safety check ` +
+          `(nested-quantifier shape triggers catastrophic backtracking): ${JSON.stringify(src)}. ` +
+          `Rewrite without stacking quantifiers — for example, use a character class like ` +
+          `[a-z]+ instead of (a+)+.`
+        );
+      }
     }
     if (contains.length === 0 && regexSources.length === 0) {
       return { contains: DEFAULT_CONTAINS.slice(), regexSources: [] };
@@ -774,6 +799,7 @@ module.exports = {
   parsePathPatterns,
   extractRegex,
   compileRegexOrThrow,
+  hasCatastrophicBacktrackShape,
   regexesLiteralCode,
   getAuthGates,
   buildObsConfig,
