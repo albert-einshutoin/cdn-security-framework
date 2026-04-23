@@ -584,6 +584,13 @@ function build(policy, options = {}) {
   });
 
   const originAuth = (policy.origin || {}).auth || null;
+  const jwksGlobal = (policy.firewall || {}).jwks || {};
+  const jwksStaleIfError = Number.isFinite(Number(jwksGlobal.stale_if_error_sec))
+    ? Math.max(0, Math.min(86400, Number(jwksGlobal.stale_if_error_sec)))
+    : 3600;
+  const jwksNegativeCache = Number.isFinite(Number(jwksGlobal.negative_cache_sec))
+    ? Math.max(0, Math.min(600, Number(jwksGlobal.negative_cache_sec)))
+    : 60;
 
   const originCfgCode = [
     'const CFG = {',
@@ -594,6 +601,8 @@ function build(policy, options = {}) {
     `  jwtGates: ${JSON.stringify(jwtGates)},`,
     `  signedUrlGates: ${JSON.stringify(signedUrlGates)},`,
     `  originAuth: ${JSON.stringify(originAuth)},`,
+    `  jwksStaleIfErrorSec: ${jwksStaleIfError},`,
+    `  jwksNegativeCacheSec: ${jwksNegativeCache},`,
     '};',
   ].join('\n');
 

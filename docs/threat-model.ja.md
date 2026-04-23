@@ -130,6 +130,25 @@ Edge / WAF / Origin のどのレイヤーが担当するかを明確にします
 
 **フレームワーク**: 署名ルール、ノンス書式（16〜256 文字、URL セーフ unreserved）、オリジン側のパターンは `docs/signed-urls.ja.md` を参照。エッジは署名とノンス束縛を検証するが、単回利用はエッジ関数がステートレスであるためオリジン側との協調が必須。
 
+### 12. 管理トークンのタイミングオラクル
+
+| 脅威 | Edge の責務 | WAF / Origin |
+|------|-------------|--------------|
+| トラフィックを観測できる攻撃者が、前方/後方不一致の応答時間差分から管理トークンをバイト単位で推測 | 入力長にかかわらず少なくとも 64 ポジションを走査する定時間比較。長さ不一致で短絡しない | — |
+| `a.length !== b.length` の短絡により長さが漏えいする | 固定パッド走査 + 長さをアキュムレータに XOR | — |
+
+**フレームワーク**: CloudFront Functions（`viewer-request.js`）と Cloudflare Workers（`index.ts`）の双方で、`static_token` と `basic_auth` は 64 ポジションパディングの定時間比較を使う。特性と制限は `docs/auth.ja.md` を参照。
+
+### 13. JWKS 障害 / キー回転の可用性
+
+| 脅威 | Edge の責務 | WAF / Origin |
+|------|-------------|--------------|
+| IdP 障害により、エッジ isolate が再生成されるまで 100% 401 | Stale-if-error キャッシュ（`firewall.jwks.stale_if_error_sec`、既定 3600 秒）で直近の正常キーを返し続ける | — |
+| 壊れた IdP をリクエスト毎に叩き続ける | Negative cache（`firewall.jwks.negative_cache_sec`、既定 60 秒）で失敗直後の再取得をスキップ | — |
+| IdP 側でキー回転済みなのにエッジが旧 JWKS を使い続ける | `kid` ミス時に一度だけ無効化＋再取得 | — |
+
+**フレームワーク**: AWS（`templates/aws/origin-request.js`）と Cloudflare（`templates/cloudflare/index.ts`）の両方で 3 ウィンドウすべてを実装済み。挙動マトリクスは `docs/auth.ja.md` を参照。
+
 ---
 
 ## 本フレームワークが対象としないもの

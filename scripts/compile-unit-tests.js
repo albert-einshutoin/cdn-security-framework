@@ -800,6 +800,143 @@ test('build defaults exact_path=false and nonce_param="" when unspecified', () =
   }
 });
 
+test('build emits jwksStaleIfErrorSec and jwksNegativeCacheSec defaults', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-jwks-default-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      routes: [
+        {
+          name: 'api',
+          match: { path_prefixes: ['/api'] },
+          auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://idp.example.com/jwks.json' },
+        },
+      ],
+    };
+    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
+    const origin = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.match(origin, /jwksStaleIfErrorSec:\s*3600/);
+    assert.match(origin, /jwksNegativeCacheSec:\s*60/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build honors firewall.jwks.stale_if_error_sec and negative_cache_sec', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-jwks-custom-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      firewall: { jwks: { stale_if_error_sec: 7200, negative_cache_sec: 120 } },
+      routes: [
+        {
+          name: 'api',
+          match: { path_prefixes: ['/api'] },
+          auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://idp.example.com/jwks.json' },
+        },
+      ],
+    };
+    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
+    const origin = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.match(origin, /jwksStaleIfErrorSec:\s*7200/);
+    assert.match(origin, /jwksNegativeCacheSec:\s*120/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build clamps jwks.stale_if_error_sec and negative_cache_sec to bounds', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-jwks-clamp-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      firewall: { jwks: { stale_if_error_sec: 999999, negative_cache_sec: 99999 } },
+      routes: [
+        {
+          name: 'api',
+          match: { path_prefixes: ['/api'] },
+          auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://idp.example.com/jwks.json' },
+        },
+      ],
+    };
+    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
+    const origin = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.match(origin, /jwksStaleIfErrorSec:\s*86400/);
+    assert.match(origin, /jwksNegativeCacheSec:\s*600/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('viewer-request uses fixed-pad constant-time compare (no length short-circuit)', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-timing-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      routes: [
+        {
+          name: 'admin',
+          match: { path_prefixes: ['/admin'] },
+          auth_gate: { type: 'static_token', header: 'x-admin', token_env: 'ADMIN_TOKEN' },
+        },
+      ],
+    };
+    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
+    const vr = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    // Must iterate a fixed PAD and must NOT early-exit on length
+    assert.match(vr, /var\s+PAD\s*=\s*64/);
+    assert.ok(!/if\s*\(\s*a\.length\s*!==?\s*b\.length\s*\)\s*return\s+false/.test(vr),
+      'constantTimeEqual must not short-circuit on length');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('constantTimeEqual (compiled) returns correct boolean for matches and mismatches', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-timing-fn-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      routes: [
+        {
+          name: 'admin',
+          match: { path_prefixes: ['/admin'] },
+          auth_gate: { type: 'static_token', header: 'x-admin', token_env: 'ADMIN_TOKEN' },
+        },
+      ],
+    };
+    process.env.ADMIN_TOKEN = 'not-relevant-to-unit-test';
+    build(policy, { outDir: tmpDir });
+    const vr = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    // Extract the function body and eval it in isolation
+    const match = vr.match(/function constantTimeEqual[\s\S]+?return diff === 0;\s*\}/);
+    assert.ok(match, 'constantTimeEqual function not found in compiled output');
+    const fn = new Function(match[0] + '\nreturn constantTimeEqual;')();
+    assert.strictEqual(fn('abc', 'abc'), true);
+    assert.strictEqual(fn('abc', 'abd'), false);
+    assert.strictEqual(fn('short', 'longer-token'), false); // different lengths still false
+    assert.strictEqual(fn('', ''), true);
+    assert.strictEqual(fn('', 'x'), false);
+    // Ensure it still works for inputs longer than PAD (64)
+    const long = 'a'.repeat(70);
+    assert.strictEqual(fn(long, long), true);
+    assert.strictEqual(fn(long, 'a'.repeat(69) + 'b'), false);
+  } finally {
+    delete process.env.ADMIN_TOKEN;
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

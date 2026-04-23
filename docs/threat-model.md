@@ -129,6 +129,25 @@ This document organizes threats that this Edge Security Framework is designed to
 
 **Framework**: See `docs/signed-urls.md` for signing rules, nonce format (16–256 chars, URL-safe unreserved), and origin-side enforcement pattern. Edge enforces signature + nonce binding; single-use still requires origin cooperation because edge functions are stateless per invocation.
 
+### 12. Admin Token Timing Oracle
+
+| Threat | Edge responsibility | WAF / Origin |
+|--------|---------------------|---------------|
+| Attacker with traffic control infers admin token byte-by-byte via response-time delta between early- vs late-mismatch positions | Constant-time compare that iterates at least 64 positions regardless of length; no early-exit on length mismatch | — |
+| Length leaks via short-circuit on `a.length !== b.length` | Fixed-pad iteration + length XORed into accumulator | — |
+
+**Framework**: Both CloudFront Functions (`viewer-request.js`) and Cloudflare Workers (`index.ts`) use a pad-to-64 constant-time compare for `static_token` and `basic_auth` gates. See `docs/auth.md` for properties and limits.
+
+### 13. JWKS Outage / Key Rotation Availability
+
+| Threat | Edge responsibility | WAF / Origin |
+|--------|---------------------|---------------|
+| IdP outage causes 100% 401 until edge isolate recycles | Stale-if-error cache window (`firewall.jwks.stale_if_error_sec`, default 3600s) serves last-known-good keys | — |
+| Edge hammers a broken IdP on every request | Negative cache (`firewall.jwks.negative_cache_sec`, default 60s) skips re-fetch after a failure | — |
+| Key rotation: new `kid` at IdP but edge keeps using old cached JWKS | On `kid`-miss, invalidate + refetch once before rejecting | — |
+
+**Framework**: JWKS fetch in AWS (`templates/aws/origin-request.js`) and Cloudflare (`templates/cloudflare/index.ts`) implements all three windows. See `docs/auth.md` for the behaviour matrix.
+
 ---
 
 ## What This Framework Does Not Mitigate

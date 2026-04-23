@@ -58,13 +58,21 @@ const CFG = {
   }
 
   function constantTimeEqual(a, b) {
-    // Constant-time string equality for CFF (no SubtleCrypto available).
-    // Length comparison leaks length, which is acceptable for fixed-length tokens.
-    if (typeof a !== 'string' || typeof b !== 'string') return false;
-    if (a.length !== b.length) return false;
-    var diff = 0;
-    for (var i = 0; i < a.length; i++) {
-      diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+    // Constant-time string equality for CFF (no SubtleCrypto / timingSafeEqual
+    // available). Always iterates at least PAD (64) positions so short tokens
+    // (the common case) take constant time regardless of prefix match.
+    // For tokens longer than PAD, iteration scales with max(|a|, |b|) — same
+    // behaviour as Go's hmac.Equal. No early-exit on length mismatch.
+    var PAD = 64;
+    var sa = typeof a === 'string' ? a : '';
+    var sb = typeof b === 'string' ? b : '';
+    var len = sa.length > sb.length ? sa.length : sb.length;
+    if (len < PAD) len = PAD;
+    var diff = (sa.length ^ sb.length) | 0;
+    for (var i = 0; i < len; i++) {
+      var ca = i < sa.length ? sa.charCodeAt(i) : 0;
+      var cb = i < sb.length ? sb.charCodeAt(i) : 0;
+      diff |= (ca ^ cb);
     }
     return diff === 0;
   }
