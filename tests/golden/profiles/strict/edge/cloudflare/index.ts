@@ -36,8 +36,17 @@ const RESPONSE_CFG = {
   },
   csp_public: "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self';",
   csp_admin: "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';",
+  csp_report_only: "",
+  csp_report_uri: "",
+  csp_nonce: false,
+  coop: "",
+  coep: "",
+  corp: "",
+  reporting_endpoints: "",
   adminPathPrefixes: ["/admin","/docs","/swagger","/api/admin","/internal"],
   adminCacheControl: "no-store",
+  authProtectedPrefixes: ["/admin","/docs","/swagger","/api/admin","/internal"],
+  forceVaryAuth: true,
   cors: null,
   cookie_attributes: null,
 };
@@ -567,26 +576,88 @@ export default {
     if (rh['referrer-policy']) out.headers.set('Referrer-Policy', rh['referrer-policy']);
     if (rh['permissions-policy']) out.headers.set('Permissions-Policy', rh['permissions-policy']);
 
+    // Cross-Origin isolation (issue #10). Only emitted when operator opts in.
+    if (RESPONSE_CFG.coop) out.headers.set('Cross-Origin-Opener-Policy', RESPONSE_CFG.coop);
+    if (RESPONSE_CFG.coep) out.headers.set('Cross-Origin-Embedder-Policy', RESPONSE_CFG.coep);
+    if (RESPONSE_CFG.corp) out.headers.set('Cross-Origin-Resource-Policy', RESPONSE_CFG.corp);
+    if (RESPONSE_CFG.reporting_endpoints) out.headers.set('Reporting-Endpoints', RESPONSE_CFG.reporting_endpoints);
+
     const isAdminPath = RESPONSE_CFG.adminPathPrefixes.some((p: string) => url.pathname === p || url.pathname.startsWith(p + '/'));
+    const isAuthPath = (RESPONSE_CFG.authProtectedPrefixes || []).some((p: string) => url.pathname === p || url.pathname.startsWith(p + '/'));
+
+    // Per-response CSP nonce (issue #11). crypto.getRandomValues is a CS-PRNG on Workers.
+    let cspNonce = '';
+    if (RESPONSE_CFG.csp_nonce) {
+      const buf = new Uint8Array(16);
+      crypto.getRandomValues(buf);
+      // base64url without padding, ~22 chars.
+      cspNonce = btoa(String.fromCharCode(...buf)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      out.headers.set('X-CSP-Nonce', cspNonce);
+    }
+    const applyNonce = (csp: string): string => {
+      if (!csp || !cspNonce) return csp;
+      return csp.split("'nonce-PLACEHOLDER'").join("'nonce-" + cspNonce + "'");
+    };
+
     if (isAdminPath) {
       if (RESPONSE_CFG.adminCacheControl) out.headers.set('Cache-Control', RESPONSE_CFG.adminCacheControl);
-      if (RESPONSE_CFG.csp_admin) out.headers.set('Content-Security-Policy', RESPONSE_CFG.csp_admin);
+      if (RESPONSE_CFG.csp_admin) out.headers.set('Content-Security-Policy', applyNonce(RESPONSE_CFG.csp_admin));
     } else {
-      if (RESPONSE_CFG.csp_public) out.headers.set('Content-Security-Policy', RESPONSE_CFG.csp_public);
+      if (RESPONSE_CFG.csp_public) out.headers.set('Content-Security-Policy', applyNonce(RESPONSE_CFG.csp_public));
+    }
+
+    if (RESPONSE_CFG.csp_report_only) {
+      out.headers.set('Content-Security-Policy-Report-Only', applyNonce(RESPONSE_CFG.csp_report_only));
+    }
+
+    // Force no-store + Vary on any auth-gate prefix (issue #8). Broader than adminPathPrefixes
+    // which only fires for the first admin-shaped route.
+    if (RESPONSE_CFG.forceVaryAuth && isAuthPath) {
+      out.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+      out.headers.set('Pragma', 'no-cache');
+      const existingVary = out.headers.get('vary') || '';
+      const tokens = existingVary.split(',').map((s: string) => s.trim()).filter(Boolean);
+      const lower = tokens.map((t: string) => t.toLowerCase());
+      if (lower.indexOf('authorization') === -1) tokens.push('Authorization');
+      if (lower.indexOf('cookie') === -1) tokens.push('Cookie');
+      out.headers.set('Vary', tokens.join(', '));
     }
 
     out.headers.delete('x-powered-by');
+    out.headers.delete('server');
 
+    // Cookie attribute append — multi-cookie aware via getAll/append (issue #13).
     if (RESPONSE_CFG.cookie_attributes) {
-      const setCookie = out.headers.get('set-cookie');
-      if (setCookie) {
-        const attrs: string[] = [];
-        if (RESPONSE_CFG.cookie_attributes.secure) attrs.push('Secure');
-        if (RESPONSE_CFG.cookie_attributes.http_only) attrs.push('HttpOnly');
-        if (RESPONSE_CFG.cookie_attributes.same_site) attrs.push('SameSite=' + RESPONSE_CFG.cookie_attributes.same_site);
+      const attrs: string[] = [];
+      if (RESPONSE_CFG.cookie_attributes.secure) attrs.push('Secure');
+      if (RESPONSE_CFG.cookie_attributes.http_only) attrs.push('HttpOnly');
+      if (RESPONSE_CFG.cookie_attributes.same_site) attrs.push('SameSite=' + RESPONSE_CFG.cookie_attributes.same_site);
 
-        if (attrs.length > 0 && !setCookie.includes('Secure') && !setCookie.includes('HttpOnly') && !setCookie.includes('SameSite')) {
-          out.headers.set('Set-Cookie', setCookie + '; ' + attrs.join('; '));
+      if (attrs.length > 0) {
+        // Workers runtime exposes multiple Set-Cookie via Headers#getSetCookie()
+        // (per the Fetch standard). Fall back to get() on older runtimes.
+        type HeadersWithGetSetCookie = Headers & { getSetCookie?: () => string[] };
+        const h = out.headers as HeadersWithGetSetCookie;
+        const cookies: string[] = typeof h.getSetCookie === 'function'
+          ? h.getSetCookie()
+          : (out.headers.get('set-cookie') ? [out.headers.get('set-cookie') as string] : []);
+        if (cookies.length > 0) {
+          out.headers.delete('set-cookie');
+          const attrStr = attrs.join('; ');
+          for (const cookie of cookies) {
+            const needsSecure = RESPONSE_CFG.cookie_attributes.secure && !/(?:^|; *)Secure(?:;|$)/i.test(cookie);
+            const needsHttpOnly = RESPONSE_CFG.cookie_attributes.http_only && !/(?:^|; *)HttpOnly(?:;|$)/i.test(cookie);
+            const needsSameSite = RESPONSE_CFG.cookie_attributes.same_site && !/(?:^|; *)SameSite=/i.test(cookie);
+            if (needsSecure || needsHttpOnly || needsSameSite) {
+              const missing: string[] = [];
+              if (needsSecure) missing.push('Secure');
+              if (needsHttpOnly) missing.push('HttpOnly');
+              if (needsSameSite) missing.push('SameSite=' + RESPONSE_CFG.cookie_attributes.same_site);
+              out.headers.append('Set-Cookie', cookie + '; ' + missing.join('; '));
+            } else {
+              out.headers.append('Set-Cookie', cookie);
+            }
+          }
         }
       }
     }

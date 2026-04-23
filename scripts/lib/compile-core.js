@@ -512,6 +512,13 @@ function build(policy, options = {}) {
   }
   if (adminPathPrefixes.length === 0) adminPathPrefixes = ['/admin', '/docs', '/swagger'];
 
+  // Union of every auth-gate protected prefix — used to force no-store +
+  // Vary: Authorization regardless of which gate type applies. Issue #8.
+  const authProtectedPrefixes = Array.from(new Set(
+    (authGates || []).flatMap((g) => Array.isArray(g.protectedPrefixes) ? g.protectedPrefixes : []),
+  ));
+  const forceVaryAuth = resHeaders.force_vary_auth !== false; // default on
+
   const responseCfgCode = [
     'const RESPONSE_CFG = {',
     '  headers: {',
@@ -522,8 +529,17 @@ function build(policy, options = {}) {
     '  },',
     `  csp_public: ${JSON.stringify(resHeaders.csp_public || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';")},`,
     `  csp_admin: ${JSON.stringify(resHeaders.csp_admin || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';")},`,
+    `  csp_report_only: ${JSON.stringify(resHeaders.csp_report_only || '')},`,
+    `  csp_report_uri: ${JSON.stringify(resHeaders.csp_report_uri || '')},`,
+    `  csp_nonce: ${resHeaders.csp_nonce === true ? 'true' : 'false'},`,
+    `  coop: ${JSON.stringify(resHeaders.coop || '')},`,
+    `  coep: ${JSON.stringify(resHeaders.coep || '')},`,
+    `  corp: ${JSON.stringify(resHeaders.corp || '')},`,
+    `  reporting_endpoints: ${JSON.stringify(resHeaders.reporting_endpoints || '')},`,
     `  adminPathPrefixes: ${JSON.stringify(adminPathPrefixes)},`,
     `  adminCacheControl: ${JSON.stringify(adminCacheControl)},`,
+    `  authProtectedPrefixes: ${JSON.stringify(authProtectedPrefixes)},`,
+    `  forceVaryAuth: ${forceVaryAuth ? 'true' : 'false'},`,
     `  cors: ${JSON.stringify(resHeaders.cors || null)},`,
     `  cookie_attributes: ${JSON.stringify(resHeaders.cookie_attributes || null)},`,
     '};',
