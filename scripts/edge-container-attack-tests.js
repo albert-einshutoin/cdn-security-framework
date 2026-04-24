@@ -38,21 +38,41 @@ function runNode(script, args, env = {}) {
   });
 }
 
-function loadAwsViewerHandler() {
+let awsArtifactsCompiled = false;
+function ensureAwsArtifactsCompiled() {
+  if (awsArtifactsCompiled) return;
   runNode('scripts/compile.js', []);
+  awsArtifactsCompiled = true;
+}
+
+function loadAwsViewerHandler() {
+  ensureAwsArtifactsCompiled();
   const code = fs.readFileSync(path.join(repoRoot, 'dist', 'edge', 'viewer-request.js'), 'utf8');
-  return Function(`${code}\nreturn handler;`)();
+  const sandbox = {
+    exports: {},
+    console,
+    Buffer,
+    setTimeout,
+    clearTimeout,
+  };
+  sandbox.global = sandbox;
+  vm.createContext(sandbox);
+  vm.runInContext(`${code}\nexports.handler = handler;`, sandbox);
+  if (typeof sandbox.exports.handler !== 'function') {
+    throw new Error('AWS viewer artifact did not expose handler');
+  }
+  return sandbox.exports.handler;
 }
 
 function loadAwsOriginHandler() {
-  runNode('scripts/compile.js', []);
+  ensureAwsArtifactsCompiled();
   const code = fs.readFileSync(path.join(repoRoot, 'dist', 'edge', 'origin-request.js'), 'utf8');
   const sandbox = {
     exports: {},
     require,
     console,
     Buffer,
-    process: { env: { ...process.env, EDGE_ADMIN_TOKEN: EDGE_TOKEN } },
+    process: { env: { EDGE_ADMIN_TOKEN: EDGE_TOKEN } },
     setTimeout,
     clearTimeout,
   };
@@ -218,34 +238,45 @@ routes:
 
 function compileCloudflareWorker() {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'edge-cf-'));
-  const policyPath = path.join(tmpDir, 'policy.yml');
-  const outDir = path.join(tmpDir, 'out');
-  fs.writeFileSync(policyPath, cloudflarePolicy(), 'utf8');
-  runNode('scripts/compile-cloudflare.js', ['--policy', policyPath, '--out-dir', outDir]);
-  const tsSource = fs.readFileSync(path.join(outDir, 'edge', 'cloudflare', 'index.ts'), 'utf8');
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-
-  let esbuild;
   try {
-    esbuild = require('esbuild');
-  } catch (_e) {
-    console.error('Edge container tests require esbuild. Run npm install first.');
+    const policyPath = path.join(tmpDir, 'policy.yml');
+    const outDir = path.join(tmpDir, 'out');
+    fs.writeFileSync(policyPath, cloudflarePolicy(), 'utf8');
+    runNode('scripts/compile-cloudflare.js', ['--policy', policyPath, '--out-dir', outDir]);
+    const tsSource = fs.readFileSync(path.join(outDir, 'edge', 'cloudflare', 'index.ts'), 'utf8');
+
+    let esbuild;
+    try {
+      esbuild = require('esbuild');
+    } catch (_e) {
+      console.error('Edge container tests require esbuild. Run npm install first.');
+      process.exit(2);
+    }
+    return esbuild.transformSync(tsSource, {
+      loader: 'ts',
+      format: 'cjs',
+      target: 'es2020',
+    }).code;
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+const REQUIRED_WORKER_GLOBALS = ['crypto', 'Request', 'Response', 'Headers', 'TextEncoder', 'TextDecoder'];
+for (const name of REQUIRED_WORKER_GLOBALS) {
+  if (typeof globalThis[name] === 'undefined') {
+    console.error(`Edge container tests require globalThis.${name} (Node >= 20).`);
     process.exit(2);
   }
-  return esbuild.transformSync(tsSource, {
-    loader: 'ts',
-    format: 'cjs',
-    target: 'es2020',
-  }).code;
 }
 
 function loadCloudflareWorker() {
   const logs = [];
   const sandbox = {
     console: {
-      log: (...args) => logs.push(args.join(' ')),
-      warn: (...args) => logs.push(args.join(' ')),
-      error: (...args) => logs.push(args.join(' ')),
+      log: (...args) => logs.push(['log', args.join(' ')]),
+      warn: (...args) => logs.push(['warn', args.join(' ')]),
+      error: (...args) => logs.push(['error', args.join(' ')]),
     },
     crypto: globalThis.crypto,
     Request: globalThis.Request,
@@ -255,20 +286,31 @@ function loadCloudflareWorker() {
     URLSearchParams: globalThis.URLSearchParams,
     TextEncoder: globalThis.TextEncoder,
     TextDecoder: globalThis.TextDecoder,
+    AbortController: globalThis.AbortController,
+    AbortSignal: globalThis.AbortSignal,
     atob: globalThis.atob,
     btoa: globalThis.btoa,
+    structuredClone: globalThis.structuredClone,
+    queueMicrotask: globalThis.queueMicrotask,
     fetch: async () => new Response('origin-ok', { status: 200 }),
     setTimeout,
     clearTimeout,
     Date,
     module: { exports: {} },
     exports: {},
-    require,
   };
   sandbox.global = sandbox;
   sandbox.globalThis = sandbox;
   vm.createContext(sandbox);
-  vm.runInContext(compileCloudflareWorker(), sandbox);
+  try {
+    vm.runInContext(compileCloudflareWorker(), sandbox);
+  } catch (e) {
+    if (logs.length) {
+      console.error('[cloudflare-worker-sandbox] captured logs before crash:');
+      for (const [level, msg] of logs) console.error(`  ${level}: ${msg}`);
+    }
+    throw e;
+  }
   const worker = sandbox.module.exports.default || sandbox.module.exports;
   if (!worker || typeof worker.fetch !== 'function') {
     throw new Error('Cloudflare artifact did not expose default.fetch');
@@ -381,6 +423,7 @@ async function runAwsAttackTests() {
       assert.strictEqual(res.headers['x-harness-edge-auth-stripped'], 'true');
     });
   } finally {
+    if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   }
 }
@@ -406,6 +449,7 @@ async function runCloudflareAttackTests() {
       });
     }
   } finally {
+    if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
     await new Promise((resolve) => server.close(resolve));
   }
 }
