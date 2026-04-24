@@ -137,6 +137,7 @@ program
   .option('--output-mode <mode>', 'AWS infra output mode: full | rule-group', 'full')
   .option('--rule-group-only', 'AWS only: generate WAF rule groups without aws_wafv2_web_acl output')
   .option('--fail-on-permissive', 'Exit non-zero when policy.metadata.risk_level is "permissive" (gate for production CI)')
+  .option('--fail-on-waf-approximation', 'Cloudflare only: exit non-zero when the policy relies on approximate or unsupported Cloudflare WAF mappings (see docs/cloudflare-waf-parity.md)')
   .action((opts) => {
     const { compile } = require(path.join(pkgRoot, 'lib'));
     const cwd = process.cwd();
@@ -154,6 +155,7 @@ program
       outputMode: opts.outputMode,
       ruleGroupOnly: !!opts.ruleGroupOnly,
       failOnPermissive: !!opts.failOnPermissive,
+      failOnWafApproximation: !!opts.failOnWafApproximation,
       cwd,
       pkgRoot,
     });
@@ -199,6 +201,7 @@ program
   .option('--output-mode <mode>', 'AWS infra output mode: full | rule-group', 'full')
   .option('--rule-group-only', 'AWS only: generate WAF rule groups without aws_wafv2_web_acl output')
   .option('--format <format>', 'Output format: terraform | cloudformation | cdk (terraform is the only format currently generated; others return exit 2)', 'terraform')
+  .option('--fail-on-waf-approximation', 'Cloudflare only: exit non-zero when the policy relies on approximate or unsupported Cloudflare WAF mappings (see docs/cloudflare-waf-parity.md)')
   .action((opts) => {
     const { emitWaf } = require(path.join(pkgRoot, 'lib'));
     const cwd = process.cwd();
@@ -216,6 +219,7 @@ program
       format: opts.format,
       outputMode: opts.outputMode,
       ruleGroupOnly: !!opts.ruleGroupOnly,
+      failOnWafApproximation: !!opts.failOnWafApproximation,
       cwd,
       pkgRoot,
     });

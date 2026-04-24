@@ -40,6 +40,22 @@ function main() {
     fail('policy/schema.json must include ja3_fingerprints and ja4_fingerprints');
   }
 
+  // Cloudflare WAF parity docs must exist and reference the fail flag, so the
+  // dual-target transparency promise is not silently deleted. The drift test
+  // (scripts/check-drift.js) separately enforces that the body matches the
+  // generator output.
+  const parityFiles = [
+    { file: 'docs/cloudflare-waf-parity.md', heading: '# Cloudflare WAF parity' },
+    { file: 'docs/cloudflare-waf-parity.ja.md', heading: '# Cloudflare WAF パリティ' },
+  ];
+  for (const p of parityFiles) {
+    if (!fs.existsSync(path.join(repoRoot, p.file))) {
+      fail(`${p.file} is missing — parity transparency (issue #68) requires this file to exist`);
+    }
+    ensureIncludes(p.file, p.heading, 'parity doc heading');
+    ensureIncludes(p.file, '--fail-on-waf-approximation', 'reference to the CI gate flag');
+  }
+
   console.log('Security baseline check passed.');
 }
 
