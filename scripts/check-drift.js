@@ -121,6 +121,30 @@ function compareScenario(scenario) {
   return !failed;
 }
 
+function checkParityDocsFresh() {
+  const { renderEn, renderJa } = require('./generate-parity-doc');
+  const targets = [
+    { label: 'docs/cloudflare-waf-parity.md', path: path.join(repoRoot, 'docs', 'cloudflare-waf-parity.md'), actual: renderEn() },
+    { label: 'docs/cloudflare-waf-parity.ja.md', path: path.join(repoRoot, 'docs', 'cloudflare-waf-parity.ja.md'), actual: renderJa() },
+  ];
+  let ok = true;
+  for (const t of targets) {
+    if (!fs.existsSync(t.path)) {
+      console.error(`[parity-doc] MISSING: ${t.label}. Run: node scripts/generate-parity-doc.js --write${t.label.endsWith('.ja.md') ? ' --lang=ja' : ''}`);
+      ok = false;
+      continue;
+    }
+    const committed = fs.readFileSync(t.path, 'utf8');
+    if (committed !== t.actual) {
+      console.error(`[parity-doc] DRIFT: ${t.label} is out of sync with scripts/lib/cloudflare-waf-parity.js. Run: node scripts/generate-parity-doc.js --write${t.label.endsWith('.ja.md') ? ' --lang=ja' : ''}`);
+      ok = false;
+    } else {
+      console.log(`[parity-doc] OK (no drift): ${t.label}`);
+    }
+  }
+  return ok;
+}
+
 function main() {
   let allPassed = true;
 
@@ -129,12 +153,14 @@ function main() {
     if (!ok) allPassed = false;
   }
 
+  if (!checkParityDocsFresh()) allPassed = false;
+
   if (!allPassed) {
     console.error('Drift check failed. Regenerate golden fixtures if change is intentional.');
     process.exit(1);
   }
 
-  console.log('Drift check passed for base + all profiles.');
+  console.log('Drift check passed for base + all profiles + parity docs.');
 }
 
 main();

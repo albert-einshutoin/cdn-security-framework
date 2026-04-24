@@ -65,6 +65,13 @@ jobs:
       - name: Build Cloudflare (compile policy → dist)
         run: node scripts/compile-cloudflare.js
 
+      - name: Cloudflare WAF parity gate (base policy must build without approximation warnings)
+        # base.yml intentionally uses only equivalent AWS rules. Any policy change
+        # that introduces approximate or unsupported mappings must be accompanied
+        # by an explicit docs/cloudflare-waf-parity.md update; this gate fails
+        # CI loudly instead of silently degrading.
+        run: node scripts/compile-cloudflare-waf.js --policy policy/base.yml --out-dir dist --fail-on-waf-approximation
+
       - name: Ensure build produces dist/
         run: |
           test -f dist/edge/viewer-request.js || (echo "Missing dist/edge/viewer-request.js"; exit 1)

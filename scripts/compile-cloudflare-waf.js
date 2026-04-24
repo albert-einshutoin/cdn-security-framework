@@ -19,16 +19,31 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 
+const parity = require('./lib/cloudflare-waf-parity');
+
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
 const securityPath = path.join(repoRoot, 'policy', 'security.yml');
 const basePath = path.join(repoRoot, 'policy', 'base.yml');
 let policyPath = fs.existsSync(securityPath) ? securityPath : basePath;
 let outDir = path.join(repoRoot, 'dist');
+let failOnApproximation = false;
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '--policy' && argv[i + 1]) { policyPath = argv[++i]; continue; }
   if (argv[i] === '--out-dir' && argv[i + 1]) { outDir = argv[++i]; continue; }
+  if (argv[i] === '--fail-on-waf-approximation') { failOnApproximation = true; continue; }
   if (!argv[i].startsWith('--')) { policyPath = argv[i]; }
+}
+
+// Parity warnings collected during emission — surfaced once at the end so
+// the order is stable (managed rules first, then scope-down notes).
+const parityWarnings = [];
+let sawApproximationOrUnsupported = false;
+function recordParity(entry) {
+  const msg = parity.formatManagedRuleWarning(entry);
+  if (!msg) return;
+  parityWarnings.push(msg);
+  sawApproximationOrUnsupported = true;
 }
 
 let policy;
@@ -227,13 +242,25 @@ if (Array.isArray(waf.rate_limit_rules)) {
     // `expression_cloudflare` to be set by the user. Unknown shapes degrade
     // to a `true` expression (global).
     let expression = 'true';
+    let translatedShape = null;
     const sd = rule.scope_down_statement || {};
     const bm = sd.byte_match_statement;
     if (bm && bm.field_to_match && bm.field_to_match.uri_path && bm.positional_constraint === 'STARTS_WITH' && typeof bm.search_string === 'string') {
       expression = `starts_with(http.request.uri.path, "${String(bm.search_string).replace(/"/g, '\\"')}")`;
+      translatedShape = 'byte_match_statement(uri_path, STARTS_WITH)';
     }
     if (typeof rule.expression_cloudflare === 'string' && rule.expression_cloudflare.trim()) {
       expression = rule.expression_cloudflare;
+      translatedShape = 'expression_cloudflare override';
+    }
+    // Warn if a scope_down_statement was declared but not auto-translated and
+    // no explicit expression_cloudflare override is present. This is the
+    // silent-match-all class of drift the parity policy exists to prevent.
+    if (Object.keys(sd).length > 0 && translatedShape === null) {
+      parityWarnings.push(
+        `[cloudflare-waf-parity] APPROXIMATE: rate_limit rule "${rule.name}" has scope_down_statement that this compiler does not auto-translate to a Cloudflare expression (shape: ${Object.keys(sd).join(', ')}). Rule degraded to expression: "true" (match-all). Set rule.expression_cloudflare on the policy to provide the exact scope. See docs/cloudflare-waf-parity.md#scope_down_statement-shapes.`,
+      );
+      sawApproximationOrUnsupported = true;
     }
     const characteristicsMap = {
       IP: ['ip.src'],
@@ -269,24 +296,23 @@ if (rateRules.length > 0) {
   };
 }
 
-// 4. Managed rulesets (OWASP-equivalents on Cloudflare)
-// managed_rules entries are AWS names; map the well-known ones to Cloudflare
-// managed ruleset IDs. Unknown names render as a commented placeholder so the
-// operator can map them explicitly.
-const AWS_TO_CF_MANAGED = {
-  AWSManagedRulesCommonRuleSet: 'efb7b8c949ac4650a09736fc376e9aee',    // Cloudflare Managed Ruleset
-  AWSManagedRulesKnownBadInputsRuleSet: '4814384a9e5d4991b9815dcfc25d2f1f', // Cloudflare OWASP Core Ruleset
-  AWSManagedRulesSQLiRuleSet: '4814384a9e5d4991b9815dcfc25d2f1f',      // OWASP (covers SQLi)
-  AWSManagedRulesIPReputationList: 'c2e184081120413c86c3ab7e14069605',  // Cloudflare Exposed Credentials Check Managed Ruleset (nearest semantic fit)
-};
+// 4. Managed rulesets — consult cloudflare-waf-parity.js for every AWS entry
+// so the compiler emits warnings for anything that is not `equivalent`. The
+// compiler never silently swaps an AWS ruleset for a semantically-different
+// Cloudflare one without surfacing the mismatch.
 const managedEntries = Array.isArray(waf.managed_rules) ? waf.managed_rules : [];
 if (managedEntries.length > 0) {
   const managedRules = [];
   for (const name of managedEntries) {
-    const cfId = AWS_TO_CF_MANAGED[name];
+    const entry = parity.classifyManagedRule(name);
+    recordParity(entry);
+    const cfId = entry.cloudflare && entry.cloudflare.rulesetId;
     if (cfId) {
       managedRules.push({
-        description: `AWS managed rule mapped to Cloudflare: ${name}`,
+        description:
+          entry.status === 'equivalent'
+            ? `AWS ${name} → Cloudflare ${entry.cloudflare.rulesetName} (equivalent)`
+            : `AWS ${name} → Cloudflare ${entry.cloudflare.rulesetName} (APPROXIMATE — see docs/cloudflare-waf-parity.md)`,
         enabled: true,
         expression: 'true',
         action: 'execute',
@@ -294,7 +320,7 @@ if (managedEntries.length > 0) {
       });
     } else {
       managedRules.push({
-        description: `UNMAPPED AWS managed rule: ${name}. Review Cloudflare catalog and replace with the equivalent ruleset id.`,
+        description: `UNSUPPORTED AWS managed rule: ${name}. No Cloudflare mapping — emitted disabled. See docs/cloudflare-waf-parity.md.`,
         enabled: false,
         expression: 'true',
         action: 'log',
@@ -352,3 +378,15 @@ if (logging.enabled) {
 const outPath = path.join(distDir, 'cloudflare-waf.tf.json');
 fs.writeFileSync(outPath, JSON.stringify(tfJson, null, 2), 'utf8');
 console.log('Build complete:', outPath);
+
+// Emit parity warnings AFTER the file write so a failing exit still leaves a
+// diffable artifact for the operator to inspect. stderr stream only — stdout
+// reserved for the Terraform consumer / CI log.
+for (const msg of parityWarnings) {
+  console.error(msg);
+}
+
+if (failOnApproximation && sawApproximationOrUnsupported) {
+  console.error('[cloudflare-waf-parity] --fail-on-waf-approximation set; exiting non-zero because the policy relies on approximate or unsupported Cloudflare mappings.');
+  process.exit(1);
+}

@@ -66,7 +66,7 @@
         "rules": [
           {
             "ref": "managed_1",
-            "description": "AWS managed rule mapped to Cloudflare: AWSManagedRulesCommonRuleSet",
+            "description": "AWS AWSManagedRulesCommonRuleSet → Cloudflare Cloudflare Managed Ruleset (equivalent)",
             "enabled": true,
             "expression": "true",
             "action": "execute",
@@ -76,7 +76,7 @@
           },
           {
             "ref": "managed_2",
-            "description": "AWS managed rule mapped to Cloudflare: AWSManagedRulesKnownBadInputsRuleSet",
+            "description": "AWS AWSManagedRulesKnownBadInputsRuleSet → Cloudflare Cloudflare OWASP Core Ruleset (APPROXIMATE — see docs/cloudflare-waf-parity.md)",
             "enabled": true,
             "expression": "true",
             "action": "execute",
@@ -86,7 +86,7 @@
           },
           {
             "ref": "managed_3",
-            "description": "AWS managed rule mapped to Cloudflare: AWSManagedRulesIPReputationList",
+            "description": "AWS AWSManagedRulesIPReputationList → Cloudflare Cloudflare Exposed Credentials Check Managed Ruleset (APPROXIMATE — see docs/cloudflare-waf-parity.md)",
             "enabled": true,
             "expression": "true",
             "action": "execute",
