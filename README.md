@@ -103,6 +103,7 @@ See [IaC integration](docs/iac.md) for Terraform / CDK / WAF usage.
 
 ### Operational docs
 - [CLI reference](docs/cli.md) — `init` / `build` / `emit-waf` / `doctor` / `migrate`
+- [Programmatic API](docs/programmatic-api.md) — `require('cdn-security-framework')` for CI / IaC integration
 - [Archetypes](docs/archetypes.md) — app-shaped policy presets (SPA, REST API, admin, microservice)
 - [Secret rotation runbook](docs/runbooks/secret-rotation.md) — JWT / JWKS / signed URL / admin token / origin secret
 - [Schema migration](docs/schema-migration.md) — how `policy/schema.json` evolves and the `migrate` CLI
