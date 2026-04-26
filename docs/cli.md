@@ -75,7 +75,7 @@ Checks run, in order:
 
 | Check | Fails when |
 | --- | --- |
-| `node_version` | Node < 18. |
+| `node_version` | Node < 20.12.0. |
 | `policy_exists` | Neither `policy/security.yml` nor `policy/base.yml` is found. |
 | `policy_parses` | YAML parse error or non-object top-level value. |
 | `policy_schema_version` | `version` field missing, or does not match the CLI's supported schema (currently v1). |

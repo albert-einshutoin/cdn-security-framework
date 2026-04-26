@@ -18,6 +18,7 @@ const {
   tryParsePolicy,
   resolvePolicyPath,
   MIN_NODE_MAJOR,
+  MIN_NODE_VERSION,
   SCHEMA_CURRENT_VERSION,
 } = require('./cli-doctor.js');
 
@@ -91,22 +92,28 @@ test('collectReferencedEnvVars: ignores empty string env names', () => {
 
 // ---- checkNodeVersion ----------------------------------------------------
 
-test('checkNodeVersion: pass at >= MIN_NODE_MAJOR', () => {
-  const r = checkNodeVersion(`v${MIN_NODE_MAJOR}.1.0`);
+test('checkNodeVersion: pass at >= MIN_NODE_VERSION', () => {
+  const r = checkNodeVersion(`v${MIN_NODE_VERSION}`);
   assert.strictEqual(r.status, 'pass');
 });
 
-test('checkNodeVersion: minimum matches package.json engines.node', () => {
+test('checkNodeVersion: minimum version matches package.json engines.node', () => {
   const pkg = require(path.join(repoRoot, 'package.json'));
-  const match = /^>=\s*(\d+)/.exec(pkg.engines.node);
+  const match = /^>=\s*(\d+\.\d+\.\d+)/.exec(pkg.engines.node);
   assert.ok(match, `unexpected engines.node format: ${pkg.engines.node}`);
-  assert.strictEqual(MIN_NODE_MAJOR, Number(match[1]));
+  assert.strictEqual(MIN_NODE_VERSION, match[1]);
 });
 
-test('checkNodeVersion: fail below MIN_NODE_MAJOR', () => {
+test('checkNodeVersion: fail below required major version', () => {
   const r = checkNodeVersion(`v${MIN_NODE_MAJOR - 2}.5.0`);
   assert.strictEqual(r.status, 'fail');
   assert.strictEqual(r.found, `v${MIN_NODE_MAJOR - 2}.5.0`);
+});
+
+test('checkNodeVersion: fail below required minor version', () => {
+  const r = checkNodeVersion('v20.11.1');
+  assert.strictEqual(r.status, 'fail');
+  assert.strictEqual(r.required, `>=${MIN_NODE_VERSION}`);
 });
 
 test('checkNodeVersion: fail on unparseable version', () => {
