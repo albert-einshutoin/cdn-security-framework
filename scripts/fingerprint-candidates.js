@@ -48,9 +48,9 @@ function main() {
         const ja3 = row?.httpRequest?.ja3Fingerprint || row?.ja3Fingerprint || row?.ja3;
         const ja4 = row?.httpRequest?.ja4Fingerprint || row?.ja4Fingerprint || row?.ja4;
         if (ja3)
-            ja3Map.set(ja3, (ja3Map.get(ja3) || 0) + 1);
+            ja3Map.set(String(ja3), (ja3Map.get(String(ja3)) || 0) + 1);
         if (ja4)
-            ja4Map.set(ja4, (ja4Map.get(ja4) || 0) + 1);
+            ja4Map.set(String(ja4), (ja4Map.get(String(ja4)) || 0) + 1);
     }
     function pick(map) {
         return Array.from(map.entries())

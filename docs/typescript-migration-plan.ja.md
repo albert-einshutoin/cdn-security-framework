@@ -13,7 +13,7 @@
   - `main`: `lib/index.js`
   - 既存テスト: `node scripts/*-tests.js`
 - CloudFront Functions 向けの runtime template と golden fixture は生成・配布対象なので、移行対象から除外する。
-- 型安全性は段階的に強める。初期移行では `strict: false` で挙動互換を優先し、移行完了後に `strict` 化を別PRで進める。
+- 型安全性は段階的に強める。移行完了後は `strict: true` を有効にし、既存JS由来の大きな整理が必要な項目だけ明示的に緩和する。
 
 ## 実装ステップ
 
@@ -37,4 +37,4 @@
 - `npm run test:api-contract` が成功する。
 - `EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy ORIGIN_SECRET=ci-origin-secret-not-for-deploy npm run test:all` が成功する。
 - `bin/`, `lib/`, `scripts/` の手書き実装ソースは `src/` 配下の TypeScript になる。
-- `strict: true` 化は、暗黙 any と unknown catch の整理を別フェーズで行う。
+- `strict: true` を有効にする。暗黙 any、strict null、catch unknown の完全整理は後続フェーズで行う。
