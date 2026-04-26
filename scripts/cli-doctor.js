@@ -28,7 +28,8 @@ const CHECK_ENV_VARS = 'env_vars_referenced_by_policy';
 const CHECK_DIST_WRITABLE = 'dist_edge_writable';
 const CHECK_DEPENDENCIES = 'npm_dependencies';
 
-const MIN_NODE_MAJOR = 20;
+const MIN_NODE_VERSION = '20.12.0';
+const MIN_NODE_MAJOR = Number(MIN_NODE_VERSION.split('.')[0]);
 const SCHEMA_CURRENT_VERSION = 1;
 
 function pass(name, detail, extras) {
@@ -45,21 +46,28 @@ function skip(name, detail, extras) {
 }
 
 function checkNodeVersion(nodeVersion) {
-  const match = /^v?(\d+)\./.exec(nodeVersion);
+  const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(nodeVersion);
   if (!match) {
     return fail(CHECK_NODE_VERSION, `Could not parse Node version: ${nodeVersion}`);
   }
   const major = Number(match[1]);
-  if (major < MIN_NODE_MAJOR) {
+  const minor = Number(match[2]);
+  const patch = Number(match[3]);
+  const [minMajor, minMinor, minPatch] = MIN_NODE_VERSION.split('.').map(Number);
+  const isBelowMinimum =
+    major < minMajor ||
+    (major === minMajor && minor < minMinor) ||
+    (major === minMajor && minor === minMinor && patch < minPatch);
+  if (isBelowMinimum) {
     return fail(
       CHECK_NODE_VERSION,
-      `Node ${nodeVersion} is below the required >= ${MIN_NODE_MAJOR}. Upgrade before running build/deploy.`,
-      { found: nodeVersion, required: `>=${MIN_NODE_MAJOR}` }
+      `Node ${nodeVersion} is below the required >= ${MIN_NODE_VERSION}. Upgrade before running build/deploy.`,
+      { found: nodeVersion, required: `>=${MIN_NODE_VERSION}` }
     );
   }
-  return pass(CHECK_NODE_VERSION, `Node ${nodeVersion} (>= ${MIN_NODE_MAJOR})`, {
+  return pass(CHECK_NODE_VERSION, `Node ${nodeVersion} (>= ${MIN_NODE_VERSION})`, {
     found: nodeVersion,
-    required: `>=${MIN_NODE_MAJOR}`,
+    required: `>=${MIN_NODE_VERSION}`,
   });
 }
 
@@ -319,5 +327,6 @@ module.exports = {
   checkDependencies,
   tryParsePolicy,
   MIN_NODE_MAJOR,
+  MIN_NODE_VERSION,
   SCHEMA_CURRENT_VERSION,
 };

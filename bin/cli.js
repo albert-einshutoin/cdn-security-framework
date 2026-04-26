@@ -7,7 +7,10 @@
 const path = require('path');
 const fs = require('fs');
 const { Command } = require('commander');
-const inquirer = require('inquirer');
+// inquirer v13+ ships as ESM-only and is exposed through a CJS interop wrapper;
+// `.default` holds the real module. `|| require('inquirer')` keeps us compatible
+// with any earlier CJS-native version a consumer might still have hoisted.
+const inquirer = require('inquirer').default || require('inquirer');
 
 const pkgRoot = path.resolve(__dirname, '..');
 
