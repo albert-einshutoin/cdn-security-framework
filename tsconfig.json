@@ -13,7 +13,10 @@
     "moduleDetection": "force",
     "ignoreDeprecations": "6.0",
     "types": ["node"],
-    "strict": false,
+    "strict": true,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "useUnknownInCatchVariables": false,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
