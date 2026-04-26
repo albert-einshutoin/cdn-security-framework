@@ -28,7 +28,7 @@ const CHECK_ENV_VARS = 'env_vars_referenced_by_policy';
 const CHECK_DIST_WRITABLE = 'dist_edge_writable';
 const CHECK_DEPENDENCIES = 'npm_dependencies';
 
-const MIN_NODE_MAJOR = 18;
+const MIN_NODE_MAJOR = 20;
 const SCHEMA_CURRENT_VERSION = 1;
 
 function pass(name, detail, extras) {

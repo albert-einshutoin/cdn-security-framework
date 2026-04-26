@@ -92,6 +92,9 @@ jobs:
       - name: Cloudflare Worker integration tests (Node-native fetch harness)
         run: npm run test:cloudflare-integration
 
+      - name: Pseudo Edge container attack tests
+        run: npm run test:edge-container
+
       - name: Drift check (base + profiles vs golden generated artifacts)
         run: npm run test:drift
 
