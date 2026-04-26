@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 
 /**
  * emit-waf subcommand integration: spawn `bin/cli.js emit-waf` in a fresh tmp
@@ -72,7 +69,7 @@ function runEmitWaf(policyYaml, extraArgs) {
   const outDir = path.join(tmp, 'dist');
   const args = ['emit-waf', '-p', policyPath, '-o', outDir].concat(extraArgs || []);
 
-  const result = spawnSync(process.execPath, [cliPath].concat(args), {
+  const result: any = spawnSync(process.execPath, [cliPath].concat(args), {
     cwd: tmp,
     encoding: 'utf8',
     env: Object.assign({}, process.env, {
@@ -181,7 +178,7 @@ test('emit-waf rejects unknown --format', () => {
 test('emit-waf fails when policy file does not exist', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emit-waf-missing-'));
   try {
-    const result = spawnSync(process.execPath, [cliPath, 'emit-waf', '-p', path.join(tmp, 'missing.yml')], {
+    const result: any = spawnSync(process.execPath, [cliPath, 'emit-waf', '-p', path.join(tmp, 'missing.yml')], {
       cwd: tmp,
       encoding: 'utf8',
       env: process.env,
@@ -199,7 +196,7 @@ test('build still emits both edge/ and infra/ (emit-waf does not replace build)'
   fs.mkdirSync(policyDir);
   fs.writeFileSync(path.join(policyDir, 'security.yml'), BASIC_AWS_POLICY, 'utf8');
   const outDir = path.join(tmp, 'dist');
-  const result = spawnSync(process.execPath, [cliPath, 'build', '-p', path.join(policyDir, 'security.yml'), '-o', outDir], {
+  const result: any = spawnSync(process.execPath, [cliPath, 'build', '-p', path.join(policyDir, 'security.yml'), '-o', outDir], {
     cwd: tmp,
     encoding: 'utf8',
     env: Object.assign({}, process.env, {

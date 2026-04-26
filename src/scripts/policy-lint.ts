@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Policy lint: validates policy YAML against policy/schema.json using ajv,
  * then runs compile-core's auth-gate validator for cross-field checks that

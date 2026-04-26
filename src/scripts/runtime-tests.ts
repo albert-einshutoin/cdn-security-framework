@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Runtime tests: run request cases against CloudFront Functions viewer-request handler
  * and Lambda@Edge origin-request handler, asserting expected status codes.
@@ -36,7 +33,7 @@ let originHandler;
 const DEFAULT_TOKEN = process.env.EDGE_ADMIN_TOKEN
   || 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
 
-function buildEvent(method, uri, headers, querystring) {
+function buildEvent(method, uri, headers = {}, querystring = '') {
   const h = headers || {};
   const cfHeaders = {};
   for (const [k, v] of Object.entries(h)) {
@@ -53,7 +50,7 @@ function buildEvent(method, uri, headers, querystring) {
 }
 
 function runCase(name, event, expected) {
-  const result = handler(event);
+  const result: any = handler(event);
   const allowed = result && !result.statusCode && result.uri !== undefined;
   const got = allowed ? 'allow' : (result && result.statusCode);
   const ok = (expected === 'allow' && allowed) || (typeof expected === 'number' && got === expected);
@@ -137,7 +134,7 @@ console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases
     'user-agent': 'Mozilla',
     'x-edge-authenticated': '1',
   });
-  const result = handler(spoofEvent);
+  const result: any = handler(spoofEvent);
   const blocked = result && result.statusCode === 401;
   if (!blocked) {
     console.error('FAIL: spoofed x-edge-authenticated on /admin should still 401, got', result && result.statusCode);
@@ -170,7 +167,7 @@ console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases
     'user-agent': 'Mozilla',
     'x-forwarded-for': '127.0.0.1, 10.0.0.1',
   });
-  const result = handler(event);
+  const result: any = handler(event);
   const passed = result && result.uri !== undefined
     && result.headers && !result.headers['x-forwarded-for'];
   if (!passed) {
@@ -217,7 +214,7 @@ console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases
     ['host-allow: wildcard does not match parent domain', buildEvent('GET', '/', { host: 'cdn.example.com' }), 400],
   ];
   for (const [name, event, expected] of cases) {
-    const result = h(event);
+    const result: any = h(event);
     const allowed = result && !result.statusCode && result.uri !== undefined;
     const got = allowed ? 'allow' : (result && result.statusCode);
     const ok = (expected === 'allow' && allowed) || (typeof expected === 'number' && got === expected);
@@ -313,7 +310,7 @@ function runViewerMonitorTests() {
 
   let failed = 0;
   for (const [name, event, expected] of monitorCases) {
-    const result = monitorHandler(event);
+    const result: any = monitorHandler(event);
     const allowed = result && !result.statusCode && result.uri !== undefined;
     const got = allowed ? 'allow' : (result && result.statusCode);
     const ok = (expected === 'allow' && allowed);
@@ -353,7 +350,7 @@ function createHS256Jwt(payload, secret) {
 }
 
 // Build Lambda@Edge event format
-function buildLambdaEdgeEvent(uri, headers, querystring) {
+function buildLambdaEdgeEvent(uri, headers = {}, querystring = '') {
   const h = headers || {};
   const cfHeaders = {};
   for (const [k, v] of Object.entries(h)) {
@@ -374,7 +371,7 @@ function buildLambdaEdgeEvent(uri, headers, querystring) {
 
 // Async test runner for Lambda@Edge (result.status is string, not statusCode number)
 async function runAsyncCase(name, event, expected) {
-  const result = await originHandler(event);
+  const result: any = await originHandler(event);
   // Lambda@Edge pass-through returns the request object (has uri, no status)
   const isPassThrough = result && result.uri !== undefined && !result.status;
   const gotStatus = isPassThrough ? 'allow' : (result && result.status);
@@ -813,7 +810,7 @@ async function runErrorBoundaryTests() {
 
   // Send a malformed event missing Records[0].cf
   const malformedEvent = { Records: [{}] };
-  const result = await errorHandler(malformedEvent);
+  const result: any = await errorHandler(malformedEvent);
   const ok = result && result.status === '502';
   if (!ok) {
     console.error('FAIL: error boundary | expected 502, got', result && result.status);
@@ -830,7 +827,7 @@ async function main() {
   let totalFailed = viewerFailed;
   let totalTests = cases.length + viewerMonitorResult.total;
 
-  const enforceResult = await runOriginRequestTests();
+  const enforceResult: any = await runOriginRequestTests();
   totalFailed += enforceResult.failed;
   totalTests += enforceResult.total;
 

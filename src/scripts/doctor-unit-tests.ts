@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 
 const assert = require('assert');
 const fs = require('fs');
@@ -36,7 +33,7 @@ function test(name, fn) {
   }
 }
 
-function mktmp(prefix) {
+function mktmp(prefix = 'doctor-unit-') {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix || 'doctor-unit-'));
 }
 
@@ -332,7 +329,7 @@ routes:
     match: { path_prefixes: ["/admin"] }
     auth_gate: { type: static_token, header: "X-Admin-Token", token_env: "ADMIN_TOKEN_FOR_TEST" }
 `);
-  const result = runDoctor({
+  const result: any = runDoctor({
     cwd: tmp,
     pkgRoot: repoRoot,
     envProvider: (n) => (n === 'ADMIN_TOKEN_FOR_TEST' ? 'ci-test' : undefined),
@@ -365,7 +362,7 @@ routes:
     match: { path_prefixes: ["/api"] }
     auth_gate: { type: jwt, algorithm: HS256, secret_env: MISSING_JWT_SECRET_XYZ }
 `);
-  const result = runDoctor({
+  const result: any = runDoctor({
     cwd: tmp,
     pkgRoot: repoRoot,
     envProvider: () => undefined,
@@ -385,7 +382,7 @@ routes:
 
 test('runDoctor: fails when policy is missing', () => {
   const tmp = mktmp();
-  const result = runDoctor({
+  const result: any = runDoctor({
     cwd: tmp,
     pkgRoot: repoRoot,
     envProvider: () => undefined,
@@ -408,7 +405,7 @@ test('runDoctor: reportPath: null skips file write', () => {
   const tmp = mktmp();
   fs.mkdirSync(path.join(tmp, 'policy'));
   fs.writeFileSync(path.join(tmp, 'policy', 'security.yml'), 'version: 1\nrequest:\n  allow_methods: [GET]\nresponse_headers: {}\n');
-  const result = runDoctor({
+  const result: any = runDoctor({
     cwd: tmp,
     pkgRoot: repoRoot,
     envProvider: () => undefined,

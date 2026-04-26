@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 "use strict";
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Schema lint tests: exercise `policy-lint.js` against temporary policy files
  * with numeric values that are inside/outside the bounds declared in

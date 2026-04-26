@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Programmatic API integration tests.
  *
@@ -331,7 +328,7 @@ test('CLI backwards-compat: `cdn-security build --target aws` still succeeds', (
   try {
     const { spawnSync } = require('child_process');
     const cli = path.join(repoRoot, 'bin', 'cli.js');
-    const result = spawnSync(process.execPath, [
+    const result: any = spawnSync(process.execPath, [
       cli, 'build',
       '-p', ctx.policyPath,
       '-o', ctx.outDir,

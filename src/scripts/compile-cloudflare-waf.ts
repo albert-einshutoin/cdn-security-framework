@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Compile Cloudflare WAF: security.yml の firewall セクションを読み、
  * dist/infra/cloudflare-waf.tf.json に `cloudflare_ruleset` / `cloudflare_list`
@@ -70,7 +67,7 @@ const projectName = (policy.project || 'cdn-security').replace(/[^a-z0-9-]/gi, '
 const distDir = path.join(outDir, 'infra');
 fs.mkdirSync(distDir, { recursive: true });
 
-const tfJson = {
+const tfJson: any = {
   variable: {
     cloudflare_zone_id: {
       description: 'Cloudflare zone ID to attach rulesets to. Sourced from $CLOUDFLARE_ZONE_ID or equivalent in CI.',

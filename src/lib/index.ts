@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * cdn-security-framework — Programmatic API
  *

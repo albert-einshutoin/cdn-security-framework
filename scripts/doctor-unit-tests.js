@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 "use strict";
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 Object.defineProperty(exports, "__esModule", { value: true });
 const assert = require('assert');
 const fs = require('fs');
@@ -20,7 +17,7 @@ function test(name, fn) {
         process.exitCode = 1;
     }
 }
-function mktmp(prefix) {
+function mktmp(prefix = 'doctor-unit-') {
     return fs.mkdtempSync(path.join(os.tmpdir(), prefix || 'doctor-unit-'));
 }
 const repoRoot = path.join(__dirname, '..');

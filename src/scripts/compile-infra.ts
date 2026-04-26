@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Compile Infra Config: security.yml の firewall/transport/origin セクションを読み、dist/infra/*.tf.json に出力する。
  * Usage: node scripts/compile-infra.js [path/to/security.yml] [--policy path] [--out-dir dir]
@@ -117,7 +114,7 @@ if (Array.isArray(waf.rate_limit_rules)) {
   for (const rule of waf.rate_limit_rules) {
     if (!rule || !rule.name || !rule.limit) continue;
     const aggregateKeyType = rule.aggregate_key_type || 'IP';
-    const rateStmt = {
+    const rateStmt: any = {
       limit: Number(rule.limit),
       aggregate_key_type: aggregateKeyType,
     };
@@ -172,7 +169,7 @@ function addFingerprintRules(fieldName, fingerprints, rulePrefix, metricPrefix) 
 addFingerprintRules('ja3_fingerprint', waf.ja3_fingerprints, 'ja3', 'ja3');
 addFingerprintRules('ja4_fingerprint', waf.ja4_fingerprints, 'ja4', 'ja4');
 
-const ruleGroupDef = {
+const ruleGroupDef: any = {
   name: projectName + '-rate-limit',
   scope,
   capacity: Math.max(2, wafRules.length * 2 || 2),
@@ -190,7 +187,7 @@ if (blockResponse) {
     content_type: blockResponse.content_type || 'TEXT_PLAIN',
   }];
 }
-const tfWafJson = {
+const tfWafJson: any = {
   resource: {
     aws_wafv2_rule_group: {
       [projectName + '-rate-limit']: ruleGroupDef,
@@ -205,7 +202,7 @@ if (waf.managed_rules && waf.managed_rules.length > 0) {
     console.log('[INFO] managed_rules are intentionally not emitted because AWS managed rule groups can only be attached from Web ACL.');
   } else {
     const webAclName = projectName + '-waf-acl';
-    const webAcl = {
+    const webAcl: any = {
       name: webAclName,
       scope,
       default_action: { allow: {} },
@@ -272,7 +269,7 @@ console.log('Build complete:', path.join(distDir, 'waf-rules.tf.json'));
 
 // 2. Geo Restriction
 if (geo.block_countries || geo.allow_countries) {
-  const geoTfJson = {
+  const geoTfJson: any = {
     resource: {
       aws_wafv2_rule_group: {
         [projectName + '-geo-block']: {
@@ -324,7 +321,7 @@ if (geo.block_countries || geo.allow_countries) {
 
 // 3. IP Sets
 if (ip.allowlist || ip.blocklist) {
-  const ipTfJson = { resource: {} };
+  const ipTfJson: any = { resource: {} };
 
   if (ip.blocklist && ip.blocklist.length > 0) {
     ipTfJson.resource.aws_wafv2_ip_set = ipTfJson.resource.aws_wafv2_ip_set || {};

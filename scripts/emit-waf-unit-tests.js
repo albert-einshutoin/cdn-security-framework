@@ -1,9 +1,5 @@
 #!/usr/bin/env node
 "use strict";
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
-Object.defineProperty(exports, "__esModule", { value: true });
 /**
  * emit-waf subcommand integration: spawn `bin/cli.js emit-waf` in a fresh tmp
  * repo and assert it drops only infra/*.tf.json (no edge/*.js), supports each
@@ -14,6 +10,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
  * lint reads env at build time for origin.auth). The cli-doctor env check is
  * NOT exercised here — that's covered by doctor-unit-tests.js.
  */
+Object.defineProperty(exports, "__esModule", { value: true });
 const assert = require('assert');
 const fs = require('fs');
 const os = require('os');

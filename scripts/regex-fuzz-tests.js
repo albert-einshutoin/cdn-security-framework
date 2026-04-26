@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 "use strict";
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * ReDoS fuzz: exercises every user-supplied regex from policy YAML against
  * adversarial inputs with a per-match timeout. Fails if any regex takes longer

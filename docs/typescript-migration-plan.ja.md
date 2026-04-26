@@ -32,7 +32,9 @@
 
 ## 完了条件
 
+- `src/` 配下の実装・テストソースから `@ts-nocheck` を撤去し、TypeScript の型検査対象にする。
 - `npm run typecheck` が成功する。
 - `npm run test:api-contract` が成功する。
 - `EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy ORIGIN_SECRET=ci-origin-secret-not-for-deploy npm run test:all` が成功する。
 - `bin/`, `lib/`, `scripts/` の手書き実装ソースは `src/` 配下の TypeScript になる。
+- `strict: true` 化は、暗黙 any と unknown catch の整理を別フェーズで行う。

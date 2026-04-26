@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Cloudflare Worker integration harness.
  *
@@ -80,13 +77,13 @@ function transpileToJs(tsSource) {
   return code;
 }
 
-function loadWorker(jsCode, { env = {}, fetchStub } = {}) {
+function loadWorker(jsCode, { env = {}, fetchStub }: any = {}) {
   // Expose the Node-native web fetch primitives inside the sandbox. Node 18+
   // ships all of these on globalThis, so just pass them straight through.
   const logs = [];
   const defaultFetch = async () =>
     new Response('stub-origin', { status: 200, headers: { 'content-type': 'text/plain' } });
-  const sandbox = {
+  const sandbox: any = {
     console: {
       log: (...args) => logs.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')),
       error: (...args) => logs.push('[stderr] ' + args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')),

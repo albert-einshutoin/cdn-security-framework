@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * cdn-security-framework CLI
  * Commands: init (scaffold policy YAML), build (compile policy → dist)

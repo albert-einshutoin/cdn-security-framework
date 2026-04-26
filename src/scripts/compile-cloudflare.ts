@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Compile Cloudflare Workers: security.yml を読み、テンプレートに注入して dist/edge/cloudflare/index.ts に出力する。
  * Usage: node scripts/compile-cloudflare.js [path/to/security.yml] [--policy path] [--out-dir dir]
@@ -80,7 +77,7 @@ function getWorkerAuthGates() {
     const prefixes = match.path_prefixes || [];
     const authType = gate.type || 'static_token';
 
-    const gateConfig = {
+    const gateConfig: any = {
       name: route.name || 'unnamed',
       protectedPrefixes: prefixes.length ? prefixes : ['/admin', '/docs', '/swagger'],
       type: authType,

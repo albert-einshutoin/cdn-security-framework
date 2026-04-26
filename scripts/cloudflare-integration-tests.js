@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 "use strict";
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Cloudflare Worker integration harness.
  *

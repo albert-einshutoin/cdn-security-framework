@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 "use strict";
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Pseudo Edge container attack tests.
  *
@@ -96,7 +93,8 @@ function cfHeadersFromNode(headers) {
 function lambdaHeadersFromCff(headers) {
     const out = {};
     for (const [name, entry] of Object.entries(headers || {})) {
-        const value = entry && entry.value !== undefined ? String(entry.value) : '';
+        const headerEntry = entry;
+        const value = headerEntry && headerEntry.value !== undefined ? String(headerEntry.value) : '';
         out[name.toLowerCase()] = [{ key: name, value }];
     }
     return out;

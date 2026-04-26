@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 "use strict";
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Compile Cloudflare WAF: security.yml の firewall セクションを読み、
  * dist/infra/cloudflare-waf.tf.json に `cloudflare_ruleset` / `cloudflare_list`

@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Compile: security.yml (Source of Truth) を読み、テンプレートに注入して dist/edge/*.js に出力する。
  * Usage: node scripts/compile.js [path/to/security.yml] [--policy path] [--out-dir dir]

@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * cli-doctor.js
  *
@@ -33,16 +32,16 @@ const MIN_NODE_VERSION = '20.12.0';
 const MIN_NODE_MAJOR = Number(MIN_NODE_VERSION.split('.')[0]);
 const SCHEMA_CURRENT_VERSION = 1;
 
-function pass(name, detail, extras) {
+function pass(name, detail, extras = undefined) {
   return Object.assign({ name, status: 'pass', detail }, extras || {});
 }
-function fail(name, detail, extras) {
+function fail(name, detail, extras = undefined) {
   return Object.assign({ name, status: 'fail', detail }, extras || {});
 }
-function warn(name, detail, extras) {
+function warn(name, detail, extras = undefined) {
   return Object.assign({ name, status: 'warn', detail }, extras || {});
 }
-function skip(name, detail, extras) {
+function skip(name, detail, extras = undefined) {
   return Object.assign({ name, status: 'skip', detail }, extras || {});
 }
 
@@ -260,7 +259,7 @@ function runDoctor(opts) {
   const policyExistsCheck = checkPolicyExists(policyPath);
   checks.push(policyExistsCheck);
 
-  let parseResult = { ok: false, doc: null };
+  let parseResult: any = { ok: false, doc: null };
   let policyDoc = null;
   if (policyExistsCheck.status === 'pass') {
     parseResult = tryParsePolicy(policyPath);

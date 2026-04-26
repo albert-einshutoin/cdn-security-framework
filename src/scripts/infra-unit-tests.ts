@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 
 const assert = require('assert');
 const fs = require('fs');
@@ -22,7 +19,7 @@ function test(name, fn) {
 
 const repoRoot = path.join(__dirname, '..');
 
-function runCompileInfra(policyContent, options = {}) {
+function runCompileInfra(policyContent, options: any = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'infra-unit-'));
   const policyPath = path.join(tempDir, 'policy.yml');
   const outDir = path.join(tempDir, 'out');

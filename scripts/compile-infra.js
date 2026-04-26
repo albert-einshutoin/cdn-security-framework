@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 "use strict";
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Compile Infra Config: security.yml の firewall/transport/origin セクションを読み、dist/infra/*.tf.json に出力する。
  * Usage: node scripts/compile-infra.js [path/to/security.yml] [--policy path] [--out-dir dir]

@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Generate docs/cloudflare-waf-parity.md from scripts/lib/cloudflare-waf-parity.js.
  *

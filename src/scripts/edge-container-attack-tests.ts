@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Pseudo Edge container attack tests.
  *
@@ -51,7 +48,7 @@ function ensureAwsArtifactsCompiled() {
 function loadAwsViewerHandler() {
   ensureAwsArtifactsCompiled();
   const code = fs.readFileSync(path.join(repoRoot, 'dist', 'edge', 'viewer-request.js'), 'utf8');
-  const sandbox = {
+  const sandbox: any = {
     exports: {},
     console,
     Buffer,
@@ -70,7 +67,7 @@ function loadAwsViewerHandler() {
 function loadAwsOriginHandler() {
   ensureAwsArtifactsCompiled();
   const code = fs.readFileSync(path.join(repoRoot, 'dist', 'edge', 'origin-request.js'), 'utf8');
-  const sandbox = {
+  const sandbox: any = {
     exports: {},
     require,
     console,
@@ -89,7 +86,7 @@ function loadAwsOriginHandler() {
 }
 
 function cfHeadersFromNode(headers) {
-  const out = {};
+  const out: any = {};
   for (const [name, value] of Object.entries(headers || {})) {
     if (value === undefined) continue;
     const v = Array.isArray(value) ? value.join(', ') : String(value);
@@ -99,9 +96,10 @@ function cfHeadersFromNode(headers) {
 }
 
 function lambdaHeadersFromCff(headers) {
-  const out = {};
+  const out: any = {};
   for (const [name, entry] of Object.entries(headers || {})) {
-    const value = entry && entry.value !== undefined ? String(entry.value) : '';
+    const headerEntry: any = entry;
+    const value = headerEntry && headerEntry.value !== undefined ? String(headerEntry.value) : '';
     out[name.toLowerCase()] = [{ key: name, value }];
   }
   return out;
@@ -275,7 +273,7 @@ for (const name of REQUIRED_WORKER_GLOBALS) {
 
 function loadCloudflareWorker() {
   const logs = [];
-  const sandbox = {
+  const sandbox: any = {
     console: {
       log: (...args) => logs.push(['log', args.join(' ')]),
       warn: (...args) => logs.push(['warn', args.join(' ')]),
@@ -366,7 +364,7 @@ function portOf(server) {
 }
 
 function request(server, method, target, headers = {}) {
-  return new Promise((resolve, reject) => {
+  return new Promise<any>((resolve, reject) => {
     const req = http.request({
       host: '127.0.0.1',
       port: portOf(server),

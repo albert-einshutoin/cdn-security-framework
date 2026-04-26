@@ -1,6 +1,5 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-// @ts-nocheck
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');

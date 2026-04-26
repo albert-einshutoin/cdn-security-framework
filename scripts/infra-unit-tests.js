@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 "use strict";
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 Object.defineProperty(exports, "__esModule", { value: true });
 const assert = require('assert');
 const fs = require('fs');

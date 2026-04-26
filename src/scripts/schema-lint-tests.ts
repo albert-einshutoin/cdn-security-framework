@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Schema lint tests: exercise `policy-lint.js` against temporary policy files
  * with numeric values that are inside/outside the bounds declared in
@@ -63,7 +60,7 @@ ${overrides.extra || ''}
 test('lint accepts in-range request.limits', () => {
   const { dir, file } = writeTempPolicy(basePolicy({}));
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -73,7 +70,7 @@ test('lint accepts in-range request.limits', () => {
 test('lint rejects max_query_length below minimum', () => {
   const { dir, file } = writeTempPolicy(basePolicy({ max_query_length: 0 }));
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0, 'expected lint to fail');
     assert.match(result.stderr + result.stdout, /max_query_length|>=\s*1|minimum/i);
   } finally {
@@ -84,7 +81,7 @@ test('lint rejects max_query_length below minimum', () => {
 test('lint rejects max_query_length above maximum', () => {
   const { dir, file } = writeTempPolicy(basePolicy({ max_query_length: 99999999 }));
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0, 'expected lint to fail');
     assert.match(result.stderr + result.stdout, /max_query_length|maximum|<=\s*65536/i);
   } finally {
@@ -95,7 +92,7 @@ test('lint rejects max_query_length above maximum', () => {
 test('lint rejects max_query_params out of range', () => {
   const { dir, file } = writeTempPolicy(basePolicy({ max_query_params: 5000 }));
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -105,7 +102,7 @@ test('lint rejects max_query_params out of range', () => {
 test('lint rejects max_uri_length below minimum', () => {
   const { dir, file } = writeTempPolicy(basePolicy({ max_uri_length: 0 }));
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -122,7 +119,7 @@ test('lint rejects firewall.waf.rate_limit below WAF minimum (100)', () => {
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0, 'expected lint to fail for rate_limit < 100');
     assert.match(result.stderr + result.stdout, /rate_limit|minimum|>=\s*100/i);
   } finally {
@@ -140,7 +137,7 @@ test('lint accepts firewall.waf.rate_limit at AWS WAF ceiling', () => {
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -158,7 +155,7 @@ test('lint rejects cors.max_age beyond 86400', () => {
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -175,7 +172,7 @@ test('lint rejects origin.timeout.read above 60', () => {
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -191,7 +188,7 @@ test('lint rejects negative origin.timeout.connect', () => {
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -215,7 +212,7 @@ test('lint rejects auth_gate.cache_ttl_sec above 1 day', () => {
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -226,7 +223,7 @@ test('lint rejects unknown key at top level (additionalProperties:false)', () =>
   const yaml = basePolicy({}) + '\ntypo_top_level: whatever\n';
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0, 'expected lint to fail');
     assert.match(result.stderr + result.stdout, /additionalProperty|typo_top_level|additional properties/i);
   } finally {
@@ -248,7 +245,7 @@ response_headers:
 `;
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0, 'expected lint to fail');
     assert.match(result.stderr + result.stdout, /additional|ratelimit/i);
   } finally {
@@ -266,7 +263,7 @@ test('lint rejects unknown key under firewall.waf', () => {
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0, 'expected lint to fail');
     assert.match(result.stderr + result.stdout, /additional|rate_limite/i);
   } finally {
@@ -285,7 +282,7 @@ test('lint rejects unknown key inside routes[]', () => {
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0, 'expected lint to fail');
     assert.match(result.stderr + result.stdout, /additional|cache_control/i);
   } finally {
@@ -303,7 +300,7 @@ test('lint rejects origin.auth custom_header missing secret_env', () => {
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0, 'expected lint to fail');
     assert.match(result.stderr + result.stdout, /secret_env|required/i);
   } finally {
@@ -322,7 +319,7 @@ test('lint rejects origin.auth.secret_env not matching env-var convention', () =
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0, 'expected lint to fail');
     assert.match(result.stderr + result.stdout, /pattern|secret_env/i);
   } finally {
@@ -340,7 +337,7 @@ test('lint rejects origin.auth.custom_header missing header', () => {
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0, 'expected lint to fail');
     assert.match(result.stderr + result.stdout, /header|required/i);
   } finally {
@@ -359,7 +356,7 @@ test('lint accepts complete origin.auth.custom_header', () => {
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
-    const result = runLint(file);
+    const result: any = runLint(file);
     assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });

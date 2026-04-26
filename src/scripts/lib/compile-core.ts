@@ -1,4 +1,3 @@
-// @ts-nocheck
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
@@ -261,7 +260,7 @@ function validateJwksUrl(rawUrl, allowedHosts) {
   return { ok: true, hostname };
 }
 
-function validateAuthGates(policy, options = {}) {
+function validateAuthGates(policy, options: any = {}) {
   const exitOnError = options.exitOnError !== false;
   const logger = options.logger || console;
   const env = options.env || process.env;
@@ -342,14 +341,14 @@ function validateAuthGates(policy, options = {}) {
     process.exit(1);
   }
 
-  const error = new Error('Auth gate validation failed');
+  const error: any = new Error('Auth gate validation failed');
   error.validationErrors = errors;
   throw error;
 }
 
 const PLACEHOLDER_TOKEN = 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
 
-function getAuthGates(policy, options = {}) {
+function getAuthGates(policy, options: any = {}) {
   const env = options.env || process.env;
   const allowPlaceholderToken = options.allowPlaceholderToken === true;
   const routes = policy.routes || [];
@@ -363,7 +362,7 @@ function getAuthGates(policy, options = {}) {
     const prefixes = match.path_prefixes || [];
     const authType = gate.type || 'static_token';
 
-    const gateConfig = {
+    const gateConfig: any = {
       name: route.name || 'unnamed',
       protectedPrefixes: prefixes.length ? prefixes : ['/admin', '/docs', '/swagger'],
       type: authType,
@@ -423,7 +422,7 @@ function hasStrictOriginAuthFlag(argv) {
 // named by `secret_env` is present and non-empty in the build environment.
 // Called with { strict: true } under --strict-origin-auth and as a warning
 // otherwise, so dev builds keep working while CI can fail closed.
-function validateOriginAuth(policy, options = {}) {
+function validateOriginAuth(policy, options: any = {}) {
   const env = options.env || process.env;
   const strict = options.strict === true;
   const logger = options.logger || console;
@@ -453,7 +452,7 @@ function validateOriginAuth(policy, options = {}) {
   if (errors.length > 0 && strict) {
     logger.error('origin-auth validation failed (--strict-origin-auth):');
     errors.forEach((e) => logger.error('  - ' + e));
-    const err = new Error('origin-auth validation failed');
+    const err: any = new Error('origin-auth validation failed');
     err.validationErrors = errors;
     throw err;
   }
@@ -466,7 +465,7 @@ function validateOriginAuth(policy, options = {}) {
 // by application convention.
 const SIGNED_URL_WRITE_PATH_HINTS = ['/api/', '/write', '/admin', '/upload', '/delete'];
 
-function warnSignedUrlReplay(policy, options = {}) {
+function warnSignedUrlReplay(policy, options: any = {}) {
   const logger = options.logger || console;
   const routes = policy.routes || [];
   const warnings = [];
@@ -491,7 +490,7 @@ function warnSignedUrlReplay(policy, options = {}) {
   return { warned: true, warnings };
 }
 
-function warnIfPermissive(policy, options = {}) {
+function warnIfPermissive(policy, options: any = {}) {
   const failOnPermissive = options.failOnPermissive === true;
   const logger = options.logger || console;
   const risk = policy && policy.metadata && policy.metadata.risk_level;
@@ -530,7 +529,7 @@ function buildObsConfig(policy) {
   };
 }
 
-function build(policy, options = {}) {
+function build(policy, options: any = {}) {
   const rootDir = options.rootDir || repoRoot;
   const outDir = options.outDir || path.join(rootDir, 'dist');
   const env = options.env || process.env;

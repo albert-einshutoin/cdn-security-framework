@@ -1,8 +1,5 @@
 #!/usr/bin/env node
 "use strict";
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 /**
  * Runtime tests: run request cases against CloudFront Functions viewer-request handler
  * and Lambda@Edge origin-request handler, asserting expected status codes.
@@ -33,7 +30,7 @@ let originHandler;
 // Fall back to the documented placeholder only for --allow-placeholder-token builds.
 const DEFAULT_TOKEN = process.env.EDGE_ADMIN_TOKEN
     || 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
-function buildEvent(method, uri, headers, querystring) {
+function buildEvent(method, uri, headers = {}, querystring = '') {
     const h = headers || {};
     const cfHeaders = {};
     for (const [k, v] of Object.entries(h)) {
@@ -329,7 +326,7 @@ function createHS256Jwt(payload, secret) {
     return headerB64 + '.' + payloadB64 + '.' + sig;
 }
 // Build Lambda@Edge event format
-function buildLambdaEdgeEvent(uri, headers, querystring) {
+function buildLambdaEdgeEvent(uri, headers = {}, querystring = '') {
     const h = headers || {};
     const cfHeaders = {};
     for (const [k, v] of Object.entries(h)) {

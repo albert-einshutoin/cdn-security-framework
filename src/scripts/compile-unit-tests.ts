@@ -1,7 +1,4 @@
 #!/usr/bin/env node
-// @ts-nocheck
-// @ts-nocheck
-// @ts-nocheck
 
 const assert = require('assert');
 const fs = require('fs');
@@ -613,7 +610,7 @@ test('warnIfPermissive returns no-op when metadata.risk_level is not permissive'
 test('warnIfPermissive warns but does not fail when failOnPermissive is false', () => {
   const captured = [];
   const logger = { error: (msg) => captured.push(msg) };
-  const result = warnIfPermissive({ metadata: { risk_level: 'permissive' } }, { logger });
+  const result: any = warnIfPermissive({ metadata: { risk_level: 'permissive' } }, { logger });
   assert.deepStrictEqual(result, { warned: true, failed: false });
   assert.strictEqual(captured.length, 1);
   assert.match(captured[0], /metadata\.risk_level is "permissive"/);
@@ -623,7 +620,7 @@ test('warnIfPermissive warns but does not fail when failOnPermissive is false', 
 test('warnIfPermissive fails when failOnPermissive is true', () => {
   const captured = [];
   const logger = { error: (msg) => captured.push(msg) };
-  const result = warnIfPermissive(
+  const result: any = warnIfPermissive(
     { metadata: { risk_level: 'permissive' } },
     { logger, failOnPermissive: true },
   );
@@ -1133,7 +1130,7 @@ test('viewer-request enforces max_header_count with 431', () => {
     }, { outDir: tmpDir, allowPlaceholderToken: true });
     const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
     // Extract handler and invoke it in isolation via Function ctor
-    const sandbox = { handler: null };
+    const sandbox: any = { handler: null };
     const run = new Function('sandbox', code + '\nsandbox.handler = handler;');
     run(sandbox);
 
@@ -1309,7 +1306,7 @@ test('validateOriginAuth warns when secret_env is unset (non-strict)', () => {
   const policy = { origin: { auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'NONEXISTENT_FOR_TEST' } } };
   const warnings = [];
   const logger = { warn: (s) => warnings.push(String(s)), error: () => {} };
-  const result = validateOriginAuth(policy, { env: {}, strict: false, logger });
+  const result: any = validateOriginAuth(policy, { env: {}, strict: false, logger });
   assert.strictEqual(result.errors.length, 0);
   assert.ok(result.warnings.some((w) => /NONEXISTENT_FOR_TEST/.test(w)));
   assert.ok(warnings.some((w) => /origin-auth/.test(w)));
@@ -1330,14 +1327,14 @@ test('validateOriginAuth errors in strict mode when secret_env is empty string',
 test('validateOriginAuth passes when secret_env resolves to non-empty value', () => {
   const policy = { origin: { auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'MY_SECRET' } } };
   const logger = { warn: () => {}, error: () => {} };
-  const result = validateOriginAuth(policy, { env: { MY_SECRET: 's3cr3t' }, strict: true, logger });
+  const result: any = validateOriginAuth(policy, { env: { MY_SECRET: 's3cr3t' }, strict: true, logger });
   assert.strictEqual(result.errors.length, 0);
   assert.strictEqual(result.warnings.length, 0);
 });
 
 test('validateOriginAuth is a no-op when origin.auth is absent', () => {
   const logger = { warn: () => {}, error: () => {} };
-  const result = validateOriginAuth({}, { env: {}, strict: true, logger });
+  const result: any = validateOriginAuth({}, { env: {}, strict: true, logger });
   assert.strictEqual(result.errors.length, 0);
   assert.strictEqual(result.warnings.length, 0);
 });
