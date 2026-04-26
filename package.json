@@ -15,8 +15,9 @@
     "test:security-baseline": "node scripts/security-baseline-check.js",
     "test:fuzz": "node scripts/regex-fuzz-tests.js",
     "test:cloudflare-integration": "node scripts/cloudflare-integration-tests.js",
+    "test:edge-container": "node scripts/edge-container-attack-tests.js",
     "test:coverage": "c8 --reporter=text --reporter=lcov --include='scripts/**/*.js' --include='lib/**/*.js' --exclude='scripts/**/*-tests.js' --lines 80 --functions 75 --branches 70 npm run test:all",
-    "test:all": "npm run build && npm run test:unit && npm run test:runtime && npm run test:fuzz && npm run test:cloudflare-integration",
+    "test:all": "npm run build && npm run test:unit && npm run test:runtime && npm run test:fuzz && npm run test:cloudflare-integration && npm run test:edge-container",
     "fingerprints:candidates": "node scripts/fingerprint-candidates.js"
   },
   "keywords": [
