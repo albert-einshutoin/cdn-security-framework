@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-function test(name, fn) {
+function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
@@ -20,7 +20,7 @@ function test(name, fn) {
 const repoRoot = path.join(__dirname, '..');
 const scriptPath = path.join(repoRoot, 'scripts', 'fingerprint-candidates.js');
 
-function withJsonl(lines, fn) {
+function withJsonl(lines: string[], fn: (inputPath: string) => void) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'fingerprint-candidates-'));
   const inputPath = path.join(tempDir, 'waf-log.jsonl');
   fs.writeFileSync(inputPath, lines.join('\n') + '\n', 'utf8');
@@ -31,7 +31,7 @@ function withJsonl(lines, fn) {
   }
 }
 
-function runCandidates(inputPath, args = []) {
+function runCandidates(inputPath: string, args: string[] = []) {
   const stdout = execFileSync(
     process.execPath,
     [scriptPath, '--input', inputPath, ...args],
@@ -86,7 +86,7 @@ test('fingerprint-candidates applies min-count and top limits', () => {
 test('fingerprint-candidates prints usage and exits non-zero without input', () => {
   assert.throws(
     () => execFileSync(process.execPath, [scriptPath], { cwd: repoRoot, encoding: 'utf8', stdio: 'pipe' }),
-    (err) => {
+    (err: any) => {
       assert.strictEqual(err.status, 1);
       assert.match(String(err.stderr), /Usage: node scripts\/fingerprint-candidates\.js --input/);
       return true;

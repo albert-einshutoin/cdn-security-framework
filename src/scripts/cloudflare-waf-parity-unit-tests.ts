@@ -24,7 +24,7 @@ const parityLib = require(path.join(repoRoot, 'scripts', 'lib', 'cloudflare-waf-
 const generator = require(path.join(repoRoot, 'scripts', 'generate-parity-doc'));
 const compilerPath = path.join(repoRoot, 'scripts', 'compile-cloudflare-waf.js');
 
-function test(name, fn) {
+function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
@@ -35,7 +35,7 @@ function test(name, fn) {
   }
 }
 
-function tmpProject(policy) {
+function tmpProject(policy: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-parity-'));
   const policyPath = path.join(dir, 'policy.yml');
   fs.writeFileSync(policyPath, policy, 'utf8');
@@ -46,7 +46,7 @@ function tmpProject(policy) {
   };
 }
 
-function runCompiler(policyPath, outDir, extraArgs = []) {
+function runCompiler(policyPath: string, outDir: string, extraArgs: string[] = []) {
   return spawnSync(
     process.execPath,
     [compilerPath, '--policy', policyPath, '--out-dir', outDir, ...extraArgs],
@@ -220,7 +220,7 @@ test('compiler: unknown AWS managed rule treated as unsupported (disabled, warne
     assert.ok(/UNSUPPORTED: AWSManagedRulesTotallyFake/.test(r.stderr));
     const tf = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra', 'cloudflare-waf.tf.json'), 'utf8'));
     const managed = tf.resource.cloudflare_ruleset['parity-unit_managed'];
-    const rule = managed.rules.find((r) => /Fake/.test(r.description));
+    const rule = managed.rules.find((r: any) => /Fake/.test(r.description));
     assert.ok(rule, 'expected managed rule emitted');
     assert.strictEqual(rule.enabled, false);
   } finally {
@@ -237,7 +237,7 @@ test('compiler: untranslated scope_down emits parity warning and degrades expres
     assert.ok(/match-all/.test(r.stderr));
     const tf = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra', 'cloudflare-waf.tf.json'), 'utf8'));
     const rl = tf.resource.cloudflare_ruleset['parity-unit_ratelimit'];
-    const rule = rl.rules.find((r) => r.description === 'exact-match');
+    const rule = rl.rules.find((r: any) => r.description === 'exact-match');
     assert.strictEqual(rule.expression, 'true');
   } finally {
     ctx.cleanup();
@@ -254,7 +254,7 @@ test('compiler: expression_cloudflare override suppresses the scope_down warning
     assert.ok(!/scope_down_statement.*match-all/.test(r.stderr), `unexpected warning: ${r.stderr}`);
     const tf = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra', 'cloudflare-waf.tf.json'), 'utf8'));
     const rl = tf.resource.cloudflare_ruleset['parity-unit_ratelimit'];
-    const rule = rl.rules.find((r) => r.description === 'exact-match');
+    const rule = rl.rules.find((r: any) => r.description === 'exact-match');
     assert.strictEqual(rule.expression, 'http.request.uri.path eq "/login"');
   } finally {
     ctx.cleanup();

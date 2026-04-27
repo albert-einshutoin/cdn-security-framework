@@ -22,7 +22,7 @@ const {
   SCHEMA_CURRENT_VERSION,
 } = require('./cli-doctor.js');
 
-function test(name, fn) {
+function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
@@ -200,7 +200,7 @@ test('checkSchemaVersion: skip on null policyDoc', () => {
 // ---- checkEnvVars --------------------------------------------------------
 
 test('checkEnvVars: pass when policy references no env vars', () => {
-  const env = () => undefined;
+  const env = (): undefined => undefined;
   const r = checkEnvVars({ routes: [] }, env);
   assert.strictEqual(r.status, 'pass');
 });
@@ -209,7 +209,7 @@ test('checkEnvVars: fail when referenced env is missing', () => {
   const doc = {
     routes: [{ name: 'a', match: {}, auth_gate: { type: 'static_token', token_env: 'EDGE_ADMIN_TOKEN' } }],
   };
-  const r = checkEnvVars(doc, () => undefined);
+  const r = checkEnvVars(doc, (): undefined => undefined);
   assert.strictEqual(r.status, 'fail');
   assert.deepStrictEqual(r.missing, ['EDGE_ADMIN_TOKEN']);
 });
@@ -218,7 +218,7 @@ test('checkEnvVars: fail when referenced env is empty string', () => {
   const doc = {
     routes: [{ name: 'a', match: {}, auth_gate: { type: 'static_token', token_env: 'EDGE_ADMIN_TOKEN' } }],
   };
-  const r = checkEnvVars(doc, (name) => (name === 'EDGE_ADMIN_TOKEN' ? '' : undefined));
+  const r = checkEnvVars(doc, (name: string) => (name === 'EDGE_ADMIN_TOKEN' ? '' : undefined));
   assert.strictEqual(r.status, 'fail');
 });
 
@@ -227,7 +227,7 @@ test('checkEnvVars: pass when all referenced env vars are set', () => {
     routes: [{ name: 'a', match: {}, auth_gate: { type: 'jwt', algorithm: 'HS256', secret_env: 'JWT_SECRET' } }],
     origin: { auth: { type: 'custom_header', header: 'X', secret_env: 'ORIGIN_SECRET' } },
   };
-  const env = (name) => ({ JWT_SECRET: 'x', ORIGIN_SECRET: 'y' }[name]);
+  const env = (name: string) => ({ JWT_SECRET: 'x', ORIGIN_SECRET: 'y' } as Record<string, string>)[name];
   const r = checkEnvVars(doc, env);
   assert.strictEqual(r.status, 'pass');
   assert.deepStrictEqual(r.missing, []);
@@ -253,24 +253,24 @@ test('checkDistWritable: pass when cwd is writable', () => {
 // ---- checkDependencies ---------------------------------------------------
 
 test('checkDependencies: pass when npm ls has no problems', () => {
-  const fakeSpawn = () => ({ stdout: JSON.stringify({ problems: [] }) });
+  const fakeSpawn = (): { stdout: string } => ({ stdout: JSON.stringify({ problems: [] }) });
   assert.strictEqual(checkDependencies('/tmp', fakeSpawn).status, 'pass');
 });
 
 test('checkDependencies: fail when npm ls reports problems', () => {
-  const fakeSpawn = () => ({
+  const fakeSpawn = (): { stdout: string } => ({
     stdout: JSON.stringify({ problems: ['missing: ajv@^8.0.0, required by cdn-security-framework@1.0.0'] }),
   });
   assert.strictEqual(checkDependencies('/tmp', fakeSpawn).status, 'fail');
 });
 
 test('checkDependencies: warn when npm is absent / empty stdout', () => {
-  const fakeSpawn = () => ({ stdout: '' });
+  const fakeSpawn = (): { stdout: string } => ({ stdout: '' });
   assert.strictEqual(checkDependencies('/tmp', fakeSpawn).status, 'warn');
 });
 
 test('checkDependencies: warn when npm output is not valid JSON', () => {
-  const fakeSpawn = () => ({ stdout: 'not json' });
+  const fakeSpawn = (): { stdout: string } => ({ stdout: 'not json' });
   assert.strictEqual(checkDependencies('/tmp', fakeSpawn).status, 'warn');
 });
 
@@ -332,14 +332,14 @@ routes:
   const result: any = runDoctor({
     cwd: tmp,
     pkgRoot: repoRoot,
-    envProvider: (n) => (n === 'ADMIN_TOKEN_FOR_TEST' ? 'ci-test' : undefined),
-    spawnSync: () => ({ stdout: JSON.stringify({ problems: [] }) }),
+    envProvider: (n: string) => (n === 'ADMIN_TOKEN_FOR_TEST' ? 'ci-test' : undefined),
+    spawnSync: (): { stdout: string } => ({ stdout: JSON.stringify({ problems: [] }) }),
     log: false,
     reportPath: 'doctor-report.json',
   });
   try {
     assert.strictEqual(result.exitCode, 0);
-    const envCheck = result.report.checks.find((c) => c.name === 'env_vars_referenced_by_policy');
+    const envCheck = result.report.checks.find((c: any) => c.name === 'env_vars_referenced_by_policy');
     assert.strictEqual(envCheck.status, 'pass');
     const written = JSON.parse(fs.readFileSync(path.join(tmp, 'doctor-report.json'), 'utf8'));
     assert.strictEqual(written.exitCode, 0);
@@ -365,14 +365,14 @@ routes:
   const result: any = runDoctor({
     cwd: tmp,
     pkgRoot: repoRoot,
-    envProvider: () => undefined,
-    spawnSync: () => ({ stdout: JSON.stringify({ problems: [] }) }),
+    envProvider: (): undefined => undefined,
+    spawnSync: (): { stdout: string } => ({ stdout: JSON.stringify({ problems: [] }) }),
     log: false,
     reportPath: null,
   });
   try {
     assert.strictEqual(result.exitCode, 1);
-    const envCheck = result.report.checks.find((c) => c.name === 'env_vars_referenced_by_policy');
+    const envCheck = result.report.checks.find((c: any) => c.name === 'env_vars_referenced_by_policy');
     assert.strictEqual(envCheck.status, 'fail');
     assert.deepStrictEqual(envCheck.missing, ['MISSING_JWT_SECRET_XYZ']);
   } finally {
@@ -385,16 +385,16 @@ test('runDoctor: fails when policy is missing', () => {
   const result: any = runDoctor({
     cwd: tmp,
     pkgRoot: repoRoot,
-    envProvider: () => undefined,
-    spawnSync: () => ({ stdout: JSON.stringify({ problems: [] }) }),
+    envProvider: (): undefined => undefined,
+    spawnSync: (): { stdout: string } => ({ stdout: JSON.stringify({ problems: [] }) }),
     log: false,
     reportPath: null,
   });
   try {
     assert.strictEqual(result.exitCode, 1);
-    const existsCheck = result.report.checks.find((c) => c.name === 'policy_exists');
+    const existsCheck = result.report.checks.find((c: any) => c.name === 'policy_exists');
     assert.strictEqual(existsCheck.status, 'fail');
-    const parseCheck = result.report.checks.find((c) => c.name === 'policy_parses');
+    const parseCheck = result.report.checks.find((c: any) => c.name === 'policy_parses');
     assert.strictEqual(parseCheck.status, 'skip');
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -408,8 +408,8 @@ test('runDoctor: reportPath: null skips file write', () => {
   const result: any = runDoctor({
     cwd: tmp,
     pkgRoot: repoRoot,
-    envProvider: () => undefined,
-    spawnSync: () => ({ stdout: JSON.stringify({ problems: [] }) }),
+    envProvider: (): undefined => undefined,
+    spawnSync: (): { stdout: string } => ({ stdout: JSON.stringify({ problems: [] }) }),
     log: false,
     reportPath: null,
   });

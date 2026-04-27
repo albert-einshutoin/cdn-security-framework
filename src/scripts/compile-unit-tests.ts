@@ -20,7 +20,7 @@ const {
   validateOriginAuth,
 } = require('./lib/compile-core');
 
-function test(name, fn) {
+function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
@@ -31,7 +31,7 @@ function test(name, fn) {
   }
 }
 
-function withEnv(key, value, fn) {
+function withEnv(key: string, value: string | undefined, fn: () => void) {
   const prev = process.env[key];
   if (value === undefined) {
     delete process.env[key];
@@ -62,7 +62,7 @@ test('parsePathPatterns expands known legacy regex entries as contains (lowercas
   assert.ok(contains.includes('..'));
   assert.ok(contains.includes('%2e%2e'));
   // Runtime lowercases the URI before `includes()`, so we only need the lower form.
-  assert.ok(contains.every((c) => c === c.toLowerCase()));
+  assert.ok(contains.every((c: string) => c === c.toLowerCase()));
   assert.deepStrictEqual(regexSources, []);
 });
 
@@ -150,7 +150,7 @@ test('parsePathPatterns lowercases contains entries so uppercase policy survives
 
   const fromLegacy = parsePathPatterns(['/INTERNAL/', '(?i)\\.{2}/']);
   assert.ok(fromLegacy.contains.includes('/internal/'), 'plain upper entry normalized');
-  assert.ok(fromLegacy.contains.every((c) => c === c.toLowerCase()), 'mapped entries normalized');
+  assert.ok(fromLegacy.contains.every((c: string) => c === c.toLowerCase()), 'mapped entries normalized');
 });
 
 test('regexesLiteralCode emits real RegExp literals with flags', () => {
@@ -284,11 +284,11 @@ test('validateAuthGates reports missing required auth fields', () => {
 
   assert.throws(
     () => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }),
-    (err) => Array.isArray(err.validationErrors)
+    (err: any) => Array.isArray(err.validationErrors)
       && err.validationErrors.length === 3
-      && err.validationErrors.some((e) => e.includes('broken-rs'))
-      && err.validationErrors.some((e) => e.includes('broken-hs'))
-      && err.validationErrors.some((e) => e.includes('broken-signed')),
+      && err.validationErrors.some((e: string) => e.includes('broken-rs'))
+      && err.validationErrors.some((e: string) => e.includes('broken-hs'))
+      && err.validationErrors.some((e: string) => e.includes('broken-signed')),
   );
 });
 
@@ -300,8 +300,8 @@ test('validateAuthGates reports missing static_token env at build time', () => {
 
     assert.throws(
       () => validateAuthGates(policy, { exitOnError: false }),
-      (err) => Array.isArray(err.validationErrors)
-        && err.validationErrors.some((e) => e.includes('EDGE_ADMIN_TOKEN')),
+      (err: any) => Array.isArray(err.validationErrors)
+        && err.validationErrors.some((e: string) => e.includes('EDGE_ADMIN_TOKEN')),
     );
   });
 });
@@ -594,8 +594,8 @@ test('hasFailOnPermissiveFlag detects the flag', () => {
 });
 
 test('warnIfPermissive returns no-op when metadata.risk_level is not permissive', () => {
-  const captured = [];
-  const logger = { error: (msg) => captured.push(msg) };
+  const captured: string[] = [];
+  const logger = { error: (msg: string) => captured.push(msg) };
   const r1 = warnIfPermissive({}, { logger });
   const r2 = warnIfPermissive({ metadata: { risk_level: 'strict' } }, { logger });
   const r3 = warnIfPermissive({ metadata: { risk_level: 'balanced' } }, { logger });
@@ -608,8 +608,8 @@ test('warnIfPermissive returns no-op when metadata.risk_level is not permissive'
 });
 
 test('warnIfPermissive warns but does not fail when failOnPermissive is false', () => {
-  const captured = [];
-  const logger = { error: (msg) => captured.push(msg) };
+  const captured: string[] = [];
+  const logger = { error: (msg: string) => captured.push(msg) };
   const result: any = warnIfPermissive({ metadata: { risk_level: 'permissive' } }, { logger });
   assert.deepStrictEqual(result, { warned: true, failed: false });
   assert.strictEqual(captured.length, 1);
@@ -618,8 +618,8 @@ test('warnIfPermissive warns but does not fail when failOnPermissive is false', 
 });
 
 test('warnIfPermissive fails when failOnPermissive is true', () => {
-  const captured = [];
-  const logger = { error: (msg) => captured.push(msg) };
+  const captured: string[] = [];
+  const logger = { error: (msg: string) => captured.push(msg) };
   const result: any = warnIfPermissive(
     { metadata: { risk_level: 'permissive' } },
     { logger, failOnPermissive: true },
@@ -695,8 +695,8 @@ test('validateAuthGates rejects jwks_url in private/loopback ranges', () => {
   };
   assert.throws(
     () => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }),
-    (err) => Array.isArray(err.validationErrors)
-      && err.validationErrors.some((e) => /metadata-ssrf/.test(e) && /private\/loopback/.test(e)),
+    (err: any) => Array.isArray(err.validationErrors)
+      && err.validationErrors.some((e: string) => /metadata-ssrf/.test(e) && /private\/loopback/.test(e)),
   );
 });
 
@@ -712,8 +712,8 @@ test('validateAuthGates rejects jwks_url outside firewall.jwks.allowed_hosts', (
   };
   assert.throws(
     () => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }),
-    (err) => Array.isArray(err.validationErrors)
-      && err.validationErrors.some((e) => /wrong-idp/.test(e) && /allowed_hosts/.test(e)),
+    (err: any) => Array.isArray(err.validationErrors)
+      && err.validationErrors.some((e: string) => /wrong-idp/.test(e) && /allowed_hosts/.test(e)),
   );
 });
 
@@ -731,8 +731,8 @@ test('validateAuthGates accepts jwks_url on allowed_hosts (case-insensitive)', (
 });
 
 test('warnSignedUrlReplay flags write-like signed_url gates missing nonce_param', () => {
-  const captured = [];
-  const logger = { error: (m) => captured.push(m) };
+  const captured: string[] = [];
+  const logger = { error: (m: string) => captured.push(m) };
   const policy = {
     routes: [
       {
@@ -750,8 +750,8 @@ test('warnSignedUrlReplay flags write-like signed_url gates missing nonce_param'
 });
 
 test('warnSignedUrlReplay stays silent for read-only paths', () => {
-  const captured = [];
-  const logger = { error: (m) => captured.push(m) };
+  const captured: string[] = [];
+  const logger = { error: (m: string) => captured.push(m) };
   const policy = {
     routes: [
       {
@@ -767,8 +767,8 @@ test('warnSignedUrlReplay stays silent for read-only paths', () => {
 });
 
 test('warnSignedUrlReplay stays silent when nonce_param is set', () => {
-  const captured = [];
-  const logger = { error: (m) => captured.push(m) };
+  const captured: string[] = [];
+  const logger = { error: (m: string) => captured.push(m) };
   const policy = {
     routes: [
       {
@@ -1049,7 +1049,7 @@ test('response_headers: emits COOP/COEP/CORP/Reporting-Endpoints when configured
         corp: 'same-origin',
         reporting_endpoints: 'csp="https://r.example.com/csp"',
       },
-      routes: [],
+      routes: [] as any[],
     };
     build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
     const resp = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
@@ -1073,7 +1073,7 @@ test('response_headers: csp_nonce=true emits substitution hook and Report-Only c
         csp_public: "default-src 'self'; script-src 'self' 'nonce-PLACEHOLDER'",
         csp_report_only: "default-src 'self'; report-to csp",
       },
-      routes: [],
+      routes: [] as any[],
     };
     build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
     const resp = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
@@ -1090,7 +1090,7 @@ test('response_headers: csp_nonce=true emits substitution hook and Report-Only c
 test('request.limits.max_header_count defaults to 64 and is clamped to 1..500', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-hc-'));
   try {
-    const base = { version: 1, request: { allow_methods: ['GET'] }, response_headers: {}, routes: [] };
+    const base = { version: 1, request: { allow_methods: ['GET'] }, response_headers: {}, routes: [] as any[] };
 
     // Default
     build(base, { outDir: tmpDir, allowPlaceholderToken: true });
@@ -1274,9 +1274,9 @@ test('viewer-request: structured JSON block log includes status, block_reason, u
     }, { outDir: tmpDir, allowPlaceholderToken: true });
     const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
 
-    const captured = [];
+    const captured: string[] = [];
     const origLog = console.log;
-    console.log = (line) => { captured.push(String(line)); };
+    console.log = (line: any) => { captured.push(String(line)); };
     let handler;
     try {
       // Evaluate compiled CFF function and capture its handler.
@@ -1288,7 +1288,7 @@ test('viewer-request: structured JSON block log includes status, block_reason, u
       console.log = origLog;
     }
 
-    const jsonLine = captured.find((l) => l.indexOf('"event":"block"') !== -1);
+    const jsonLine = captured.find((l: string) => l.indexOf('"event":"block"') !== -1);
     assert.ok(jsonLine, 'expected a block JSON log; got: ' + captured.join('\n'));
     const parsed = JSON.parse(jsonLine);
     assert.strictEqual(parsed.event, 'block');
@@ -1304,12 +1304,12 @@ test('viewer-request: structured JSON block log includes status, block_reason, u
 
 test('validateOriginAuth warns when secret_env is unset (non-strict)', () => {
   const policy = { origin: { auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'NONEXISTENT_FOR_TEST' } } };
-  const warnings = [];
-  const logger = { warn: (s) => warnings.push(String(s)), error: () => {} };
+  const warnings: string[] = [];
+  const logger = { warn: (s: string) => warnings.push(String(s)), error: () => {} };
   const result: any = validateOriginAuth(policy, { env: {}, strict: false, logger });
   assert.strictEqual(result.errors.length, 0);
-  assert.ok(result.warnings.some((w) => /NONEXISTENT_FOR_TEST/.test(w)));
-  assert.ok(warnings.some((w) => /origin-auth/.test(w)));
+  assert.ok(result.warnings.some((w: string) => /NONEXISTENT_FOR_TEST/.test(w)));
+  assert.ok(warnings.some((w: string) => /origin-auth/.test(w)));
 });
 
 test('validateOriginAuth errors in strict mode when secret_env is unset', () => {
