@@ -10,6 +10,7 @@
     "build:ts": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:lib-strict": "tsc --ignoreConfig --noEmit --target ES2022 --module CommonJS --moduleResolution Node --moduleDetection force --ignoreDeprecations 6.0 --esModuleInterop --resolveJsonModule --types node --strict true --noImplicitAny true --strictNullChecks false --useUnknownInCatchVariables true src/lib/*.ts",
+    "typecheck:scripts-lib-strict": "tsc --ignoreConfig --noEmit --target ES2022 --module CommonJS --moduleResolution Node --moduleDetection force --ignoreDeprecations 6.0 --esModuleInterop --resolveJsonModule --types node --strict true --noImplicitAny true --strictNullChecks false --useUnknownInCatchVariables true src/scripts/lib/*.ts",
     "build": "npm run build:ts && node scripts/compile.js",
     "lint:policy": "npm run build:ts && node scripts/policy-lint.js",
     "test:api-contract": "npm run build:ts && node scripts/api-contract-tests.js",
@@ -21,7 +22,7 @@
     "test:cloudflare-integration": "npm run build:ts && node scripts/cloudflare-integration-tests.js",
     "test:edge-container": "npm run build:ts && node scripts/edge-container-attack-tests.js",
     "test:coverage": "c8 --reporter=text --reporter=lcov --include='scripts/**/*.js' --include='lib/**/*.js' --exclude='scripts/**/*-tests.js' --lines 80 --functions 75 --branches 70 npm run test:all",
-    "test:all": "npm run build && npm run typecheck:lib-strict && npm run test:api-contract && npm run test:unit && npm run test:runtime && npm run test:fuzz && npm run test:cloudflare-integration && npm run test:edge-container",
+    "test:all": "npm run build && npm run typecheck:lib-strict && npm run typecheck:scripts-lib-strict && npm run test:api-contract && npm run test:unit && npm run test:runtime && npm run test:fuzz && npm run test:cloudflare-integration && npm run test:edge-container",
     "fingerprints:candidates": "npm run build:ts && node scripts/fingerprint-candidates.js"
   },
   "keywords": [

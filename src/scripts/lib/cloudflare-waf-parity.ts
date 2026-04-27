@@ -23,7 +23,21 @@
 
 'use strict';
 
-const MANAGED_RULES = [
+interface CloudflareParityTarget {
+  rulesetId: string | null;
+  rulesetName: string | null;
+  docUrl: string | null;
+}
+
+interface ManagedRuleParityEntry {
+  aws: string;
+  status: 'equivalent' | 'approximate' | 'unsupported';
+  cloudflare: CloudflareParityTarget;
+  rationale: string;
+  lastVerified: string | null;
+}
+
+const MANAGED_RULES: ManagedRuleParityEntry[] = [
   {
     aws: 'AWSManagedRulesCommonRuleSet',
     status: 'equivalent',
@@ -172,9 +186,9 @@ const LOGGING_FEATURES = [
   },
 ];
 
-const MANAGED_RULES_INDEX = Object.fromEntries(MANAGED_RULES.map((e) => [e.aws, e]));
+const MANAGED_RULES_INDEX: Record<string, ManagedRuleParityEntry> = Object.fromEntries(MANAGED_RULES.map((e) => [e.aws, e]));
 
-function classifyManagedRule(awsRuleName) {
+function classifyManagedRule(awsRuleName: string): ManagedRuleParityEntry {
   if (Object.prototype.hasOwnProperty.call(MANAGED_RULES_INDEX, awsRuleName)) {
     return MANAGED_RULES_INDEX[awsRuleName];
   }
@@ -188,7 +202,7 @@ function classifyManagedRule(awsRuleName) {
   };
 }
 
-function formatManagedRuleWarning(entry) {
+function formatManagedRuleWarning(entry: ManagedRuleParityEntry): string | null {
   const target = entry.cloudflare.rulesetName
     ? `${entry.cloudflare.rulesetName}${entry.cloudflare.rulesetId ? ` (id: ${entry.cloudflare.rulesetId})` : ''}`
     : '(no Cloudflare target)';

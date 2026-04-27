@@ -8,9 +8,9 @@ const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
 const LEGACY_KNOWN_MAP = {
   '(?i)\\.{2}/': { contains: ['/../', '..'] },
   '(?i)%2e%2e': { contains: ['%2e%2e'] },
-};
+} as Record<string, { contains?: string[]; regex?: string[] }>;
 
-function parseArgs(argv, rootDir = repoRoot) {
+function parseArgs(argv: string[], rootDir = repoRoot) {
   const securityPath = path.join(rootDir, 'policy', 'security.yml');
   const basePath = path.join(rootDir, 'policy', 'base.yml');
   let policyPath = fs.existsSync(securityPath) ? securityPath : basePath;
@@ -33,12 +33,12 @@ function parseArgs(argv, rootDir = repoRoot) {
   return { policyPath, outDir };
 }
 
-function loadPolicy(policyPath) {
+function loadPolicy(policyPath: string) {
   const content = fs.readFileSync(policyPath, 'utf8');
   return yaml.load(content);
 }
 
-function extractRegex(source) {
+function extractRegex(source: string) {
   // Convert `(?i)...` to { pattern: '...', flags: 'i' }; else use the source as pattern.
   if (typeof source !== 'string') {
     throw new Error('Regex source must be a string');
@@ -53,7 +53,7 @@ function extractRegex(source) {
   return { pattern: trimmed, flags: '' };
 }
 
-function compileRegexOrThrow(source, context) {
+function compileRegexOrThrow(source: string, context: string) {
   const { pattern, flags } = extractRegex(source);
   try {
     return new RegExp(pattern, flags);
@@ -68,7 +68,7 @@ function compileRegexOrThrow(source, context) {
 // project needs stacked quantifiers, so false positives cost us nothing while
 // false negatives would ship a runtime DoS to the edge. Paired with the
 // runtime timeout fuzz in scripts/regex-fuzz-tests.js for defense in depth.
-function hasCatastrophicBacktrackShape(src) {
+function hasCatastrophicBacktrackShape(src: string) {
   if (typeof src !== 'string' || src.length === 0) return false;
   // Strip the optional `(?i)` etc. inline-flag prefix so the heuristic sees
   // the same pattern body the engine will.
@@ -77,12 +77,12 @@ function hasCatastrophicBacktrackShape(src) {
   return nested.test(body);
 }
 
-function looksLikeRegex(s) {
+function looksLikeRegex(s: string) {
   // Heuristic: presence of common regex metacharacters suggests a regex intent.
   return /[\\(){}\[\]|^$+?*]|\.\{|\\\\/.test(s);
 }
 
-function parsePathPatterns(pathPatterns) {
+function parsePathPatterns(pathPatterns: any) {
   // Returns { contains: string[], regexSources: string[] } with strict validation.
   if (pathPatterns === undefined || pathPatterns === null) {
     return { contains: DEFAULT_CONTAINS.slice(), regexSources: [] };
@@ -93,8 +93,8 @@ function parsePathPatterns(pathPatterns) {
     // (expanded via LEGACY_KNOWN_MAP) or a plain substring (treated as contains).
     // Anything that looks like an unknown regex is rejected to avoid silent
     // downgrade to substring semantics.
-    const contains = new Set();
-    const regexSources = [];
+    const contains = new Set<string>();
+    const regexSources: string[] = [];
     for (const raw of pathPatterns) {
       const s = (raw || '').trim();
       if (!s) continue;
@@ -102,8 +102,8 @@ function parsePathPatterns(pathPatterns) {
       if (mapped) {
         // Runtime lowercases the URI before `includes()`, so contains entries
         // must also be lowercase or they never match.
-        if (mapped.contains) mapped.contains.forEach((m) => contains.add(m.toLowerCase()));
-        if (mapped.regex) mapped.regex.forEach((m) => regexSources.push(m));
+        if (mapped.contains) mapped.contains.forEach((m: string) => contains.add(m.toLowerCase()));
+        if (mapped.regex) mapped.regex.forEach((m: string) => regexSources.push(m));
         continue;
       }
       if (looksLikeRegex(s)) {
@@ -127,7 +127,7 @@ function parsePathPatterns(pathPatterns) {
     // Reject regex-looking entries under `contains` to prevent silent downgrade
     // where a user accidentally puts a regex literal under `contains` and it
     // becomes a substring match that never fires.
-    const contains = [];
+    const contains: string[] = [];
     for (const raw of rawContains) {
       const s = typeof raw === 'string' ? raw.trim() : '';
       if (!s) continue;
@@ -165,10 +165,10 @@ function parsePathPatterns(pathPatterns) {
   throw new Error('request.block.path_patterns must be an array or an object with contains/regex');
 }
 
-function regexesLiteralCode(regexSources) {
+function regexesLiteralCode(regexSources: string[]) {
   // Emit real RegExp literals in generated JS so runtime avoids `new RegExp` at request time.
   if (regexSources.length === 0) return '[]';
-  const literals = regexSources.map((src) => {
+  const literals = regexSources.map((src: string) => {
     const re = compileRegexOrThrow(src, 'request.block.path_patterns.regex');
     return re.toString();
   });
@@ -187,7 +187,7 @@ const JWKS_DISALLOWED_HOSTNAMES = new Set([
   'broadcasthost',
 ]);
 
-function isPrivateIPv4Literal(hostname) {
+function isPrivateIPv4Literal(hostname: string) {
   const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
   if (!m) return false;
   const octets = m.slice(1, 5).map(Number);
@@ -204,7 +204,7 @@ function isPrivateIPv4Literal(hostname) {
   return false;
 }
 
-function isPrivateIPv6Literal(hostname) {
+function isPrivateIPv6Literal(hostname: string) {
   const h = hostname.startsWith('[') && hostname.endsWith(']')
     ? hostname.slice(1, -1).toLowerCase()
     : hostname.toLowerCase();
@@ -220,7 +220,7 @@ function isPrivateIPv6Literal(hostname) {
   return false;
 }
 
-function validateJwksUrl(rawUrl, allowedHosts) {
+function validateJwksUrl(rawUrl: string, allowedHosts: any) {
   if (typeof rawUrl !== 'string' || rawUrl.trim() === '') {
     return { ok: false, reason: 'jwks_url is empty' };
   }
@@ -260,13 +260,13 @@ function validateJwksUrl(rawUrl, allowedHosts) {
   return { ok: true, hostname };
 }
 
-function validateAuthGates(policy, options: any = {}) {
+function validateAuthGates(policy: any, options: any = {}) {
   const exitOnError = options.exitOnError !== false;
   const logger = options.logger || console;
   const env = options.env || process.env;
   const allowPlaceholderToken = options.allowPlaceholderToken === true;
   const routes = policy.routes || [];
-  const errors = [];
+  const errors: string[] = [];
   const jwksAllowedHosts = ((policy.firewall || {}).jwks || {}).allowed_hosts;
 
   for (const route of routes) {
@@ -295,7 +295,7 @@ function validateAuthGates(policy, options: any = {}) {
       // at build time rather than ship a config that never authenticates.
       if (Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0) {
         const extras = gate.allowed_algorithms.filter(
-          (a) => typeof a === 'string' && a !== 'none' && a !== alg,
+          (a: any) => typeof a === 'string' && a !== 'none' && a !== alg,
         );
         if (extras.length > 0) {
           errors.push(
@@ -348,11 +348,11 @@ function validateAuthGates(policy, options: any = {}) {
 
 const PLACEHOLDER_TOKEN = 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
 
-function getAuthGates(policy, options: any = {}) {
+function getAuthGates(policy: any, options: any = {}) {
   const env = options.env || process.env;
   const allowPlaceholderToken = options.allowPlaceholderToken === true;
   const routes = policy.routes || [];
-  const gates = [];
+  const gates: any[] = [];
 
   for (const route of routes) {
     const gate = route.auth_gate;
@@ -406,15 +406,15 @@ function getAuthGates(policy, options: any = {}) {
   return gates;
 }
 
-function hasAllowPlaceholderFlag(argv) {
+function hasAllowPlaceholderFlag(argv: string[]) {
   return Array.isArray(argv) && argv.includes('--allow-placeholder-token');
 }
 
-function hasFailOnPermissiveFlag(argv) {
+function hasFailOnPermissiveFlag(argv: string[]) {
   return Array.isArray(argv) && argv.includes('--fail-on-permissive');
 }
 
-function hasStrictOriginAuthFlag(argv) {
+function hasStrictOriginAuthFlag(argv: string[]) {
   return Array.isArray(argv) && argv.includes('--strict-origin-auth');
 }
 
@@ -422,7 +422,7 @@ function hasStrictOriginAuthFlag(argv) {
 // named by `secret_env` is present and non-empty in the build environment.
 // Called with { strict: true } under --strict-origin-auth and as a warning
 // otherwise, so dev builds keep working while CI can fail closed.
-function validateOriginAuth(policy, options: any = {}) {
+function validateOriginAuth(policy: any, options: any = {}) {
   const env = options.env || process.env;
   const strict = options.strict === true;
   const logger = options.logger || console;
@@ -430,8 +430,8 @@ function validateOriginAuth(policy, options: any = {}) {
   const auth = policy && policy.origin && policy.origin.auth;
   if (!auth || auth.type !== 'custom_header') return { warnings: [], errors: [] };
 
-  const warnings = [];
-  const errors = [];
+  const warnings: string[] = [];
+  const errors: string[] = [];
   const envName = auth.secret_env || '';
   if (!envName) {
     errors.push('origin.auth.secret_env is required when type=custom_header');
@@ -465,17 +465,17 @@ function validateOriginAuth(policy, options: any = {}) {
 // by application convention.
 const SIGNED_URL_WRITE_PATH_HINTS = ['/api/', '/write', '/admin', '/upload', '/delete'];
 
-function warnSignedUrlReplay(policy, options: any = {}) {
+function warnSignedUrlReplay(policy: any, options: any = {}) {
   const logger = options.logger || console;
   const routes = policy.routes || [];
-  const warnings = [];
+  const warnings: string[] = [];
   for (const route of routes) {
     const gate = route.auth_gate;
     if (!gate || gate.type !== 'signed_url') continue;
     if (gate.nonce_param && typeof gate.nonce_param === 'string' && gate.nonce_param.trim()) continue;
     const match = route.match || {};
     const prefixes = match.path_prefixes || [];
-    const writeLike = prefixes.find((p) =>
+    const writeLike = prefixes.find((p: string) =>
       SIGNED_URL_WRITE_PATH_HINTS.some((hint) => p.toLowerCase().includes(hint)),
     );
     if (writeLike) {
@@ -490,7 +490,7 @@ function warnSignedUrlReplay(policy, options: any = {}) {
   return { warned: true, warnings };
 }
 
-function warnIfPermissive(policy, options: any = {}) {
+function warnIfPermissive(policy: any, options: any = {}) {
   const failOnPermissive = options.failOnPermissive === true;
   const logger = options.logger || console;
   const risk = policy && policy.metadata && policy.metadata.risk_level;
@@ -511,7 +511,7 @@ function warnIfPermissive(policy, options: any = {}) {
 // Normalize observability config for injection into edge CFG objects.
 // Kept next to the compiler so every target (CFF / Lambda@Edge / Worker)
 // sees identical defaults and casing.
-function buildObsConfig(policy) {
+function buildObsConfig(policy: any) {
   const obs = (policy && policy.observability) || {};
   const format = obs.log_format === 'text' ? 'text' : 'json';
   const correlationHeader = typeof obs.correlation_id_header === 'string' && obs.correlation_id_header.trim()
@@ -529,7 +529,7 @@ function buildObsConfig(policy) {
   };
 }
 
-function build(policy, options: any = {}) {
+function build(policy: any, options: any = {}) {
   const rootDir = options.rootDir || repoRoot;
   const outDir = options.outDir || path.join(rootDir, 'dist');
   const env = options.env || process.env;
@@ -554,7 +554,7 @@ function build(policy, options: any = {}) {
   // Host header value without per-request normalization.
   const rawAllowedHosts = Array.isArray(request.allowed_hosts) ? request.allowed_hosts : [];
   const allowedHosts = rawAllowedHosts
-    .map((h) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
+    .map((h: any) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
     .filter(Boolean);
   const trustForwardedFor = request.trust_forwarded_for === true;
 
@@ -637,7 +637,7 @@ function build(policy, options: any = {}) {
     `  forceVaryAuth: ${forceVaryAuth ? 'true' : 'false'},`,
     `  clearSiteDataPaths: ${JSON.stringify(
       Array.isArray(resHeaders.clear_site_data_paths)
-        ? resHeaders.clear_site_data_paths.filter((s) => typeof s === 'string' && s.trim())
+        ? resHeaders.clear_site_data_paths.filter((s: any) => typeof s === 'string' && s.trim())
         : []
     )},`,
     `  clearSiteDataTypes: ${JSON.stringify(
@@ -657,7 +657,7 @@ function build(policy, options: any = {}) {
   fs.writeFileSync(outPathResponse, codeResponse, 'utf8');
 
   const jwtGates = authGates.filter((g) => g.type === 'jwt').map((g) => {
-    const route = (policy.routes || []).find((r) => r.name === g.name);
+    const route = (policy.routes || []).find((r: any) => r.name === g.name);
     const gate = route?.auth_gate || {};
     const algorithm = gate.algorithm || 'RS256';
     // Runtime has only one verifier per gate (RS256 or HS256), so the emitted
@@ -666,7 +666,7 @@ function build(policy, options: any = {}) {
     // values out at runtime too), but cross-alg entries are rejected at build
     // time in `validateAuthGates` to avoid a silent auth outage.
     const userAllowed = Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0
-      ? gate.allowed_algorithms.filter((a) => typeof a === 'string' && a !== 'none' && a === algorithm)
+      ? gate.allowed_algorithms.filter((a: any) => typeof a === 'string' && a !== 'none' && a === algorithm)
       : null;
     const allowedAlgorithms = userAllowed && userAllowed.length > 0 ? userAllowed : [algorithm];
     const clockSkewSec = Number.isFinite(Number(gate.clock_skew_sec))
@@ -687,7 +687,7 @@ function build(policy, options: any = {}) {
   });
 
   const signedUrlGates = authGates.filter((g) => g.type === 'signed_url').map((g) => {
-    const route = (policy.routes || []).find((r) => r.name === g.name);
+    const route = (policy.routes || []).find((r: any) => r.name === g.name);
     const gate = route?.auth_gate || {};
     return {
       name: g.name,
@@ -739,7 +739,7 @@ function build(policy, options: any = {}) {
   return [outPath, outPathResponse, outPathOrigin];
 }
 
-function main(argv = process.argv.slice(2)) {
+function main(argv: string[] = process.argv.slice(2)) {
   const { policyPath, outDir } = parseArgs(argv, repoRoot);
   const allowPlaceholderToken = hasAllowPlaceholderFlag(argv);
   const failOnPermissive = hasFailOnPermissiveFlag(argv);
