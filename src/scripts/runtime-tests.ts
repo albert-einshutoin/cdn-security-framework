@@ -19,7 +19,7 @@ const viewerRequestPath = path.join(__dirname, '..', 'dist', 'edge', 'viewer-req
 let code;
 try {
   code = fs.readFileSync(viewerRequestPath, 'utf8');
-} catch (e) {
+} catch (e: any) {
   console.error('Could not read dist/edge/viewer-request.js. Run: npm run build');
   process.exit(1);
 }
@@ -236,7 +236,7 @@ function compileViewerTemplate(cfgCode) {
   let vrCode;
   try {
     vrCode = fs.readFileSync(templatePath, 'utf8');
-  } catch (e) {
+  } catch (e: any) {
     console.error('Could not read templates/aws/viewer-request.js');
     return null;
   }
@@ -246,7 +246,7 @@ function compileViewerTemplate(cfgCode) {
   const wrappedCode = '(function() {\n' + vrCode + '\nreturn handler;\n})()';
   try {
     return eval(wrappedCode);
-  } catch (e) {
+  } catch (e: any) {
     console.error('Failed to eval viewer-request template:', e.message);
     return null;
   }
@@ -391,7 +391,7 @@ function compileOriginTemplate(cfgCode) {
   let originCode;
   try {
     originCode = fs.readFileSync(templatePath, 'utf8');
-  } catch (e) {
+  } catch (e: any) {
     console.error('Could not read templates/aws/origin-request.js');
     return null;
   }
@@ -409,7 +409,7 @@ function compileOriginTemplate(cfgCode) {
 
   try {
     return eval(wrappedCode);
-  } catch (e) {
+  } catch (e: any) {
     console.error('Failed to eval origin-request template:', e.message);
     return null;
   }

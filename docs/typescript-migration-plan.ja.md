@@ -37,4 +37,4 @@
 - `npm run test:api-contract` が成功する。
 - `EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy ORIGIN_SECRET=ci-origin-secret-not-for-deploy npm run test:all` が成功する。
 - `bin/`, `lib/`, `scripts/` の手書き実装ソースは `src/` 配下の TypeScript になる。
-- `strict: true` を有効にする。暗黙 any、strict null、catch unknown の完全整理は後続フェーズで行う。
+- `strict: true` と `useUnknownInCatchVariables: true` を有効にする。暗黙 any と strict null の完全整理は後続フェーズで行う。

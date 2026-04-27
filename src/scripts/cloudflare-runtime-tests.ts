@@ -10,7 +10,7 @@ function test(name, fn) {
   try {
     fn();
     console.log('OK:', name);
-  } catch (e) {
+  } catch (e: any) {
     console.error('FAIL:', name);
     console.error(e && e.stack ? e.stack : e);
     process.exitCode = 1;
@@ -148,7 +148,7 @@ routes:
       audience: test
       allowed_algorithms: ["HS256"]
 `);
-  } catch (e) {
+  } catch (e: any) {
     caught = e;
   }
   assert.ok(caught, 'expected compile-cloudflare to fail validation');

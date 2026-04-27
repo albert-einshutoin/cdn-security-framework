@@ -24,7 +24,7 @@ function test(name, fn) {
   try {
     fn();
     console.log('OK:', name);
-  } catch (e) {
+  } catch (e: any) {
     console.error('FAIL:', name);
     console.error(e && e.stack ? e.stack : e);
     process.exitCode = 1;
@@ -517,7 +517,7 @@ test('validateAuthGates rejects allowed_algorithms that include an alg the verif
   let caught;
   try {
     validateAuthGates(policy, { exitOnError: false });
-  } catch (e) {
+  } catch (e: any) {
     caught = e;
   }
   assert.ok(caught, 'validateAuthGates should throw');

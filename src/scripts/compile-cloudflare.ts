@@ -38,7 +38,7 @@ let policy;
 try {
   const content = fs.readFileSync(policyPath, 'utf8');
   policy = yaml.load(content);
-} catch (e) {
+} catch (e: any) {
   if (e.code === 'ENOENT') {
     console.error('Error: policy file not found:', policyPath);
     process.exit(1);
@@ -240,7 +240,7 @@ const templatePath = path.join(repoRoot, 'templates', 'cloudflare', 'index.ts');
 let code;
 try {
   code = fs.readFileSync(templatePath, 'utf8');
-} catch (e) {
+} catch (e: any) {
   if (e.code === 'ENOENT') {
     console.error('Error: template not found:', templatePath);
     process.exit(1);
