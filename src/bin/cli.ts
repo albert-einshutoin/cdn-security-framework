@@ -16,6 +16,50 @@ const pkgRoot = path.resolve(__dirname, '..');
 
 const program = new Command();
 
+type InitOptions = {
+  force?: boolean;
+  platform?: string;
+  profile?: string;
+  archetype?: string;
+};
+
+type BuildOptions = {
+  policy?: string | null;
+  outDir: string;
+  target: string;
+  outputMode: string;
+  ruleGroupOnly?: boolean;
+  failOnPermissive?: boolean;
+  failOnWafApproximation?: boolean;
+};
+
+type DoctorOptions = {
+  policy?: string | null;
+  report?: string | false | null;
+};
+
+type EmitWafOptions = {
+  policy?: string | null;
+  outDir: string;
+  target: string;
+  format: string;
+  outputMode: string;
+  ruleGroupOnly?: boolean;
+  failOnWafApproximation?: boolean;
+};
+
+type MigrateOptions = {
+  policy: string;
+  to: string;
+};
+
+type StarterAnswers = {
+  platform?: string;
+  starterKind?: 'profile' | 'archetype';
+  profile?: string;
+  archetype?: string;
+};
+
 program
   .name('cdn-security')
   .description('CDN edge security: init policy YAML and build runtime code from policy')
@@ -28,7 +72,7 @@ program
   .option('-p, --platform <name>', 'Platform: aws | cloudflare (skip interactive)')
   .option('--profile <name>', 'Profile: strict | balanced | permissive (skip interactive)')
   .option('--archetype <name>', 'Archetype: spa-static-site | rest-api | admin-panel | microservice-origin (mutually exclusive with --profile)')
-  .action(async (opts) => {
+  .action(async (opts: InitOptions) => {
     const cwd = process.cwd();
     const policyDir = path.join(cwd, 'policy');
     const profilesDir = path.join(cwd, 'policy', 'profiles');
@@ -50,7 +94,7 @@ program
       process.exit(1);
     }
     if (!platform || (!profile && !archetype)) {
-      const questions = [];
+      const questions: any[] = [];
       if (!platform) {
         questions.push({
           type: 'list',
@@ -76,7 +120,7 @@ program
           type: 'list',
           name: 'profile',
           message: 'Choose a security profile:',
-          when: (a) => a.starterKind === 'profile',
+          when: (a: StarterAnswers) => a.starterKind === 'profile',
           choices: [
             { name: 'Strict (High security, risk of breaking legacy clients)', value: 'strict' },
             { name: 'Balanced (Recommended for most sites)', value: 'balanced' },
@@ -87,7 +131,7 @@ program
           type: 'list',
           name: 'archetype',
           message: 'Choose an archetype:',
-          when: (a) => a.starterKind === 'archetype',
+          when: (a: StarterAnswers) => a.starterKind === 'archetype',
           choices: [
             { name: 'SPA / static site (immutable cache, CSP nonce)', value: 'spa-static-site' },
             { name: 'REST API (JWT-gated /api/*, CORS allowlist)', value: 'rest-api' },
@@ -96,7 +140,7 @@ program
           ],
         });
       }
-      const answers = await inquirer.prompt(questions);
+      const answers: StarterAnswers = await inquirer.prompt(questions);
       platform = platform || answers.platform;
       profile = profile || answers.profile;
       archetype = archetype || answers.archetype;
@@ -141,7 +185,7 @@ program
   .option('--rule-group-only', 'AWS only: generate WAF rule groups without aws_wafv2_web_acl output')
   .option('--fail-on-permissive', 'Exit non-zero when policy.metadata.risk_level is "permissive" (gate for production CI)')
   .option('--fail-on-waf-approximation', 'Cloudflare only: exit non-zero when the policy relies on approximate or unsupported Cloudflare WAF mappings (see docs/cloudflare-waf-parity.md)')
-  .action((opts) => {
+  .action((opts: BuildOptions) => {
     const { compile } = require(path.join(pkgRoot, 'lib'));
     const cwd = process.cwd();
     let policyPath = opts.policy;
@@ -163,16 +207,16 @@ program
       pkgRoot,
     });
 
-    result.warnings.forEach((w) => console.warn(w));
+    result.warnings.forEach((w: string) => console.warn(w));
 
     if (!result.ok) {
-      result.errors.forEach((e) => console.error('[ERROR]', e));
+      result.errors.forEach((e: string) => console.error('[ERROR]', e));
       process.exit(1);
     }
 
     console.log('[INFO] Validating policy... OK');
     console.log('[INFO] Target:', result.target === 'aws' ? 'AWS CloudFront Functions' : 'Cloudflare Workers');
-    result.edgeFiles.forEach((f) => console.log('[SUCCESS] Generated ' + f));
+    result.edgeFiles.forEach((f: string) => console.log('[SUCCESS] Generated ' + f));
     if (result.infraFiles.length > 0) {
       console.log('[SUCCESS] Generated ' + path.join(result.outDir, 'infra', '*.tf.json'));
     }
@@ -184,7 +228,7 @@ program
   .option('-p, --policy <path>', 'Policy file path to inspect', null)
   .option('--report <path>', 'Write machine-readable JSON report to this path', 'doctor-report.json')
   .option('--no-report', 'Skip writing doctor-report.json')
-  .action((opts) => {
+  .action((opts: DoctorOptions) => {
     const { runDoctor } = require(path.join(pkgRoot, 'scripts', 'cli-doctor.js'));
     const result = runDoctor({
       cwd: process.cwd(),
@@ -205,7 +249,7 @@ program
   .option('--rule-group-only', 'AWS only: generate WAF rule groups without aws_wafv2_web_acl output')
   .option('--format <format>', 'Output format: terraform | cloudformation | cdk (terraform is the only format currently generated; others return exit 2)', 'terraform')
   .option('--fail-on-waf-approximation', 'Cloudflare only: exit non-zero when the policy relies on approximate or unsupported Cloudflare WAF mappings (see docs/cloudflare-waf-parity.md)')
-  .action((opts) => {
+  .action((opts: EmitWafOptions) => {
     const { emitWaf } = require(path.join(pkgRoot, 'lib'));
     const cwd = process.cwd();
     let policyPath = opts.policy;
@@ -227,10 +271,10 @@ program
       pkgRoot,
     });
 
-    result.warnings.forEach((w) => console.warn(w));
+    result.warnings.forEach((w: string) => console.warn(w));
 
     if (!result.ok) {
-      result.errors.forEach((e) => console.error('[ERROR]', e));
+      result.errors.forEach((e: string) => console.error('[ERROR]', e));
       // Reserved format = exit 2 so pipelines notice silent-fallback is not an option.
       process.exit(result.formatNotImplemented ? 2 : 1);
     }
@@ -247,7 +291,7 @@ program
   .option('-p, --policy <path>', 'Policy file path to inspect', 'policy/security.yml')
   .option('--to <version>', 'Target schema version', '1')
   .option('--write', 'Write the migrated policy back in place (no-op on v1)')
-  .action((opts) => {
+  .action((opts: MigrateOptions) => {
     const { migratePolicy } = require(path.join(pkgRoot, 'lib'));
     const cwd = process.cwd();
     const policyPath = path.isAbsolute(opts.policy) ? opts.policy : path.join(cwd, opts.policy);
@@ -270,7 +314,7 @@ program
     }
 
     if (!result.ok) {
-      result.errors.forEach((e) => console.error('[ERROR]', e));
+      result.errors.forEach((e: string) => console.error('[ERROR]', e));
       process.exit(result.reservedExit2 ? 2 : 1);
     }
   });
