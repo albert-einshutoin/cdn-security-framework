@@ -44,28 +44,51 @@ const DEFAULT_PKG_ROOT = path.join(__dirname, '..');
 const AWS_EDGE_FILES = ['viewer-request.js', 'viewer-response.js', 'origin-request.js'];
 const CF_EDGE_FILES = [path.join('cloudflare', 'index.ts')];
 
-function resolveAbsolute(inputPath, cwd) {
+type CompileTarget = 'aws' | 'cloudflare';
+
+interface CompileOptions {
+  policyPath?: string;
+  outDir?: string;
+  target?: CompileTarget;
+  failOnPermissive?: boolean;
+  failOnWafApproximation?: boolean;
+  outputMode?: string;
+  ruleGroupOnly?: boolean;
+  cwd?: string;
+  pkgRoot?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+interface CompileResultBase {
+  edgeFiles: string[];
+  infraFiles: string[];
+  policyPath: string | null;
+  outDir: string | null;
+  target: string;
+}
+
+function resolveAbsolute(inputPath: string, cwd: string): string {
   return path.isAbsolute(inputPath) ? inputPath : path.join(cwd, inputPath);
 }
 
-function listInfraArtifacts(outDir) {
+function listInfraArtifacts(outDir: string): string[] {
   const infraDir = path.join(outDir, 'infra');
   if (!fs.existsSync(infraDir)) return [];
   return fs
     .readdirSync(infraDir)
-    .filter((name) => name.endsWith('.tf.json'))
-    .map((name) => path.join(infraDir, name));
+    .filter((name: string) => name.endsWith('.tf.json'))
+    .map((name: string) => path.join(infraDir, name));
 }
 
-function compile(opts) {
+function compile(opts: CompileOptions = {}) {
   opts = opts || {};
   const cwd = opts.cwd || process.cwd();
   const pkgRoot = opts.pkgRoot || DEFAULT_PKG_ROOT;
   const env = opts.env || process.env;
 
-  const errors = [];
-  const warnings = [];
-  const baseResult = {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const baseResult: CompileResultBase = {
     edgeFiles: [],
     infraFiles: [],
     policyPath: null,
