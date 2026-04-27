@@ -13,7 +13,7 @@
     "lint:policy": "npm run build:ts && node scripts/policy-lint.js",
     "test:api-contract": "npm run build:ts && node scripts/api-contract-tests.js",
     "test:runtime": "npm run build:ts && node scripts/runtime-tests.js && node scripts/cloudflare-runtime-tests.js",
-    "test:unit": "npm run build:ts && node scripts/compile-unit-tests.js && node scripts/infra-unit-tests.js && node scripts/schema-lint-tests.js && node scripts/doctor-unit-tests.js && node scripts/emit-waf-unit-tests.js && node scripts/programmatic-api-unit-tests.js && node scripts/cloudflare-waf-parity-unit-tests.js",
+    "test:unit": "npm run build:ts && node scripts/compile-unit-tests.js && node scripts/infra-unit-tests.js && node scripts/schema-lint-tests.js && node scripts/doctor-unit-tests.js && node scripts/emit-waf-unit-tests.js && node scripts/programmatic-api-unit-tests.js && node scripts/cloudflare-waf-parity-unit-tests.js && node scripts/fingerprint-candidates-unit-tests.js",
     "test:drift": "npm run build:ts && node scripts/check-drift.js",
     "test:security-baseline": "npm run build:ts && node scripts/security-baseline-check.js",
     "test:fuzz": "npm run build:ts && node scripts/regex-fuzz-tests.js",
