@@ -22,7 +22,7 @@ const path = require('path');
 
 const api = require('../lib');
 
-function test(name, fn) {
+function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
@@ -59,7 +59,7 @@ response_headers:
 unknown_top_level_key: true
 `;
 
-function tmpProject(yamlBody) {
+function tmpProject(yamlBody: string) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'api-'));
   const policyDir = path.join(tmp, 'policy');
   fs.mkdirSync(policyDir);
@@ -108,14 +108,14 @@ test('lintPolicy: returns ok=true for valid policy', () => {
 test('lintPolicy: missing policyPath → structured error, no throw', () => {
   const result = api.lintPolicy({});
   assert.strictEqual(result.ok, false);
-  assert.ok(result.errors.some((e) => /policyPath is required/.test(e)));
+  assert.ok(result.errors.some((e: string) => /policyPath is required/.test(e)));
   assert.strictEqual(result.policy, null);
 });
 
 test('lintPolicy: nonexistent file → structured error', () => {
   const result = api.lintPolicy({ policyPath: '/no/such/file.yml' });
   assert.strictEqual(result.ok, false);
-  assert.ok(result.errors.some((e) => /not found/i.test(e)));
+  assert.ok(result.errors.some((e: string) => /not found/i.test(e)));
 });
 
 test('lintPolicy: invalid policy surfaces schema errors', () => {
@@ -155,9 +155,9 @@ test('compile: aws target writes edge + infra, returns file lists', () => {
     assert.strictEqual(result.ok, true, `compile failed: ${result.errors.join(' ')}`);
     assert.strictEqual(result.target, 'aws');
     assert.ok(result.edgeFiles.length >= 3, 'aws target emits 3 edge files');
-    assert.ok(result.edgeFiles.every((f) => fs.existsSync(f)), 'all edge files must exist');
+    assert.ok(result.edgeFiles.every((f: string) => fs.existsSync(f)), 'all edge files must exist');
     assert.ok(result.infraFiles.length > 0, 'aws target emits infra files');
-    assert.ok(result.infraFiles.every((f) => fs.existsSync(f)));
+    assert.ok(result.infraFiles.every((f: string) => fs.existsSync(f)));
   } finally {
     ctx.cleanup();
   }
@@ -170,19 +170,19 @@ test('compile: unknown target returns structured error', () => {
     target: 'gcp',
   });
   assert.strictEqual(result.ok, false);
-  assert.ok(result.errors.some((e) => /unknown target/i.test(e)));
+  assert.ok(result.errors.some((e: string) => /unknown target/i.test(e)));
 });
 
 test('compile: missing policyPath → error, no exit', () => {
   const result = api.compile({ outDir: '/tmp', target: 'aws' });
   assert.strictEqual(result.ok, false);
-  assert.ok(result.errors.some((e) => /policyPath is required/.test(e)));
+  assert.ok(result.errors.some((e: string) => /policyPath is required/.test(e)));
 });
 
 test('compile: missing outDir → error, no exit', () => {
   const result = api.compile({ policyPath: '/tmp/x.yml', target: 'aws' });
   assert.strictEqual(result.ok, false);
-  assert.ok(result.errors.some((e) => /outDir is required/.test(e)));
+  assert.ok(result.errors.some((e: string) => /outDir is required/.test(e)));
 });
 
 test('compile: nonexistent policy file → structured error', () => {
@@ -192,7 +192,7 @@ test('compile: nonexistent policy file → structured error', () => {
     target: 'aws',
   });
   assert.strictEqual(result.ok, false);
-  assert.ok(result.errors.some((e) => /not found/i.test(e)));
+  assert.ok(result.errors.some((e: string) => /not found/i.test(e)));
 });
 
 // --- emitWaf ---
@@ -230,7 +230,7 @@ test('emitWaf: --format cloudformation returns ok=false with formatNotImplemente
     });
     assert.strictEqual(result.ok, false);
     assert.strictEqual(result.formatNotImplemented, true);
-    assert.ok(result.errors.some((e) => /not yet implemented/i.test(e)));
+    assert.ok(result.errors.some((e: string) => /not yet implemented/i.test(e)));
   } finally {
     ctx.cleanup();
   }
@@ -244,7 +244,7 @@ test('emitWaf: unknown format → structured error', () => {
     format: 'pulumi',
   });
   assert.strictEqual(result.ok, false);
-  assert.ok(result.errors.some((e) => /unknown --format/i.test(e)));
+  assert.ok(result.errors.some((e: string) => /unknown --format/i.test(e)));
 });
 
 // --- migratePolicy ---
@@ -270,7 +270,7 @@ test('migratePolicy: no version field → ok=false with guidance error', () => {
     fs.writeFileSync(policyPath, 'project: noversion\n', 'utf8');
     const result = api.migratePolicy({ policyPath });
     assert.strictEqual(result.ok, false);
-    assert.ok(result.errors.some((e) => /no `version` field/.test(e)));
+    assert.ok(result.errors.some((e: string) => /no `version` field/.test(e)));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -294,7 +294,7 @@ test('migratePolicy: downgrade rejected', () => {
     fs.writeFileSync(policyPath, 'version: 5\nproject: future\n', 'utf8');
     const result = api.migratePolicy({ policyPath, toVersion: 1 });
     assert.strictEqual(result.ok, false);
-    assert.ok(result.errors.some((e) => /Downgrade/.test(e)));
+    assert.ok(result.errors.some((e: string) => /Downgrade/.test(e)));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

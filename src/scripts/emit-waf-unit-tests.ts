@@ -17,7 +17,7 @@ const os = require('os');
 const path = require('path');
 const { spawnSync } = require('child_process');
 
-function test(name, fn) {
+function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
@@ -59,7 +59,7 @@ firewall:
     rate_limit: 1000
 `;
 
-function runEmitWaf(policyYaml, extraArgs) {
+function runEmitWaf(policyYaml: string, extraArgs: string[]) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'emit-waf-'));
   const policyDir = path.join(tmp, 'policy');
   fs.mkdirSync(policyDir);

@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-function test(name, fn) {
+function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
@@ -19,7 +19,7 @@ function test(name, fn) {
 
 const repoRoot = path.join(__dirname, '..');
 
-function runCompileInfra(policyContent, options: any = {}) {
+function runCompileInfra(policyContent: string, options: any = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'infra-unit-'));
   const policyPath = path.join(tempDir, 'policy.yml');
   const outDir = path.join(tempDir, 'out');
@@ -36,7 +36,7 @@ function runCompileInfra(policyContent, options: any = {}) {
 
   return {
     tempDir,
-    read(rel) {
+    read(rel: string) {
       return JSON.parse(fs.readFileSync(path.join(outDir, rel), 'utf8'));
     },
     cleanup() {
@@ -67,7 +67,7 @@ firewall:
     assert.ok(group);
     assert.ok(Array.isArray(group.rule));
 
-    const ja3Rules = group.rule.filter((r) => r.statement && r.statement.byte_match_statement);
+    const ja3Rules = group.rule.filter((r: any) => r.statement && r.statement.byte_match_statement);
     assert.strictEqual(ja3Rules.length, 2);
     assert.strictEqual(ja3Rules[0].statement.byte_match_statement.field_to_match.ja3_fingerprint.constructor, Object);
     assert.strictEqual(ja3Rules[0].statement.byte_match_statement.positional_constraint, 'EXACTLY');
@@ -94,7 +94,7 @@ firewall:
   try {
     const waf = ctx.read('infra/waf-rules.tf.json');
     const group = waf.resource.aws_wafv2_rule_group['ja4-test-rate-limit'];
-    const ja4Rules = group.rule.filter((r) =>
+    const ja4Rules = group.rule.filter((r: any) =>
       r.statement &&
       r.statement.byte_match_statement &&
       r.statement.byte_match_statement.field_to_match &&
@@ -126,7 +126,7 @@ firewall:
   try {
     const waf = ctx.read('infra/waf-rules.tf.json');
     const group = waf.resource.aws_wafv2_rule_group['waf-test-rate-limit'];
-    assert.ok(group.rule.some((r) => r.statement && r.statement.rate_based_statement));
+    assert.ok(group.rule.some((r: any) => r.statement && r.statement.rate_based_statement));
 
     const acl = waf.resource.aws_wafv2_web_acl['waf-test-waf-acl'];
     assert.ok(acl.rule.length === 1);
@@ -216,7 +216,7 @@ firewall:
   try {
     const waf = ctx.read('infra/waf-rules.tf.json');
     const group = waf.resource.aws_wafv2_rule_group['rlr-test-rate-limit'];
-    const rateRules = group.rule.filter((r) => r.statement && r.statement.rate_based_statement);
+    const rateRules = group.rule.filter((r: any) => r.statement && r.statement.rate_based_statement);
     assert.strictEqual(rateRules.length, 2);
     assert.strictEqual(rateRules[0].name, 'global');
     assert.strictEqual(rateRules[0].priority, 1);
@@ -256,7 +256,7 @@ firewall:
     assert.strictEqual(group.custom_response_body[0].key, 'cdn_sec_block');
     assert.strictEqual(group.custom_response_body[0].content, 'unavailable for legal reasons');
 
-    const rateRule = group.rule.find((r) => r.statement.rate_based_statement);
+    const rateRule = group.rule.find((r: any) => r.statement.rate_based_statement);
     assert.strictEqual(rateRule.action.block.custom_response.response_code, 451);
     assert.strictEqual(rateRule.action.block.custom_response.custom_response_body_key, 'cdn_sec_block');
 
