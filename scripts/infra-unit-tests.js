@@ -308,6 +308,83 @@ firewall:
         ctx.cleanup();
     }
 });
+test('compile-infra emits geo allowlist as a negated geo match statement', () => {
+    const ctx = runCompileInfra(`
+version: 1
+project: geo-allow-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  geo:
+    allow_countries: ["JP", "US"]
+`);
+    try {
+        const geo = ctx.read('infra/geo-restriction.tf.json');
+        const group = geo.resource.aws_wafv2_rule_group['geo-allow-test-geo-block'];
+        const rule = group.rule[0];
+        assert.ok(rule.action.block);
+        assert.deepStrictEqual(rule.statement.not_statement.statement.geo_match_statement.country_codes, ['JP', 'US']);
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('compile-infra emits separate IP allowlist and blocklist resources', () => {
+    const ctx = runCompileInfra(`
+version: 1
+project: ip-set-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  ip:
+    blocklist: ["203.0.113.0/24"]
+    allowlist: ["198.51.100.10/32"]
+`);
+    try {
+        const ipSets = ctx.read('infra/ip-sets.tf.json');
+        assert.deepStrictEqual(ipSets.resource.aws_wafv2_ip_set['ip-set-test-ip-blocklist'].addresses, ['203.0.113.0/24']);
+        assert.deepStrictEqual(ipSets.resource.aws_wafv2_ip_set['ip-set-test-ip-allowlist'].addresses, ['198.51.100.10/32']);
+        assert.ok(ipSets.resource.aws_wafv2_rule_group['ip-set-test-ip-block'].rule[0].action.block);
+        assert.ok(ipSets.resource.aws_wafv2_rule_group['ip-set-test-ip-allow'].rule[0].action.allow);
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('compile-infra emits transport and origin locals for CloudFront settings', () => {
+    const ctx = runCompileInfra(`
+version: 1
+project: transport-origin-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=1"
+transport:
+  tls:
+    security_policy: TLSv1.2_2021
+  http:
+    versions: ["http2", "http3"]
+origin:
+  timeout:
+    connect: 7
+    read: 45
+`);
+    try {
+        const transport = ctx.read('infra/cloudfront-settings.tf.json');
+        assert.strictEqual(transport.locals.cdn_security_transport.http_version, 'http2and3');
+        assert.strictEqual(transport.locals.cdn_security_transport.viewer_certificate.minimum_protocol_version, 'TLSv1.2_2021');
+        const origin = ctx.read('infra/cloudfront-origin.tf.json');
+        assert.strictEqual(origin.locals.cdn_security_origin_config.connection_timeout, 7);
+        assert.strictEqual(origin.locals.cdn_security_origin_config.read_timeout, 45);
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
 if (process.exitCode) {
     process.exit(process.exitCode);
 }

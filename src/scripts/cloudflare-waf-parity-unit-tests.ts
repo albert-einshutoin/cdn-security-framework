@@ -261,6 +261,114 @@ test('compiler: expression_cloudflare override suppresses the scope_down warning
   }
 });
 
+test('compiler: custom Cloudflare rules include geo, IP, UA, fingerprint, rate limit, and logging resources', () => {
+  const policy = `
+version: 1
+project: cf-custom-test
+request:
+  allow_methods: [GET]
+  block:
+    ua_contains: ["BadBot"]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  geo:
+    block_countries: ["RU"]
+    allow_countries: ["JP", "US"]
+  ip:
+    blocklist: ["203.0.113.0/24"]
+    allowlist: ["198.51.100.10/32"]
+  waf:
+    scope: CLOUDFRONT
+    rate_limit: 1234
+    fingerprint_action: count
+    ja3_fingerprints:
+      - "0123456789abcdef0123456789abcdef"
+    ja4_fingerprints:
+      - "t13d1516h2_8daaf6152771_02713d6af862"
+    block_response:
+      status_code: 429
+      body: "slow down"
+      content_type: APPLICATION_JSON
+    rate_limit_rules:
+      - name: login-starts-with
+        aggregate_key_type: CUSTOM_KEYS
+        cloudflare_characteristics: ["ip.src", "http.request.headers[\\"x-api-key\\"]"]
+        limit: 25
+        action: count
+        scope_down_statement:
+          byte_match_statement:
+            field_to_match: { uri_path: {} }
+            positional_constraint: STARTS_WITH
+            search_string: "/login"
+    logging:
+      enabled: true
+      destination_arn_env: CLOUDFLARE_LOG_DEST
+`;
+  const ctx = tmpProject(policy);
+  try {
+    const r = runCompiler(ctx.policyPath, ctx.dir);
+    assert.strictEqual(r.status, 0, r.stderr);
+    const tf = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra', 'cloudflare-waf.tf.json'), 'utf8'));
+
+    const lists = tf.resource.cloudflare_list;
+    assert.strictEqual(lists['cf-custom-test_ip_blocklist'].item[0].value.ip, '203.0.113.0/24');
+    assert.strictEqual(lists['cf-custom-test_ip_allowlist'].item[0].value.ip, '198.51.100.10/32');
+
+    const custom = tf.resource.cloudflare_ruleset['cf-custom-test_custom'];
+    assert.ok(custom.rules.some((rule: any) => /Geo blocklist/.test(rule.description) && /"RU"/.test(rule.expression)));
+    assert.ok(custom.rules.some((rule: any) => /Geo allowlist/.test(rule.description) && /not/.test(rule.expression)));
+    assert.ok(custom.rules.some((rule: any) => /IP blocklist/.test(rule.description) && /\$cf-custom-test_ip_blocklist/.test(rule.expression)));
+    assert.ok(custom.rules.some((rule: any) => /User-Agent/.test(rule.description) && /badbot/.test(rule.expression)));
+    assert.ok(custom.rules.some((rule: any) => /JA3 fingerprint log/.test(rule.description) && rule.action === 'log'));
+    assert.ok(custom.rules.some((rule: any) => /JA4 fingerprint log/.test(rule.description) && rule.action === 'log'));
+    const blockedRule = custom.rules.find((rule: any) => /Geo blocklist/.test(rule.description));
+    assert.strictEqual(blockedRule.action_parameters.response.status_code, 429);
+    assert.strictEqual(blockedRule.action_parameters.response.content_type, 'application/json');
+
+    const rateRules = tf.resource.cloudflare_ruleset['cf-custom-test_ratelimit'].rules;
+    const globalRate = rateRules.find((rule: any) => /legacy/.test(rule.description));
+    assert.strictEqual(globalRate.ratelimit.requests_per_period, 1234);
+    const scopedRate = rateRules.find((rule: any) => rule.description === 'login-starts-with');
+    assert.strictEqual(scopedRate.action, 'log');
+    assert.strictEqual(scopedRate.expression, 'starts_with(http.request.uri.path, "/login")');
+    assert.deepStrictEqual(scopedRate.ratelimit.characteristics, ['ip.src', 'http.request.headers["x-api-key"]']);
+
+    assert.ok(tf.variable.cloudflare_log_dest);
+    const logpush = tf.resource.cloudflare_logpush_job['cf-custom-test_waf_logs'];
+    assert.strictEqual(logpush.destination_conf, '${var.cloudflare_log_dest}');
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('compiler: BotControl managed rule emits approximation warning and bot fight setting', () => {
+  const policy = `
+version: 1
+project: cf-bots-test
+request:
+  allow_methods: [GET]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  waf:
+    managed_rules:
+      - AWSManagedRulesBotControlRuleSet
+`;
+  const ctx = tmpProject(policy);
+  try {
+    const r = runCompiler(ctx.policyPath, ctx.dir);
+    assert.strictEqual(r.status, 0, r.stderr);
+    assert.ok(/APPROXIMATE: AWSManagedRulesBotControlRuleSet/.test(r.stderr));
+    const tf = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra', 'cloudflare-waf.tf.json'), 'utf8'));
+    const managed = tf.resource.cloudflare_ruleset['cf-bots-test_managed'];
+    assert.strictEqual(managed.rules[0].enabled, false);
+    assert.strictEqual(tf.resource.cloudflare_zone_settings_override['cf-bots-test_bots'].settings.bot_fight_mode, 'on');
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 // ---- generator ----
 
 test('generator: EN render includes every managed rule entry', () => {
