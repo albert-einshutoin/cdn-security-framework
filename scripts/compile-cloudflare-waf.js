@@ -88,8 +88,8 @@ const tfJson = {
     resource: {},
 };
 // 1. IP lists (optional) — cloudflare_list with IPs. Rules below reference by id.
-const ipBlocklistEntries = Array.isArray(ip.blocklist) ? ip.blocklist.filter(Boolean) : [];
-const ipAllowlistEntries = Array.isArray(ip.allowlist) ? ip.allowlist.filter(Boolean) : [];
+const ipBlocklistEntries = Array.isArray(ip.blocklist) ? ip.blocklist.filter((entry) => Boolean(entry)) : [];
+const ipAllowlistEntries = Array.isArray(ip.allowlist) ? ip.allowlist.filter((entry) => Boolean(entry)) : [];
 if (ipBlocklistEntries.length > 0) {
     tfJson.resource.cloudflare_list = tfJson.resource.cloudflare_list || {};
     tfJson.resource.cloudflare_list[projectName + '_ip_blocklist'] = {
@@ -140,8 +140,8 @@ function makeBlockAction() {
     return { action: 'block', action_parameters: { response: null } };
 }
 // Geo block / allow
-const geoBlockCountries = Array.isArray(geo.block_countries) ? geo.block_countries.filter(Boolean) : [];
-const geoAllowCountries = Array.isArray(geo.allow_countries) ? geo.allow_countries.filter(Boolean) : [];
+const geoBlockCountries = Array.isArray(geo.block_countries) ? geo.block_countries.filter((c) => Boolean(c)) : [];
+const geoAllowCountries = Array.isArray(geo.allow_countries) ? geo.allow_countries.filter((c) => Boolean(c)) : [];
 if (geoBlockCountries.length > 0) {
     const expr = `(ip.geoip.country in {${geoBlockCountries.map((c) => `"${c}"`).join(' ')}})`;
     customRules.push(Object.assign({
@@ -180,8 +180,8 @@ if (uaDeny.length > 0) {
 }
 // JA3/JA4 fingerprint rules
 const fpAction = waf.fingerprint_action === 'count' ? 'log' : 'block';
-const ja3List = Array.isArray(waf.ja3_fingerprints) ? waf.ja3_fingerprints.filter(Boolean) : [];
-const ja4List = Array.isArray(waf.ja4_fingerprints) ? waf.ja4_fingerprints.filter(Boolean) : [];
+const ja3List = Array.isArray(waf.ja3_fingerprints) ? waf.ja3_fingerprints.filter((h) => Boolean(h)) : [];
+const ja4List = Array.isArray(waf.ja4_fingerprints) ? waf.ja4_fingerprints.filter((h) => Boolean(h)) : [];
 if (ja3List.length > 0) {
     const expr = `(cf.bot_management.ja3_hash in {${ja3List.map((h) => `"${h}"`).join(' ')}})`;
     customRules.push({

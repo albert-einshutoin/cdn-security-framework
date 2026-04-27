@@ -5,7 +5,7 @@ const path = require('path');
 const repoRoot = path.join(__dirname, '..');
 const api = require(path.join(repoRoot, 'lib'));
 
-function test(name, fn) {
+function test(name: string, fn: () => void) {
   try {
     fn();
     console.log(`OK: ${name}`);

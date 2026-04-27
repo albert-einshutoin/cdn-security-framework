@@ -28,18 +28,18 @@ const { execFileSync } = require('child_process');
 
 const repoRoot = path.join(__dirname, '..');
 
-function test(name, fn) {
+function test(name: string, fn: () => unknown | Promise<unknown>) {
   return Promise.resolve()
     .then(fn)
     .then(() => console.log('OK:', name))
-    .catch((e) => {
+    .catch((e: any) => {
       console.error('FAIL:', name);
       console.error(e && e.stack ? e.stack : e);
       process.exitCode = 1;
     });
 }
 
-function compileWorker(policyYaml, { env = {} } = {}) {
+function compileWorker(policyYaml: string, { env = {} }: { env?: Record<string, string> } = {}): string {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-integ-'));
   const policyPath = path.join(tmpDir, 'policy.yml');
   const outDir = path.join(tmpDir, 'out');
@@ -55,7 +55,7 @@ function compileWorker(policyYaml, { env = {} } = {}) {
   return tsSource;
 }
 
-function transpileToJs(tsSource) {
+function transpileToJs(tsSource: string): string {
   // Strip types, preserve source-equivalent semantics. `format: 'cjs'` so the
   // `export default` binding becomes `module.exports.default`, which we then
   // reach into from the sandbox.
@@ -77,17 +77,17 @@ function transpileToJs(tsSource) {
   return code;
 }
 
-function loadWorker(jsCode, { env = {}, fetchStub }: any = {}) {
+function loadWorker(jsCode: string, { env = {}, fetchStub }: any = {}) {
   // Expose the Node-native web fetch primitives inside the sandbox. Node 18+
   // ships all of these on globalThis, so just pass them straight through.
-  const logs = [];
+  const logs: string[] = [];
   const defaultFetch = async () =>
     new Response('stub-origin', { status: 200, headers: { 'content-type': 'text/plain' } });
   const sandbox: any = {
     console: {
-      log: (...args) => logs.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')),
-      error: (...args) => logs.push('[stderr] ' + args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')),
-      warn: (...args) => logs.push('[stderr] ' + args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')),
+      log: (...args: unknown[]) => logs.push(args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')),
+      error: (...args: unknown[]) => logs.push('[stderr] ' + args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')),
+      warn: (...args: unknown[]) => logs.push('[stderr] ' + args.map((a) => (typeof a === 'string' ? a : JSON.stringify(a))).join(' ')),
     },
     crypto: globalThis.crypto,
     Request: globalThis.Request,
@@ -123,7 +123,7 @@ function loadWorker(jsCode, { env = {}, fetchStub }: any = {}) {
   return { worker, logs, env: sandbox.__env };
 }
 
-async function dispatch(worker, url, init = {}, env = {}) {
+async function dispatch(worker: any, url: string, init: RequestInit = {}, env: Record<string, string> = {}) {
   const req = new Request(url, init);
   // Cloudflare passes env as the 2nd arg. ctx (3rd) is unused here.
   const res = await worker.fetch(req, env, { waitUntil() {}, passThroughOnException() {} });
@@ -241,7 +241,7 @@ async function runAll() {
     });
     const jsonLine = logs.find((l) => l.includes('"event":"block"'));
     assert.ok(jsonLine, 'expected a structured block log; got:\n' + logs.join('\n'));
-    const parsed = JSON.parse(jsonLine);
+    const parsed = JSON.parse(jsonLine as string);
     assert.strictEqual(parsed.event, 'block');
     assert.strictEqual(parsed.status, 400);
     assert.strictEqual(parsed.method, 'GET');

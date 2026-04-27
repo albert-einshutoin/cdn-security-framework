@@ -19,18 +19,23 @@ const { execFileSync } = require('child_process');
 const repoRoot = path.join(__dirname, '..');
 const EDGE_TOKEN = 'edge-container-test-token';
 
-function test(name, fn) {
+type HeaderBag = Record<string, string>;
+type CffHeaderMap = Record<string, { value: string }>;
+type LambdaHeaderMap = Record<string, Array<{ key: string; value: string }>>;
+type AttackCase = [string, string, string, HeaderBag, number];
+
+function test(name: string, fn: () => unknown | Promise<unknown>) {
   return Promise.resolve()
     .then(fn)
     .then(() => console.log('OK:', name))
-    .catch((e) => {
+    .catch((e: any) => {
       console.error('FAIL:', name);
       console.error(e && e.stack ? e.stack : e);
       process.exitCode = 1;
     });
 }
 
-function runNode(script, args, env = {}) {
+function runNode(script: string, args: string[], env: Record<string, string> = {}) {
   execFileSync(process.execPath, [path.join(repoRoot, script), ...args], {
     cwd: repoRoot,
     stdio: 'pipe',
@@ -85,8 +90,8 @@ function loadAwsOriginHandler() {
   return sandbox.exports.handler;
 }
 
-function cfHeadersFromNode(headers) {
-  const out: any = {};
+function cfHeadersFromNode(headers: import('http').IncomingHttpHeaders): CffHeaderMap {
+  const out: CffHeaderMap = {};
   for (const [name, value] of Object.entries(headers || {})) {
     if (value === undefined) continue;
     const v = Array.isArray(value) ? value.join(', ') : String(value);
@@ -95,8 +100,8 @@ function cfHeadersFromNode(headers) {
   return out;
 }
 
-function lambdaHeadersFromCff(headers) {
-  const out: any = {};
+function lambdaHeadersFromCff(headers: CffHeaderMap): LambdaHeaderMap {
+  const out: LambdaHeaderMap = {};
   for (const [name, entry] of Object.entries(headers || {})) {
     const headerEntry: any = entry;
     const value = headerEntry && headerEntry.value !== undefined ? String(headerEntry.value) : '';
@@ -105,15 +110,15 @@ function lambdaHeadersFromCff(headers) {
   return out;
 }
 
-function splitUrl(reqUrl) {
-  const url = new URL(reqUrl, 'https://edge.test');
+function splitUrl(reqUrl: string | undefined) {
+  const url = new URL(reqUrl || '/', 'https://edge.test');
   return {
     uri: url.pathname,
     querystring: url.search ? url.search.slice(1) : '',
   };
 }
 
-function cffEventFromHttp(req) {
+function cffEventFromHttp(req: import('http').IncomingMessage) {
   const { uri, querystring } = splitUrl(req.url);
   return {
     request: {
@@ -125,7 +130,7 @@ function cffEventFromHttp(req) {
   };
 }
 
-function lambdaEventFromCffRequest(request) {
+function lambdaEventFromCffRequest(request: any) {
   return {
     Records: [{
       cf: {
@@ -140,17 +145,17 @@ function lambdaEventFromCffRequest(request) {
   };
 }
 
-function lambdaStatusToHttp(result) {
+function lambdaStatusToHttp(result: any) {
   if (!result || !result.status) return null;
   return Number(result.status);
 }
 
-function cffStatusToHttp(result) {
+function cffStatusToHttp(result: any) {
   if (!result || !result.statusCode) return null;
   return Number(result.statusCode);
 }
 
-function hasHeader(headers, name) {
+function hasHeader(headers: Record<string, unknown> | undefined, name: string) {
   return Boolean(headers && headers[name.toLowerCase()]);
 }
 
@@ -158,7 +163,7 @@ async function startAwsEdgeHarness() {
   const viewerHandler = loadAwsViewerHandler();
   const originHandler = loadAwsOriginHandler();
 
-  const server = http.createServer(async (req, res) => {
+  const server = http.createServer(async (req: import('http').IncomingMessage, res: import('http').ServerResponse) => {
     try {
       const viewerResult = viewerHandler(cffEventFromHttp(req));
       const viewerStatus = cffStatusToHttp(viewerResult);
@@ -265,19 +270,19 @@ function compileCloudflareWorker() {
 
 const REQUIRED_WORKER_GLOBALS = ['crypto', 'Request', 'Response', 'Headers', 'TextEncoder', 'TextDecoder'];
 for (const name of REQUIRED_WORKER_GLOBALS) {
-  if (typeof globalThis[name] === 'undefined') {
+  if (typeof (globalThis as Record<string, unknown>)[name] === 'undefined') {
     console.error(`Edge container tests require globalThis.${name} (Node >= 20).`);
     process.exit(2);
   }
 }
 
 function loadCloudflareWorker() {
-  const logs = [];
+  const logs: Array<[string, string]> = [];
   const sandbox: any = {
     console: {
-      log: (...args) => logs.push(['log', args.join(' ')]),
-      warn: (...args) => logs.push(['warn', args.join(' ')]),
-      error: (...args) => logs.push(['error', args.join(' ')]),
+      log: (...args: unknown[]) => logs.push(['log', args.join(' ')]),
+      warn: (...args: unknown[]) => logs.push(['warn', args.join(' ')]),
+      error: (...args: unknown[]) => logs.push(['error', args.join(' ')]),
     },
     crypto: globalThis.crypto,
     Request: globalThis.Request,
@@ -322,7 +327,7 @@ function loadCloudflareWorker() {
 async function startCloudflareEdgeHarness() {
   const worker = loadCloudflareWorker();
 
-  const server = http.createServer(async (req, res) => {
+  const server = http.createServer(async (req: import('http').IncomingMessage, res: import('http').ServerResponse) => {
     try {
       const origin = `http://edge.test${req.url}`;
       const headers = new Headers();
@@ -359,11 +364,11 @@ async function startCloudflareEdgeHarness() {
   return server;
 }
 
-function portOf(server) {
-  return server.address().port;
+function portOf(server: import('http').Server) {
+  return (server.address() as import('net').AddressInfo).port;
 }
 
-function request(server, method, target, headers = {}) {
+function request(server: import('http').Server, method: string, target: string, headers: import('http').OutgoingHttpHeaders = {}) {
   return new Promise<any>((resolve, reject) => {
     const req = http.request({
       host: '127.0.0.1',
@@ -371,10 +376,10 @@ function request(server, method, target, headers = {}) {
       method,
       path: target,
       headers,
-    }, (res) => {
+    }, (res: import('http').IncomingMessage) => {
       let body = '';
       res.setEncoding('utf8');
-      res.on('data', (chunk) => { body += chunk; });
+      res.on('data', (chunk: string) => { body += chunk; });
       res.on('end', () => resolve({ status: res.statusCode, headers: res.headers, body }));
     });
     req.on('error', reject);
@@ -382,8 +387,8 @@ function request(server, method, target, headers = {}) {
   });
 }
 
-function fillerHeaders(count) {
-  const headers = { 'user-agent': 'Mozilla/5.0' };
+function fillerHeaders(count: number): HeaderBag {
+  const headers: HeaderBag = { 'user-agent': 'Mozilla/5.0' };
   for (let i = 0; i < count - 1; i++) headers[`x-filler-${i}`] = 'v';
   return headers;
 }
@@ -391,7 +396,7 @@ function fillerHeaders(count) {
 async function runAwsAttackTests() {
   const server = await startAwsEdgeHarness();
   try {
-    const cases = [
+    const cases: AttackCase[] = [
       ['aws pseudo-edge allows benign request', 'GET', '/', { 'user-agent': 'Mozilla/5.0' }, 200],
       ['aws pseudo-edge blocks missing user-agent', 'GET', '/', {}, 400],
       ['aws pseudo-edge blocks disallowed method', 'DELETE', '/', { 'user-agent': 'Mozilla/5.0' }, 405],
@@ -432,7 +437,7 @@ async function runAwsAttackTests() {
 async function runCloudflareAttackTests() {
   const server = await startCloudflareEdgeHarness();
   try {
-    const cases = [
+    const cases: AttackCase[] = [
       ['cloudflare pseudo-edge allows benign request', 'GET', '/', { 'user-agent': 'Mozilla/5.0' }, 200],
       ['cloudflare pseudo-edge blocks disallowed method', 'DELETE', '/', { 'user-agent': 'Mozilla/5.0' }, 405],
       ['cloudflare pseudo-edge blocks encoded traversal', 'GET', '/a/%2e%2e%2fb', { 'user-agent': 'Mozilla/5.0' }, 400],

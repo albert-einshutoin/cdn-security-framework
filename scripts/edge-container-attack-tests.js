@@ -100,7 +100,7 @@ function lambdaHeadersFromCff(headers) {
     return out;
 }
 function splitUrl(reqUrl) {
-    const url = new URL(reqUrl, 'https://edge.test');
+    const url = new URL(reqUrl || '/', 'https://edge.test');
     return {
         uri: url.pathname,
         querystring: url.search ? url.search.slice(1) : '',

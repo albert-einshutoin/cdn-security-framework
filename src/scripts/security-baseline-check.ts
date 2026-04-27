@@ -5,16 +5,16 @@ const path = require('path');
 
 const repoRoot = path.join(__dirname, '..');
 
-function read(file) {
+function read(file: string) {
   return fs.readFileSync(path.join(repoRoot, file), 'utf8');
 }
 
-function fail(msg) {
+function fail(msg: string) {
   console.error('Baseline check failed:', msg);
   process.exit(1);
 }
 
-function ensureIncludes(file, pattern, desc) {
+function ensureIncludes(file: string, pattern: string, desc: string) {
   const content = read(file);
   if (!content.includes(pattern)) {
     fail(`${file} is missing ${desc} (${pattern})`);

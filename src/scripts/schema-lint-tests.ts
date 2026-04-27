@@ -15,7 +15,7 @@ const { execFileSync, spawnSync } = require('child_process');
 const repoRoot = path.join(__dirname, '..');
 const lintScript = path.join(repoRoot, 'scripts', 'policy-lint.js');
 
-function test(name, fn) {
+function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
@@ -26,21 +26,21 @@ function test(name, fn) {
   }
 }
 
-function writeTempPolicy(policyYaml) {
+function writeTempPolicy(policyYaml: string) {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-lint-'));
   const file = path.join(dir, 'policy.yml');
   fs.writeFileSync(file, policyYaml, 'utf8');
   return { dir, file };
 }
 
-function runLint(policyPath) {
+function runLint(policyPath: string) {
   return spawnSync(process.execPath, [lintScript, policyPath], {
     cwd: repoRoot,
     encoding: 'utf8',
   });
 }
 
-function basePolicy(overrides) {
+function basePolicy(overrides: Record<string, any>) {
   return `
 version: 1
 project: schema-lint-test

@@ -27,6 +27,12 @@ const STATUS_BADGE = {
   unsupported: 'UNSUPPORTED',
 };
 
+type ParityStatus = keyof typeof STATUS_BADGE;
+
+function statusBadge(status: ParityStatus) {
+  return STATUS_BADGE[status];
+}
+
 function renderEn() {
   const lines = [];
   lines.push('# Cloudflare WAF parity');
@@ -53,13 +59,13 @@ function renderEn() {
     const target = e.cloudflare.rulesetName
       ? (e.cloudflare.rulesetId ? `${e.cloudflare.rulesetName} (\`${e.cloudflare.rulesetId}\`)` : e.cloudflare.rulesetName)
       : '—';
-    lines.push(`| \`${e.aws}\` | \`${STATUS_BADGE[e.status]}\` | ${target} | ${e.lastVerified || '—'} |`);
+    lines.push(`| \`${e.aws}\` | \`${statusBadge(e.status)}\` | ${target} | ${e.lastVerified || '—'} |`);
   }
   lines.push('');
   for (const e of parity.MANAGED_RULES) {
     lines.push(`### \`${e.aws}\``);
     lines.push('');
-    lines.push(`- **Status:** \`${STATUS_BADGE[e.status]}\``);
+    lines.push(`- **Status:** \`${statusBadge(e.status)}\``);
     if (e.cloudflare.rulesetName) {
       lines.push(`- **Cloudflare target:** ${e.cloudflare.rulesetName}${e.cloudflare.rulesetId ? ` (id \`${e.cloudflare.rulesetId}\`)` : ''}`);
     } else {
@@ -78,7 +84,7 @@ function renderEn() {
   lines.push('| Shape | Status | Cloudflare expression | Notes |');
   lines.push('| --- | --- | --- | --- |');
   for (const s of parity.SCOPE_DOWN_TRANSLATIONS) {
-    lines.push(`| \`${s.shape}\` | \`${STATUS_BADGE[s.status]}\` | ${s.cloudflareExpression ? `\`${s.cloudflareExpression}\`` : '—'} | ${s.rationale} |`);
+    lines.push(`| \`${s.shape}\` | \`${statusBadge(s.status)}\` | ${s.cloudflareExpression ? `\`${s.cloudflareExpression}\`` : '—'} | ${s.rationale} |`);
   }
   lines.push('');
   lines.push('## IP reputation and lists');
@@ -86,7 +92,7 @@ function renderEn() {
   lines.push('| Feature | Status | Cloudflare surface | Last verified |');
   lines.push('| --- | --- | --- | --- |');
   for (const f of parity.IP_REPUTATION_FEATURES) {
-    lines.push(`| ${f.feature} | \`${STATUS_BADGE[f.status]}\` | ${f.cloudflareSurface} | ${f.lastVerified || '—'} |`);
+    lines.push(`| ${f.feature} | \`${statusBadge(f.status)}\` | ${f.cloudflareSurface} | ${f.lastVerified || '—'} |`);
   }
   lines.push('');
   for (const f of parity.IP_REPUTATION_FEATURES) {
@@ -98,7 +104,7 @@ function renderEn() {
   lines.push('| Feature | Status | Cloudflare surface | Last verified |');
   lines.push('| --- | --- | --- | --- |');
   for (const f of parity.LOGGING_FEATURES) {
-    lines.push(`| ${f.feature} | \`${STATUS_BADGE[f.status]}\` | ${f.cloudflareSurface} | ${f.lastVerified || '—'} |`);
+    lines.push(`| ${f.feature} | \`${statusBadge(f.status)}\` | ${f.cloudflareSurface} | ${f.lastVerified || '—'} |`);
   }
   lines.push('');
   for (const f of parity.LOGGING_FEATURES) {
@@ -149,13 +155,13 @@ function renderJa() {
     const target = e.cloudflare.rulesetName
       ? (e.cloudflare.rulesetId ? `${e.cloudflare.rulesetName} (\`${e.cloudflare.rulesetId}\`)` : e.cloudflare.rulesetName)
       : '—';
-    lines.push(`| \`${e.aws}\` | \`${STATUS_BADGE[e.status]}\` | ${target} | ${e.lastVerified || '—'} |`);
+    lines.push(`| \`${e.aws}\` | \`${statusBadge(e.status)}\` | ${target} | ${e.lastVerified || '—'} |`);
   }
   lines.push('');
   for (const e of parity.MANAGED_RULES) {
     lines.push(`### \`${e.aws}\``);
     lines.push('');
-    lines.push(`- **ステータス:** \`${STATUS_BADGE[e.status]}\``);
+    lines.push(`- **ステータス:** \`${statusBadge(e.status)}\``);
     if (e.cloudflare.rulesetName) {
       lines.push(`- **Cloudflare ターゲット:** ${e.cloudflare.rulesetName}${e.cloudflare.rulesetId ? `（id \`${e.cloudflare.rulesetId}\`）` : ''}`);
     } else {
@@ -174,7 +180,7 @@ function renderJa() {
   lines.push('| 形状 | ステータス | Cloudflare expression | 備考 |');
   lines.push('| --- | --- | --- | --- |');
   for (const s of parity.SCOPE_DOWN_TRANSLATIONS) {
-    lines.push(`| \`${s.shape}\` | \`${STATUS_BADGE[s.status]}\` | ${s.cloudflareExpression ? `\`${s.cloudflareExpression}\`` : '—'} | ${s.rationale} |`);
+    lines.push(`| \`${s.shape}\` | \`${statusBadge(s.status)}\` | ${s.cloudflareExpression ? `\`${s.cloudflareExpression}\`` : '—'} | ${s.rationale} |`);
   }
   lines.push('');
   lines.push('## IP レピュテーション / リスト');
@@ -182,7 +188,7 @@ function renderJa() {
   lines.push('| 機能 | ステータス | Cloudflare 対応面 | 最終確認日 |');
   lines.push('| --- | --- | --- | --- |');
   for (const f of parity.IP_REPUTATION_FEATURES) {
-    lines.push(`| ${f.feature} | \`${STATUS_BADGE[f.status]}\` | ${f.cloudflareSurface} | ${f.lastVerified || '—'} |`);
+    lines.push(`| ${f.feature} | \`${statusBadge(f.status)}\` | ${f.cloudflareSurface} | ${f.lastVerified || '—'} |`);
   }
   lines.push('');
   for (const f of parity.IP_REPUTATION_FEATURES) {
@@ -194,7 +200,7 @@ function renderJa() {
   lines.push('| 機能 | ステータス | Cloudflare 対応面 | 最終確認日 |');
   lines.push('| --- | --- | --- | --- |');
   for (const f of parity.LOGGING_FEATURES) {
-    lines.push(`| ${f.feature} | \`${STATUS_BADGE[f.status]}\` | ${f.cloudflareSurface} | ${f.lastVerified || '—'} |`);
+    lines.push(`| ${f.feature} | \`${statusBadge(f.status)}\` | ${f.cloudflareSurface} | ${f.lastVerified || '—'} |`);
   }
   lines.push('');
   for (const f of parity.LOGGING_FEATURES) {

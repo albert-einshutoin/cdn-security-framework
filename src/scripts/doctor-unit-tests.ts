@@ -101,7 +101,7 @@ test('checkNodeVersion: minimum version matches package.json engines.node', () =
   const pkg = require(path.join(repoRoot, 'package.json'));
   const match = /^>=\s*(\d+\.\d+\.\d+)/.exec(pkg.engines.node);
   assert.ok(match, `unexpected engines.node format: ${pkg.engines.node}`);
-  assert.strictEqual(MIN_NODE_VERSION, match[1]);
+  assert.strictEqual(MIN_NODE_VERSION, match![1]);
 });
 
 test('checkNodeVersion: fail below required major version', () => {

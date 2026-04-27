@@ -59,7 +59,13 @@ const scenarios = [
   },
 ];
 
-function runBuild(policyPath, outDir) {
+type DriftScenario = {
+  name: string;
+  policyPath: string;
+  goldenDir: string;
+};
+
+function runBuild(policyPath: string, outDir: string) {
   execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile.js'), '--policy', policyPath, '--out-dir', outDir], {
     cwd: repoRoot,
     stdio: 'inherit',
@@ -78,7 +84,7 @@ function runBuild(policyPath, outDir) {
   });
 }
 
-function readOrNull(filePath) {
+function readOrNull(filePath: string): string | null {
   try {
     return fs.readFileSync(filePath, 'utf8');
   } catch (_e) {
@@ -86,7 +92,7 @@ function readOrNull(filePath) {
   }
 }
 
-function compareScenario(scenario) {
+function compareScenario(scenario: DriftScenario) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `cdn-security-drift-${scenario.name}-`));
   let failed = false;
 

@@ -83,7 +83,7 @@ function blockAction() {
   return { block: {} };
 }
 
-function actionFor(actionName) {
+function actionFor(actionName: string) {
   if (actionName === 'count') return { count: {} };
   if (actionName === 'captcha') return { captcha: {} };
   return blockAction();
@@ -138,7 +138,7 @@ if (Array.isArray(waf.rate_limit_rules)) {
   }
 }
 
-function addFingerprintRules(fieldName, fingerprints, rulePrefix, metricPrefix) {
+function addFingerprintRules(fieldName: string, fingerprints: unknown[], rulePrefix: string, metricPrefix: string) {
   if (!Array.isArray(fingerprints) || fingerprints.length === 0) return;
   for (const fp of fingerprints) {
     if (!fp) continue;
@@ -206,7 +206,7 @@ if (waf.managed_rules && waf.managed_rules.length > 0) {
       name: webAclName,
       scope,
       default_action: { allow: {} },
-      rule: waf.managed_rules.map((ruleName, idx) => ({
+      rule: waf.managed_rules.map((ruleName: string, idx: number) => ({
         name: `AWS-${ruleName}`,
         priority: 10 + idx,
         override_action: { none: {} },
@@ -247,7 +247,7 @@ if (waf.managed_rules && waf.managed_rules.length > 0) {
         description: `WAF log destination ARN (Kinesis Firehose / S3 / CloudWatch Logs). Sourced from $${arnEnv}.`,
         type: 'string',
       };
-      const redactedFields = (logging.redacted_fields || []).map((field) => {
+      const redactedFields = (logging.redacted_fields || []).map((field: string) => {
         if (field === 'authorization' || field === 'cookie' || field === 'x-api-key' || field === 'x-csrf-token' || field === 'set-cookie') {
           return { single_header: { name: field } };
         }
