@@ -33,20 +33,46 @@ const { lintPolicy } = require('./lint');
 
 const DEFAULT_PKG_ROOT = path.join(__dirname, '..');
 
-function resolveAbsolute(inputPath, cwd) {
+type EmitWafTarget = 'aws' | 'cloudflare';
+type EmitWafFormat = 'terraform' | 'cloudformation' | 'cdk';
+
+interface EmitWafOptions {
+  policyPath?: string;
+  outDir?: string;
+  target?: EmitWafTarget;
+  format?: EmitWafFormat;
+  outputMode?: string;
+  ruleGroupOnly?: boolean;
+  failOnWafApproximation?: boolean;
+  cwd?: string;
+  pkgRoot?: string;
+  env?: NodeJS.ProcessEnv;
+}
+
+interface EmitWafResultBase {
+  edgeFiles: string[];
+  infraFiles: string[];
+  policyPath: string | null;
+  outDir: string | null;
+  target: string;
+  format: string;
+  formatNotImplemented: boolean;
+}
+
+function resolveAbsolute(inputPath: string, cwd: string): string {
   return path.isAbsolute(inputPath) ? inputPath : path.join(cwd, inputPath);
 }
 
-function listInfraArtifacts(outDir) {
+function listInfraArtifacts(outDir: string): string[] {
   const infraDir = path.join(outDir, 'infra');
   if (!fs.existsSync(infraDir)) return [];
   return fs
     .readdirSync(infraDir)
-    .filter((name) => name.endsWith('.tf.json'))
-    .map((name) => path.join(infraDir, name));
+    .filter((name: string) => name.endsWith('.tf.json'))
+    .map((name: string) => path.join(infraDir, name));
 }
 
-function emitWaf(opts) {
+function emitWaf(opts: EmitWafOptions = {}) {
   opts = opts || {};
   const cwd = opts.cwd || process.cwd();
   const pkgRoot = opts.pkgRoot || DEFAULT_PKG_ROOT;
@@ -54,9 +80,9 @@ function emitWaf(opts) {
   const format = opts.format || 'terraform';
   const target = opts.target || 'aws';
 
-  const errors = [];
-  const warnings = [];
-  const baseResult = {
+  const errors: string[] = [];
+  const warnings: string[] = [];
+  const baseResult: EmitWafResultBase = {
     edgeFiles: [],
     infraFiles: [],
     policyPath: null,

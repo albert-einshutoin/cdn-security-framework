@@ -30,17 +30,23 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 
-function resolveAbsolute(inputPath, cwd) {
+interface MigratePolicyOptions {
+  policyPath?: string;
+  toVersion?: number | string;
+  cwd?: string;
+}
+
+function resolveAbsolute(inputPath: string, cwd: string): string {
   return path.isAbsolute(inputPath) ? inputPath : path.join(cwd, inputPath);
 }
 
-function migratePolicy(opts) {
+function migratePolicy(opts: MigratePolicyOptions = {}) {
   opts = opts || {};
   const cwd = opts.cwd || process.cwd();
   const toVersionRaw = opts.toVersion === undefined ? 1 : opts.toVersion;
   const toVersion = Number(toVersionRaw);
 
-  const warnings = [];
+  const warnings: string[] = [];
 
   if (!opts.policyPath) {
     return {
@@ -79,7 +85,7 @@ function migratePolicy(opts) {
     };
   }
 
-  let doc;
+  let doc: any;
   try {
     doc = yaml.load(fs.readFileSync(policyPath, 'utf8'));
   } catch (e: any) {

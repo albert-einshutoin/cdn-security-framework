@@ -27,7 +27,7 @@ const {
 
 const DEFAULT_PKG_ROOT = path.join(__dirname, '..');
 
-function formatAjvErrors(errors) {
+function formatAjvErrors(errors: any[]): string[] {
   return errors.map((err) => {
     const loc = err.instancePath || '(root)';
     const key =
@@ -38,14 +38,14 @@ function formatAjvErrors(errors) {
   });
 }
 
-function lintPolicy(opts) {
+function lintPolicy(opts: any = {}) {
   opts = opts || {};
   const pkgRoot = opts.pkgRoot || DEFAULT_PKG_ROOT;
   const policyPath = opts.policyPath;
   const env = opts.env || process.env;
 
-  const errors = [];
-  const warnings = [];
+  const errors: string[] = [];
+  const warnings: string[] = [];
 
   if (!policyPath) {
     return {
@@ -56,7 +56,7 @@ function lintPolicy(opts) {
     };
   }
 
-  let policy = null;
+  let policy: any = null;
   try {
     policy = yaml.load(fs.readFileSync(policyPath, 'utf8'));
   } catch (e: any) {
@@ -76,7 +76,7 @@ function lintPolicy(opts) {
     };
   }
 
-  let schema;
+  let schema: any;
   try {
     schema = JSON.parse(
       fs.readFileSync(path.join(pkgRoot, 'policy', 'schema.json'), 'utf8'),
@@ -119,7 +119,7 @@ function lintPolicy(opts) {
   } catch (e: any) {
     if (Array.isArray(e.validationErrors)) {
       errors.push('Auth gate validation failed:');
-      e.validationErrors.forEach((msg) => errors.push('  - ' + msg));
+      e.validationErrors.forEach((msg: string) => errors.push('  - ' + msg));
     } else {
       errors.push('Auth gate validation error: ' + e.message);
     }
@@ -141,7 +141,7 @@ function lintPolicy(opts) {
   if (isEnforce && hasWaf) {
     const managed = Array.isArray(waf.managed_rules) ? waf.managed_rules : [];
     const hasCoreSignal = managed.some(
-      (r) =>
+      (r: string) =>
         r === 'AWSManagedRulesBotControlRuleSet' ||
         r === 'AWSManagedRulesATPRuleSet' ||
         r === 'AWSManagedRulesIPReputationList' ||
