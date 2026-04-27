@@ -59,7 +59,7 @@ function lintPolicy(opts) {
   let policy = null;
   try {
     policy = yaml.load(fs.readFileSync(policyPath, 'utf8'));
-  } catch (e) {
+  } catch (e: any) {
     if (e.code === 'ENOENT') {
       return {
         ok: false,
@@ -81,7 +81,7 @@ function lintPolicy(opts) {
     schema = JSON.parse(
       fs.readFileSync(path.join(pkgRoot, 'policy', 'schema.json'), 'utf8'),
     );
-  } catch (e) {
+  } catch (e: any) {
     return {
       ok: false,
       errors: [`failed to load schema: ${e.message}`],
@@ -107,7 +107,7 @@ function lintPolicy(opts) {
     if (block.path_patterns !== undefined) {
       parsePathPatterns(block.path_patterns);
     }
-  } catch (e) {
+  } catch (e: any) {
     errors.push(`  - request.block.path_patterns: ${e.message}`);
   }
 
@@ -116,7 +116,7 @@ function lintPolicy(opts) {
       exitOnError: false,
       allowPlaceholderToken: true,
     });
-  } catch (e) {
+  } catch (e: any) {
     if (Array.isArray(e.validationErrors)) {
       errors.push('Auth gate validation failed:');
       e.validationErrors.forEach((msg) => errors.push('  - ' + msg));

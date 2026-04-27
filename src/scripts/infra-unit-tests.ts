@@ -10,7 +10,7 @@ function test(name, fn) {
   try {
     fn();
     console.log('OK:', name);
-  } catch (e) {
+  } catch (e: any) {
     console.error('FAIL:', name);
     console.error(e && e.stack ? e.stack : e);
     process.exitCode = 1;

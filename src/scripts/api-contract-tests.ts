@@ -9,7 +9,7 @@ function test(name, fn) {
   try {
     fn();
     console.log(`OK: ${name}`);
-  } catch (err) {
+  } catch (err: any) {
     console.error(`FAIL: ${name}`);
     console.error(err);
     process.exitCode = 1;

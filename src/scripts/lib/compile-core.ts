@@ -57,7 +57,7 @@ function compileRegexOrThrow(source, context) {
   const { pattern, flags } = extractRegex(source);
   try {
     return new RegExp(pattern, flags);
-  } catch (e) {
+  } catch (e: any) {
     throw new Error(`Invalid regex in ${context}: ${source} — ${e.message}`);
   }
 }
@@ -748,7 +748,7 @@ function main(argv = process.argv.slice(2)) {
 
   try {
     policy = loadPolicy(policyPath);
-  } catch (e) {
+  } catch (e: any) {
     if (e.code === 'ENOENT') {
       console.error('Error: policy file not found:', policyPath);
       process.exit(1);
@@ -770,7 +770,7 @@ function main(argv = process.argv.slice(2)) {
 
   try {
     validateOriginAuth(policy, { strict: strictOriginAuth });
-  } catch (e) {
+  } catch (e: any) {
     process.exit(1);
   }
 
@@ -781,7 +781,7 @@ function main(argv = process.argv.slice(2)) {
     if (allowPlaceholderToken) {
       console.error('[WARN] Built with --allow-placeholder-token. Generated artifacts are NOT safe for production.');
     }
-  } catch (e) {
+  } catch (e: any) {
     if (e.code === 'ENOENT') {
       console.error('Error: template not found:', e.path);
       process.exit(1);

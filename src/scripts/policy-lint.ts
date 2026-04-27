@@ -42,7 +42,7 @@ function main() {
   let policy;
   try {
     policy = loadYaml(policyPath);
-  } catch (e) {
+  } catch (e: any) {
     if (e.code === 'ENOENT') {
       console.error('Error: policy file not found:', policyPath);
       process.exit(1);
@@ -54,7 +54,7 @@ function main() {
   let schema;
   try {
     schema = loadJson(schemaPath);
-  } catch (e) {
+  } catch (e: any) {
     console.error('Error: failed to load schema:', e.message);
     process.exit(1);
   }
@@ -77,7 +77,7 @@ function main() {
     if (block.path_patterns !== undefined) {
       parsePathPatterns(block.path_patterns);
     }
-  } catch (e) {
+  } catch (e: any) {
     errors.push(`  - request.block.path_patterns: ${e.message}`);
   }
 
@@ -85,7 +85,7 @@ function main() {
   // Allow missing token envs at lint time — they are enforced at build time.
   try {
     validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true });
-  } catch (e) {
+  } catch (e: any) {
     if (Array.isArray(e.validationErrors)) {
       errors.push('Auth gate validation failed:');
       e.validationErrors.forEach((msg) => errors.push('  - ' + msg));

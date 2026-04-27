@@ -27,7 +27,7 @@ function test(name, fn) {
   try {
     fn();
     console.log('OK:', name);
-  } catch (e) {
+  } catch (e: any) {
     console.error('FAIL:', name);
     console.error(e && e.stack ? e.stack : e);
     process.exitCode = 1;
@@ -62,7 +62,7 @@ function runWithTimeout(regex, input, timeoutMs) {
   const start = Date.now();
   try {
     vm.runInContext('regex.test(input)', ctx, { timeout: timeoutMs });
-  } catch (e) {
+  } catch (e: any) {
     if (/Script execution timed out/i.test(String(e && e.message))) {
       return { ok: false, elapsed: Date.now() - start, timedOut: true };
     }
@@ -95,7 +95,7 @@ function fuzzRegex(patternSource) {
     // (which Node's RegExp does not natively accept) are translated the same
     // way as at compile time.
     compiled = compileRegexOrThrow(patternSource, 'redos-fuzz');
-  } catch (e) {
+  } catch (e: any) {
     return { compile: false, reason: String(e && e.message) };
   }
   for (const input of adversarialInputs()) {
@@ -156,7 +156,7 @@ test('redos-fuzz: runtime timeout triggers on an exponentially backtracking rege
   let timedOut = false;
   try {
     vm.runInContext('regex.test(input)', ctx, { timeout: REDOS_TIMEOUT_MS });
-  } catch (e) {
+  } catch (e: any) {
     if (/Script execution timed out/i.test(String(e && e.message))) timedOut = true;
     else throw e;
   }

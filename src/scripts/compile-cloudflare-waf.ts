@@ -49,7 +49,7 @@ function recordParity(entry) {
 let policy;
 try {
   policy = yaml.load(fs.readFileSync(policyPath, 'utf8'));
-} catch (e) {
+} catch (e: any) {
   if (e.code === 'ENOENT') {
     console.error('Error: policy file not found:', policyPath);
     process.exit(1);

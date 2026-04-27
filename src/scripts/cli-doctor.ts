@@ -99,7 +99,7 @@ function tryParsePolicy(policyPath) {
     const raw = fs.readFileSync(policyPath, 'utf8');
     const doc = yaml.load(raw);
     return { ok: true, doc };
-  } catch (e) {
+  } catch (e: any) {
     return { ok: false, error: e.message };
   }
 }
@@ -199,7 +199,7 @@ function checkDistWritable(cwd) {
     fs.writeFileSync(probe, 'ok', 'utf8');
     fs.unlinkSync(probe);
     return pass(CHECK_DIST_WRITABLE, `dist/edge/ is writable (${edgeDir}).`);
-  } catch (e) {
+  } catch (e: any) {
     return fail(
       CHECK_DIST_WRITABLE,
       `Cannot write to dist/edge/: ${e.message}. Check filesystem permissions — build will fail.`
@@ -223,7 +223,7 @@ function checkDependencies(cwd, spawnSyncImpl) {
   let parsed;
   try {
     parsed = JSON.parse(res.stdout);
-  } catch (e) {
+  } catch (e: any) {
     return warn(CHECK_DEPENDENCIES, `Could not parse \`npm ls --json\` output: ${e.message}`);
   }
   const problems = Array.isArray(parsed.problems) ? parsed.problems : [];
@@ -290,7 +290,7 @@ function runDoctor(opts) {
     const resolved = path.isAbsolute(reportPath) ? reportPath : path.join(cwd, reportPath);
     try {
       fs.writeFileSync(resolved, JSON.stringify(report, null, 2) + '\n', 'utf8');
-    } catch (e) {
+    } catch (e: any) {
       // A report-write failure must not mask the actual doctor result, but we
       // surface it on stderr so CI can notice.
       console.error(`[doctor] failed to write report to ${resolved}: ${e.message}`);

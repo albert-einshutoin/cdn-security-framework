@@ -82,7 +82,7 @@ function migratePolicy(opts) {
   let doc;
   try {
     doc = yaml.load(fs.readFileSync(policyPath, 'utf8'));
-  } catch (e) {
+  } catch (e: any) {
     return {
       ok: false,
       errors: [`failed to parse policy YAML: ${e.message}`],

@@ -40,7 +40,7 @@ let policy;
 try {
   const content = fs.readFileSync(policyPath, 'utf8');
   policy = yaml.load(content);
-} catch (e) {
+} catch (e: any) {
   if (e.code === 'ENOENT') {
     console.error('Error: policy file not found:', policyPath);
     process.exit(1);

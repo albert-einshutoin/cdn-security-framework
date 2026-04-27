@@ -16,7 +16,7 @@
     "strict": true,
     "noImplicitAny": false,
     "strictNullChecks": false,
-    "useUnknownInCatchVariables": false,
+    "useUnknownInCatchVariables": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true
   },
