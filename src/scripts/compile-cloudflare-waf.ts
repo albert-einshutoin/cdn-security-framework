@@ -37,9 +37,9 @@ for (let i = 0; i < argv.length; i++) {
 
 // Parity warnings collected during emission — surfaced once at the end so
 // the order is stable (managed rules first, then scope-down notes).
-const parityWarnings = [];
+const parityWarnings: string[] = [];
 let sawApproximationOrUnsupported = false;
-function recordParity(entry) {
+function recordParity(entry: any) {
   const msg = parity.formatManagedRuleWarning(entry);
   if (!msg) return;
   parityWarnings.push(msg);
@@ -82,8 +82,8 @@ const tfJson: any = {
 };
 
 // 1. IP lists (optional) — cloudflare_list with IPs. Rules below reference by id.
-const ipBlocklistEntries = Array.isArray(ip.blocklist) ? ip.blocklist.filter(Boolean) : [];
-const ipAllowlistEntries = Array.isArray(ip.allowlist) ? ip.allowlist.filter(Boolean) : [];
+const ipBlocklistEntries = Array.isArray(ip.blocklist) ? ip.blocklist.filter((entry: unknown) => Boolean(entry)) : [];
+const ipAllowlistEntries = Array.isArray(ip.allowlist) ? ip.allowlist.filter((entry: unknown) => Boolean(entry)) : [];
 if (ipBlocklistEntries.length > 0) {
   tfJson.resource.cloudflare_list = tfJson.resource.cloudflare_list || {};
   tfJson.resource.cloudflare_list[projectName + '_ip_blocklist'] = {
@@ -91,7 +91,7 @@ if (ipBlocklistEntries.length > 0) {
     name: projectName + '_ip_blocklist',
     description: 'CDN Security Framework: IP blocklist',
     kind: 'ip',
-    item: ipBlocklistEntries.map((addr) => ({
+    item: ipBlocklistEntries.map((addr: unknown) => ({
       value: { ip: String(addr) },
       comment: 'policy blocklist',
     })),
@@ -104,7 +104,7 @@ if (ipAllowlistEntries.length > 0) {
     name: projectName + '_ip_allowlist',
     description: 'CDN Security Framework: IP allowlist',
     kind: 'ip',
-    item: ipAllowlistEntries.map((addr) => ({
+    item: ipAllowlistEntries.map((addr: unknown) => ({
       value: { ip: String(addr) },
       comment: 'policy allowlist',
     })),
@@ -112,7 +112,7 @@ if (ipAllowlistEntries.length > 0) {
 }
 
 // 2. Custom firewall ruleset (geo + IP + UA + path)
-const customRules = [];
+const customRules: any[] = [];
 let customPriority = 1;
 
 function makeBlockAction() {
@@ -137,10 +137,10 @@ function makeBlockAction() {
 }
 
 // Geo block / allow
-const geoBlockCountries = Array.isArray(geo.block_countries) ? geo.block_countries.filter(Boolean) : [];
-const geoAllowCountries = Array.isArray(geo.allow_countries) ? geo.allow_countries.filter(Boolean) : [];
+const geoBlockCountries = Array.isArray(geo.block_countries) ? geo.block_countries.filter((c: unknown) => Boolean(c)) : [];
+const geoAllowCountries = Array.isArray(geo.allow_countries) ? geo.allow_countries.filter((c: unknown) => Boolean(c)) : [];
 if (geoBlockCountries.length > 0) {
-  const expr = `(ip.geoip.country in {${geoBlockCountries.map((c) => `"${c}"`).join(' ')}})`;
+  const expr = `(ip.geoip.country in {${geoBlockCountries.map((c: unknown) => `"${c}"`).join(' ')}})`;
   customRules.push(Object.assign({
     description: 'Geo blocklist',
     enabled: true,
@@ -148,7 +148,7 @@ if (geoBlockCountries.length > 0) {
   }, makeBlockAction()));
 }
 if (geoAllowCountries.length > 0) {
-  const expr = `not (ip.geoip.country in {${geoAllowCountries.map((c) => `"${c}"`).join(' ')}})`;
+  const expr = `not (ip.geoip.country in {${geoAllowCountries.map((c: unknown) => `"${c}"`).join(' ')}})`;
   customRules.push(Object.assign({
     description: 'Geo allowlist (reject anything outside)',
     enabled: true,
@@ -170,7 +170,7 @@ const uaDeny = Array.isArray((policy.request || {}).block?.ua_contains)
   ? policy.request.block.ua_contains
   : [];
 if (uaDeny.length > 0) {
-  const uaExprs = uaDeny.map((s) => `lower(http.user_agent) contains "${String(s).toLowerCase().replace(/"/g, '\\"')}"`);
+  const uaExprs = uaDeny.map((s: unknown) => `lower(http.user_agent) contains "${String(s).toLowerCase().replace(/"/g, '\\"')}"`);
   customRules.push(Object.assign({
     description: 'User-Agent blocklist',
     enabled: true,
@@ -180,10 +180,10 @@ if (uaDeny.length > 0) {
 
 // JA3/JA4 fingerprint rules
 const fpAction = waf.fingerprint_action === 'count' ? 'log' : 'block';
-const ja3List = Array.isArray(waf.ja3_fingerprints) ? waf.ja3_fingerprints.filter(Boolean) : [];
-const ja4List = Array.isArray(waf.ja4_fingerprints) ? waf.ja4_fingerprints.filter(Boolean) : [];
+const ja3List = Array.isArray(waf.ja3_fingerprints) ? waf.ja3_fingerprints.filter((h: unknown) => Boolean(h)) : [];
+const ja4List = Array.isArray(waf.ja4_fingerprints) ? waf.ja4_fingerprints.filter((h: unknown) => Boolean(h)) : [];
 if (ja3List.length > 0) {
-  const expr = `(cf.bot_management.ja3_hash in {${ja3List.map((h) => `"${h}"`).join(' ')}})`;
+  const expr = `(cf.bot_management.ja3_hash in {${ja3List.map((h: unknown) => `"${h}"`).join(' ')}})`;
   customRules.push({
     description: 'JA3 fingerprint ' + fpAction,
     enabled: true,
@@ -193,7 +193,7 @@ if (ja3List.length > 0) {
   });
 }
 if (ja4List.length > 0) {
-  const expr = `(cf.bot_management.ja4 in {${ja4List.map((h) => `"${h}"`).join(' ')}})`;
+  const expr = `(cf.bot_management.ja4 in {${ja4List.map((h: unknown) => `"${h}"`).join(' ')}})`;
   customRules.push({
     description: 'JA4 fingerprint ' + fpAction,
     enabled: true,
@@ -211,12 +211,12 @@ if (customRules.length > 0) {
     description: 'CDN Security Framework: custom firewall rules (geo/IP/UA/fingerprint)',
     kind: 'zone',
     phase: 'http_request_firewall_custom',
-    rules: customRules.map((r, idx) => Object.assign({ ref: `rule_${idx + 1}` }, r)),
+    rules: customRules.map((r: any, idx: number) => Object.assign({ ref: `rule_${idx + 1}` }, r)),
   };
 }
 
 // 3. Rate-limit ruleset — rate_limit (legacy global) + rate_limit_rules[]
-const rateRules = [];
+const rateRules: any[] = [];
 if (waf.rate_limit) {
   rateRules.push({
     description: 'Global IP rate limit (legacy)',
@@ -262,7 +262,7 @@ if (Array.isArray(waf.rate_limit_rules)) {
       );
       sawApproximationOrUnsupported = true;
     }
-    const characteristicsMap = {
+    const characteristicsMap: Record<string, string[]> = {
       IP: ['ip.src'],
       FORWARDED_IP: ['http.x_forwarded_for'],
       CUSTOM_KEYS: Array.isArray(rule.cloudflare_characteristics) && rule.cloudflare_characteristics.length > 0
@@ -292,7 +292,7 @@ if (rateRules.length > 0) {
     description: 'CDN Security Framework: rate limits',
     kind: 'zone',
     phase: 'http_ratelimit',
-    rules: rateRules.map((r, idx) => Object.assign({ ref: `rate_${idx + 1}` }, r)),
+    rules: rateRules.map((r: any, idx: number) => Object.assign({ ref: `rate_${idx + 1}` }, r)),
   };
 }
 
@@ -302,7 +302,7 @@ if (rateRules.length > 0) {
 // Cloudflare one without surfacing the mismatch.
 const managedEntries = Array.isArray(waf.managed_rules) ? waf.managed_rules : [];
 if (managedEntries.length > 0) {
-  const managedRules = [];
+  const managedRules: any[] = [];
   for (const name of managedEntries) {
     const entry = parity.classifyManagedRule(name);
     recordParity(entry);
@@ -335,13 +335,13 @@ if (managedEntries.length > 0) {
     description: 'CDN Security Framework: managed ruleset bindings',
     kind: 'zone',
     phase: 'http_request_firewall_managed',
-    rules: managedRules.map((r, idx) => Object.assign({ ref: `managed_${idx + 1}` }, r)),
+    rules: managedRules.map((r: any, idx: number) => Object.assign({ ref: `managed_${idx + 1}` }, r)),
   };
 }
 
 // 5. Bot Fight Mode — expressed as a zone setting; emit a one-line hint when
 // BotControl appears in managed_rules but cannot be mapped one-to-one.
-if (managedEntries.some((n) => n === 'AWSManagedRulesBotControlRuleSet' || n === 'AWSManagedRulesATPRuleSet')) {
+if (managedEntries.some((n: unknown) => n === 'AWSManagedRulesBotControlRuleSet' || n === 'AWSManagedRulesATPRuleSet')) {
   tfJson.resource.cloudflare_zone_settings_override = tfJson.resource.cloudflare_zone_settings_override || {};
   tfJson.resource.cloudflare_zone_settings_override[projectName + '_bots'] = {
     zone_id: '${var.cloudflare_zone_id}',

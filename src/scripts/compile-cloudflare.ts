@@ -67,8 +67,8 @@ const block = request.block || {};
 const normalize = request.normalize || {};
 const routes = policy.routes || [];
 
-function getWorkerAuthGates() {
-  const gates = [];
+function getWorkerAuthGates(): any[] {
+  const gates: any[] = [];
   for (const route of routes) {
     const gate = route.auth_gate;
     if (!gate) continue;
@@ -96,7 +96,7 @@ function getWorkerAuthGates() {
       // verifier — cross-alg entries would cause silent auth outage and are
       // rejected at build time via `validateAuthGates`.
       const userAllowed = Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0
-        ? gate.allowed_algorithms.filter((a) => typeof a === 'string' && a !== 'none' && a === algorithm)
+        ? gate.allowed_algorithms.filter((a: unknown) => typeof a === 'string' && a !== 'none' && a === algorithm)
         : null;
       gateConfig.allowed_algorithms = userAllowed && userAllowed.length > 0 ? userAllowed : [algorithm];
       gateConfig.clock_skew_sec = Number.isFinite(Number(gate.clock_skew_sec))
@@ -136,7 +136,7 @@ const corsConfig = resHeaders.cors || null;
 const originAuth = (policy.origin || {}).auth || null;
 const rawAllowedHosts = Array.isArray(request.allowed_hosts) ? request.allowed_hosts : [];
 const allowedHosts = rawAllowedHosts
-  .map((h) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
+  .map((h: unknown) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
   .filter(Boolean);
 const trustForwardedFor = request.trust_forwarded_for === true;
 const jwksGlobal = (policy.firewall || {}).jwks || {};
@@ -148,10 +148,10 @@ const jwksNegativeCache = Number.isFinite(Number(jwksGlobal.negative_cache_sec))
   : 60;
 const fwGeo = (policy.firewall || {}).geo || {};
 const geoBlockCountries = Array.isArray(fwGeo.block_countries)
-  ? fwGeo.block_countries.map((c) => String(c || '').trim().toUpperCase()).filter(Boolean)
+  ? fwGeo.block_countries.map((c: unknown) => String(c || '').trim().toUpperCase()).filter(Boolean)
   : [];
 const geoAllowCountries = Array.isArray(fwGeo.allow_countries)
-  ? fwGeo.allow_countries.map((c) => String(c || '').trim().toUpperCase()).filter(Boolean)
+  ? fwGeo.allow_countries.map((c: unknown) => String(c || '').trim().toUpperCase()).filter(Boolean)
   : [];
 
 const cfgCode = [
@@ -196,7 +196,7 @@ for (const route of routes) {
 }
 
 const authProtectedPrefixesForResp = Array.from(new Set(
-  (authGates || []).flatMap((g) => Array.isArray(g.protectedPrefixes) ? g.protectedPrefixes : []),
+  (authGates || []).flatMap((g: any) => Array.isArray(g.protectedPrefixes) ? g.protectedPrefixes : []),
 ));
 const forceVaryAuth = resHeaders.force_vary_auth !== false;
 
@@ -223,7 +223,7 @@ const responseCfgCode = [
   `  forceVaryAuth: ${forceVaryAuth ? 'true' : 'false'},`,
   `  clearSiteDataPaths: ${JSON.stringify(
     Array.isArray(resHeaders.clear_site_data_paths)
-      ? resHeaders.clear_site_data_paths.filter((s) => typeof s === 'string' && s.trim())
+      ? resHeaders.clear_site_data_paths.filter((s: unknown) => typeof s === 'string' && s.trim())
       : []
   )},`,
   `  clearSiteDataTypes: ${JSON.stringify(

@@ -11,6 +11,12 @@ const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
 
+type HeaderMap = Record<string, string>;
+type CloudFrontHeaderMap = Record<string, { value: string }>;
+type LambdaHeaderMap = Record<string, Array<{ key: string; value: string }>>;
+type ExpectedStatus = 'allow' | number | string;
+type RuntimeCase = [string, any, ExpectedStatus];
+
 // =========================================================================
 // Section 1: viewer-request.js tests (CloudFront Functions)
 // =========================================================================
@@ -26,16 +32,16 @@ try {
 
 // Run the generated script in an isolated function and capture its handler.
 const handler = Function(`${code}\nreturn handler;`)();
-let originHandler;
+let originHandler: any;
 
 // The build must have been invoked with EDGE_ADMIN_TOKEN set (see CI / npm script).
 // Fall back to the documented placeholder only for --allow-placeholder-token builds.
 const DEFAULT_TOKEN = process.env.EDGE_ADMIN_TOKEN
   || 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
 
-function buildEvent(method, uri, headers = {}, querystring = '') {
+function buildEvent(method: string, uri: string, headers: HeaderMap = {}, querystring = '') {
   const h = headers || {};
-  const cfHeaders = {};
+  const cfHeaders: CloudFrontHeaderMap = {};
   for (const [k, v] of Object.entries(h)) {
     cfHeaders[k.toLowerCase()] = { value: v };
   }
@@ -49,7 +55,7 @@ function buildEvent(method, uri, headers = {}, querystring = '') {
   };
 }
 
-function runCase(name, event, expected) {
+function runCase(name: string, event: any, expected: ExpectedStatus) {
   const result: any = handler(event);
   const allowed = result && !result.statusCode && result.uri !== undefined;
   const got = allowed ? 'allow' : (result && result.statusCode);
@@ -62,7 +68,7 @@ function runCase(name, event, expected) {
   return true;
 }
 
-const cases = [
+const cases: RuntimeCase[] = [
   // Basic tests
   ['GET / with UA', buildEvent('GET', '/', { 'user-agent': 'Mozilla/5.0' }), 'allow'],
   ['GET / no UA', buildEvent('GET', '/'), 400],
@@ -103,7 +109,7 @@ const cases = [
   // 64 headers (incl. user-agent) must pass; 65 must get 431.
   ['GET / with 64 headers (boundary)',
     (() => {
-      const h = { 'user-agent': 'Mozilla' };
+      const h: HeaderMap = { 'user-agent': 'Mozilla' };
       for (let i = 0; i < 63; i++) h['x-filler-' + i] = 'v';
       return buildEvent('GET', '/', h);
     })(),
@@ -111,7 +117,7 @@ const cases = [
   ],
   ['GET / with 65 headers (over cap)',
     (() => {
-      const h = { 'user-agent': 'Mozilla' };
+      const h: HeaderMap = { 'user-agent': 'Mozilla' };
       for (let i = 0; i < 64; i++) h['x-filler-' + i] = 'v';
       return buildEvent('GET', '/', h);
     })(),
@@ -204,7 +210,7 @@ console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases
   const h = compileViewerTemplate(cfgCode);
   if (!h) { viewerFailed++; return; }
 
-  const cases = [
+  const cases: RuntimeCase[] = [
     ['host-allow: api.example.com accepted', buildEvent('GET', '/', { host: 'api.example.com' }), 'allow'],
     ['host-allow: matches wildcard *.cdn.example.com', buildEvent('GET', '/', { host: 'edge.cdn.example.com' }), 'allow'],
     ['host-allow: matches wildcard case-insensitively', buildEvent('GET', '/', { host: 'EDGE.CDN.EXAMPLE.COM' }), 'allow'],
@@ -231,7 +237,7 @@ console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases
 // Section 1b: viewer-request.js monitor mode tests
 // =========================================================================
 
-function compileViewerTemplate(cfgCode) {
+function compileViewerTemplate(cfgCode: string): any {
   const templatePath = path.join(__dirname, '..', 'templates', 'aws', 'viewer-request.js');
   let vrCode;
   try {
@@ -336,9 +342,9 @@ viewerFailed += viewerMonitorResult.failed;
 // Helper: create HS256 JWT
 const HS256_SECRET = 'test-secret-for-runtime-tests-32b';
 
-function createHS256Jwt(payload, secret) {
+function createHS256Jwt(payload: unknown, secret: string) {
   const header = { alg: 'HS256', typ: 'JWT' };
-  const enc = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64')
+  const enc = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base64')
     .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
   const headerB64 = enc(header);
   const payloadB64 = enc(payload);
@@ -350,9 +356,9 @@ function createHS256Jwt(payload, secret) {
 }
 
 // Build Lambda@Edge event format
-function buildLambdaEdgeEvent(uri, headers = {}, querystring = '') {
+function buildLambdaEdgeEvent(uri: string, headers: HeaderMap = {}, querystring = '') {
   const h = headers || {};
-  const cfHeaders = {};
+  const cfHeaders: LambdaHeaderMap = {};
   for (const [k, v] of Object.entries(h)) {
     cfHeaders[k.toLowerCase()] = [{ key: k, value: v }];
   }
@@ -370,7 +376,7 @@ function buildLambdaEdgeEvent(uri, headers = {}, querystring = '') {
 }
 
 // Async test runner for Lambda@Edge (result.status is string, not statusCode number)
-async function runAsyncCase(name, event, expected) {
+async function runAsyncCase(name: string, event: any, expected: ExpectedStatus) {
   const result: any = await originHandler(event);
   // Lambda@Edge pass-through returns the request object (has uri, no status)
   const isPassThrough = result && result.uri !== undefined && !result.status;
@@ -386,7 +392,7 @@ async function runAsyncCase(name, event, expected) {
 }
 
 // Helper: compile origin-request template with inline config
-function compileOriginTemplate(cfgCode) {
+function compileOriginTemplate(cfgCode: string): any {
   const templatePath = path.join(__dirname, '..', 'templates', 'aws', 'origin-request.js');
   let originCode;
   try {
@@ -418,7 +424,7 @@ function compileOriginTemplate(cfgCode) {
 // Helper: create signed URL query string
 const SIGNED_URL_SECRET = 'test-signing-secret-for-urls-32b';
 
-function createSignedUrlParams(uri, expiresSec, secret) {
+function createSignedUrlParams(uri: string, expiresSec: number, secret: string) {
   const signData = uri + String(expiresSec);
   const sig = crypto.createHmac('sha256', secret)
     .update(signData)
@@ -426,7 +432,7 @@ function createSignedUrlParams(uri, expiresSec, secret) {
   return 'exp=' + expiresSec + '&sig=' + sig;
 }
 
-function createSignedUrlWithNonce(uri, expiresSec, secret, nonce) {
+function createSignedUrlWithNonce(uri: string, expiresSec: number, secret: string, nonce: string) {
   const signData = uri + String(expiresSec) + '|' + nonce;
   const sig = crypto.createHmac('sha256', secret)
     .update(signData)
@@ -484,7 +490,7 @@ async function runOriginRequestTests() {
 
   const nowSec = Math.floor(Date.now() / 1000);
 
-  const originCases = [
+  const originCases: RuntimeCase[] = [
     // --- Pass-through ---
     ['origin: GET / pass-through',
       buildLambdaEdgeEvent('/'),
@@ -561,7 +567,7 @@ async function runOriginRequestTests() {
         'Authorization': 'Bearer ' + (function () {
           const header = { alg: 'none', typ: 'JWT' };
           const payload = { sub: 'user', iss: 'test-issuer', aud: 'test-audience', exp: nowSec + 3600 };
-          const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64')
+          const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64')
             .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
           return enc(header) + '.' + enc(payload) + '.';
         })(),
@@ -575,7 +581,7 @@ async function runOriginRequestTests() {
         'Authorization': 'Bearer ' + (function () {
           const header = { alg: 'RS256', typ: 'JWT' };
           const payload = { sub: 'user', iss: 'test-issuer', aud: 'test-audience', exp: nowSec + 3600 };
-          const enc = (o) => Buffer.from(JSON.stringify(o)).toString('base64')
+          const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64')
             .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
           const data = enc(header) + '.' + enc(payload);
           const sig = crypto.createHmac('sha256', testSecret).update(data).digest('base64')
@@ -770,7 +776,7 @@ async function runMonitorModeTests() {
 
   const nowSec = Math.floor(Date.now() / 1000);
 
-  const monitorCases = [
+  const monitorCases: RuntimeCase[] = [
     // In monitor mode, invalid JWT should pass through (allow)
     ['monitor: GET /api/data invalid JWT passes through',
       buildLambdaEdgeEvent('/api/data'),

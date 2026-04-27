@@ -14,8 +14,8 @@
     "ignoreDeprecations": "6.0",
     "types": ["node"],
     "strict": true,
-    "noImplicitAny": false,
-    "strictNullChecks": false,
+    "noImplicitAny": true,
+    "strictNullChecks": true,
     "useUnknownInCatchVariables": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true

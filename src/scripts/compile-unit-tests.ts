@@ -1290,7 +1290,7 @@ test('viewer-request: structured JSON block log includes status, block_reason, u
 
     const jsonLine = captured.find((l: string) => l.indexOf('"event":"block"') !== -1);
     assert.ok(jsonLine, 'expected a block JSON log; got: ' + captured.join('\n'));
-    const parsed = JSON.parse(jsonLine);
+    const parsed = JSON.parse(jsonLine as string);
     assert.strictEqual(parsed.event, 'block');
     assert.strictEqual(parsed.status, 405);
     assert.strictEqual(parsed.method, 'POST');

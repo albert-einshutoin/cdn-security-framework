@@ -17,15 +17,17 @@ const repoRoot = path.join(__dirname, '..');
 const schemaPath = path.join(repoRoot, 'policy', 'schema.json');
 const defaultPolicyPath = path.join(repoRoot, 'policy', 'base.yml');
 
-function loadJson(filePath) {
+type AjvError = import('ajv').ErrorObject;
+
+function loadJson(filePath: string): any {
   return JSON.parse(fs.readFileSync(filePath, 'utf8'));
 }
 
-function loadYaml(filePath) {
+function loadYaml(filePath: string): any {
   return yaml.load(fs.readFileSync(filePath, 'utf8'));
 }
 
-function formatAjvErrors(errors) {
+function formatAjvErrors(errors: AjvError[]): string[] {
   return errors.map((err) => {
     const loc = err.instancePath || '(root)';
     const key = err.params && err.params.additionalProperty
@@ -35,9 +37,9 @@ function formatAjvErrors(errors) {
   });
 }
 
-function main() {
+function main(): void {
   const policyPath = process.argv[2] || defaultPolicyPath;
-  const errors = [];
+  const errors: string[] = [];
 
   let policy;
   try {
@@ -88,7 +90,7 @@ function main() {
   } catch (e: any) {
     if (Array.isArray(e.validationErrors)) {
       errors.push('Auth gate validation failed:');
-      e.validationErrors.forEach((msg) => errors.push('  - ' + msg));
+      e.validationErrors.forEach((msg: string) => errors.push('  - ' + msg));
     } else {
       errors.push('Auth gate validation error: ' + e.message);
     }
@@ -101,13 +103,13 @@ function main() {
   }
 
   // Non-fatal warnings for production-grade WAF hygiene.
-  const warnings = [];
+  const warnings: string[] = [];
   const mode = (policy && policy.defaults && policy.defaults.mode) || null;
   const isEnforce = mode === 'enforce';
   const hasWaf = policy && policy.firewall && policy.firewall.waf;
   if (isEnforce && hasWaf) {
     const managed = Array.isArray(waf.managed_rules) ? waf.managed_rules : [];
-    const hasCoreSignal = managed.some((r) =>
+    const hasCoreSignal = managed.some((r: string) =>
       r === 'AWSManagedRulesBotControlRuleSet' ||
       r === 'AWSManagedRulesATPRuleSet' ||
       r === 'AWSManagedRulesIPReputationList' ||

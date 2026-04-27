@@ -3,7 +3,7 @@
 const fs = require('fs');
 const path = require('path');
 
-function parseArgs(argv) {
+function parseArgs(argv: string[]) {
   const args = {
     input: '',
     minCount: 20,
@@ -29,7 +29,7 @@ function parseArgs(argv) {
   return args;
 }
 
-function readJsonLines(filePath) {
+function readJsonLines(filePath: string) {
   const content = fs.readFileSync(filePath, 'utf8');
   return content.split(/\r?\n/).filter(Boolean);
 }

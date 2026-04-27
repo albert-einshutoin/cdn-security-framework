@@ -95,8 +95,7 @@ const cases = [
                 h['x-filler-' + i] = 'v';
             return buildEvent('GET', '/', h);
         })(),
-        'allow',
-    ],
+        'allow',],
     ['GET / with 65 headers (over cap)',
         (() => {
             const h = { 'user-agent': 'Mozilla' };
@@ -104,8 +103,7 @@ const cases = [
                 h['x-filler-' + i] = 'v';
             return buildEvent('GET', '/', h);
         })(),
-        431,
-    ],
+        431,],
 ];
 let viewerFailed = 0;
 for (const [name, event, expected] of cases) {

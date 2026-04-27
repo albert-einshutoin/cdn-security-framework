@@ -23,7 +23,7 @@ const REDOS_TIMEOUT_MS = 50;
 
 const repoRoot = path.join(__dirname, '..');
 
-function test(name, fn) {
+function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
@@ -34,12 +34,12 @@ function test(name, fn) {
   }
 }
 
-function loadPolicy(filePath) {
+function loadPolicy(filePath: string) {
   return yaml.load(fs.readFileSync(filePath, 'utf8'));
 }
 
-function collectRegexes(policy) {
-  const out = [];
+function collectRegexes(policy: any) {
+  const out: Array<{ source: string; pattern: string }> = [];
   const patterns = policy && policy.request && policy.request.block && policy.request.block.path_patterns;
   if (patterns && typeof patterns === 'object' && !Array.isArray(patterns) && Array.isArray(patterns.regex)) {
     for (const r of patterns.regex) {
@@ -52,11 +52,11 @@ function collectRegexes(policy) {
 // Proxy to the shared heuristic in compile-core so build-time rejection and
 // fuzz-time rejection stay in lockstep — any pattern the compiler refuses is
 // also something the fuzz harness refuses to even benchmark.
-function hasNestedQuantifier(src) {
+function hasNestedQuantifier(src: string) {
   return hasCatastrophicBacktrackShape(src);
 }
 
-function runWithTimeout(regex, input, timeoutMs) {
+function runWithTimeout(regex: RegExp, input: string, timeoutMs: number) {
   const ctx = { regex, input };
   vm.createContext(ctx);
   const start = Date.now();
@@ -87,8 +87,8 @@ function adversarialInputs() {
   ];
 }
 
-function fuzzRegex(patternSource) {
-  const results = [];
+function fuzzRegex(patternSource: string) {
+  const results: Array<{ input: string; ok: boolean; elapsed: number; timedOut: boolean }> = [];
   let compiled;
   try {
     // Use the compiler's helper so `(?i)` / `(?s)` / `(?m)` inline flags

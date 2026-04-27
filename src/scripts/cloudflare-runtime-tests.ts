@@ -6,7 +6,7 @@ const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
 
-function test(name, fn) {
+function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
@@ -19,7 +19,7 @@ function test(name, fn) {
 
 const repoRoot = path.join(__dirname, '..');
 
-function compileCloudflare(policyContent) {
+function compileCloudflare(policyContent: string): string {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-runtime-'));
   const policyPath = path.join(tempDir, 'policy.yml');
   const outDir = path.join(tempDir, 'out');
@@ -127,7 +127,7 @@ routes:
 });
 
 test('cloudflare compile fails when allowed_algorithms includes an alg the verifier cannot validate', () => {
-  let caught;
+  let caught: any;
   try {
     compileCloudflare(`
 version: 1

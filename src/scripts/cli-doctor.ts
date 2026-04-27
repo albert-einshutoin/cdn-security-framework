@@ -32,20 +32,36 @@ const MIN_NODE_VERSION = '20.12.0';
 const MIN_NODE_MAJOR = Number(MIN_NODE_VERSION.split('.')[0]);
 const SCHEMA_CURRENT_VERSION = 1;
 
-function pass(name, detail, extras = undefined) {
-  return Object.assign({ name, status: 'pass', detail }, extras || {});
+type CheckStatus = 'pass' | 'fail' | 'warn' | 'skip';
+type CheckExtras = Record<string, any> | undefined;
+type CheckRow = { name: string; status: CheckStatus; detail: string } & Record<string, any>;
+type ParseResult = { ok: boolean; doc?: any; error?: string };
+type EnvProvider = (name: string) => string | undefined;
+type SpawnSyncImpl = typeof import('child_process').spawnSync;
+type DoctorOptions = {
+  cwd?: string;
+  pkgRoot?: string;
+  policyPath?: string;
+  reportPath?: string;
+  envProvider?: EnvProvider;
+  spawnSync?: SpawnSyncImpl;
+  log?: boolean;
+};
+
+function pass(name: string, detail: string, extras: CheckExtras = undefined): CheckRow {
+  return Object.assign({ name, status: 'pass' as const, detail }, extras || {});
 }
-function fail(name, detail, extras = undefined) {
-  return Object.assign({ name, status: 'fail', detail }, extras || {});
+function fail(name: string, detail: string, extras: CheckExtras = undefined): CheckRow {
+  return Object.assign({ name, status: 'fail' as const, detail }, extras || {});
 }
-function warn(name, detail, extras = undefined) {
-  return Object.assign({ name, status: 'warn', detail }, extras || {});
+function warn(name: string, detail: string, extras: CheckExtras = undefined): CheckRow {
+  return Object.assign({ name, status: 'warn' as const, detail }, extras || {});
 }
-function skip(name, detail, extras = undefined) {
-  return Object.assign({ name, status: 'skip', detail }, extras || {});
+function skip(name: string, detail: string, extras: CheckExtras = undefined): CheckRow {
+  return Object.assign({ name, status: 'skip' as const, detail }, extras || {});
 }
 
-function checkNodeVersion(nodeVersion) {
+function checkNodeVersion(nodeVersion: string): CheckRow {
   const match = /^v?(\d+)\.(\d+)\.(\d+)/.exec(nodeVersion);
   if (!match) {
     return fail(CHECK_NODE_VERSION, `Could not parse Node version: ${nodeVersion}`);
@@ -71,7 +87,7 @@ function checkNodeVersion(nodeVersion) {
   });
 }
 
-function resolvePolicyPath(cwd, explicitPath) {
+function resolvePolicyPath(cwd: string, explicitPath?: string): string {
   if (explicitPath) {
     return path.isAbsolute(explicitPath) ? explicitPath : path.join(cwd, explicitPath);
   }
@@ -82,7 +98,7 @@ function resolvePolicyPath(cwd, explicitPath) {
   return security; // will be reported as missing
 }
 
-function checkPolicyExists(policyPath) {
+function checkPolicyExists(policyPath: string): CheckRow {
   if (!fs.existsSync(policyPath)) {
     return fail(
       CHECK_POLICY_EXISTS,
@@ -93,7 +109,7 @@ function checkPolicyExists(policyPath) {
   return pass(CHECK_POLICY_EXISTS, `Found ${policyPath}`, { policyPath });
 }
 
-function tryParsePolicy(policyPath) {
+function tryParsePolicy(policyPath: string): ParseResult {
   try {
     const yaml = require('js-yaml');
     const raw = fs.readFileSync(policyPath, 'utf8');
@@ -104,7 +120,7 @@ function tryParsePolicy(policyPath) {
   }
 }
 
-function checkPolicyParses(parseResult) {
+function checkPolicyParses(parseResult: ParseResult): CheckRow {
   if (!parseResult.ok) {
     return fail(CHECK_POLICY_PARSES, `YAML parse failed: ${parseResult.error}`);
   }
@@ -114,7 +130,7 @@ function checkPolicyParses(parseResult) {
   return pass(CHECK_POLICY_PARSES, 'Policy parses as a YAML mapping.');
 }
 
-function checkSchemaVersion(policyDoc) {
+function checkSchemaVersion(policyDoc: any): CheckRow {
   if (!policyDoc || typeof policyDoc !== 'object') {
     return skip(CHECK_POLICY_SCHEMA_VERSION, 'Policy did not parse; skipping schema version check.');
   }
@@ -143,9 +159,9 @@ function checkSchemaVersion(policyDoc) {
  * these off the schema-bearing fields rather than string-grepping the YAML so
  * `doctor` never picks up commented-out placeholders.
  */
-function collectReferencedEnvVars(policyDoc) {
+function collectReferencedEnvVars(policyDoc: any): string[] {
   if (!policyDoc || typeof policyDoc !== 'object') return [];
-  const seen = new Set();
+  const seen = new Set<string>();
 
   const routes = Array.isArray(policyDoc.routes) ? policyDoc.routes : [];
   for (const route of routes) {
@@ -164,7 +180,7 @@ function collectReferencedEnvVars(policyDoc) {
   return Array.from(seen).sort();
 }
 
-function checkEnvVars(policyDoc, envProvider) {
+function checkEnvVars(policyDoc: any, envProvider: EnvProvider): CheckRow {
   if (!policyDoc || typeof policyDoc !== 'object') {
     return skip(CHECK_ENV_VARS, 'Policy did not parse; skipping env var check.');
   }
@@ -190,7 +206,7 @@ function checkEnvVars(policyDoc, envProvider) {
   );
 }
 
-function checkDistWritable(cwd) {
+function checkDistWritable(cwd: string): CheckRow {
   const distDir = path.join(cwd, 'dist');
   const edgeDir = path.join(distDir, 'edge');
   try {
@@ -207,7 +223,7 @@ function checkDistWritable(cwd) {
   }
 }
 
-function checkDependencies(cwd, spawnSyncImpl) {
+function checkDependencies(cwd: string, spawnSyncImpl: SpawnSyncImpl | null): CheckRow {
   const spawnSync = spawnSyncImpl || require('child_process').spawnSync;
   // `npm ls --depth=0 --json` reports UNMET DEPENDENCY and invalid peer ranges
   // as top-level `problems[]` entries, so we don't have to re-scan node_modules.
@@ -237,10 +253,10 @@ function checkDependencies(cwd, spawnSyncImpl) {
   return pass(CHECK_DEPENDENCIES, 'npm dependency tree is clean.');
 }
 
-function runDoctor(opts) {
+function runDoctor(opts?: DoctorOptions) {
   const cwd = (opts && opts.cwd) || process.cwd();
   const pkgRoot = (opts && opts.pkgRoot) || path.resolve(__dirname, '..');
-  const envProvider = (opts && opts.envProvider) || ((name) => process.env[name]);
+  const envProvider = (opts && opts.envProvider) || ((name: string) => process.env[name]);
   const spawnSyncImpl = (opts && opts.spawnSync) || null;
 
   const pkgJsonPath = path.join(pkgRoot, 'package.json');
@@ -251,7 +267,7 @@ function runDoctor(opts) {
     /* best-effort only */
   }
 
-  const checks = [];
+  const checks: CheckRow[] = [];
 
   checks.push(checkNodeVersion(process.versions.node));
 
