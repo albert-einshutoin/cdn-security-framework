@@ -10,6 +10,7 @@
  *   {
  *     policyPath: string,
  *     toVersion?: number | string,   // default: 1
+ *     write?:     boolean,           // write migrated content when a migration exists
  *     cwd?:       string,
  *   }
  *
@@ -33,6 +34,7 @@ const yaml = require('js-yaml');
 interface MigratePolicyOptions {
   policyPath?: string;
   toVersion?: number | string;
+  write?: boolean;
   cwd?: string;
 }
 

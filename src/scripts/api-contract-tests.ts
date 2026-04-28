@@ -24,6 +24,28 @@ test('api exports stable callable surface', () => {
   assert.strictEqual(typeof api.runDoctor, 'function');
 });
 
+test('package metadata exposes typed root api and bounded exports', () => {
+  const pkg = require(path.join(repoRoot, 'package.json'));
+  assert.strictEqual(pkg.main, 'lib/index.js');
+  assert.strictEqual(pkg.types, 'lib/index.d.ts');
+  assert.deepStrictEqual(Object.keys(pkg.exports).sort(), ['.', './bin/cli', './bin/cli.js']);
+  assert.strictEqual(pkg.exports['.'].types, './lib/index.d.ts');
+  assert.strictEqual(pkg.exports['.'].require, './lib/index.js');
+  assert.strictEqual(pkg.exports['./bin/cli.js'], './bin/cli.js');
+});
+
+test('root type declarations expose public programmatic api', () => {
+  const dts = fs.readFileSync(path.join(repoRoot, 'lib', 'index.d.ts'), 'utf8');
+  for (const name of ['compile', 'emitWaf', 'lintPolicy', 'migratePolicy', 'runDoctor']) {
+    assert.ok(
+      dts.includes(`export declare const ${name}`),
+      `lib/index.d.ts must declare ${name}`,
+    );
+  }
+  assert.ok(dts.includes('export interface CompileOptions'));
+  assert.ok(dts.includes('export interface DoctorResult'));
+});
+
 test('api compile missing policyPath returns structured error', () => {
   const result = api.compile({ outDir: 'dist', cwd: repoRoot, pkgRoot: repoRoot });
   assert.strictEqual(result.ok, false);

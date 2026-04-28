@@ -51,6 +51,7 @@ type EmitWafOptions = {
 type MigrateOptions = {
   policy: string;
   to: string;
+  write?: boolean;
 };
 
 type StarterAnswers = {
@@ -300,6 +301,7 @@ program
       policyPath,
       toVersion: opts.to,
       cwd,
+      write: !!opts.write,
     });
 
     if (result.fromVersion !== undefined) {

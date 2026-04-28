@@ -71,13 +71,14 @@ function resolveAbsolute(inputPath: string, cwd: string): string {
   return path.isAbsolute(inputPath) ? inputPath : path.join(cwd, inputPath);
 }
 
-function listInfraArtifacts(outDir: string): string[] {
+function listInfraArtifacts(outDir: string, sinceMs = 0): string[] {
   const infraDir = path.join(outDir, 'infra');
   if (!fs.existsSync(infraDir)) return [];
   return fs
     .readdirSync(infraDir)
     .filter((name: string) => name.endsWith('.tf.json'))
-    .map((name: string) => path.join(infraDir, name));
+    .map((name: string) => path.join(infraDir, name))
+    .filter((filePath: string) => sinceMs <= 0 || fs.statSync(filePath).mtimeMs >= sinceMs);
 }
 
 function compile(opts: CompileOptions = {}) {
@@ -115,6 +116,7 @@ function compile(opts: CompileOptions = {}) {
 
   const policyPath = resolveAbsolute(opts.policyPath, cwd);
   const outDir = resolveAbsolute(opts.outDir, cwd);
+  const compileStartedAt = Date.now() - 1000;
   baseResult.policyPath = policyPath;
   baseResult.outDir = outDir;
   baseResult.target = target;
@@ -181,7 +183,7 @@ function compile(opts: CompileOptions = {}) {
     if (infraResult.stderr) {
       warnings.push(...infraResult.stderr.trim().split('\n').filter(Boolean));
     }
-    baseResult.infraFiles = listInfraArtifacts(outDir);
+    baseResult.infraFiles = listInfraArtifacts(outDir, compileStartedAt);
   } else {
     const compileCfPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare.js');
     const cfResult = spawnSync(
@@ -223,7 +225,7 @@ function compile(opts: CompileOptions = {}) {
     if (cfWafResult.stderr) {
       warnings.push(...cfWafResult.stderr.trim().split('\n').filter(Boolean));
     }
-    baseResult.infraFiles = listInfraArtifacts(outDir);
+    baseResult.infraFiles = listInfraArtifacts(outDir, compileStartedAt);
   }
 
   return { ok: true, errors, warnings, ...baseResult };

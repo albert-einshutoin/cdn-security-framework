@@ -162,6 +162,81 @@ test('lint rejects cors.max_age beyond 86400', () => {
   }
 });
 
+test('lint rejects wildcard CORS origin when credentials are allowed', () => {
+  const yaml = `
+version: 1
+project: schema-lint-test
+request:
+  allow_methods: ["GET", "HEAD"]
+  limits:
+    max_query_length: 1024
+    max_query_params: 30
+    max_uri_length: 2048
+    max_header_size: 8192
+response_headers:
+  hsts: "max-age=31536000"
+  cors:
+    allow_origins: ["*"]
+    allow_credentials: true
+`;
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result: any = runLint(file);
+    assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+    assert.match(result.stderr + result.stdout, /allow_origins|allow_credentials|\*/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint accepts wildcard CORS origin without credentials', () => {
+  const yaml = `
+version: 1
+project: schema-lint-test
+request:
+  allow_methods: ["GET", "HEAD"]
+  limits:
+    max_query_length: 1024
+    max_query_params: 30
+    max_uri_length: 2048
+    max_header_size: 8192
+response_headers:
+  hsts: "max-age=31536000"
+  cors:
+    allow_origins: ["*"]
+    allow_credentials: false
+`;
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result: any = runLint(file);
+    assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint accepts Cloudflare override fields inside rate_limit_rules[]', () => {
+  const yaml = basePolicy({
+    extra: `firewall:
+  waf:
+    scope: CLOUDFRONT
+    rate_limit_rules:
+      - name: login-api
+        aggregate_key_type: CUSTOM_KEYS
+        limit: 100
+        expression_cloudflare: 'http.request.uri.path eq "/login"'
+        cloudflare_characteristics: ["ip.src", "http.request.headers[\\"x-api-key\\"]"]
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result: any = runLint(file);
+    assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('lint rejects origin.timeout.read above 60', () => {
   const yaml = basePolicy({
     extra: `origin:

@@ -233,6 +233,31 @@ async function runAll() {
     assert.ok(res.status < 500, `expected non-5xx; got ${res.status}`);
   });
 
+  await test('origin auth missing secret fails closed with 503', async () => {
+    const originAuthPolicy = BASE_POLICY + `
+origin:
+  auth:
+    type: custom_header
+    header: X-Origin-Verify
+    secret_env: ORIGIN_SECRET_FOR_MISSING_TEST
+`;
+    const originJs = transpileToJs(compileWorker(originAuthPolicy, { env: { EDGE_ADMIN_TOKEN: 'integration-test-token' } }));
+    let fetched = false;
+    const { worker } = loadWorker(originJs, {
+      env: { EDGE_ADMIN_TOKEN: 'integration-test-token' },
+      fetchStub: async () => {
+        fetched = true;
+        return new Response('origin', { status: 200 });
+      },
+    });
+    const res = await dispatch(worker, 'https://example.com/hello', {
+      method: 'GET',
+      headers: { 'user-agent': 'Mozilla/5.0' },
+    }, { EDGE_ADMIN_TOKEN: 'integration-test-token' });
+    assert.strictEqual(res.status, 503);
+    assert.strictEqual(fetched, false, 'origin fetch must not run when origin auth secret is missing');
+  });
+
   await test('blocked request emits structured JSON log with status/block_reason/uri', async () => {
     const { worker, logs } = loadWorker(js, { env: { EDGE_ADMIN_TOKEN: 'integration-test-token' } });
     await dispatch(worker, 'https://example.com/a/%2e%2e%2fb', {

@@ -5,6 +5,11 @@ on:
     tags:
       - 'v*'
   workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing release tag to publish or verify, for example v1.1.0'
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -25,6 +30,12 @@ jobs:
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
+      - name: Checkout release tag for manual dispatch
+        if: github.event_name == 'workflow_dispatch'
+        run: |
+          git fetch --force origin "refs/tags/${{ inputs.tag }}:refs/tags/${{ inputs.tag }}"
+          git checkout --detach "refs/tags/${{ inputs.tag }}"
+
       - name: Set up Node.js
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
@@ -34,7 +45,21 @@ jobs:
 
       - name: Ensure tag matches package version
         run: |
-          TAG_VERSION="${GITHUB_REF_NAME#v}"
+          TAG_NAME="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG_NAME="${{ inputs.tag }}"
+          fi
+          case "$TAG_NAME" in
+            v*) ;;
+            *) echo "Release tag must start with v. Got: $TAG_NAME"; exit 1 ;;
+          esac
+          git fetch origin main develop
+          TAG_COMMIT="$(git rev-list -n 1 "$TAG_NAME")"
+          if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main && ! git merge-base --is-ancestor "$TAG_COMMIT" origin/develop; then
+            echo "Release tag $TAG_NAME is not reachable from origin/main or origin/develop."
+            exit 1
+          fi
+          TAG_VERSION="${TAG_NAME#v}"
           PKG_VERSION="$(node -p "require('./package.json').version")"
           if [ "$TAG_VERSION" != "$PKG_VERSION" ]; then
             echo "Tag version ($TAG_VERSION) does not match package.json version ($PKG_VERSION)."
@@ -104,8 +129,8 @@ jobs:
       - name: Coverage (c8, fail below 80% lines)
         run: npm run test:coverage
 
-      - name: Verify npm package contents (dry-run)
-        run: npm pack --dry-run
+      - name: Verify npm package contents and packed install smoke
+        run: npm run test:package
 
       - name: Check whether npm version already exists
         id: npm_version

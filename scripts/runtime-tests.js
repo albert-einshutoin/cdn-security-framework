@@ -49,7 +49,8 @@ function runCase(name, event, expected) {
     const result = handler(event);
     const allowed = result && !result.statusCode && result.uri !== undefined;
     const got = allowed ? 'allow' : (result && result.statusCode);
-    const ok = (expected === 'allow' && allowed) || (typeof expected === 'number' && got === expected);
+    const ok = (expected === 'allow' && allowed)
+        || (expected !== 'allow' && String(got) === String(expected));
     if (!ok) {
         console.error('FAIL:', name, '| expected', expected, 'got', got);
         return false;
@@ -86,6 +87,13 @@ const cases = [
     ['GET / with long query string', buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, 'x=' + 'a'.repeat(1100)), 414],
     // Query normalization (drop utm_* keys)
     ['GET / with utm params (should be stripped)', buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, 'utm_source=google&foo=bar'), 'allow'],
+    ['GET / with CloudFront query object (should be normalized)',
+        buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, {
+            utm_source: { value: 'google' },
+            foo: { value: 'bar' },
+            multi: { value: 'one', multiValue: [{ value: 'one' }, { value: 'two' }] },
+        }),
+        'allow'],
     // Phase A-4: Header count cap (issue #9). Default is 64 from the compiler.
     // 64 headers (incl. user-agent) must pass; 65 must get 431.
     ['GET / with 64 headers (boundary)',
@@ -282,17 +290,18 @@ function runViewerMonitorTests() {
         ['viewer-monitor: sqlmap UA passes through',
             buildEvent('GET', '/', { 'user-agent': 'sqlmap/1.0' }),
             'allow'],
-        // In monitor mode, missing auth token should pass through
-        ['viewer-monitor: /admin no token passes through',
+        // Auth gates fail closed even in monitor mode.
+        ['viewer-monitor: /admin no token still blocked',
             buildEvent('GET', '/admin', { 'user-agent': 'Mozilla' }),
-            'allow'],
+            401],
     ];
     let failed = 0;
     for (const [name, event, expected] of monitorCases) {
         const result = monitorHandler(event);
         const allowed = result && !result.statusCode && result.uri !== undefined;
         const got = allowed ? 'allow' : (result && result.statusCode);
-        const ok = (expected === 'allow' && allowed);
+        const ok = (expected === 'allow' && allowed)
+            || (expected !== 'allow' && String(got) === String(expected));
         if (!ok) {
             console.error('FAIL:', name, '| expected', expected, 'got', got);
             failed++;
@@ -510,6 +519,13 @@ async function runOriginRequestTests() {
                 'Authorization': 'Bearer not-a-jwt',
             }),
             '401'],
+        ['origin: GET /api/data JWT missing exp rejected',
+            buildLambdaEdgeEvent('/api/data', {
+                'Authorization': 'Bearer ' + createHS256Jwt({
+                    sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
+                }, testSecret),
+            }),
+            '401'],
         // alg confusion: alg=none must be rejected
         ['origin: GET /api/data alg=none rejected',
             buildLambdaEdgeEvent('/api/data', {
@@ -658,6 +674,29 @@ async function runOriginRequestTests() {
     console.log('--- origin-request (enforce): ' + (originCases.length + extraAsserts - originFailed) + '/' + (originCases.length + extraAsserts) + ' passed ---');
     return { failed: originFailed, total: originCases.length + extraAsserts };
 }
+async function runOriginAuthFailClosedTests() {
+    const cfgCode = [
+        'const CFG = {',
+        '  project: "test",',
+        '  mode: "monitor",',
+        '  maxHeaderSize: 0,',
+        '  jwtGates: [],',
+        '  signedUrlGates: [],',
+        '  originAuth: { type: "custom_header", header: "X-Origin-Verify", secret_env: "__MISSING_ORIGIN_SECRET_FOR_TEST__" },',
+        '  trustForwardedFor: false,',
+        '  obs: { logFormat: "json", correlationHeader: "" }',
+        '};',
+    ].join('\n');
+    const authHandler = compileOriginTemplate(cfgCode);
+    if (!authHandler)
+        return { failed: 1, total: 1 };
+    const previous = originHandler;
+    originHandler = authHandler;
+    const ok = await runAsyncCase('origin: missing origin auth secret fails closed even in monitor mode', buildLambdaEdgeEvent('/other/file'), '503');
+    originHandler = previous;
+    console.log('--- origin-auth fail-closed: ' + (ok ? '1/1' : '0/1') + ' passed ---');
+    return { failed: ok ? 0 : 1, total: 1 };
+}
 // Monitor mode tests: blocking checks should pass through
 async function runMonitorModeTests() {
     const testSecret = HS256_SECRET;
@@ -696,14 +735,13 @@ async function runMonitorModeTests() {
     originHandler = monitorHandler;
     const nowSec = Math.floor(Date.now() / 1000);
     const monitorCases = [
-        // In monitor mode, invalid JWT should pass through (allow)
-        ['monitor: GET /api/data invalid JWT passes through',
+        // Auth gates fail closed even in monitor mode.
+        ['monitor: GET /api/data invalid JWT still blocked',
             buildLambdaEdgeEvent('/api/data'),
-            'allow'],
-        // In monitor mode, expired signed URL should pass through
-        ['monitor: GET /assets/file.png expired signed URL passes through',
+            '401'],
+        ['monitor: GET /assets/file.png expired signed URL still blocked',
             buildLambdaEdgeEvent('/assets/file.png', {}, createSignedUrlParams('/assets/file.png', nowSec - 100, SIGNED_URL_SECRET)),
-            'allow'],
+            '403'],
     ];
     let monitorFailed = 0;
     for (const [name, event, expected] of monitorCases) {
@@ -748,6 +786,9 @@ async function main() {
     const enforceResult = await runOriginRequestTests();
     totalFailed += enforceResult.failed;
     totalTests += enforceResult.total;
+    const originAuthResult = await runOriginAuthFailClosedTests();
+    totalFailed += originAuthResult.failed;
+    totalTests += originAuthResult.total;
     const monitorResult = await runMonitorModeTests();
     totalFailed += monitorResult.failed;
     totalTests += monitorResult.total;

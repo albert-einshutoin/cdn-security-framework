@@ -38,6 +38,19 @@ function formatAjvErrors(errors: any[]): string[] {
   });
 }
 
+function validateCorsCredentials(policy: any): string[] {
+  const cors = policy && policy.response_headers && policy.response_headers.cors;
+  if (!cors || cors.allow_credentials !== true || !Array.isArray(cors.allow_origins)) {
+    return [];
+  }
+  if (!cors.allow_origins.includes('*')) {
+    return [];
+  }
+  return [
+    '  - response_headers.cors: allow_origins cannot include "*" when allow_credentials is true',
+  ];
+}
+
 function lintPolicy(opts: any = {}) {
   opts = opts || {};
   const pkgRoot = opts.pkgRoot || DEFAULT_PKG_ROOT;
@@ -101,6 +114,8 @@ function lintPolicy(opts: any = {}) {
     errors.push('Schema validation failed:');
     errors.push(...formatAjvErrors(validate.errors || []));
   }
+
+  errors.push(...validateCorsCredentials(policy));
 
   try {
     const block = (policy && policy.request && policy.request.block) || {};

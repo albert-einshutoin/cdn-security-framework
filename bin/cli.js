@@ -233,6 +233,7 @@ program
         policyPath,
         toVersion: opts.to,
         cwd,
+        write: !!opts.write,
     });
     if (result.fromVersion !== undefined) {
         console.log('[INFO] Policy:', policyPath);
