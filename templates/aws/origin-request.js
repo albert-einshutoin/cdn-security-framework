@@ -214,8 +214,11 @@ async function verifyJwtRS256(token, gate) {
       ? Number(gate.clock_skew_sec) : 30) * 1000;
     const now = Date.now();
 
-    // Check expiration (with skew tolerance)
-    if (payload.exp && now >= payload.exp * 1000 + skewMs) {
+    // Check expiration (required, with skew tolerance)
+    if (!Number.isFinite(Number(payload.exp))) {
+      return { valid: false, error: 'Missing exp claim' };
+    }
+    if (now >= Number(payload.exp) * 1000 + skewMs) {
       return { valid: false, error: 'Token expired' };
     }
 
@@ -296,8 +299,11 @@ function verifyJwtHS256(token, secret, gate) {
       ? Number(gate.clock_skew_sec) : 30) * 1000;
     const now = Date.now();
 
-    // Check expiration (with skew tolerance)
-    if (payload.exp && now >= payload.exp * 1000 + skewMs) {
+    // Check expiration (required, with skew tolerance)
+    if (!Number.isFinite(Number(payload.exp))) {
+      return { valid: false, error: 'Missing exp claim' };
+    }
+    if (now >= Number(payload.exp) * 1000 + skewMs) {
       return { valid: false, error: 'Token expired' };
     }
 
@@ -489,7 +495,7 @@ function checkSignedUrlGates(request) {
 // Add origin auth header. Refuses to forward when the env var is unset / empty
 // so origin cannot mistake a blank `X-Origin-Verify` for a valid edge handoff.
 function addOriginAuth(request) {
-  if (!CFG.originAuth) return;
+  if (!CFG.originAuth) return null;
 
   const envName = CFG.originAuth.secret_env || '';
   const secret = envName ? (process.env[envName] || '') : '';
@@ -500,13 +506,14 @@ function addOriginAuth(request) {
       uri: request.uri || '',
       correlation_id: readCorrelation(request),
     });
-    return;
+    return resp(503, 'Origin auth misconfigured');
   }
   const headerName = (CFG.originAuth.header || 'X-Origin-Verify').toLowerCase();
   request.headers[headerName] = [{
     key: CFG.originAuth.header || 'X-Origin-Verify',
     value: secret,
   }];
+  return null;
 }
 
 // Propagate the correlation ID header to origin. When the incoming request
@@ -580,6 +587,25 @@ function shouldBlock(checkResult, request) {
   return checkResult;
 }
 
+function shouldBlockAuth(checkResult, request) {
+  if (!checkResult) return null;
+  const status = parseInt(checkResult.status, 10);
+  const reason = checkResult.statusDescription || checkResult.body || 'auth_failed';
+  logEvent(CFG.mode === 'monitor' ? 'monitor' : 'block', {
+    status,
+    block_reason: reason,
+    method: request && request.method,
+    uri: (request && request.uri) || '/',
+    correlation_id: readCorrelation(request),
+  });
+  if (status === 401) {
+    return resp(401, 'Unauthorized');
+  } else if (status === 403) {
+    return resp(403, 'Forbidden');
+  }
+  return checkResult;
+}
+
 exports.handler = async (event) => {
   try {
     const cf = event.Records[0].cf;
@@ -615,15 +641,16 @@ exports.handler = async (event) => {
     if (headerBlock) return headerBlock;
 
     // JWT auth gates
-    const jwtBlock = shouldBlock(await checkJwtGates(req), req);
+    const jwtBlock = shouldBlockAuth(await checkJwtGates(req), req);
     if (jwtBlock) return jwtBlock;
 
     // Signed URL gates
-    const signedUrlBlock = shouldBlock(checkSignedUrlGates(req), req);
+    const signedUrlBlock = shouldBlockAuth(checkSignedUrlGates(req), req);
     if (signedUrlBlock) return signedUrlBlock;
 
     // Add origin auth header
-    addOriginAuth(req);
+    const originAuthBlock = addOriginAuth(req);
+    if (originAuthBlock) return originAuthBlock;
 
     // Propagate correlation / trace header to origin so origin logs can join
     // edge block/allow logs.

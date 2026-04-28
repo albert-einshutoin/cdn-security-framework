@@ -28,7 +28,7 @@ const CHECK_ENV_VARS = 'env_vars_referenced_by_policy';
 const CHECK_DIST_WRITABLE = 'dist_edge_writable';
 const CHECK_DEPENDENCIES = 'npm_dependencies';
 
-const MIN_NODE_VERSION = '20.12.0';
+const MIN_NODE_VERSION = '20.17.0';
 const MIN_NODE_MAJOR = Number(MIN_NODE_VERSION.split('.')[0]);
 const SCHEMA_CURRENT_VERSION = 1;
 

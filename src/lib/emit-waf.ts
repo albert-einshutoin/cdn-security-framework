@@ -63,13 +63,14 @@ function resolveAbsolute(inputPath: string, cwd: string): string {
   return path.isAbsolute(inputPath) ? inputPath : path.join(cwd, inputPath);
 }
 
-function listInfraArtifacts(outDir: string): string[] {
+function listInfraArtifacts(outDir: string, sinceMs = 0): string[] {
   const infraDir = path.join(outDir, 'infra');
   if (!fs.existsSync(infraDir)) return [];
   return fs
     .readdirSync(infraDir)
     .filter((name: string) => name.endsWith('.tf.json'))
-    .map((name: string) => path.join(infraDir, name));
+    .map((name: string) => path.join(infraDir, name))
+    .filter((filePath: string) => sinceMs <= 0 || fs.statSync(filePath).mtimeMs >= sinceMs);
 }
 
 function emitWaf(opts: EmitWafOptions = {}) {
@@ -128,6 +129,7 @@ function emitWaf(opts: EmitWafOptions = {}) {
 
   const policyPath = resolveAbsolute(opts.policyPath, cwd);
   const outDir = resolveAbsolute(opts.outDir, cwd);
+  const emitStartedAt = Date.now() - 1000;
   baseResult.policyPath = policyPath;
   baseResult.outDir = outDir;
 
@@ -168,7 +170,7 @@ function emitWaf(opts: EmitWafOptions = {}) {
     if (result.stderr) {
       warnings.push(...result.stderr.trim().split('\n').filter(Boolean));
     }
-    baseResult.infraFiles = listInfraArtifacts(outDir);
+    baseResult.infraFiles = listInfraArtifacts(outDir, emitStartedAt);
   } else {
     const cfWafPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare-waf.js');
     const result = spawnSync(
@@ -189,7 +191,7 @@ function emitWaf(opts: EmitWafOptions = {}) {
     if (result.stderr) {
       warnings.push(...result.stderr.trim().split('\n').filter(Boolean));
     }
-    baseResult.infraFiles = listInfraArtifacts(outDir);
+    baseResult.infraFiles = listInfraArtifacts(outDir, emitStartedAt);
   }
 
   return { ok: true, errors, warnings, ...baseResult };

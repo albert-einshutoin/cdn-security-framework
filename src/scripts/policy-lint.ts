@@ -37,6 +37,19 @@ function formatAjvErrors(errors: AjvError[]): string[] {
   });
 }
 
+function validateCorsCredentials(policy: any): string[] {
+  const cors = policy && policy.response_headers && policy.response_headers.cors;
+  if (!cors || cors.allow_credentials !== true || !Array.isArray(cors.allow_origins)) {
+    return [];
+  }
+  if (!cors.allow_origins.includes('*')) {
+    return [];
+  }
+  return [
+    '  - response_headers.cors: allow_origins cannot include "*" when allow_credentials is true',
+  ];
+}
+
 function main(): void {
   const policyPath = process.argv[2] || defaultPolicyPath;
   const errors: string[] = [];
@@ -72,6 +85,8 @@ function main(): void {
     errors.push('Schema validation failed:');
     errors.push(...formatAjvErrors(validate.errors || []));
   }
+
+  errors.push(...validateCorsCredentials(policy));
 
   // path_patterns semantic checks (regex compilation, ambiguous legacy entries)
   try {

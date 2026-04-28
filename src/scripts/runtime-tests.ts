@@ -39,7 +39,7 @@ let originHandler: any;
 const DEFAULT_TOKEN = process.env.EDGE_ADMIN_TOKEN
   || 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
 
-function buildEvent(method: string, uri: string, headers: HeaderMap = {}, querystring = '') {
+function buildEvent(method: string, uri: string, headers: HeaderMap = {}, querystring: any = '') {
   const h = headers || {};
   const cfHeaders: CloudFrontHeaderMap = {};
   for (const [k, v] of Object.entries(h)) {
@@ -59,7 +59,8 @@ function runCase(name: string, event: any, expected: ExpectedStatus) {
   const result: any = handler(event);
   const allowed = result && !result.statusCode && result.uri !== undefined;
   const got = allowed ? 'allow' : (result && result.statusCode);
-  const ok = (expected === 'allow' && allowed) || (typeof expected === 'number' && got === expected);
+  const ok = (expected === 'allow' && allowed)
+    || (expected !== 'allow' && String(got) === String(expected));
   if (!ok) {
     console.error('FAIL:', name, '| expected', expected, 'got', got);
     return false;
@@ -104,6 +105,13 @@ const cases: RuntimeCase[] = [
 
   // Query normalization (drop utm_* keys)
   ['GET / with utm params (should be stripped)', buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, 'utm_source=google&foo=bar'), 'allow'],
+  ['GET / with CloudFront query object (should be normalized)',
+    buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, {
+      utm_source: { value: 'google' },
+      foo: { value: 'bar' },
+      multi: { value: 'one', multiValue: [{ value: 'one' }, { value: 'two' }] },
+    }),
+    'allow'],
 
   // Phase A-4: Header count cap (issue #9). Default is 64 from the compiler.
   // 64 headers (incl. user-agent) must pass; 65 must get 431.
@@ -131,6 +139,38 @@ for (const [name, event, expected] of cases) {
 }
 
 console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases.length + ' passed ---');
+
+// Query normalization must preserve the CloudFront Functions object shape when
+// the runtime supplies querystring as an object.
+(function runQuerystringShapeTests() {
+  const stringResult: any = handler(buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, 'utm_source=google&foo=bar'));
+  if (!stringResult || stringResult.querystring !== 'foo=bar') {
+    console.error('FAIL: string querystring should drop utm_* and stay string, got', stringResult && stringResult.querystring);
+    viewerFailed++;
+  } else {
+    console.log('OK: string querystring drops utm_* and stays string');
+  }
+
+  const objectResult: any = handler(buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, {
+    utm_source: { value: 'google' },
+    foo: { value: 'bar' },
+    multi: { value: 'one', multiValue: [{ value: 'one' }, { value: 'two' }] },
+  }));
+  const normalized = objectResult && objectResult.querystring;
+  const objectShapePreserved = normalized
+    && typeof normalized === 'object'
+    && !Array.isArray(normalized)
+    && !normalized.utm_source
+    && normalized.foo?.value === 'bar'
+    && Array.isArray(normalized.multi?.multiValue)
+    && normalized.multi.multiValue.map((item: any) => item.value).join(',') === 'one,two';
+  if (!objectShapePreserved) {
+    console.error('FAIL: object querystring should drop utm_* and preserve multiValue shape, got', normalized);
+    viewerFailed++;
+  } else {
+    console.log('OK: object querystring drops utm_* and preserves multiValue shape');
+  }
+})();
 
 // x-edge-authenticated spoofing defense: the handler MUST strip any
 // client-supplied value before the origin sees it. If the caller does not
@@ -308,10 +348,10 @@ function runViewerMonitorTests() {
       buildEvent('GET', '/', { 'user-agent': 'sqlmap/1.0' }),
       'allow'],
 
-    // In monitor mode, missing auth token should pass through
-    ['viewer-monitor: /admin no token passes through',
+    // Auth gates fail closed even in monitor mode.
+    ['viewer-monitor: /admin no token still blocked',
       buildEvent('GET', '/admin', { 'user-agent': 'Mozilla' }),
-      'allow'],
+      401],
   ];
 
   let failed = 0;
@@ -319,7 +359,8 @@ function runViewerMonitorTests() {
     const result: any = monitorHandler(event);
     const allowed = result && !result.statusCode && result.uri !== undefined;
     const got = allowed ? 'allow' : (result && result.statusCode);
-    const ok = (expected === 'allow' && allowed);
+    const ok = (expected === 'allow' && allowed)
+      || (expected !== 'allow' && String(got) === String(expected));
     if (!ok) {
       console.error('FAIL:', name, '| expected', expected, 'got', got);
       failed++;
@@ -561,6 +602,14 @@ async function runOriginRequestTests() {
       }),
       '401'],
 
+    ['origin: GET /api/data JWT missing exp rejected',
+      buildLambdaEdgeEvent('/api/data', {
+        'Authorization': 'Bearer ' + createHS256Jwt({
+          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
+        }, testSecret),
+      }),
+      '401'],
+
     // alg confusion: alg=none must be rejected
     ['origin: GET /api/data alg=none rejected',
       buildLambdaEdgeEvent('/api/data', {
@@ -735,6 +784,36 @@ async function runOriginRequestTests() {
   return { failed: originFailed, total: originCases.length + extraAsserts };
 }
 
+async function runOriginAuthFailClosedTests() {
+  const cfgCode = [
+    'const CFG = {',
+    '  project: "test",',
+    '  mode: "monitor",',
+    '  maxHeaderSize: 0,',
+    '  jwtGates: [],',
+    '  signedUrlGates: [],',
+    '  originAuth: { type: "custom_header", header: "X-Origin-Verify", secret_env: "__MISSING_ORIGIN_SECRET_FOR_TEST__" },',
+    '  trustForwardedFor: false,',
+    '  obs: { logFormat: "json", correlationHeader: "" }',
+    '};',
+  ].join('\n');
+
+  const authHandler = compileOriginTemplate(cfgCode);
+  if (!authHandler) return { failed: 1, total: 1 };
+
+  const previous = originHandler;
+  originHandler = authHandler;
+  const ok = await runAsyncCase(
+    'origin: missing origin auth secret fails closed even in monitor mode',
+    buildLambdaEdgeEvent('/other/file'),
+    '503',
+  );
+  originHandler = previous;
+
+  console.log('--- origin-auth fail-closed: ' + (ok ? '1/1' : '0/1') + ' passed ---');
+  return { failed: ok ? 0 : 1, total: 1 };
+}
+
 // Monitor mode tests: blocking checks should pass through
 async function runMonitorModeTests() {
   const testSecret = HS256_SECRET;
@@ -777,16 +856,15 @@ async function runMonitorModeTests() {
   const nowSec = Math.floor(Date.now() / 1000);
 
   const monitorCases: RuntimeCase[] = [
-    // In monitor mode, invalid JWT should pass through (allow)
-    ['monitor: GET /api/data invalid JWT passes through',
+    // Auth gates fail closed even in monitor mode.
+    ['monitor: GET /api/data invalid JWT still blocked',
       buildLambdaEdgeEvent('/api/data'),
-      'allow'],
+      '401'],
 
-    // In monitor mode, expired signed URL should pass through
-    ['monitor: GET /assets/file.png expired signed URL passes through',
+    ['monitor: GET /assets/file.png expired signed URL still blocked',
       buildLambdaEdgeEvent('/assets/file.png', {},
         createSignedUrlParams('/assets/file.png', nowSec - 100, SIGNED_URL_SECRET)),
-      'allow'],
+      '403'],
   ];
 
   let monitorFailed = 0;
@@ -836,6 +914,10 @@ async function main() {
   const enforceResult: any = await runOriginRequestTests();
   totalFailed += enforceResult.failed;
   totalTests += enforceResult.total;
+
+  const originAuthResult = await runOriginAuthFailClosedTests();
+  totalFailed += originAuthResult.failed;
+  totalTests += originAuthResult.total;
 
   const monitorResult = await runMonitorModeTests();
   totalFailed += monitorResult.failed;

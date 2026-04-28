@@ -20,6 +20,7 @@
  */
 
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -27,6 +28,13 @@ const vm = require('vm');
 const { execFileSync } = require('child_process');
 
 const repoRoot = path.join(__dirname, '..');
+
+function createHS256Jwt(payload: Record<string, unknown>, secret: string) {
+  const enc = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+  const data = enc({ alg: 'HS256', typ: 'JWT' }) + '.' + enc(payload);
+  const sig = crypto.createHmac('sha256', secret).update(data).digest('base64url');
+  return data + '.' + sig;
+}
 
 function test(name: string, fn: () => unknown | Promise<unknown>) {
   return Promise.resolve()
@@ -231,6 +239,68 @@ async function runAll() {
     }, { EDGE_ADMIN_TOKEN: 'integration-test-token' });
     assert.notStrictEqual(res.status, 401);
     assert.ok(res.status < 500, `expected non-5xx; got ${res.status}`);
+  });
+
+  await test('origin auth missing secret fails closed with 503', async () => {
+    const originAuthPolicy = BASE_POLICY + `
+origin:
+  auth:
+    type: custom_header
+    header: X-Origin-Verify
+    secret_env: ORIGIN_SECRET_FOR_MISSING_TEST
+`;
+    const originJs = transpileToJs(compileWorker(originAuthPolicy, { env: { EDGE_ADMIN_TOKEN: 'integration-test-token' } }));
+    let fetched = false;
+    const { worker } = loadWorker(originJs, {
+      env: { EDGE_ADMIN_TOKEN: 'integration-test-token' },
+      fetchStub: async () => {
+        fetched = true;
+        return new Response('origin', { status: 200 });
+      },
+    });
+    const res = await dispatch(worker, 'https://example.com/hello', {
+      method: 'GET',
+      headers: { 'user-agent': 'Mozilla/5.0' },
+    }, { EDGE_ADMIN_TOKEN: 'integration-test-token' });
+    assert.strictEqual(res.status, 503);
+    assert.strictEqual(fetched, false, 'origin fetch must not run when origin auth secret is missing');
+  });
+
+  await test('JWT missing exp is rejected by Cloudflare worker with 401', async () => {
+    const jwtPolicy = BASE_POLICY + `
+  - name: api-jwt
+    match:
+      path_prefixes: ["/api"]
+    auth_gate:
+      type: jwt
+      algorithm: HS256
+      secret_env: JWT_SECRET
+      issuer: test-issuer
+      audience: test-audience
+`;
+    const jwtJs = transpileToJs(compileWorker(jwtPolicy, {
+      env: {
+        EDGE_ADMIN_TOKEN: 'integration-test-token',
+        JWT_SECRET: 'integration-jwt-secret',
+      },
+    }));
+    const { worker } = loadWorker(jwtJs);
+    const token = createHS256Jwt({
+      sub: 'user1',
+      iss: 'test-issuer',
+      aud: 'test-audience',
+    }, 'integration-jwt-secret');
+    const res = await dispatch(worker, 'https://example.com/api/data', {
+      method: 'GET',
+      headers: {
+        'user-agent': 'Mozilla/5.0',
+        authorization: 'Bearer ' + token,
+      },
+    }, {
+      EDGE_ADMIN_TOKEN: 'integration-test-token',
+      JWT_SECRET: 'integration-jwt-secret',
+    });
+    assert.strictEqual(res.status, 401);
   });
 
   await test('blocked request emits structured JSON log with status/block_reason/uri', async () => {

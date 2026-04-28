@@ -3,6 +3,16 @@
   "version": "1.1.0",
   "description": "Policy-driven CDN edge security. Init YAML with npx cdn-security init, then npx cdn-security build to generate runtime code.",
   "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./lib/index.d.ts",
+      "require": "./lib/index.js",
+      "default": "./lib/index.js"
+    },
+    "./bin/cli": "./bin/cli.js",
+    "./bin/cli.js": "./bin/cli.js"
+  },
   "bin": {
     "cdn-security": "bin/cli.js"
   },
@@ -23,6 +33,7 @@
     "test:fuzz": "npm run build:ts && node scripts/regex-fuzz-tests.js",
     "test:cloudflare-integration": "npm run build:ts && node scripts/cloudflare-integration-tests.js",
     "test:edge-container": "npm run build:ts && node scripts/edge-container-attack-tests.js",
+    "test:package": "npm run build:ts && node scripts/package-smoke-tests.js",
     "test:coverage": "c8 --reporter=text --reporter=lcov --include='scripts/**/*.js' --include='lib/**/*.js' --exclude='scripts/**/*-tests.js' --lines 80 --functions 75 --branches 70 npm run test:all",
     "test:all": "npm run build && npm run typecheck:lib-strict && npm run typecheck:scripts-lib-strict && npm run typecheck:unit-tests-strict && npm run typecheck:cli-strict && npm run test:api-contract && npm run test:unit && npm run test:runtime && npm run test:fuzz && npm run test:cloudflare-integration && npm run test:edge-container",
     "fingerprints:candidates": "npm run build:ts && node scripts/fingerprint-candidates.js"
@@ -37,7 +48,7 @@
   ],
   "license": "MIT",
   "engines": {
-    "node": ">=20.12.0"
+    "node": ">=20.17.0"
   },
   "dependencies": {
     "ajv": "^8.18.0",
@@ -65,6 +76,7 @@
     "scripts/policy-lint.d.ts",
     "scripts/lib/",
     "templates/",
+    "policy/base.yml",
     "policy/profiles/",
     "policy/archetypes/",
     "policy/schema.json"

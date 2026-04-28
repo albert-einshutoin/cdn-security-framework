@@ -81,7 +81,9 @@ test('cloudflare template contains auth enforcement logic', () => {
     assert.ok(template.includes('isJwtAlgAllowed'), 'JWT alg whitelist helper missing');
     assert.ok(template.includes('isHostAllowed'), 'Host allowlist helper missing');
     assert.ok(template.includes("forwardHeaders.delete('x-forwarded-for')"), 'XFF strip missing from forward path');
-    assert.ok(/payload\.exp\s*&&\s*nowSec\s*>=\s*payload\.exp\s*\+\s*skewSec/.test(template), 'JWT clock skew tolerance missing');
+    assert.ok(template.includes('Missing exp claim'), 'JWT exp-required guard missing');
+    assert.ok(/nowSec\s*>=\s*Number\(payload\.exp\)\s*\+\s*skewSec/.test(template), 'JWT clock skew tolerance missing');
+    assert.ok(template.includes('function shouldBlockAuth'), 'auth fail-closed helper missing');
 });
 test('cloudflare compile emits allowedHosts, trustForwardedFor, and JWT alg/skew fields', () => {
     const generated = compileCloudflare(`

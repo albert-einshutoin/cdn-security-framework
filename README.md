@@ -215,7 +215,7 @@ Use the generated files in `dist/edge/` with Terraform, CDK, or your CDN console
 * **package-lock.json**: Commit it so CI can run `npm ci`.
 * **dist/**: Ignored via `.gitignore`. Users run `npm run build` to generate `dist/edge/` and `dist/infra/`. For CI drift checks, run `npm run build` in CI and compare with policy (do not commit `dist/`).
 * **CI workflows**:
-  * `.github/workflows/policy-lint.yml`: push/PR quality gate (lint/build/runtime/unit/drift/security-baseline + `npm pack --dry-run`)
+  * `.github/workflows/policy-lint.yml`: push/PR quality gate (lint/build/runtime/unit/drift/security-baseline + package smoke tests)
   * `.github/workflows/release-npm.yml`: tag-driven publish workflow
 * **Release by tag**:
   1. Bump `package.json` version (example: `1.0.1`)

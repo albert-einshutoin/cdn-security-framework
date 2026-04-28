@@ -130,6 +130,27 @@ test('lintPolicy: invalid policy surfaces schema errors', () => {
   }
 });
 
+test('lintPolicy: rejects wildcard CORS origin when credentials are allowed', () => {
+  const ctx = tmpProject(`
+version: 1
+project: api-test
+request:
+  allow_methods: [GET]
+response_headers:
+  hsts: "max-age=1"
+  cors:
+    allow_origins: ["*"]
+    allow_credentials: true
+`);
+  try {
+    const result = api.lintPolicy({ policyPath: ctx.policyPath });
+    assert.strictEqual(result.ok, false);
+    assert.ok(result.errors.some((e: string) => /allow_origins.*allow_credentials|\*/i.test(e)));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test('lintPolicy: does not call process.exit (isolation probe)', () => {
   // If lintPolicy ever calls process.exit, Node will terminate this test
   // process before subsequent tests run. Reaching the assertion below
