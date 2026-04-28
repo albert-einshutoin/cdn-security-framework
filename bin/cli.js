@@ -20,7 +20,7 @@ program
     .version(require(path.join(pkgRoot, 'package.json')).version);
 program
     .command('init')
-    .description('Scaffold policy/base.yml and a profile (interactive or --platform/--profile)')
+    .description('Scaffold policy/security.yml from a profile or archetype (interactive or --platform/--profile)')
     .option('-f, --force', 'Overwrite existing policy files')
     .option('-p, --platform <name>', 'Platform: aws | cloudflare (skip interactive)')
     .option('--profile <name>', 'Profile: strict | balanced | permissive (skip interactive)')
