@@ -244,7 +244,8 @@
   }
 
   function guardAndNormalizeQuery(req) {
-    const qs = serializeQuerystring(req.querystring);
+    const originalQuerystring = req.querystring;
+    const qs = serializeQuerystring(originalQuerystring);
 
     if (qs.length > CFG.maxQueryLength) return resp(414, "URI Too Long");
 
@@ -260,7 +261,7 @@
       if (CFG.dropQueryKeys.has(k)) continue;
       kept.push(p);
     }
-    req.querystring = kept.join("&");
+    req.querystring = normalizeQuerystringOutput(originalQuerystring, kept);
     return null;
   }
 
@@ -288,6 +289,27 @@
       }
     }
     return parts.join("&");
+  }
+
+  function normalizeQuerystringOutput(originalQuerystring, parts) {
+    if (!originalQuerystring || typeof originalQuerystring === "string") {
+      return parts.join("&");
+    }
+    const next = {};
+    for (const p of parts) {
+      const eq = p.indexOf("=");
+      const key = decodeURIComponent(eq === -1 ? p : p.slice(0, eq));
+      if (!key) continue;
+      const value = eq === -1 ? "" : decodeURIComponent(p.slice(eq + 1));
+      if (!next[key]) {
+        next[key] = { value: value };
+      } else if (Array.isArray(next[key].multiValue)) {
+        next[key].multiValue.push({ value: value });
+      } else {
+        next[key].multiValue = [{ value: next[key].value }, { value: value }];
+      }
+    }
+    return next;
   }
 
   function basicAuthResp() {

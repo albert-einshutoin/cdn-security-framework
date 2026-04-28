@@ -140,6 +140,38 @@ for (const [name, event, expected] of cases) {
 
 console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases.length + ' passed ---');
 
+// Query normalization must preserve the CloudFront Functions object shape when
+// the runtime supplies querystring as an object.
+(function runQuerystringShapeTests() {
+  const stringResult: any = handler(buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, 'utm_source=google&foo=bar'));
+  if (!stringResult || stringResult.querystring !== 'foo=bar') {
+    console.error('FAIL: string querystring should drop utm_* and stay string, got', stringResult && stringResult.querystring);
+    viewerFailed++;
+  } else {
+    console.log('OK: string querystring drops utm_* and stays string');
+  }
+
+  const objectResult: any = handler(buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, {
+    utm_source: { value: 'google' },
+    foo: { value: 'bar' },
+    multi: { value: 'one', multiValue: [{ value: 'one' }, { value: 'two' }] },
+  }));
+  const normalized = objectResult && objectResult.querystring;
+  const objectShapePreserved = normalized
+    && typeof normalized === 'object'
+    && !Array.isArray(normalized)
+    && !normalized.utm_source
+    && normalized.foo?.value === 'bar'
+    && Array.isArray(normalized.multi?.multiValue)
+    && normalized.multi.multiValue.map((item: any) => item.value).join(',') === 'one,two';
+  if (!objectShapePreserved) {
+    console.error('FAIL: object querystring should drop utm_* and preserve multiValue shape, got', normalized);
+    viewerFailed++;
+  } else {
+    console.log('OK: object querystring drops utm_* and preserves multiValue shape');
+  }
+})();
+
 // x-edge-authenticated spoofing defense: the handler MUST strip any
 // client-supplied value before the origin sees it. If the caller does not
 // also supply a valid token the request must still fail auth.

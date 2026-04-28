@@ -21,12 +21,19 @@
  */
 Object.defineProperty(exports, "__esModule", { value: true });
 const assert = require('assert');
+const crypto = require('crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const vm = require('vm');
 const { execFileSync } = require('child_process');
 const repoRoot = path.join(__dirname, '..');
+function createHS256Jwt(payload, secret) {
+    const enc = (value) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const data = enc({ alg: 'HS256', typ: 'JWT' }) + '.' + enc(payload);
+    const sig = crypto.createHmac('sha256', secret).update(data).digest('base64url');
+    return data + '.' + sig;
+}
 function test(name, fn) {
     return Promise.resolve()
         .then(fn)
@@ -235,6 +242,42 @@ origin:
         }, { EDGE_ADMIN_TOKEN: 'integration-test-token' });
         assert.strictEqual(res.status, 503);
         assert.strictEqual(fetched, false, 'origin fetch must not run when origin auth secret is missing');
+    });
+    await test('JWT missing exp is rejected by Cloudflare worker with 401', async () => {
+        const jwtPolicy = BASE_POLICY + `
+  - name: api-jwt
+    match:
+      path_prefixes: ["/api"]
+    auth_gate:
+      type: jwt
+      algorithm: HS256
+      secret_env: JWT_SECRET
+      issuer: test-issuer
+      audience: test-audience
+`;
+        const jwtJs = transpileToJs(compileWorker(jwtPolicy, {
+            env: {
+                EDGE_ADMIN_TOKEN: 'integration-test-token',
+                JWT_SECRET: 'integration-jwt-secret',
+            },
+        }));
+        const { worker } = loadWorker(jwtJs);
+        const token = createHS256Jwt({
+            sub: 'user1',
+            iss: 'test-issuer',
+            aud: 'test-audience',
+        }, 'integration-jwt-secret');
+        const res = await dispatch(worker, 'https://example.com/api/data', {
+            method: 'GET',
+            headers: {
+                'user-agent': 'Mozilla/5.0',
+                authorization: 'Bearer ' + token,
+            },
+        }, {
+            EDGE_ADMIN_TOKEN: 'integration-test-token',
+            JWT_SECRET: 'integration-jwt-secret',
+        });
+        assert.strictEqual(res.status, 401);
     });
     await test('blocked request emits structured JSON log with status/block_reason/uri', async () => {
         const { worker, logs } = loadWorker(js, { env: { EDGE_ADMIN_TOKEN: 'integration-test-token' } });

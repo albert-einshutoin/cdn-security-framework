@@ -7,10 +7,6 @@
 const path = require('path');
 const fs = require('fs');
 const { Command } = require('commander');
-// inquirer v13+ ships as ESM-only and is exposed through a CJS interop wrapper;
-// `.default` holds the real module. `|| require('inquirer')` keeps us compatible
-// with any earlier CJS-native version a consumer might still have hoisted.
-const inquirer = require('inquirer').default || require('inquirer');
 
 const pkgRoot = path.resolve(__dirname, '..');
 
@@ -60,6 +56,15 @@ type StarterAnswers = {
   profile?: string;
   archetype?: string;
 };
+
+async function promptQuestions(questions: any[]) {
+  // inquirer v13+ is ESM-only. Keep it lazy so simple commands like
+  // `cdn-security --version` and `build` do not require loading the prompt UI.
+  const dynamicImport = new Function('specifier', 'return import(specifier)');
+  const mod = await dynamicImport('inquirer');
+  const inquirer = mod.default || mod;
+  return inquirer.prompt(questions);
+}
 
 program
   .name('cdn-security')
@@ -141,7 +146,7 @@ program
           ],
         });
       }
-      const answers: StarterAnswers = await inquirer.prompt(questions);
+      const answers: StarterAnswers = await promptQuestions(questions);
       platform = platform || answers.platform;
       profile = profile || answers.profile;
       archetype = archetype || answers.archetype;
