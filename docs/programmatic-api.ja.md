@@ -10,7 +10,7 @@ const { compile, emitWaf, lintPolicy, migratePolicy, runDoctor } = require('cdn-
 
 ## 存在理由
 
-1.2.0 より前は CLI 経由でしか統合できませんでした。CI は stderr を取り込み文字列一致で失敗分類し、終了コード 1 / 2 の違いを慣習で扱い、出力ファイル一覧を取得する安定手段もありませんでした。プログラマティック API はこれを以下に置き換えます。
+以前は CLI 経由でしか統合できませんでした。CI は stderr を取り込み文字列一致で失敗分類し、終了コード 1 / 2 の違いを慣習で扱い、出力ファイル一覧を取得する安定手段もありませんでした。プログラマティック API はこれを以下に置き換えます。
 
 - 統一された `{ ok, errors, warnings, ... }` の形
 - 明示的な `edgeFiles` / `infraFiles` 配列（絶対パス）

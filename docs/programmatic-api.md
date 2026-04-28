@@ -10,7 +10,7 @@ const { compile, emitWaf, lintPolicy, migratePolicy, runDoctor } = require('cdn-
 
 ## Why this exists
 
-Before 1.2.0, the only integration path was the CLI. CI systems had to capture stderr to classify failures, parse exit codes (1 vs 2) by convention, and had no stable way to enumerate emitted files. The programmatic API replaces that with:
+Historically, the only integration path was the CLI. CI systems had to capture stderr to classify failures, parse exit codes (1 vs 2) by convention, and had no stable way to enumerate emitted files. The programmatic API replaces that with:
 
 - Uniform `{ ok, errors, warnings, ... }` shape
 - Explicit `edgeFiles` / `infraFiles` arrays (absolute paths)
