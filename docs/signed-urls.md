@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The `signed_url` auth gate grants time-bounded access to a protected resource by binding a URL to an HMAC-SHA256 signature. Without additional constraints, a signed URL can be replayed against sibling paths under the same prefix, or re-used repeatedly until it expires. This document covers two framework-level mitigations:
+The `signed_url` auth gate grants time-bounded access to a protected resource by binding a URL path and its signed query parameters to an HMAC-SHA256 signature. Without additional constraints, a signed URL can be replayed against sibling paths under the same prefix, or re-used repeatedly until it expires. This document covers two framework-level mitigations:
 
 - **`exact_path`** — scope the signature to a single path (default behaviour matches any path under the gate prefix).
 - **`nonce_param`** — bind a per-URL nonce into the HMAC input so the edge can forward a single-use identifier to the origin.
@@ -11,6 +11,7 @@ The `signed_url` auth gate grants time-bounded access to a protected resource by
 
 | Attack | Mitigation |
 |---|---|
+| Signed URL for `/download/a.pdf?file=a.pdf` reused against `/download/a.pdf?file=b.pdf` | Every query parameter except `sig` is included in the HMAC input |
 | Signed URL for `/download/a.pdf` reused against `/download/b.pdf` when both share the same signing secret and prefix | `exact_path: true` |
 | Single signed URL replayed by multiple clients (leaked URL, browser back button) | `nonce_param` + origin-side single-use store (edge cannot enforce single-use alone) |
 | Signed URL tampered by flipping the nonce value to collide with another user's session | Nonce is included in the HMAC input (`uri + exp + '|' + nonce`), so any change to the nonce invalidates the signature |
@@ -41,11 +42,12 @@ routes:
 The HMAC input is constructed as:
 
 ```
-signData = uri + exp + ( nonce ? '|' + nonce : '' )
-signature = HMAC-SHA256-Hex(secret, signData)
+canonicalQuery = sort(query parameters except signature_param by key, then value)
+signData = uri + '?' + canonicalQuery
+signature = HMAC-SHA256-Base64URL(secret, signData)
 ```
 
-The nonce is appended only when `nonce_param` is configured. Existing URLs signed without a nonce continue to work unchanged.
+`expires_param` and `nonce_param` are normal query parameters and are included in `canonicalQuery`. `signature_param` itself is excluded. This means adding or changing any resource selector query parameter after signing invalidates the URL.
 
 ### Nonce Format
 

@@ -123,11 +123,12 @@ This document organizes threats that this Edge Security Framework is designed to
 | Threat | Edge responsibility | WAF / Origin |
 |--------|---------------------|---------------|
 | Signed URL for `/download/a.pdf` reused against sibling path `/download/b.pdf` | `exact_path: true` binds signature to a single URI | — |
+| Signed URL reused with a different resource-selector query string on the same path | Every query parameter except the signature itself is included in the HMAC input | — |
 | Single signed URL replayed repeatedly within its TTL | `nonce_param` binds per-URL nonce into HMAC + edge forwards `X-Signed-URL-Nonce` | Origin enforces single-use (e.g., Redis `SET NX`) |
-| Nonce tampered to collide with another session | Nonce included in HMAC input (`uri + exp + '|' + nonce`); tampering invalidates signature | — |
+| Nonce tampered to collide with another session | Nonce is included in the signed query payload; tampering invalidates the signature | — |
 | Write endpoint (POST/PUT/DELETE) protected by long-lived signed URL | Compile-time warning when `signed_url` gate hits write-like prefix without `nonce_param` | — |
 
-**Framework**: See `docs/signed-urls.md` for signing rules, nonce format (16–256 chars, URL-safe unreserved), and origin-side enforcement pattern. Edge enforces signature + nonce binding; single-use still requires origin cooperation because edge functions are stateless per invocation.
+**Framework**: See `docs/signed-urls.md` for signing rules, canonical query binding, nonce format (16–256 chars, URL-safe unreserved), and origin-side enforcement pattern. Edge enforces signature + nonce binding; single-use still requires origin cooperation because edge functions are stateless per invocation.
 
 ### 12. Admin Token Timing Oracle
 

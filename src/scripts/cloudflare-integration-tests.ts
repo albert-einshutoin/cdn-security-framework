@@ -36,6 +36,17 @@ function createHS256Jwt(payload: Record<string, unknown>, secret: string) {
   return data + '.' + sig;
 }
 
+function createSignedUrlQuery(pathname: string, params: Array<[string, string]>, secret: string) {
+  const canonical = params
+    .slice()
+    .sort((a, b) => a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0]))
+    .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
+    .join('&');
+  const payload = canonical ? pathname + '?' + canonical : pathname;
+  const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
+  return canonical + '&sig=' + sig;
+}
+
 function test(name: string, fn: () => unknown | Promise<unknown>) {
   return Promise.resolve()
     .then(fn)
@@ -301,6 +312,38 @@ origin:
       JWT_SECRET: 'integration-jwt-secret',
     });
     assert.strictEqual(res.status, 401);
+    assert.strictEqual(await res.text(), 'Unauthorized');
+  });
+
+  await test('signed URL rejects unsigned query selector changes with generic 403', async () => {
+    const signedPolicy = BASE_POLICY.replace('max_query_length: 64', 'max_query_length: 256') + `
+  - name: assets-signed
+    match:
+      path_prefixes: ["/assets"]
+    auth_gate:
+      type: signed_url
+      secret_env: URL_SIGNING_SECRET
+      expires_param: exp
+      signature_param: sig
+`;
+    const signedJs = transpileToJs(compileWorker(signedPolicy, {
+      env: {
+        EDGE_ADMIN_TOKEN: 'integration-test-token',
+        URL_SIGNING_SECRET: 'integration-url-secret',
+      },
+    }));
+    const { worker } = loadWorker(signedJs);
+    const exp = String(Math.floor(Date.now() / 1000) + 3600);
+    const signedQuery = createSignedUrlQuery('/assets/file.png', [['exp', exp]], 'integration-url-secret');
+    const res = await dispatch(worker, 'https://example.com/assets/file.png?' + signedQuery + '&file=other.png', {
+      method: 'GET',
+      headers: { 'user-agent': 'Mozilla/5.0' },
+    }, {
+      EDGE_ADMIN_TOKEN: 'integration-test-token',
+      URL_SIGNING_SECRET: 'integration-url-secret',
+    });
+    assert.strictEqual(res.status, 403);
+    assert.strictEqual(await res.text(), 'Forbidden');
   });
 
   await test('blocked request emits structured JSON log with status/block_reason/uri', async () => {

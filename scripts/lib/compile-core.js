@@ -479,6 +479,18 @@ function warnIfPermissive(policy, options = {}) {
     }
     return { warned: true, failed: false };
 }
+function warnWeakAwsCspNonce(policy, options = {}) {
+    const logger = options.logger || console;
+    const resHeaders = (policy && policy.response_headers) || {};
+    if (resHeaders.csp_nonce !== true) {
+        return { warned: false };
+    }
+    const msg = '[WARN] response_headers.csp_nonce is enabled for the AWS CloudFront Functions target. ' +
+        'CloudFront Functions do not expose a cryptographic RNG, so AWS viewer-response nonces use Math.random. ' +
+        'Prefer Cloudflare Workers for nonce-based CSP, or disable csp_nonce on AWS and let the origin manage nonces.';
+    logger.error(msg);
+    return { warned: true, warnings: [msg] };
+}
 // Normalize observability config for injection into edge CFG objects.
 // Kept next to the compiler so every target (CFF / Lambda@Edge / Worker)
 // sees identical defaults and casing.
@@ -712,6 +724,7 @@ function main(argv = process.argv.slice(2)) {
     }
     // Non-fatal advisory: signed_url protecting write-like paths without nonce_param.
     warnSignedUrlReplay(policy);
+    warnWeakAwsCspNonce(policy);
     validateAuthGates(policy, { allowPlaceholderToken });
     try {
         validateOriginAuth(policy, { strict: strictOriginAuth });
@@ -753,6 +766,7 @@ module.exports = {
     hasStrictOriginAuthFlag,
     validateOriginAuth,
     warnIfPermissive,
+    warnWeakAwsCspNonce,
     warnSignedUrlReplay,
     validateJwksUrl,
     build,
