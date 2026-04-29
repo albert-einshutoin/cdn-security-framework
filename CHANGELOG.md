@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-29
+
+### Security
+
+- Signed URL validation now binds signatures to the canonical query string, not only the path and expiry. Appending unsigned selector parameters after signing is rejected on AWS Lambda@Edge and Cloudflare Workers.
+- Cloudflare Workers authentication failures now return generic response bodies while preserving detailed `block_reason` values in structured logs.
+- Product-review hardening tightened edge/runtime behavior, fixtures, and package smoke coverage for release readiness.
+- AWS CloudFront Functions builds now warn when `response_headers.csp_nonce` is enabled because CloudFront Functions do not expose a cryptographic RNG for nonce generation.
+
+### Added
+
+- Programmatic API in `lib/` with structured results, with CLI commands delegating to the public API surface.
+- Edge container attack harness covering AWS and Cloudflare pseudo-edge behavior.
+- Cloudflare WAF parity transparency warnings and a `--fail-on-waf-approximation` guardrail.
+- Additional runtime, Cloudflare integration, compiler unit, infra/WAF, fingerprint candidate, coverage, drift, and package smoke tests.
+
+### Changed
+
+- Completed the TypeScript source migration and enabled stricter TypeScript checks across public API, shared scripts, unit tests, and CLI slices.
+- Raised the Node.js engine floor to `>=20.17.0`.
+- Updated `inquirer` to v13 and adjusted CommonJS interop.
+- Polished package contents and product documentation for OSS release readiness.
+
+### Fixed
+
+- Package smoke and runtime fixtures now align with generated outputs.
+- NPM release workflow is idempotent.
+
 ## [1.1.0] - 2026-04-23
 
 ### Security / Breaking
@@ -68,6 +96,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.0.0...v1.1.0
 [0.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/releases/tag/v0.1.0
