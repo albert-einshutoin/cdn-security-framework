@@ -96,7 +96,7 @@
         "rules": [
           {
             "ref": "managed_1",
-            "description": "AWS managed rule mapped to Cloudflare: AWSManagedRulesCommonRuleSet",
+            "description": "AWS AWSManagedRulesCommonRuleSet → Cloudflare Cloudflare Managed Ruleset (equivalent)",
             "enabled": true,
             "expression": "true",
             "action": "execute",
@@ -106,7 +106,7 @@
           },
           {
             "ref": "managed_2",
-            "description": "AWS managed rule mapped to Cloudflare: AWSManagedRulesKnownBadInputsRuleSet",
+            "description": "AWS AWSManagedRulesKnownBadInputsRuleSet → Cloudflare Cloudflare OWASP Core Ruleset (APPROXIMATE — see docs/cloudflare-waf-parity.md)",
             "enabled": true,
             "expression": "true",
             "action": "execute",
@@ -116,7 +116,7 @@
           },
           {
             "ref": "managed_3",
-            "description": "AWS managed rule mapped to Cloudflare: AWSManagedRulesIPReputationList",
+            "description": "AWS AWSManagedRulesIPReputationList → Cloudflare Cloudflare Exposed Credentials Check Managed Ruleset (APPROXIMATE — see docs/cloudflare-waf-parity.md)",
             "enabled": true,
             "expression": "true",
             "action": "execute",
@@ -126,7 +126,7 @@
           },
           {
             "ref": "managed_4",
-            "description": "UNMAPPED AWS managed rule: AWSManagedRulesAnonymousIpList. Review Cloudflare catalog and replace with the equivalent ruleset id.",
+            "description": "UNSUPPORTED AWS managed rule: AWSManagedRulesAnonymousIpList. No Cloudflare mapping — emitted disabled. See docs/cloudflare-waf-parity.md.",
             "enabled": false,
             "expression": "true",
             "action": "log",

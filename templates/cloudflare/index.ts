@@ -82,6 +82,21 @@ function shouldBlock(code: number, msg: string, ctx?: ReqCtx | null): Response |
   return deny(code, msg);
 }
 
+function shouldBlockAuth(code: number, msg: string, ctx?: ReqCtx | null): Response {
+  const base = {
+    status: code,
+    block_reason: msg,
+    method: ctx && ctx.method,
+    uri: ctx && ctx.uri,
+    correlation_id: ctx && ctx.correlationId,
+  };
+  logEvent(CFG.mode === 'monitor' ? 'monitor' : 'block', base);
+  if (code === 401) return deny(401, 'Unauthorized');
+  if (code === 403) return deny(403, 'Forbidden');
+  if (code === 503) return deny(503, 'Service Unavailable');
+  return deny(code, 'Denied');
+}
+
 function normalizePath(pathname: string): string {
   let p = pathname;
   if (CFG.normalizePath.collapseSlashes) {
@@ -248,7 +263,8 @@ async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ va
 
   const skewSec: number = Number.isFinite(Number(gate?.clock_skew_sec)) ? Number(gate.clock_skew_sec) : 30;
   const nowSec = Math.floor(Date.now() / 1000);
-  if (payload.exp && nowSec >= payload.exp + skewSec) return { valid: false, error: 'Token expired' };
+  if (!Number.isFinite(Number(payload.exp))) return { valid: false, error: 'Missing exp claim' };
+  if (nowSec >= Number(payload.exp) + skewSec) return { valid: false, error: 'Token expired' };
   if (payload.nbf && nowSec + skewSec < payload.nbf) return { valid: false, error: 'Token not yet valid' };
   if (gate.issuer && payload.iss !== gate.issuer) return { valid: false, error: 'Invalid issuer' };
   if (gate.audience) {
@@ -321,10 +337,25 @@ async function verifySignedUrl(gate: any, url: URL, env: WorkerEnv): Promise<{ v
   const secret = env[gate.secret_env] || '';
   if (!secret) return { valid: false, error: 'URL signing secret not configured' };
 
-  const signData = `${url.pathname}${exp}` + (nonce ? `|${nonce}` : '');
+  const signData = canonicalSignedUrlPayload(url.pathname, url.searchParams, gate.signature_param || 'sig');
   const expected = await hmacSha256Base64Url(secret, signData);
   if (!timingSafeEqual(expected, sig)) return { valid: false, error: 'Invalid signature' };
   return { valid: true, nonce };
+}
+
+function canonicalSignedUrlPayload(pathname: string, params: URLSearchParams, signatureParam: string): string {
+  const pairs: Array<[string, string]> = [];
+  params.forEach((value, key) => {
+    if (key !== signatureParam) pairs.push([key, value]);
+  });
+  pairs.sort((a, b) => {
+    if (a[0] === b[0]) return a[1] < b[1] ? -1 : (a[1] > b[1] ? 1 : 0);
+    return a[0] < b[0] ? -1 : 1;
+  });
+  const query = pairs
+    .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
+    .join('&');
+  return query ? `${pathname}?${query}` : pathname;
 }
 
 function isHostAllowed(hostHeader: string): boolean {
@@ -500,58 +531,55 @@ export default {
         const expectedToken = env[gate.tokenEnv] || '';
         if (!expectedToken) {
           console.error('[auth] static_token env missing:', gate.tokenEnv);
-          const r = shouldBlock(503, 'Auth misconfigured', ctx);
-          if (r) return r;
-          continue;
+          return shouldBlockAuth(503, 'Auth misconfigured', ctx);
         }
         if (!timingSafeEqual(tok, expectedToken)) {
-          const r = shouldBlock(401, 'Unauthorized', ctx);
-          if (r) return r;
+          return shouldBlockAuth(401, 'Unauthorized', ctx);
         }
       } else if (gate.type === 'basic_auth') {
         const authHeader = request.headers.get('authorization') || '';
         const expectedCreds = env[gate.credentialsEnv] || '';
         if (!expectedCreds) {
           console.error('[auth] basic_auth env missing:', gate.credentialsEnv);
-          const r = shouldBlock(503, 'Auth misconfigured', ctx);
-          if (r) return r;
-          continue;
+          return shouldBlockAuth(503, 'Auth misconfigured', ctx);
         }
         if (!authHeader.startsWith('Basic ')) {
-          if (CFG.mode === 'monitor') {
-            console.log('[monitor] 401 Missing Basic auth');
-          } else {
+          logEvent(CFG.mode === 'monitor' ? 'monitor' : 'block', {
+            status: 401,
+            block_reason: 'Missing Basic auth',
+            method: ctx.method,
+            uri: ctx.uri,
+            correlation_id: ctx.correlationId,
+          });
+          return new Response('Unauthorized', {
+            status: 401,
+            headers: { 'WWW-Authenticate': 'Basic realm="Protected"', 'Cache-Control': 'no-store' },
+          });
+        } else {
+          const provided = authHeader.slice(6);
+          if (!timingSafeEqual(provided, expectedCreds)) {
+            logEvent(CFG.mode === 'monitor' ? 'monitor' : 'block', {
+              status: 401,
+              block_reason: 'Invalid Basic auth credentials',
+              method: ctx.method,
+              uri: ctx.uri,
+              correlation_id: ctx.correlationId,
+            });
             return new Response('Unauthorized', {
               status: 401,
               headers: { 'WWW-Authenticate': 'Basic realm="Protected"', 'Cache-Control': 'no-store' },
             });
           }
-        } else {
-          const provided = authHeader.slice(6);
-          if (!timingSafeEqual(provided, expectedCreds)) {
-            if (CFG.mode === 'monitor') {
-              console.log('[monitor] 401 Invalid Basic auth credentials');
-            } else {
-              return new Response('Unauthorized', {
-                status: 401,
-                headers: { 'WWW-Authenticate': 'Basic realm="Protected"', 'Cache-Control': 'no-store' },
-              });
-            }
-          }
         }
       } else if (gate.type === 'jwt') {
         const authHeader = request.headers.get('authorization') || '';
         if (!authHeader.startsWith('Bearer ')) {
-          const r = shouldBlock(401, 'Missing or invalid Authorization header', ctx);
-          if (r) return r;
-          continue;
+          return shouldBlockAuth(401, 'Missing or invalid Authorization header', ctx);
         }
         const token = authHeader.slice(7);
         const verified = await verifyJwt(gate, token, env);
         if (!verified.valid) {
-          const r = shouldBlock(401, verified.error || 'Invalid token', ctx);
-          if (r) return r;
-          continue;
+          return shouldBlockAuth(401, verified.error || 'Invalid token', ctx);
         }
         if (CFG.obs && CFG.obs.auditLogAuth) {
           const rawSub = (verified.payload && verified.payload.sub) || '';
@@ -568,9 +596,7 @@ export default {
       } else if (gate.type === 'signed_url') {
         const verified = await verifySignedUrl(gate, url, env);
         if (!verified.valid) {
-          const r = shouldBlock(403, verified.error || 'Invalid signature', ctx);
-          if (r) return r;
-          continue;
+          return shouldBlockAuth(403, verified.error || 'Invalid signature', ctx);
         }
         if (gate.nonce_param && verified.nonce) {
           signedUrlNonce = verified.nonce;
@@ -623,6 +649,7 @@ export default {
           uri: ctx.uri,
           correlation_id: ctx.correlationId,
         }));
+        return shouldBlockAuth(503, 'Origin auth misconfigured', ctx);
       }
     }
     // Forward signed-URL nonce so origin can enforce single-use. The edge

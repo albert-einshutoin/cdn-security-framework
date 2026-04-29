@@ -9,6 +9,34 @@
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-04-29
+
+### セキュリティ
+
+- 署名付き URL の検証を、パスと期限だけでなく正規化済みクエリ文字列全体にバインドするようにした。署名後に未署名の selector パラメータを追加する改ざんは、AWS Lambda@Edge / Cloudflare Workers の双方で拒否される。
+- Cloudflare Workers の認証失敗レスポンス本文を汎用化した。詳細な `block_reason` は構造化ログに残しつつ、クライアントには詳細を漏らさない。
+- プロダクトレビューで見つかった edge/runtime の挙動、fixture、package smoke の不整合を修正し、リリース前品質を強化。
+- AWS CloudFront Functions で `response_headers.csp_nonce` が有効な場合、暗号学的 RNG が使えないため nonce 生成に関する警告を出すようにした。
+
+### 追加
+
+- 構造化された結果を返す `lib/` の programmatic API を追加し、CLI は公開 API 経由で処理する構成にした。
+- AWS / Cloudflare の疑似 edge 挙動を検証する edge container attack harness を追加。
+- Cloudflare WAF パリティの明示的な警告と、近似変換を失敗扱いにできる `--fail-on-waf-approximation` ガードレールを追加。
+- runtime、Cloudflare integration、compiler unit、infra/WAF、fingerprint candidate、coverage、drift、package smoke のテストを拡充。
+
+### 変更
+
+- TypeScript ソース移行を完了し、public API、shared scripts、unit tests、CLI の各領域でより厳格な TypeScript チェックを有効化。
+- Node.js engine の下限を `>=20.17.0` に更新。
+- `inquirer` を v13 に更新し、CommonJS interop を調整。
+- OSS リリース準備として package 内容とプロダクトドキュメントを整理。
+
+### 修正
+
+- package smoke と runtime fixture を生成物に合わせて修正。
+- npm release workflow を冪等にした。
+
 ## [1.1.0] - 2026-04-23
 
 ### セキュリティ / 破壊的変更
@@ -68,6 +96,7 @@
 
 ---
 
-[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.0.0...v1.1.0
 [0.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/releases/tag/v0.1.0

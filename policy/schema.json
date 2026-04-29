@@ -262,7 +262,28 @@
               "minimum": 0,
               "maximum": 86400
             }
-          }
+          },
+          "allOf": [
+            {
+              "if": {
+                "properties": {
+                  "allow_credentials": { "const": true }
+                },
+                "required": ["allow_credentials"]
+              },
+              "then": {
+                "not": {
+                  "properties": {
+                    "allow_origins": {
+                      "type": "array",
+                      "contains": { "const": "*" }
+                    }
+                  },
+                  "required": ["allow_origins"]
+                }
+              }
+            }
+          ]
         },
         "cookie_attributes": {
           "type": "object",
@@ -301,6 +322,17 @@
                   "limit": { "type": "integer", "minimum": 100, "maximum": 2000000000 },
                   "aggregate_key_type": { "enum": ["IP", "FORWARDED_IP", "CUSTOM_KEYS"] },
                   "custom_keys": { "type": "array", "items": { "type": "object" } },
+                  "expression_cloudflare": {
+                    "description": "Explicit Cloudflare expression for this rate-limit rule. Use when scope_down_statement cannot be translated safely.",
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "cloudflare_characteristics": {
+                    "description": "Cloudflare rate-limit characteristics used when aggregate_key_type is CUSTOM_KEYS.",
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "minItems": 1
+                  },
                   "scope_down_statement": { "type": "object" },
                   "priority": { "type": "integer", "minimum": 1, "maximum": 10000 },
                   "action": { "enum": ["block", "count", "captcha"] }

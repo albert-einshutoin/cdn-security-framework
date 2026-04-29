@@ -1,8 +1,6 @@
-# README.md
+# CDN Security Framework
 
 > **Languages:** English · [日本語](./README.ja.md)
-
-## CDN Security Framework
 
 [![CI](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/policy-lint.yml/badge.svg)](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/policy-lint.yml)
 [![npm release](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/release-npm.yml/badge.svg)](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/release-npm.yml)
@@ -103,6 +101,7 @@ See [IaC integration](docs/iac.md) for Terraform / CDK / WAF usage.
 
 ### Operational docs
 - [CLI reference](docs/cli.md) — `init` / `build` / `emit-waf` / `doctor` / `migrate`
+- [Programmatic API](docs/programmatic-api.md) — `require('cdn-security-framework')` for CI / IaC integration
 - [Archetypes](docs/archetypes.md) — app-shaped policy presets (SPA, REST API, admin, microservice)
 - [Secret rotation runbook](docs/runbooks/secret-rotation.md) — JWT / JWKS / signed URL / admin token / origin secret
 - [Schema migration](docs/schema-migration.md) — how `policy/schema.json` evolves and the `migrate` CLI
@@ -216,7 +215,7 @@ Use the generated files in `dist/edge/` with Terraform, CDK, or your CDN console
 * **package-lock.json**: Commit it so CI can run `npm ci`.
 * **dist/**: Ignored via `.gitignore`. Users run `npm run build` to generate `dist/edge/` and `dist/infra/`. For CI drift checks, run `npm run build` in CI and compare with policy (do not commit `dist/`).
 * **CI workflows**:
-  * `.github/workflows/policy-lint.yml`: push/PR quality gate (lint/build/runtime/unit/drift/security-baseline + `npm pack --dry-run`)
+  * `.github/workflows/policy-lint.yml`: push/PR quality gate (lint/build/runtime/unit/drift/security-baseline + package smoke tests)
   * `.github/workflows/release-npm.yml`: tag-driven publish workflow
 * **Release by tag**:
   1. Bump `package.json` version (example: `1.0.1`)

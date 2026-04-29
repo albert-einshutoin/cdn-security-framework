@@ -95,6 +95,18 @@ const CFG = {
     return checkResult;
   }
 
+  function shouldBlockAuth(checkResult, req) {
+    if (!checkResult) return null;
+    logEvent(CFG.mode === 'monitor' ? 'monitor' : 'block', {
+      status: checkResult.statusCode,
+      block_reason: (checkResult.body && String(checkResult.body)) || 'auth_failed',
+      method: req && req.method,
+      uri: req && req.uri,
+      correlation_id: req ? readCorrelation(req) : '',
+    });
+    return checkResult;
+  }
+
   function constantTimeEqual(a, b) {
     // Constant-time string equality for CFF (no SubtleCrypto / timingSafeEqual
     // available). Always iterates at least PAD (64) positions so short tokens
@@ -250,7 +262,8 @@ const CFG = {
   }
 
   function guardAndNormalizeQuery(req) {
-    const qs = req.querystring || "";
+    const originalQuerystring = req.querystring;
+    const qs = serializeQuerystring(originalQuerystring);
 
     if (qs.length > CFG.maxQueryLength) return resp(414, "URI Too Long");
 
@@ -266,8 +279,55 @@ const CFG = {
       if (CFG.dropQueryKeys.has(k)) continue;
       kept.push(p);
     }
-    req.querystring = kept.join("&");
+    req.querystring = normalizeQuerystringOutput(originalQuerystring, kept);
     return null;
+  }
+
+  function encodeQueryPair(k, v) {
+    return encodeURIComponent(k) + (v === undefined ? "" : "=" + encodeURIComponent(String(v)));
+  }
+
+  function serializeQuerystring(qs) {
+    if (!qs) return "";
+    if (typeof qs === "string") return qs;
+    const parts = [];
+    for (const k in qs) {
+      if (!Object.prototype.hasOwnProperty.call(qs, k)) continue;
+      const entry = qs[k];
+      if (!entry || typeof entry !== "object") {
+        parts.push(encodeQueryPair(k, entry));
+        continue;
+      }
+      if (Array.isArray(entry.multiValue) && entry.multiValue.length > 0) {
+        for (const mv of entry.multiValue) {
+          parts.push(encodeQueryPair(k, mv && mv.value));
+        }
+      } else {
+        parts.push(encodeQueryPair(k, entry.value));
+      }
+    }
+    return parts.join("&");
+  }
+
+  function normalizeQuerystringOutput(originalQuerystring, parts) {
+    if (!originalQuerystring || typeof originalQuerystring === "string") {
+      return parts.join("&");
+    }
+    const next = {};
+    for (const p of parts) {
+      const eq = p.indexOf("=");
+      const key = decodeURIComponent(eq === -1 ? p : p.slice(0, eq));
+      if (!key) continue;
+      const value = eq === -1 ? "" : decodeURIComponent(p.slice(eq + 1));
+      if (!next[key]) {
+        next[key] = { value: value };
+      } else if (Array.isArray(next[key].multiValue)) {
+        next[key].multiValue.push({ value: value });
+      } else {
+        next[key].multiValue = [{ value: next[key].value }, { value: value }];
+      }
+    }
+    return next;
   }
 
   function basicAuthResp() {
@@ -373,7 +433,7 @@ const CFG = {
     if (q) return q;
 
     // 8) Auth gates (static token, basic auth)
-    const auth = shouldBlock(checkAuthGates(req), req);
+    const auth = shouldBlockAuth(checkAuthGates(req), req);
     if (auth) return auth;
 
     return req;
