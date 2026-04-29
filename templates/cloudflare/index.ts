@@ -91,7 +91,10 @@ function shouldBlockAuth(code: number, msg: string, ctx?: ReqCtx | null): Respon
     correlation_id: ctx && ctx.correlationId,
   };
   logEvent(CFG.mode === 'monitor' ? 'monitor' : 'block', base);
-  return deny(code, msg);
+  if (code === 401) return deny(401, 'Unauthorized');
+  if (code === 403) return deny(403, 'Forbidden');
+  if (code === 503) return deny(503, 'Service Unavailable');
+  return deny(code, 'Denied');
 }
 
 function normalizePath(pathname: string): string {
@@ -334,10 +337,25 @@ async function verifySignedUrl(gate: any, url: URL, env: WorkerEnv): Promise<{ v
   const secret = env[gate.secret_env] || '';
   if (!secret) return { valid: false, error: 'URL signing secret not configured' };
 
-  const signData = `${url.pathname}${exp}` + (nonce ? `|${nonce}` : '');
+  const signData = canonicalSignedUrlPayload(url.pathname, url.searchParams, gate.signature_param || 'sig');
   const expected = await hmacSha256Base64Url(secret, signData);
   if (!timingSafeEqual(expected, sig)) return { valid: false, error: 'Invalid signature' };
   return { valid: true, nonce };
+}
+
+function canonicalSignedUrlPayload(pathname: string, params: URLSearchParams, signatureParam: string): string {
+  const pairs: Array<[string, string]> = [];
+  params.forEach((value, key) => {
+    if (key !== signatureParam) pairs.push([key, value]);
+  });
+  pairs.sort((a, b) => {
+    if (a[0] === b[0]) return a[1] < b[1] ? -1 : (a[1] > b[1] ? 1 : 0);
+    return a[0] < b[0] ? -1 : 1;
+  });
+  const query = pairs
+    .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
+    .join('&');
+  return query ? `${pathname}?${query}` : pathname;
 }
 
 function isHostAllowed(hostHeader: string): boolean {

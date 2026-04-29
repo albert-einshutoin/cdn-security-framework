@@ -370,14 +370,14 @@ function verifySignedUrl(uri, querystring, gate) {
     }
   }
 
-  // Compute expected signature: HMAC-SHA256(uri + exp [+ nonce], secret)
+  // Compute expected signature over the path and every query parameter except
+  // the signature itself. This prevents a valid URL for one resource selector
+  // (for example ?file=a.pdf) from being replayed with a different selector on
+  // the same path.
   const secret = process.env[gate.secret_env] || '';
   if (!secret) return { valid: false, error: 'Secret not configured' };
 
-  // When a nonce is part of the scheme, include it in the signed material so
-  // tampering with it invalidates the signature (origin still enforces single-
-  // use separately).
-  const signData = uri + exp + (nonce ? ('|' + nonce) : '');
+  const signData = canonicalSignedUrlPayload(uri, params, gate.signature_param);
   const expectedSig = crypto.createHmac('sha256', secret)
     .update(signData)
     .digest('base64url');
@@ -389,6 +389,22 @@ function verifySignedUrl(uri, querystring, gate) {
     crypto.timingSafeEqual(expectedBuf, providedBuf);
 
   return { valid: isValid, nonce };
+}
+
+function canonicalSignedUrlPayload(uri, params, signatureParam) {
+  const pairs = [];
+  for (const [key, value] of params.entries()) {
+    if (key === signatureParam) continue;
+    pairs.push([key, value]);
+  }
+  pairs.sort((a, b) => {
+    if (a[0] === b[0]) return a[1] < b[1] ? -1 : (a[1] > b[1] ? 1 : 0);
+    return a[0] < b[0] ? -1 : 1;
+  });
+  const query = pairs
+    .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
+    .join('&');
+  return query ? uri + '?' + query : uri;
 }
 
 // Check JWT auth gates

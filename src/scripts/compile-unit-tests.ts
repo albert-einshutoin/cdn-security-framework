@@ -16,6 +16,7 @@ const {
   PLACEHOLDER_TOKEN,
   hasFailOnPermissiveFlag,
   warnIfPermissive,
+  warnWeakAwsCspNonce,
   warnSignedUrlReplay,
   validateOriginAuth,
 } = require('./lib/compile-core');
@@ -779,6 +780,23 @@ test('warnSignedUrlReplay stays silent when nonce_param is set', () => {
     ],
   };
   const r = warnSignedUrlReplay(policy, { logger });
+  assert.strictEqual(r.warned, false);
+  assert.strictEqual(captured.length, 0);
+});
+
+test('warnWeakAwsCspNonce flags csp_nonce on AWS builds', () => {
+  const captured: string[] = [];
+  const logger = { error: (m: string) => captured.push(m) };
+  const r = warnWeakAwsCspNonce({ response_headers: { csp_nonce: true } }, { logger });
+  assert.strictEqual(r.warned, true);
+  assert.match(captured[0], /Math\.random/);
+  assert.match(captured[0], /CloudFront Functions/);
+});
+
+test('warnWeakAwsCspNonce stays silent when csp_nonce is disabled', () => {
+  const captured: string[] = [];
+  const logger = { error: (m: string) => captured.push(m) };
+  const r = warnWeakAwsCspNonce({ response_headers: { csp_nonce: false } }, { logger });
   assert.strictEqual(r.warned, false);
   assert.strictEqual(captured.length, 0);
 });

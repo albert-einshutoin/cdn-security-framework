@@ -2,7 +2,7 @@
 
 ## 目的
 
-`signed_url` 認証ゲートは HMAC-SHA256 署名で URL と期限を束ねて、保護リソースへの一時的アクセスを与える。追加の制約がなければ、同じプレフィックス配下の別パスで再利用されたり、有効期限まで何度もリプレイされたりする余地が残る。本ドキュメントでは、フレームワーク側の 2 つの緩和策を整理する。
+`signed_url` 認証ゲートは HMAC-SHA256 署名で URL パスと署名対象クエリパラメータを束ねて、保護リソースへの一時的アクセスを与える。追加の制約がなければ、同じプレフィックス配下の別パスで再利用されたり、有効期限まで何度もリプレイされたりする余地が残る。本ドキュメントでは、フレームワーク側の 2 つの緩和策を整理する。
 
 - **`exact_path`** — 署名を 1 つのパスだけに束ねる（既定はゲートプレフィックス配下のパス全体にマッチ）。
 - **`nonce_param`** — HMAC 入力にリクエスト毎のノンスを組み込み、エッジ → オリジンへワンタイム識別子を転送する。
@@ -13,7 +13,8 @@
 |---|---|
 | 同じ署名鍵とプレフィックスを共有する `/download/a.pdf` の署名 URL が、兄弟パス `/download/b.pdf` に再利用される | `exact_path: true` |
 | 漏洩・ブラウザ戻るなどで 1 本の署名 URL が複数クライアントから使われる | `nonce_param` + オリジン側の単回利用ストア（エッジ単体ではワンタイム化できない） |
-| 署名 URL のノンスを書き換えて他ユーザのセッションを乗っ取る | ノンスは HMAC 入力 (`uri + exp + '|' + nonce`) に含まれるため、書き換えると署名が壊れて失敗 |
+| `/download/a.pdf?file=a.pdf` の署名 URL を `/download/a.pdf?file=b.pdf` へ流用する | `sig` 以外の全クエリパラメータを HMAC 入力に含める |
+| 署名 URL のノンスを書き換えて他ユーザのセッションを乗っ取る | ノンスは HMAC 入力に含まれるため、書き換えると署名が壊れて失敗 |
 
 ## ポリシー設定
 
@@ -41,11 +42,12 @@ routes:
 HMAC 入力は以下の通り。
 
 ```
-signData = uri + exp + ( nonce ? '|' + nonce : '' )
-signature = HMAC-SHA256-Hex(secret, signData)
+canonicalQuery = signature_param 以外のクエリパラメータを key, value 順にソート
+signData = uri + '?' + canonicalQuery
+signature = HMAC-SHA256-Base64URL(secret, signData)
 ```
 
-`nonce_param` が設定されているときだけノンスを連結する。ノンス無しで発行済みの既存 URL は従来どおり通過する。
+`expires_param` と `nonce_param` は通常のクエリパラメータとして `canonicalQuery` に含まれる。`signature_param` 自体は除外する。署名後にリソース選択用のクエリパラメータを追加・変更すると署名検証に失敗する。
 
 ### ノンス書式
 

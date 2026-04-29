@@ -429,18 +429,35 @@ function compileOriginTemplate(cfgCode) {
 // Helper: create signed URL query string
 const SIGNED_URL_SECRET = 'test-signing-secret-for-urls-32b';
 function createSignedUrlParams(uri, expiresSec, secret) {
-    const signData = uri + String(expiresSec);
+    const signData = canonicalSignedUrlPayload(uri, [['exp', String(expiresSec)]]);
     const sig = crypto.createHmac('sha256', secret)
         .update(signData)
         .digest('base64url');
     return 'exp=' + expiresSec + '&sig=' + sig;
 }
 function createSignedUrlWithNonce(uri, expiresSec, secret, nonce) {
-    const signData = uri + String(expiresSec) + '|' + nonce;
+    const signData = canonicalSignedUrlPayload(uri, [['exp', String(expiresSec)], ['nonce', nonce]]);
     const sig = crypto.createHmac('sha256', secret)
         .update(signData)
         .digest('base64url');
     return 'exp=' + expiresSec + '&nonce=' + nonce + '&sig=' + sig;
+}
+function createSignedUrlWithQuery(uri, params, secret) {
+    const signData = canonicalSignedUrlPayload(uri, params);
+    const sig = crypto.createHmac('sha256', secret)
+        .update(signData)
+        .digest('base64url');
+    return params
+        .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
+        .join('&') + '&sig=' + sig;
+}
+function canonicalSignedUrlPayload(uri, params) {
+    const query = params
+        .slice()
+        .sort((a, b) => a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0]))
+        .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
+        .join('&');
+    return query ? uri + '?' + query : uri;
 }
 async function runOriginRequestTests() {
     const testSecret = HS256_SECRET;
@@ -623,6 +640,15 @@ async function runOriginRequestTests() {
         ['origin: GET /assets/file.png bad signature',
             buildLambdaEdgeEvent('/assets/file.png', {}, createSignedUrlParams('/assets/file.png', nowSec + 3600, 'wrong-secret')),
             '403'],
+        ['origin: GET /assets/file.png rejects unsigned extra query selector',
+            buildLambdaEdgeEvent('/assets/file.png', {}, createSignedUrlParams('/assets/file.png', nowSec + 3600, SIGNED_URL_SECRET) + '&file=other.png'),
+            '403'],
+        ['origin: GET /assets/file.png accepts signed extra query selector',
+            buildLambdaEdgeEvent('/assets/file.png', {}, createSignedUrlWithQuery('/assets/file.png', [
+                ['exp', String(nowSec + 3600)],
+                ['file', 'allowed.png'],
+            ], SIGNED_URL_SECRET)),
+            'allow'],
         ['origin: GET /assets/file.png missing sig params',
             buildLambdaEdgeEvent('/assets/file.png', {}, 'foo=bar'),
             '403'],
