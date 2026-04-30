@@ -21,6 +21,7 @@ const {
   validateOriginAuth,
 } = require('./lib/compile-core');
 const {
+  assertInjectedConstDeclarations,
   injectTemplateCode,
   renderConstObject,
   runtimeCode,
@@ -75,6 +76,23 @@ test('template-inject requires exactly one marker', () => {
   );
   assert.throws(() => injectTemplateCode('no marker', '// MARK', 'x'), /must appear exactly once/);
   assert.throws(() => injectTemplateCode('// MARK\n// MARK', '// MARK', 'x'), /must appear exactly once/);
+});
+
+test('template-inject validates injected top-level const declarations', () => {
+  assert.doesNotThrow(() => assertInjectedConstDeclarations('const CFG = {};\nfunction handler() {}', ['CFG']));
+  assert.throws(
+    () => assertInjectedConstDeclarations('const CFG = {};\nconst CFG = {};', ['CFG']),
+    /Identifier|already been declared|already declared/,
+  );
+  assert.throws(
+    () => assertInjectedConstDeclarations('function f(){ const CFG = {}; }', ['CFG']),
+    /must appear exactly once/,
+  );
+  assert.doesNotThrow(() => assertInjectedConstDeclarations(
+    'const CFG: Record<string, unknown> = {};',
+    ['CFG'],
+    { loader: 'ts' },
+  ));
 });
 
 test('parsePathPatterns returns defaults when unset or empty', () => {

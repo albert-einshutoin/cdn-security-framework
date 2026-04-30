@@ -10,6 +10,21 @@
       "require": "./lib/index.js",
       "default": "./lib/index.js"
     },
+    "./emitter": {
+      "types": "./emitter/index.d.ts",
+      "require": "./emitter/index.js",
+      "default": "./emitter/index.js"
+    },
+    "./parser": {
+      "types": "./parser/index.d.ts",
+      "require": "./parser/index.js",
+      "default": "./parser/index.js"
+    },
+    "./validator": {
+      "types": "./validator/index.d.ts",
+      "require": "./validator/index.js",
+      "default": "./validator/index.js"
+    },
     "./bin/cli": "./bin/cli.js",
     "./bin/cli.js": "./bin/cli.js"
   },
@@ -18,6 +33,8 @@
   },
   "scripts": {
     "build:ts": "tsc -p tsconfig.json",
+    "types:gen": "json2ts -i policy/schema.json -o src/types/policy.d.ts --unknownAny",
+    "test:types": "npm run build:ts && node scripts/check-generated-types.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "typecheck:lib-strict": "tsc --ignoreConfig --noEmit --target ES2022 --module CommonJS --moduleResolution Node --moduleDetection force --ignoreDeprecations 6.0 --esModuleInterop --resolveJsonModule --types node --strict true --noImplicitAny true --strictNullChecks true --useUnknownInCatchVariables true src/lib/*.ts",
     "typecheck:scripts-lib-strict": "tsc --ignoreConfig --noEmit --target ES2022 --module CommonJS --moduleResolution Node --moduleDetection force --ignoreDeprecations 6.0 --esModuleInterop --resolveJsonModule --types node --strict true --noImplicitAny true --strictNullChecks true --useUnknownInCatchVariables true src/scripts/lib/*.ts",
@@ -27,15 +44,15 @@
     "lint:policy": "npm run build:ts && node scripts/policy-lint.js",
     "test:api-contract": "npm run build:ts && node scripts/api-contract-tests.js",
     "test:runtime": "npm run build:ts && node scripts/runtime-tests.js && node scripts/cloudflare-runtime-tests.js",
-    "test:unit": "npm run build:ts && node scripts/compile-unit-tests.js && node scripts/infra-unit-tests.js && node scripts/schema-lint-tests.js && node scripts/doctor-unit-tests.js && node scripts/emit-waf-unit-tests.js && node scripts/programmatic-api-unit-tests.js && node scripts/cloudflare-waf-parity-unit-tests.js && node scripts/fingerprint-candidates-unit-tests.js",
+    "test:unit": "npm run build:ts && node scripts/compiler-phase-unit-tests.js && node scripts/compile-unit-tests.js && node scripts/infra-unit-tests.js && node scripts/schema-lint-tests.js && node scripts/doctor-unit-tests.js && node scripts/emit-waf-unit-tests.js && node scripts/programmatic-api-unit-tests.js && node scripts/cloudflare-waf-parity-unit-tests.js && node scripts/fingerprint-candidates-unit-tests.js",
     "test:drift": "npm run build:ts && node scripts/check-drift.js",
     "test:security-baseline": "npm run build:ts && node scripts/security-baseline-check.js",
     "test:fuzz": "npm run build:ts && node scripts/regex-fuzz-tests.js",
     "test:cloudflare-integration": "npm run build:ts && node scripts/cloudflare-integration-tests.js",
     "test:edge-container": "npm run build:ts && node scripts/edge-container-attack-tests.js",
     "test:package": "npm run build:ts && node scripts/package-smoke-tests.js",
-    "test:coverage": "c8 --reporter=text --reporter=lcov --include='scripts/**/*.js' --include='lib/**/*.js' --exclude='scripts/**/*-tests.js' --lines 80 --functions 75 --branches 70 npm run test:all",
-    "test:all": "npm run build && npm run typecheck:lib-strict && npm run typecheck:scripts-lib-strict && npm run typecheck:unit-tests-strict && npm run typecheck:cli-strict && npm run test:api-contract && npm run test:unit && npm run test:runtime && npm run test:fuzz && npm run test:cloudflare-integration && npm run test:edge-container",
+    "test:coverage": "c8 --reporter=text --reporter=lcov --include='scripts/**/*.js' --include='lib/**/*.js' --include='parser/**/*.js' --include='validator/**/*.js' --include='emitter/**/*.js' --exclude='scripts/**/*-tests.js' --lines 80 --functions 75 --branches 70 npm run test:all",
+    "test:all": "npm run build && npm run test:types && npm run typecheck:lib-strict && npm run typecheck:scripts-lib-strict && npm run typecheck:unit-tests-strict && npm run typecheck:cli-strict && npm run test:api-contract && npm run test:unit && npm run test:runtime && npm run test:fuzz && npm run test:cloudflare-integration && npm run test:edge-container",
     "fingerprints:candidates": "npm run build:ts && node scripts/fingerprint-candidates.js"
   },
   "keywords": [
@@ -51,6 +68,7 @@
     "node": ">=20.17.0"
   },
   "dependencies": {
+    "acorn": "^8.16.0",
     "ajv": "^8.18.0",
     "commander": "^11.0.0",
     "inquirer": "^13.4.2",
@@ -58,7 +76,10 @@
   },
   "files": [
     "bin/",
+    "emitter/",
     "lib/",
+    "parser/",
+    "validator/",
     "docs/",
     "scripts/README.md",
     "scripts/README.ja.md",
@@ -94,6 +115,7 @@
     "@types/node": "^25.6.0",
     "c8": "^10.1.3",
     "esbuild": "^0.28.0",
+    "json-schema-to-typescript": "^15.0.4",
     "typescript": "^6.0.3"
   }
 }

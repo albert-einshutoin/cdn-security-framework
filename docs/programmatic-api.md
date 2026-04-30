@@ -21,7 +21,7 @@ The CLI (`bin/cli.js`) now delegates to these same functions. If a bug shows up 
 
 ## Scope note
 
-`compile()` and `emitWaf()` currently invoke the existing compiler scripts in a subprocess via `spawnSync`. The API contract (inputs, outputs, error semantics) is stable; the subprocess boundary is an implementation detail that will move in-process under issue #69 without changing the surface. `lintPolicy()` and `migratePolicy()` already run fully in-process.
+The compiler is split into parser, validator, and emitter phase modules. `lintPolicy()` runs parser + validator fully in-process. `compile()` uses those phase boundaries and the emitter phase still delegates to the existing target scripts where necessary to preserve generated output compatibility.
 
 ## Reference
 
@@ -166,4 +166,4 @@ When building your own wrapper, prefer inspecting the structured flags rather th
 
 - [CLI reference](./cli.md)
 - [Schema migration](./schema-migration.md)
-- Roadmap item #69 (in-process compile) in [ROADMAP.md](./ROADMAP.md)
+- [Template injection contract](./template-injection-contract.md)

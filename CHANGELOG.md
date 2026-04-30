@@ -14,6 +14,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Added AWS CloudFormation WAFv2 output via `emit-waf --format cloudformation`.
 - Added policy authoring DX commands: `explain`, `diff`, and `doctor --strict`.
 - Added shared template injection helpers so compiler config injection is structured and marker-safe.
+- Split the compiler into parser, validator, and emitter phase modules behind the programmatic API.
+- Added schema-derived policy type generation and a drift check for `src/types/policy.d.ts`.
+- Added post-injection AST validation plus a documented template injection contract.
 
 ## [1.2.0] - 2026-04-29
 

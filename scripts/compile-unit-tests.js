@@ -6,7 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { DEFAULT_CONTAINS, parsePathPatterns, hasCatastrophicBacktrackShape, regexesLiteralCode, getAuthGates, validateAuthGates, validateJwksUrl, build, PLACEHOLDER_TOKEN, hasFailOnPermissiveFlag, warnIfPermissive, warnWeakAwsCspNonce, warnSignedUrlReplay, validateOriginAuth, } = require('./lib/compile-core');
-const { injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
+const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
 function test(name, fn) {
     try {
         fn();
@@ -53,6 +53,12 @@ test('template-inject requires exactly one marker', () => {
     assert.strictEqual(injectTemplateCode('a\n// MARK\nb', '// MARK', 'const X = 1;'), 'a\nconst X = 1;\nb');
     assert.throws(() => injectTemplateCode('no marker', '// MARK', 'x'), /must appear exactly once/);
     assert.throws(() => injectTemplateCode('// MARK\n// MARK', '// MARK', 'x'), /must appear exactly once/);
+});
+test('template-inject validates injected top-level const declarations', () => {
+    assert.doesNotThrow(() => assertInjectedConstDeclarations('const CFG = {};\nfunction handler() {}', ['CFG']));
+    assert.throws(() => assertInjectedConstDeclarations('const CFG = {};\nconst CFG = {};', ['CFG']), /Identifier|already been declared|already declared/);
+    assert.throws(() => assertInjectedConstDeclarations('function f(){ const CFG = {}; }', ['CFG']), /must appear exactly once/);
+    assert.doesNotThrow(() => assertInjectedConstDeclarations('const CFG: Record<string, unknown> = {};', ['CFG'], { loader: 'ts' }));
 });
 test('parsePathPatterns returns defaults when unset or empty', () => {
     assert.deepStrictEqual(parsePathPatterns(undefined), { contains: DEFAULT_CONTAINS.slice(), regexSources: [] });

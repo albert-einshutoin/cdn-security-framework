@@ -14,6 +14,9 @@
 - `emit-waf --format cloudformation` で AWS CloudFormation WAFv2 出力に対応。
 - ポリシー作成 DX として `explain`、`diff`、`doctor --strict` を追加。
 - コンパイラの設定注入を構造化し、テンプレートマーカーの欠落や重複を検知できる共通 helper を追加。
+- compiler を parser / validator / emitter の phase module に分割し、programmatic API の裏側で利用する構成にした。
+- `src/types/policy.d.ts` の schema 由来型生成と drift check を追加。
+- 注入後 AST 検証と template injection contract のドキュメントを追加。
 
 ## [1.2.0] - 2026-04-29
 

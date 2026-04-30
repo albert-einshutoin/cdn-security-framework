@@ -9,7 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 const { parsePathPatterns, regexesLiteralCode, validateAuthGates, hasAllowPlaceholderFlag, hasFailOnPermissiveFlag, warnIfPermissive, warnSignedUrlReplay, buildObsConfig, } = require('./lib/compile-core');
-const { injectTemplateCode, renderConstObject, runtimeCode } = require('./lib/template-inject');
+const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
 const securityPath = path.join(repoRoot, 'policy', 'security.yml');
@@ -239,6 +239,7 @@ catch (e) {
 }
 code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode);
 code = injectTemplateCode(code, '// {{INJECT_RESPONSE_CFG}}', responseCfgCode);
+assertInjectedConstDeclarations(code, ['CFG', 'RESPONSE_CFG'], { loader: 'ts' });
 const distDir = path.join(outDir, 'edge', 'cloudflare');
 fs.mkdirSync(distDir, { recursive: true });
 const outPath = path.join(distDir, 'index.ts');

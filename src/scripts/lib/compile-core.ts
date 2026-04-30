@@ -1,7 +1,12 @@
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
-const { injectTemplateCode, renderConstObject, runtimeCode } = require('./template-inject');
+const {
+  assertInjectedConstDeclarations,
+  injectTemplateCode,
+  renderConstObject,
+  runtimeCode,
+} = require('./template-inject');
 
 const repoRoot = path.join(__dirname, '..', '..');
 const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
@@ -603,6 +608,7 @@ function build(policy: any, options: any = {}) {
   const templatePath = path.join(rootDir, 'templates', 'aws', 'viewer-request.js');
   let code = fs.readFileSync(templatePath, 'utf8');
   code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode);
+  assertInjectedConstDeclarations(code, ['CFG']);
 
   const distDir = path.join(outDir, 'edge');
   fs.mkdirSync(distDir, { recursive: true });
@@ -665,6 +671,7 @@ function build(policy: any, options: any = {}) {
   const templateResponsePath = path.join(rootDir, 'templates', 'aws', 'viewer-response.js');
   let codeResponse = fs.readFileSync(templateResponsePath, 'utf8');
   codeResponse = injectTemplateCode(codeResponse, '// {{INJECT_RESPONSE_CONFIG}}', responseCfgCode);
+  assertInjectedConstDeclarations(codeResponse, ['RESPONSE_CFG']);
   const outPathResponse = path.join(distDir, 'viewer-response.js');
   fs.writeFileSync(outPathResponse, codeResponse, 'utf8');
 
@@ -743,6 +750,7 @@ function build(policy: any, options: any = {}) {
   const templateOriginPath = path.join(rootDir, 'templates', 'aws', 'origin-request.js');
   let codeOrigin = fs.readFileSync(templateOriginPath, 'utf8');
   codeOrigin = injectTemplateCode(codeOrigin, '// {{INJECT_CONFIG}}', originCfgCode);
+  assertInjectedConstDeclarations(codeOrigin, ['CFG']);
   const outPathOrigin = path.join(distDir, 'origin-request.js');
   fs.writeFileSync(outPathOrigin, codeOrigin, 'utf8');
 
