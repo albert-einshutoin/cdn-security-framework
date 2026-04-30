@@ -14,6 +14,7 @@
  *   report: { generatedAt, cdnSecurityVersion, checks: [{ name, status, detail }] }
  *
  *   status ∈ { pass, fail, warn, skip }
- *   exitCode = 0 when no check has status === 'fail', else 1.
+ *   exitCode = 0 when no check has status === 'fail', else 1. In strict mode,
+ *   warn checks also produce exitCode 1.
  */
 export {};

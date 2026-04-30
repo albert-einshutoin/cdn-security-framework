@@ -84,6 +84,7 @@ export interface DoctorOptions {
     envProvider?: (name: string) => string | undefined;
     spawnSync?: typeof import('child_process').spawnSync;
     log?: boolean;
+    strict?: boolean;
 }
 export interface DoctorCheck {
     name: string;
@@ -95,6 +96,7 @@ export interface DoctorReport {
     generatedAt: string;
     cdnSecurityVersion: string;
     policyPath: string;
+    strict: boolean;
     exitCode: number;
     checks: DoctorCheck[];
 }

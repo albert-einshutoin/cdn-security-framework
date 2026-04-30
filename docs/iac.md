@@ -1,6 +1,6 @@
-# IaC Integration (Terraform / CDK / WAF)
+# IaC Integration (Terraform / CloudFormation / CDK / WAF)
 
-This document describes how to use the generated **`dist/edge/`** and **`dist/infra/`** outputs with Terraform and AWS CDK.
+This document describes how to use the generated **`dist/edge/`** and **`dist/infra/`** outputs with Terraform, AWS CloudFormation, and AWS CDK.
 
 ---
 
@@ -14,6 +14,7 @@ After `npx cdn-security build` (and `npx cdn-security build --target aws` for In
 | **dist/edge/viewer-response.js** | CloudFront Function (Viewer Response) |
 | **dist/edge/cloudflare/index.ts** | Cloudflare Worker (when built with `--target cloudflare`). Output is TypeScript; Wrangler compiles it on deploy. Without Wrangler, a TypeScript build step is required. |
 | **dist/infra/waf-rules.tf.json** | Terraform JSON: `aws_wafv2_rule_group` (rate-based rule). Use when policy has `firewall.waf`. |
+| **dist/infra/waf-cloudformation.json** | AWS CloudFormation: `AWS::WAFv2::*` resources. Generate with `emit-waf --format cloudformation`. |
 
 ---
 
@@ -111,6 +112,20 @@ If you keep the generated file in `dist/infra/`, run Terraform from the repo roo
 
 ---
 
+## CloudFormation: AWS WAFv2
+
+Generate an AWS CloudFormation template without rebuilding edge code:
+
+```bash
+npx cdn-security emit-waf --target aws --format cloudformation
+```
+
+The command writes `dist/infra/waf-cloudformation.json`. The template contains `AWS::WAFv2::RuleGroup`, `AWS::WAFv2::WebACL` when full output is requested, plus related IP set resources when the policy uses IP allow/block lists.
+
+Use `--rule-group-only` when another stack owns the Web ACL and you only want reusable rule groups.
+
+---
+
 ## AWS CDK: CloudFront Functions
 
 Use the generated code as inline function code:
@@ -154,6 +169,7 @@ distribution.addBehavior('*', origin, {
 | **Edge (CloudFront)** | Use `file("dist/edge/viewer-request.js")` (Terraform) or `FunctionCode.fromInline(...)` (CDK) with the generated files. |
 | **Edge (Cloudflare)** | Copy or reference `dist/edge/cloudflare/index.ts` in your Worker project and deploy with Wrangler. |
 | **WAF (Terraform)** | Use `dist/infra/waf-rules.tf.json` in your Terraform config (same directory or module) and attach the rule group to your Web ACL. |
+| **WAF (CloudFormation)** | Use `npx cdn-security emit-waf --format cloudformation` and deploy `dist/infra/waf-cloudformation.json`. |
 
 Re-run `npx cdn-security build` whenever you change `policy/security.yml`; then re-run Terraform or CDK so the deployed Edge and WAF match the policy.
 

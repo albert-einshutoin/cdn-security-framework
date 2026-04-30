@@ -285,6 +285,7 @@ routes:
         assert.strictEqual(envCheck.status, 'pass');
         const written = JSON.parse(fs.readFileSync(path.join(tmp, 'doctor-report.json'), 'utf8'));
         assert.strictEqual(written.exitCode, 0);
+        assert.strictEqual(written.strict, false);
         assert.ok(Array.isArray(written.checks));
     }
     finally {
@@ -361,6 +362,29 @@ test('runDoctor: reportPath: null skips file write', () => {
         const files = fs.readdirSync(tmp);
         assert.ok(!files.includes('doctor-report.json'), 'report file should not be written');
         assert.strictEqual(result.exitCode, 0);
+    }
+    finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+});
+test('runDoctor: strict mode fails on warning checks', () => {
+    const tmp = mktmp();
+    fs.mkdirSync(path.join(tmp, 'policy'));
+    fs.writeFileSync(path.join(tmp, 'policy', 'security.yml'), 'version: 1\nrequest:\n  allow_methods: [GET]\nresponse_headers: {}\n');
+    const result = runDoctor({
+        cwd: tmp,
+        pkgRoot: repoRoot,
+        envProvider: () => undefined,
+        spawnSync: () => ({ stdout: '' }),
+        log: false,
+        reportPath: null,
+        strict: true,
+    });
+    try {
+        assert.strictEqual(result.exitCode, 1);
+        assert.strictEqual(result.report.strict, true);
+        const dependencyCheck = result.report.checks.find((c) => c.name === 'npm_dependencies');
+        assert.strictEqual(dependencyCheck.status, 'warn');
     }
     finally {
         fs.rmSync(tmp, { recursive: true, force: true });

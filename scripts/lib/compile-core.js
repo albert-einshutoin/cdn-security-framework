@@ -3,6 +3,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
+const { injectTemplateCode, renderConstObject, runtimeCode } = require('./template-inject');
 const repoRoot = path.join(__dirname, '..', '..');
 const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
 const LEGACY_KNOWN_MAP = {
@@ -539,30 +540,33 @@ function build(policy, options = {}) {
         .filter(Boolean);
     const trustForwardedFor = request.trust_forwarded_for === true;
     const obsCfg = buildObsConfig(policy);
-    const cfgCode = [
-        'const CFG = {',
-        `  mode: ${JSON.stringify(defaults.mode || 'enforce')},`,
-        `  allowMethods: ${JSON.stringify(request.allow_methods || ['GET', 'HEAD', 'POST'])},`,
-        `  maxQueryLength: ${Number(limits.max_query_length) || 1024},`,
-        `  maxQueryParams: ${Number(limits.max_query_params) || 30},`,
-        `  maxUriLength: ${Number(limits.max_uri_length) || 2048},`,
-        `  maxHeaderCount: ${Number.isFinite(Number(limits.max_header_count)) ? Math.max(1, Math.min(500, Number(limits.max_header_count))) : 64},`,
-        `  dropQueryKeys: new Set(${JSON.stringify(dropQueryKeysArray)}),`,
-        `  uaDenyContains: ${JSON.stringify(block.ua_contains || ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests'])},`,
-        `  blockPathContains: ${JSON.stringify(blockPathContains)},`,
-        `  blockPathRegexes: ${regexesLiteralCode(blockPathRegexSources)},`,
-        `  normalizePath: { collapseSlashes: ${!!pathNormalize.collapse_slashes}, removeDotSegments: ${!!pathNormalize.remove_dot_segments} },`,
-        `  requiredHeaders: ${JSON.stringify(requiredHeaders)},`,
-        `  allowedHosts: ${JSON.stringify(allowedHosts)},`,
-        `  trustForwardedFor: ${trustForwardedFor ? 'true' : 'false'},`,
-        `  cors: ${JSON.stringify(corsConfig)},`,
-        `  authGates: ${JSON.stringify(authGates)},`,
-        `  obs: ${JSON.stringify(obsCfg)},`,
-        '};',
-    ].join('\n');
+    const cfgCode = renderConstObject('CFG', {
+        mode: defaults.mode || 'enforce',
+        allowMethods: request.allow_methods || ['GET', 'HEAD', 'POST'],
+        maxQueryLength: Number(limits.max_query_length) || 1024,
+        maxQueryParams: Number(limits.max_query_params) || 30,
+        maxUriLength: Number(limits.max_uri_length) || 2048,
+        maxHeaderCount: Number.isFinite(Number(limits.max_header_count))
+            ? Math.max(1, Math.min(500, Number(limits.max_header_count)))
+            : 64,
+        dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(dropQueryKeysArray)})`),
+        uaDenyContains: block.ua_contains || ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests'],
+        blockPathContains,
+        blockPathRegexes: runtimeCode(regexesLiteralCode(blockPathRegexSources)),
+        normalizePath: {
+            collapseSlashes: !!pathNormalize.collapse_slashes,
+            removeDotSegments: !!pathNormalize.remove_dot_segments,
+        },
+        requiredHeaders,
+        allowedHosts,
+        trustForwardedFor,
+        cors: corsConfig,
+        authGates,
+        obs: obsCfg,
+    });
     const templatePath = path.join(rootDir, 'templates', 'aws', 'viewer-request.js');
     let code = fs.readFileSync(templatePath, 'utf8');
-    code = code.replace('// {{INJECT_CONFIG}}', cfgCode);
+    code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode);
     const distDir = path.join(outDir, 'edge');
     fs.mkdirSync(distDir, { recursive: true });
     const outPath = path.join(distDir, 'viewer-request.js');
@@ -588,40 +592,38 @@ function build(policy, options = {}) {
     // Vary: Authorization regardless of which gate type applies. Issue #8.
     const authProtectedPrefixes = Array.from(new Set((authGates || []).flatMap((g) => Array.isArray(g.protectedPrefixes) ? g.protectedPrefixes : [])));
     const forceVaryAuth = resHeaders.force_vary_auth !== false; // default on
-    const responseCfgCode = [
-        'const RESPONSE_CFG = {',
-        '  headers: {',
-        `    "strict-transport-security": ${JSON.stringify(resHeaders.hsts || 'max-age=31536000; includeSubDomains; preload')},`,
-        `    "x-content-type-options": ${JSON.stringify(resHeaders.x_content_type_options || 'nosniff')},`,
-        `    "referrer-policy": ${JSON.stringify(resHeaders.referrer_policy || 'strict-origin-when-cross-origin')},`,
-        `    "permissions-policy": ${JSON.stringify(resHeaders.permissions_policy || 'camera=(), microphone=(), geolocation=()')},`,
-        '  },',
-        `  csp_public: ${JSON.stringify(resHeaders.csp_public || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';")},`,
-        `  csp_admin: ${JSON.stringify(resHeaders.csp_admin || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';")},`,
-        `  csp_report_only: ${JSON.stringify(resHeaders.csp_report_only || '')},`,
-        `  csp_report_uri: ${JSON.stringify(resHeaders.csp_report_uri || '')},`,
-        `  csp_nonce: ${resHeaders.csp_nonce === true ? 'true' : 'false'},`,
-        `  coop: ${JSON.stringify(resHeaders.coop || '')},`,
-        `  coep: ${JSON.stringify(resHeaders.coep || '')},`,
-        `  corp: ${JSON.stringify(resHeaders.corp || '')},`,
-        `  reporting_endpoints: ${JSON.stringify(resHeaders.reporting_endpoints || '')},`,
-        `  adminPathPrefixes: ${JSON.stringify(adminPathPrefixes)},`,
-        `  adminCacheControl: ${JSON.stringify(adminCacheControl)},`,
-        `  authProtectedPrefixes: ${JSON.stringify(authProtectedPrefixes)},`,
-        `  forceVaryAuth: ${forceVaryAuth ? 'true' : 'false'},`,
-        `  clearSiteDataPaths: ${JSON.stringify(Array.isArray(resHeaders.clear_site_data_paths)
+    const responseCfgCode = renderConstObject('RESPONSE_CFG', {
+        headers: {
+            'strict-transport-security': resHeaders.hsts || 'max-age=31536000; includeSubDomains; preload',
+            'x-content-type-options': resHeaders.x_content_type_options || 'nosniff',
+            'referrer-policy': resHeaders.referrer_policy || 'strict-origin-when-cross-origin',
+            'permissions-policy': resHeaders.permissions_policy || 'camera=(), microphone=(), geolocation=()',
+        },
+        csp_public: resHeaders.csp_public || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
+        csp_admin: resHeaders.csp_admin || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+        csp_report_only: resHeaders.csp_report_only || '',
+        csp_report_uri: resHeaders.csp_report_uri || '',
+        csp_nonce: resHeaders.csp_nonce === true,
+        coop: resHeaders.coop || '',
+        coep: resHeaders.coep || '',
+        corp: resHeaders.corp || '',
+        reporting_endpoints: resHeaders.reporting_endpoints || '',
+        adminPathPrefixes,
+        adminCacheControl,
+        authProtectedPrefixes,
+        forceVaryAuth,
+        clearSiteDataPaths: Array.isArray(resHeaders.clear_site_data_paths)
             ? resHeaders.clear_site_data_paths.filter((s) => typeof s === 'string' && s.trim())
-            : [])},`,
-        `  clearSiteDataTypes: ${JSON.stringify(Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
+            : [],
+        clearSiteDataTypes: Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
             ? resHeaders.clear_site_data_types
-            : ['cache', 'cookies', 'storage'])},`,
-        `  cors: ${JSON.stringify(resHeaders.cors || null)},`,
-        `  cookie_attributes: ${JSON.stringify(resHeaders.cookie_attributes || null)},`,
-        '};',
-    ].join('\n');
+            : ['cache', 'cookies', 'storage'],
+        cors: resHeaders.cors || null,
+        cookie_attributes: resHeaders.cookie_attributes || null,
+    });
     const templateResponsePath = path.join(rootDir, 'templates', 'aws', 'viewer-response.js');
     let codeResponse = fs.readFileSync(templateResponsePath, 'utf8');
-    codeResponse = codeResponse.replace('// {{INJECT_RESPONSE_CONFIG}}', responseCfgCode);
+    codeResponse = injectTemplateCode(codeResponse, '// {{INJECT_RESPONSE_CONFIG}}', responseCfgCode);
     const outPathResponse = path.join(distDir, 'viewer-response.js');
     fs.writeFileSync(outPathResponse, codeResponse, 'utf8');
     const jwtGates = authGates.filter((g) => g.type === 'jwt').map((g) => {
@@ -679,23 +681,21 @@ function build(policy, options = {}) {
         ? Math.max(0, Math.min(600, Number(jwksGlobal.negative_cache_sec)))
         : 60;
     const obsCfgOrigin = buildObsConfig(policy);
-    const originCfgCode = [
-        'const CFG = {',
-        `  project: ${JSON.stringify(policy.project || 'cdn-security')},`,
-        `  mode: ${JSON.stringify(defaults.mode || 'enforce')},`,
-        `  maxHeaderSize: ${Number(limits.max_header_size) || 0},`,
-        `  trustForwardedFor: ${trustForwardedFor ? 'true' : 'false'},`,
-        `  jwtGates: ${JSON.stringify(jwtGates)},`,
-        `  signedUrlGates: ${JSON.stringify(signedUrlGates)},`,
-        `  originAuth: ${JSON.stringify(originAuth)},`,
-        `  jwksStaleIfErrorSec: ${jwksStaleIfError},`,
-        `  jwksNegativeCacheSec: ${jwksNegativeCache},`,
-        `  obs: ${JSON.stringify(obsCfgOrigin)},`,
-        '};',
-    ].join('\n');
+    const originCfgCode = renderConstObject('CFG', {
+        project: policy.project || 'cdn-security',
+        mode: defaults.mode || 'enforce',
+        maxHeaderSize: Number(limits.max_header_size) || 0,
+        trustForwardedFor,
+        jwtGates,
+        signedUrlGates,
+        originAuth,
+        jwksStaleIfErrorSec: jwksStaleIfError,
+        jwksNegativeCacheSec: jwksNegativeCache,
+        obs: obsCfgOrigin,
+    });
     const templateOriginPath = path.join(rootDir, 'templates', 'aws', 'origin-request.js');
     let codeOrigin = fs.readFileSync(templateOriginPath, 'utf8');
-    codeOrigin = codeOrigin.replace('// {{INJECT_CONFIG}}', originCfgCode);
+    codeOrigin = injectTemplateCode(codeOrigin, '// {{INJECT_CONFIG}}', originCfgCode);
     const outPathOrigin = path.join(distDir, 'origin-request.js');
     fs.writeFileSync(outPathOrigin, codeOrigin, 'utf8');
     return [outPath, outPathResponse, outPathOrigin];

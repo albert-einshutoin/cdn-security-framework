@@ -9,6 +9,12 @@
 
 ## [Unreleased]
 
+### 追加
+
+- `emit-waf --format cloudformation` で AWS CloudFormation WAFv2 出力に対応。
+- ポリシー作成 DX として `explain`、`diff`、`doctor --strict` を追加。
+- コンパイラの設定注入を構造化し、テンプレートマーカーの欠落や重複を検知できる共通 helper を追加。
+
 ## [1.2.0] - 2026-04-29
 
 ### セキュリティ
