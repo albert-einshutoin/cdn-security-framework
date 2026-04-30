@@ -28,10 +28,42 @@ test('package metadata exposes typed root api and bounded exports', () => {
   const pkg = require(path.join(repoRoot, 'package.json'));
   assert.strictEqual(pkg.main, 'lib/index.js');
   assert.strictEqual(pkg.types, 'lib/index.d.ts');
-  assert.deepStrictEqual(Object.keys(pkg.exports).sort(), ['.', './bin/cli', './bin/cli.js']);
+  assert.deepStrictEqual(Object.keys(pkg.exports).sort(), [
+    '.',
+    './bin/cli',
+    './bin/cli.js',
+    './emitter',
+    './parser',
+    './validator',
+  ]);
   assert.strictEqual(pkg.exports['.'].types, './lib/index.d.ts');
   assert.strictEqual(pkg.exports['.'].require, './lib/index.js');
+  assert.strictEqual(pkg.exports['./parser'].types, './parser/index.d.ts');
+  assert.strictEqual(pkg.exports['./parser'].require, './parser/index.js');
+  assert.strictEqual(pkg.exports['./validator'].types, './validator/index.d.ts');
+  assert.strictEqual(pkg.exports['./validator'].require, './validator/index.js');
+  assert.strictEqual(pkg.exports['./emitter'].types, './emitter/index.d.ts');
+  assert.strictEqual(pkg.exports['./emitter'].require, './emitter/index.js');
   assert.strictEqual(pkg.exports['./bin/cli.js'], './bin/cli.js');
+});
+
+test('phase subpath exports expose public compiler contracts', () => {
+  const parser = require(path.join(repoRoot, 'parser'));
+  const validator = require(path.join(repoRoot, 'validator'));
+  const emitter = require(path.join(repoRoot, 'emitter'));
+  assert.strictEqual(typeof parser.parsePolicyFile, 'function');
+  assert.strictEqual(typeof validator.validatePolicy, 'function');
+  assert.strictEqual(typeof emitter.compileArtifacts, 'function');
+
+  const phaseDeclarations = [
+    ['parser/index.d.ts', 'parsePolicyFile'],
+    ['validator/index.d.ts', 'validatePolicy'],
+    ['emitter/index.d.ts', 'compileArtifacts'],
+  ];
+  for (const [file, name] of phaseDeclarations) {
+    const dts = fs.readFileSync(path.join(repoRoot, file), 'utf8');
+    assert.ok(dts.includes(`export declare function ${name}`), `${file} must declare ${name}`);
+  }
 });
 
 test('root type declarations expose public programmatic api', () => {

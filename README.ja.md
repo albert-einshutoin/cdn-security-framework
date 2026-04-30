@@ -106,6 +106,7 @@ Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.
 - [シークレットローテーション runbook](docs/runbooks/secret-rotation.ja.md) — JWT / JWKS / 署名付き URL / 管理トークン / origin シークレット
 - [スキーママイグレーション](docs/schema-migration.ja.md) — `policy/schema.json` のバージョン契約と `migrate` CLI
 - [サプライチェーン](docs/supply-chain.ja.md) — SLSA v1 provenance と `npm audit signatures`
+- [テンプレート注入契約](docs/template-injection-contract.ja.md) — marker-safe かつ parse-checked な runtime config 注入
 
 ---
 

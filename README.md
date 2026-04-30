@@ -106,6 +106,7 @@ See [IaC integration](docs/iac.md) for Terraform / CloudFormation / CDK / WAF us
 - [Secret rotation runbook](docs/runbooks/secret-rotation.md) — JWT / JWKS / signed URL / admin token / origin secret
 - [Schema migration](docs/schema-migration.md) — how `policy/schema.json` evolves and the `migrate` CLI
 - [Supply chain](docs/supply-chain.md) — SLSA v1 provenance and `npm audit signatures`
+- [Template injection contract](docs/template-injection-contract.md) — marker-safe, parse-checked runtime config injection
 
 ---
 
