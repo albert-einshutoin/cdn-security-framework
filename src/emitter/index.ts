@@ -4,6 +4,8 @@ const { spawnSync } = require('child_process');
 
 const { lintPolicy } = require('../lib/lint');
 
+import type { SpawnSyncReturns } from 'child_process';
+
 const DEFAULT_PKG_ROOT = path.join(__dirname, '..');
 
 const AWS_EDGE_FILES = ['viewer-request.js', 'viewer-response.js', 'origin-request.js'];
@@ -32,6 +34,12 @@ export type CompileResultBase = {
   target: string;
 };
 
+export type CompileArtifactsResult = CompileResultBase & {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+};
+
 export function resolveAbsolute(inputPath: string, cwd: string): string {
   return path.isAbsolute(inputPath) ? inputPath : path.join(cwd, inputPath);
 }
@@ -46,7 +54,22 @@ export function listInfraArtifacts(outDir: string, sinceMs = 0): string[] {
     .filter((filePath: string) => sinceMs <= 0 || fs.statSync(filePath).mtimeMs >= sinceMs);
 }
 
-export function compileArtifacts(opts: CompileArtifactsOptions = {}) {
+function collectStderrWarnings(result: SpawnSyncReturns<string>, warnings: string[]): void {
+  if (result.stderr) {
+    warnings.push(...result.stderr.trim().split('\n').filter(Boolean));
+  }
+}
+
+function collectFailedSpawn(
+  label: string,
+  result: SpawnSyncReturns<string>,
+  errors: string[],
+): void {
+  errors.push(`${label} failed (status ${result.status})`);
+  if (result.stderr) errors.push(result.stderr.trim());
+}
+
+export function compileArtifacts(opts: CompileArtifactsOptions = {}): CompileArtifactsResult {
   opts = opts || {};
   const cwd = opts.cwd || process.cwd();
   const pkgRoot = opts.pkgRoot || DEFAULT_PKG_ROOT;
@@ -117,13 +140,10 @@ export function compileArtifacts(opts: CompileArtifactsOptions = {}) {
       { cwd, encoding: 'utf8', env },
     );
     if (compileResult.status !== 0) {
-      errors.push(`edge compile failed (status ${compileResult.status})`);
-      if (compileResult.stderr) errors.push(compileResult.stderr.trim());
+      collectFailedSpawn('edge compile', compileResult, errors);
       return { ok: false, errors, warnings, ...baseResult };
     }
-    if (compileResult.stderr) {
-      warnings.push(...compileResult.stderr.trim().split('\n').filter(Boolean));
-    }
+    collectStderrWarnings(compileResult, warnings);
     baseResult.edgeFiles = AWS_EDGE_FILES.map((f) => path.join(outDir, 'edge', f));
 
     const infraPath = path.join(pkgRoot, 'scripts', 'compile-infra.js');
@@ -139,13 +159,10 @@ export function compileArtifacts(opts: CompileArtifactsOptions = {}) {
       { cwd, encoding: 'utf8', env },
     );
     if (infraResult.status !== 0) {
-      errors.push(`infra compile failed (status ${infraResult.status})`);
-      if (infraResult.stderr) errors.push(infraResult.stderr.trim());
+      collectFailedSpawn('infra compile', infraResult, errors);
       return { ok: false, errors, warnings, ...baseResult };
     }
-    if (infraResult.stderr) {
-      warnings.push(...infraResult.stderr.trim().split('\n').filter(Boolean));
-    }
+    collectStderrWarnings(infraResult, warnings);
     baseResult.infraFiles = listInfraArtifacts(outDir, compileStartedAt);
   } else {
     const compileCfPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare.js');
@@ -160,13 +177,10 @@ export function compileArtifacts(opts: CompileArtifactsOptions = {}) {
       { cwd, encoding: 'utf8', env },
     );
     if (cfResult.status !== 0) {
-      errors.push(`cloudflare edge compile failed (status ${cfResult.status})`);
-      if (cfResult.stderr) errors.push(cfResult.stderr.trim());
+      collectFailedSpawn('cloudflare edge compile', cfResult, errors);
       return { ok: false, errors, warnings, ...baseResult };
     }
-    if (cfResult.stderr) {
-      warnings.push(...cfResult.stderr.trim().split('\n').filter(Boolean));
-    }
+    collectStderrWarnings(cfResult, warnings);
     baseResult.edgeFiles = CF_EDGE_FILES.map((f) => path.join(outDir, 'edge', f));
 
     const cfWafPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare-waf.js');
@@ -181,13 +195,10 @@ export function compileArtifacts(opts: CompileArtifactsOptions = {}) {
       { cwd, encoding: 'utf8', env },
     );
     if (cfWafResult.status !== 0) {
-      errors.push(`cloudflare waf compile failed (status ${cfWafResult.status})`);
-      if (cfWafResult.stderr) errors.push(cfWafResult.stderr.trim());
+      collectFailedSpawn('cloudflare waf compile', cfWafResult, errors);
       return { ok: false, errors, warnings, ...baseResult };
     }
-    if (cfWafResult.stderr) {
-      warnings.push(...cfWafResult.stderr.trim().split('\n').filter(Boolean));
-    }
+    collectStderrWarnings(cfWafResult, warnings);
     baseResult.infraFiles = listInfraArtifacts(outDir, compileStartedAt);
   }
 

@@ -17,6 +17,7 @@
 - compiler を parser / validator / emitter の phase module に分割し、programmatic API の裏側で利用する構成にした。
 - `src/types/policy.d.ts` の schema 由来型生成と drift check を追加。
 - 注入後 AST 検証と template injection contract のドキュメントを追加。
+- compiler phase の strict typecheck と、CI report 対応の初期 Vitest contract test suite を追加。
 
 ## [1.2.0] - 2026-04-29
 

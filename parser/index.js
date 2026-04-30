@@ -13,12 +13,13 @@ function parsePolicyFile(opts = {}) {
         return { ok: true, errors: [], policy };
     }
     catch (e) {
-        if (e && e.code === 'ENOENT') {
+        if (e && typeof e === 'object' && 'code' in e && e.code === 'ENOENT') {
             return { ok: false, errors: [`policy file not found: ${policyPath}`], policy: null };
         }
+        const message = e instanceof Error ? e.message : String(e);
         return {
             ok: false,
-            errors: [`failed to parse policy YAML: ${e && e.message ? e.message : String(e)}`],
+            errors: [`failed to parse policy YAML: ${message}`],
             policy: null,
         };
     }

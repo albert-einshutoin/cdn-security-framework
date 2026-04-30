@@ -27,6 +27,7 @@ dist/
 
 # c8 coverage output
 coverage/
+reports/
 .nyc_output/
 
 # doctor subcommand report — regenerated on every run, captured as CI artifact

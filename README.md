@@ -102,11 +102,13 @@ See [IaC integration](docs/iac.md) for Terraform / CloudFormation / CDK / WAF us
 ### Operational docs
 - [CLI reference](docs/cli.md) — `init` / `build` / `emit-waf` / `doctor` / `explain` / `diff` / `migrate`
 - [Programmatic API](docs/programmatic-api.md) — `require('cdn-security-framework')` for CI / IaC integration
+- [Compiler strictness](docs/compiler-strictness.md) — phase contracts, strict checks, and remaining dynamic areas
 - [Archetypes](docs/archetypes.md) — app-shaped policy presets (SPA, REST API, admin, microservice)
 - [Secret rotation runbook](docs/runbooks/secret-rotation.md) — JWT / JWKS / signed URL / admin token / origin secret
 - [Schema migration](docs/schema-migration.md) — how `policy/schema.json` evolves and the `migrate` CLI
 - [Supply chain](docs/supply-chain.md) — SLSA v1 provenance and `npm audit signatures`
 - [Template injection contract](docs/template-injection-contract.md) — marker-safe, parse-checked runtime config injection
+- [Test strategy](docs/test-strategy.md) — Vitest migration policy and release-gate test workflow
 
 ---
 
