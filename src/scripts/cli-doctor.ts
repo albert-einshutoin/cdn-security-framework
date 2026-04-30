@@ -14,7 +14,8 @@
  *   report: { generatedAt, cdnSecurityVersion, checks: [{ name, status, detail }] }
  *
  *   status ∈ { pass, fail, warn, skip }
- *   exitCode = 0 when no check has status === 'fail', else 1.
+ *   exitCode = 0 when no check has status === 'fail', else 1. In strict mode,
+ *   warn checks also produce exitCode 1.
  */
 
 const fs = require('fs');
@@ -46,6 +47,7 @@ type DoctorOptions = {
   envProvider?: EnvProvider;
   spawnSync?: SpawnSyncImpl;
   log?: boolean;
+  strict?: boolean;
 };
 
 function pass(name: string, detail: string, extras: CheckExtras = undefined): CheckRow {
@@ -290,13 +292,18 @@ function runDoctor(opts?: DoctorOptions) {
   checks.push(checkDistWritable(cwd));
   checks.push(checkDependencies(cwd, spawnSyncImpl));
 
-  const anyFail = checks.some((c) => c.status === 'fail');
-  const exitCode = anyFail ? 1 : 0;
+  const strict = Boolean(opts && opts.strict);
+  const failCount = checks.filter((c) => c.status === 'fail').length;
+  const warnCount = checks.filter((c) => c.status === 'warn').length;
+  const anyFail = failCount > 0;
+  const strictFailed = strict && warnCount > 0;
+  const exitCode = anyFail || strictFailed ? 1 : 0;
 
   const report = {
     generatedAt: new Date().toISOString(),
     cdnSecurityVersion,
     policyPath,
+    strict,
     exitCode,
     checks,
   };
@@ -322,9 +329,11 @@ function runDoctor(opts?: DoctorOptions) {
       stream(`[${marker}] ${c.name}: ${c.detail}`);
     }
     const summary = anyFail
-      ? `[doctor] ${checks.filter((c) => c.status === 'fail').length} failing check(s). See above.`
-      : `[doctor] all checks passed.`;
-    (anyFail ? console.error : console.log)(summary);
+      ? `[doctor] ${failCount} failing check(s). See above.`
+      : strictFailed
+        ? `[doctor] strict mode failed because ${warnCount} warning check(s) were reported.`
+        : `[doctor] all checks passed.`;
+    (anyFail || strictFailed ? console.error : console.log)(summary);
   }
 
   return { exitCode, report };

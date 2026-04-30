@@ -240,7 +240,7 @@ test('emitWaf: aws emits only infra, edgeFiles empty', () => {
   }
 });
 
-test('emitWaf: --format cloudformation returns ok=false with formatNotImplemented flag', () => {
+test('emitWaf: --format cloudformation emits AWS CloudFormation template', () => {
   const ctx = tmpProject(BASIC_AWS_POLICY);
   try {
     const result = api.emitWaf({
@@ -249,9 +249,11 @@ test('emitWaf: --format cloudformation returns ok=false with formatNotImplemente
       target: 'aws',
       format: 'cloudformation',
     });
-    assert.strictEqual(result.ok, false);
-    assert.strictEqual(result.formatNotImplemented, true);
-    assert.ok(result.errors.some((e: string) => /not yet implemented/i.test(e)));
+    assert.strictEqual(result.ok, true, `emitWaf failed: ${result.errors.join(' ')}`);
+    assert.strictEqual(result.formatNotImplemented, false);
+    assert.ok(result.infraFiles.some((f: string) => f.endsWith('waf-cloudformation.json')));
+    const doc = JSON.parse(fs.readFileSync(path.join(ctx.outDir, 'infra', 'waf-cloudformation.json'), 'utf8'));
+    assert.ok(Object.values(doc.Resources).some((r: any) => r.Type === 'AWS::WAFv2::RuleGroup'));
   } finally {
     ctx.cleanup();
   }
@@ -365,6 +367,68 @@ test('CLI backwards-compat: `cdn-security build --target aws` still succeeds', (
     assert.strictEqual(result.status, 0, `CLI build failed: ${result.stderr}`);
     assert.ok(fs.existsSync(path.join(ctx.outDir, 'edge', 'viewer-request.js')));
     assert.ok(fs.existsSync(path.join(ctx.outDir, 'infra', 'waf-rules.tf.json')));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: explain summarizes policy posture', () => {
+  const ctx = tmpProject(BASIC_AWS_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'explain',
+      '-p', ctx.policyPath,
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `explain failed: ${result.stderr}`);
+    assert.ok(/Policy: api-test/.test(result.stdout));
+    assert.ok(/Allowed methods: GET, POST/.test(result.stdout));
+    assert.ok(/WAF:/.test(result.stdout));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: diff detects generated output drift', () => {
+  const ctx = tmpProject(BASIC_AWS_POLICY);
+  const { spawnSync } = require('child_process');
+  const cli = path.join(repoRoot, 'bin', 'cli.js');
+  const env = Object.assign({}, process.env, {
+    EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy',
+    ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+  });
+  try {
+    const buildResult: any = spawnSync(process.execPath, [
+      cli, 'build',
+      '-p', ctx.policyPath,
+      '-o', ctx.outDir,
+      '--target', 'aws',
+    ], { cwd: ctx.tmp, encoding: 'utf8', env });
+    assert.strictEqual(buildResult.status, 0, `build failed: ${buildResult.stderr}`);
+
+    const cleanDiff: any = spawnSync(process.execPath, [
+      cli, 'diff',
+      '-p', ctx.policyPath,
+      '-o', ctx.outDir,
+      '--target', 'aws',
+    ], { cwd: ctx.tmp, encoding: 'utf8', env });
+    assert.strictEqual(cleanDiff.status, 0, `clean diff failed: ${cleanDiff.stderr}`);
+    assert.ok(/matches policy/.test(cleanDiff.stdout));
+
+    fs.appendFileSync(path.join(ctx.outDir, 'edge', 'viewer-request.js'), '\n// drift\n', 'utf8');
+    const dirtyDiff: any = spawnSync(process.execPath, [
+      cli, 'diff',
+      '-p', ctx.policyPath,
+      '-o', ctx.outDir,
+      '--target', 'aws',
+    ], { cwd: ctx.tmp, encoding: 'utf8', env });
+    assert.strictEqual(dirtyDiff.status, 1);
+    assert.ok(/CHANGED edge\/viewer-request\.js/.test(dirtyDiff.stdout));
   } finally {
     ctx.cleanup();
   }

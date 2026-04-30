@@ -92,15 +92,15 @@
     aws/
   dist/
     edge/                  # 生成物: ここをデプロイ (viewer-request.js, viewer-response.js, origin-request.js)
-    infra/                 # ポリシーに firewall がある場合に生成: waf-rules.tf.json (Terraform)
+    infra/                 # 生成 WAF IaC: Terraform JSON と任意の CloudFormation
   runtimes/                # レガシー・参照用。デプロイは dist/edge/ から
   examples/
 ```
 
-Terraform / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.md) を参照。
+Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.md) を参照。
 
 ### 運用ドキュメント
-- [CLI リファレンス](docs/cli.ja.md) — `init` / `build` / `emit-waf` / `doctor` / `migrate`
+- [CLI リファレンス](docs/cli.ja.md) — `init` / `build` / `emit-waf` / `doctor` / `explain` / `diff` / `migrate`
 - [プログラマティック API](docs/programmatic-api.ja.md) — `require('cdn-security-framework')` で CI / IaC から直接呼び出し
 - [アーキタイプ](docs/archetypes.ja.md) — アプリ形状別プリセット（SPA / REST API / 管理画面 / マイクロサービス）
 - [シークレットローテーション runbook](docs/runbooks/secret-rotation.ja.md) — JWT / JWKS / 署名付き URL / 管理トークン / origin シークレット
@@ -160,9 +160,12 @@ CI と同じ runtime / unit / drift / security-baseline チェックを実行し
 
 ```bash
 npx cdn-security doctor
+npx cdn-security explain
 ```
 
 Node バージョン、ポリシーのパース/スキーマバージョン、認証ゲートが参照する全環境変数（`EDGE_ADMIN_TOKEN`・`JWT_SECRET`・`ORIGIN_SECRET` など）、`dist/edge/` の書き込み可否、`npm ls` の健全性を一括で pass/fail 判定します。CI でアーティファクト化できる `doctor-report.json` も書き出します。詳細は [CLI リファレンス](docs/cli.ja.md)。
+
+`explain` はポリシーの姿勢を読み取り専用で要約し、レビューやオンボーディングに使えます。
 
 ### 5. デプロイ
 

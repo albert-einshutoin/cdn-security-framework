@@ -85,7 +85,7 @@ Emit only the infra/WAF config. `edgeFiles` is always `[]`.
 
 Same input shape as `compile` plus `format: 'terraform' | 'cloudformation' | 'cdk'` (defaults to `'terraform'`).
 
-Only `terraform` is generated today. `cloudformation` and `cdk` return `{ ok: false, formatNotImplemented: true, errors: [...] }`. The CLI translates `formatNotImplemented: true` to exit code 2 so pipelines can distinguish "not implemented" from "implementation failed".
+`terraform` is supported for AWS and Cloudflare. `cloudformation` is supported for AWS and writes `dist/infra/waf-cloudformation.json`. `cdk` returns `{ ok: false, formatNotImplemented: true, errors: [...] }`. The CLI translates `formatNotImplemented: true` to exit code 2 so pipelines can distinguish "not implemented" from "implementation failed".
 
 ```js
 const { emitWaf } = require('cdn-security-framework');
@@ -94,7 +94,7 @@ const result = emitWaf({
   policyPath: 'policy/security.yml',
   outDir: 'dist',
   target: 'aws',
-  format: 'terraform',
+  format: 'cloudformation',
 });
 ```
 
@@ -142,7 +142,7 @@ interface MigrateResult {
 
 ### `runDoctor(opts)`
 
-Run environment diagnostics. Returns `{ exitCode: number, report: {...} }`. Unlike the other functions, `runDoctor` already pre-dates this surface and is re-exported unchanged.
+Run environment diagnostics. Returns `{ exitCode: number, report: {...} }`. Pass `strict: true` to make warning checks fail with exit code `1`, matching `cdn-security doctor --strict`.
 
 ## Error semantics
 

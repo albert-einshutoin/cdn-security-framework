@@ -85,7 +85,7 @@ for (const file of result.infraFiles) console.log('infra:', file);
 
 `compile` と同じ入力に加えて `format: 'terraform' | 'cloudformation' | 'cdk'`（デフォルト `'terraform'`）。
 
-現状 `terraform` のみ生成します。`cloudformation` と `cdk` は `{ ok: false, formatNotImplemented: true, errors: [...] }` を返します。CLI は `formatNotImplemented: true` を終了コード 2 に翻訳するので、パイプラインは「未実装」と「実装が失敗」を区別できます。
+`terraform` は AWS / Cloudflare に対応しています。`cloudformation` は AWS に対応し、`dist/infra/waf-cloudformation.json` を出力します。`cdk` は `{ ok: false, formatNotImplemented: true, errors: [...] }` を返します。CLI は `formatNotImplemented: true` を終了コード 2 に翻訳するので、パイプラインは「未実装」と「実装が失敗」を区別できます。
 
 ```js
 const { emitWaf } = require('cdn-security-framework');
@@ -94,7 +94,7 @@ const result = emitWaf({
   policyPath: 'policy/security.yml',
   outDir: 'dist',
   target: 'aws',
-  format: 'terraform',
+  format: 'cloudformation',
 });
 ```
 
@@ -142,7 +142,7 @@ interface MigrateResult {
 
 ### `runDoctor(opts)`
 
-環境診断を実行します。`{ exitCode: number, report: {...} }` を返します。この API 表面より前から存在するので、そのまま再エクスポートしています。
+環境診断を実行します。`{ exitCode: number, report: {...} }` を返します。`strict: true` を渡すと `cdn-security doctor --strict` と同じく warn チェックも exit code `1` の失敗扱いにします。
 
 ## エラー意味論
 

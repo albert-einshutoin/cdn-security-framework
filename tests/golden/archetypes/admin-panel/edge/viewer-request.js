@@ -29,7 +29,7 @@ const CFG = {
   uaDenyContains: ["sqlmap","nikto","acunetix","masscan","curl","wget","python-requests"],
   blockPathContains: ["/../","%2e%2e",".git/",".env"],
   blockPathRegexes: [],
-  normalizePath: { collapseSlashes: false, removeDotSegments: false },
+  normalizePath: {"collapseSlashes":false,"removeDotSegments":false},
   requiredHeaders: ["user-agent"],
   allowedHosts: [],
   trustForwardedFor: false,

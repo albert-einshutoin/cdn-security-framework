@@ -1,6 +1,6 @@
-# IaC 連携（Terraform / CDK / WAF）
+# IaC 連携（Terraform / CloudFormation / CDK / WAF）
 
-このドキュメントでは、生成された **`dist/edge/`** と **`dist/infra/`** を Terraform および AWS CDK でどう使うかを説明します。
+このドキュメントでは、生成された **`dist/edge/`** と **`dist/infra/`** を Terraform、AWS CloudFormation、AWS CDK でどう使うかを説明します。
 
 ---
 
@@ -14,6 +14,7 @@
 | **dist/edge/viewer-response.js** | CloudFront Function (Viewer Response) |
 | **dist/edge/cloudflare/index.ts** | Cloudflare Worker（`--target cloudflare` でビルドした場合）。出力は TypeScript。Wrangler がデプロイ時にコンパイルする。Wrangler を使わない場合は TypeScript ビルド環境が必要。 |
 | **dist/infra/waf-rules.tf.json** | Terraform JSON: `aws_wafv2_rule_group`（レートベースルール）。ポリシーに `firewall.waf` がある場合に生成。 |
+| **dist/infra/waf-cloudformation.json** | AWS CloudFormation: `AWS::WAFv2::*` リソース。`emit-waf --format cloudformation` で生成。 |
 
 ---
 
@@ -111,6 +112,20 @@ resource "aws_wafv2_web_acl" "main" {
 
 ---
 
+## CloudFormation: AWS WAFv2
+
+エッジコードを再生成せず AWS CloudFormation テンプレートだけを生成できます。
+
+```bash
+npx cdn-security emit-waf --target aws --format cloudformation
+```
+
+このコマンドは `dist/infra/waf-cloudformation.json` を出力します。テンプレートには `AWS::WAFv2::RuleGroup`、full 出力時の `AWS::WAFv2::WebACL`、IP allow/block list を使う場合の IP set リソースが含まれます。
+
+Web ACL を別スタックで管理している場合は `--rule-group-only` を使い、再利用可能な rule group のみを出力します。
+
+---
+
 ## AWS CDK: CloudFront Functions
 
 生成コードをインラインで渡します:
@@ -153,6 +168,7 @@ distribution.addBehavior('*', origin, {
 | **Edge (CloudFront)** | Terraform では `file("dist/edge/viewer-request.js")`、CDK では `FunctionCode.fromInline(...)` で生成ファイルを参照。 |
 | **Edge (Cloudflare)** | `dist/edge/cloudflare/index.ts` を Worker プロジェクトにコピーまたは参照し、Wrangler でデプロイ。 |
 | **WAF (Terraform)** | `dist/infra/waf-rules.tf.json` を Terraform の設定に含め、Web ACL でルールグループを参照。 |
+| **WAF (CloudFormation)** | `npx cdn-security emit-waf --format cloudformation` を実行し、`dist/infra/waf-cloudformation.json` をデプロイ。 |
 
 `policy/security.yml` を変更したら `npx cdn-security build` を再実行し、続けて Terraform または CDK を実行すると、デプロイされる Edge と WAF がポリシーと一致します。
 

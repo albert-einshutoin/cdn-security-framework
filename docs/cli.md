@@ -14,6 +14,8 @@ npx cdn-security <subcommand> [options]
 | `build` | Validate policy, compile edge runtime + infra config. |
 | `emit-waf` | Emit infra config only (no edge code). For redeploying firewall rules without touching edge. |
 | `doctor` | One-shot environment diagnostics. Exits non-zero on any failing check. |
+| `explain` | Print a concise policy posture summary for review and onboarding. |
+| `diff` | Compare generated output against the current `dist/` tree and fail on drift. |
 | `migrate` | Migrate a policy file between schema versions (stub — v1 is the only shipped version today). |
 
 ---
@@ -49,6 +51,7 @@ Outputs:
 ```bash
 npx cdn-security emit-waf                               # AWS WAF terraform
 npx cdn-security emit-waf --target cloudflare           # Cloudflare WAF terraform
+npx cdn-security emit-waf --format cloudformation       # AWS WAFv2 CloudFormation JSON
 npx cdn-security emit-waf --target aws --rule-group-only
 ```
 
@@ -61,13 +64,14 @@ Flags:
 - `-t, --target <aws|cloudflare>` — target platform
 - `--output-mode <full|rule-group>` — AWS only
 - `--rule-group-only` — AWS only; generate rule groups without `aws_wafv2_web_acl`
-- `--format <terraform|cloudformation|cdk>` — only `terraform` is generated today; `cloudformation` and `cdk` are reserved stubs that exit 2 so pipelines fail loudly rather than silently fall back.
+- `--format <terraform|cloudformation|cdk>` — `terraform` is supported for AWS and Cloudflare. `cloudformation` is supported for AWS and writes `dist/infra/waf-cloudformation.json`. `cdk` remains reserved and exits 2.
 
 ## `doctor`
 
 ```bash
 npx cdn-security doctor                               # prints pass/fail report, writes doctor-report.json
 npx cdn-security doctor --policy policy/security.yml
+npx cdn-security doctor --strict                      # fail on warn checks too
 npx cdn-security doctor --no-report                   # skip the JSON report
 ```
 
@@ -83,7 +87,7 @@ Checks run, in order:
 | `dist_edge_writable` | Cannot create or write files under `dist/edge/`. |
 | `npm_dependencies` | `npm ls --depth=0 --json` reports `problems[]` (missing / invalid peer / unmet dep). `warn` (not fail) when npm is absent. |
 
-Exit code is `0` when no check has status `fail`, else `1`. Report is written to `doctor-report.json` by default — useful for CI capture.
+Exit code is `0` when no check has status `fail`, else `1`. With `--strict`, warning checks also fail the command. Report is written to `doctor-report.json` by default — useful for CI capture.
 
 ### Example CI usage
 
@@ -98,6 +102,25 @@ Exit code is `0` when no check has status `fail`, else `1`. Report is written to
     name: doctor-report
     path: doctor-report.json
 ```
+
+## `explain`
+
+```bash
+npx cdn-security explain
+npx cdn-security explain --policy policy/security.yml
+```
+
+Prints the policy's schema, mode, allowed methods, request limits, host and route posture, auth gates, WAF settings, and response headers. It is read-only and intended for code review, runbooks, and issue triage.
+
+## `diff`
+
+```bash
+npx cdn-security diff
+npx cdn-security diff --target cloudflare
+npx cdn-security diff --out-dir dist
+```
+
+Compiles the selected policy to a temporary directory and compares it with the current output tree. It prints `MISSING`, `EXTRA`, and `CHANGED` entries and exits `1` when generated artifacts are out of date.
 
 ## `migrate`
 

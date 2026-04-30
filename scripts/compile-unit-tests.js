@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { DEFAULT_CONTAINS, parsePathPatterns, hasCatastrophicBacktrackShape, regexesLiteralCode, getAuthGates, validateAuthGates, validateJwksUrl, build, PLACEHOLDER_TOKEN, hasFailOnPermissiveFlag, warnIfPermissive, warnWeakAwsCspNonce, warnSignedUrlReplay, validateOriginAuth, } = require('./lib/compile-core');
+const { injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
 function test(name, fn) {
     try {
         fn();
@@ -37,6 +38,22 @@ function withEnv(key, value, fn) {
         }
     }
 }
+test('template-inject renders structured config with runtime literals', () => {
+    const code = renderConstObject('CFG', {
+        mode: 'enforce',
+        allowed: runtimeCode('new Set(["GET"])'),
+        nested: { enabled: true },
+    });
+    assert.ok(code.includes('const CFG = {'));
+    assert.ok(code.includes('mode: "enforce"'));
+    assert.ok(code.includes('allowed: new Set(["GET"])'));
+    assert.ok(code.includes('"enabled":true'));
+});
+test('template-inject requires exactly one marker', () => {
+    assert.strictEqual(injectTemplateCode('a\n// MARK\nb', '// MARK', 'const X = 1;'), 'a\nconst X = 1;\nb');
+    assert.throws(() => injectTemplateCode('no marker', '// MARK', 'x'), /must appear exactly once/);
+    assert.throws(() => injectTemplateCode('// MARK\n// MARK', '// MARK', 'x'), /must appear exactly once/);
+});
 test('parsePathPatterns returns defaults when unset or empty', () => {
     assert.deepStrictEqual(parsePathPatterns(undefined), { contains: DEFAULT_CONTAINS.slice(), regexSources: [] });
     assert.deepStrictEqual(parsePathPatterns(null), { contains: DEFAULT_CONTAINS.slice(), regexSources: [] });

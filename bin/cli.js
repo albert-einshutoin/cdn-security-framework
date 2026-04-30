@@ -18,6 +18,68 @@ async function promptQuestions(questions) {
     const inquirer = mod.default || mod;
     return inquirer.prompt(questions);
 }
+function resolvePolicyPath(cwd, explicitPath) {
+    if (explicitPath)
+        return path.isAbsolute(explicitPath) ? explicitPath : path.join(cwd, explicitPath);
+    const security = path.join(cwd, 'policy', 'security.yml');
+    const base = path.join(cwd, 'policy', 'base.yml');
+    return fs.existsSync(security) ? security : base;
+}
+function loadPolicyDocument(policyPath) {
+    const yaml = require('js-yaml');
+    return yaml.load(fs.readFileSync(policyPath, 'utf8'));
+}
+function explainPolicy(policy) {
+    const request = policy.request || {};
+    const routes = Array.isArray(policy.routes) ? policy.routes : [];
+    const firewall = policy.firewall || {};
+    const waf = firewall.waf || {};
+    const responseHeaders = policy.response_headers || {};
+    const lines = [
+        `Policy: ${policy.project || 'cdn-security'} (schema v${policy.version || 'unknown'})`,
+        `Mode: ${(policy.defaults && policy.defaults.mode) || 'enforce'}`,
+        `Allowed methods: ${(request.allow_methods || []).join(', ') || '(none)'}`,
+    ];
+    const limits = request.limits || {};
+    if (Object.keys(limits).length > 0) {
+        lines.push(`Request limits: ${Object.entries(limits).map(([k, v]) => `${k}=${v}`).join(', ')}`);
+    }
+    if (Array.isArray(request.allowed_hosts) && request.allowed_hosts.length > 0) {
+        lines.push(`Host allowlist: ${request.allowed_hosts.join(', ')}`);
+    }
+    lines.push(`Routes: ${routes.length}`);
+    for (const route of routes) {
+        const prefixes = (((route || {}).match || {}).path_prefixes || []).join(', ') || '(no path prefixes)';
+        const gate = (route || {}).auth_gate || {};
+        lines.push(`- ${route.name || 'unnamed'}: ${prefixes}; auth=${gate.type || 'none'}`);
+    }
+    if (waf.rate_limit || Array.isArray(waf.managed_rules) || Array.isArray(waf.rate_limit_rules)) {
+        const managed = Array.isArray(waf.managed_rules) ? waf.managed_rules.length : 0;
+        const fineGrained = Array.isArray(waf.rate_limit_rules) ? waf.rate_limit_rules.length : 0;
+        lines.push(`WAF: rate_limit=${waf.rate_limit || 'none'}, managed_rules=${managed}, rate_limit_rules=${fineGrained}`);
+    }
+    const headerKeys = ['hsts', 'csp_public', 'csp_admin', 'csp_report_only', 'cors', 'cookie_attributes']
+        .filter((key) => responseHeaders[key] !== undefined);
+    lines.push(`Response headers: ${headerKeys.join(', ') || '(defaults only)'}`);
+    return lines;
+}
+function collectFiles(root) {
+    if (!fs.existsSync(root))
+        return [];
+    const out = [];
+    const walk = (dir) => {
+        for (const entry of fs.readdirSync(dir)) {
+            const full = path.join(dir, entry);
+            const stat = fs.statSync(full);
+            if (stat.isDirectory())
+                walk(full);
+            else
+                out.push(path.relative(root, full));
+        }
+    };
+    walk(root);
+    return out.sort();
+}
 program
     .name('cdn-security')
     .description('CDN edge security: init policy YAML and build runtime code from policy')
@@ -172,6 +234,7 @@ program
     .option('-p, --policy <path>', 'Policy file path to inspect', null)
     .option('--report <path>', 'Write machine-readable JSON report to this path', 'doctor-report.json')
     .option('--no-report', 'Skip writing doctor-report.json')
+    .option('--strict', 'Treat warn checks as failures for production CI gates')
     .action((opts) => {
     const { runDoctor } = require(path.join(pkgRoot, 'scripts', 'cli-doctor.js'));
     const result = runDoctor({
@@ -179,8 +242,83 @@ program
         pkgRoot,
         policyPath: opts.policy,
         reportPath: opts.report === false ? null : opts.report,
+        strict: opts.strict,
     });
     process.exit(result.exitCode);
+});
+program
+    .command('explain')
+    .description('Explain the effective security posture of a policy without generating runtime files')
+    .option('-p, --policy <path>', 'Policy file path (default: policy/security.yml or policy/base.yml)', null)
+    .action((opts) => {
+    const cwd = process.cwd();
+    const policyPath = resolvePolicyPath(cwd, opts.policy);
+    let policy;
+    try {
+        policy = loadPolicyDocument(policyPath);
+    }
+    catch (e) {
+        console.error('[ERROR] Failed to read policy:', e.message);
+        process.exit(1);
+    }
+    explainPolicy(policy).forEach((line) => console.log(line));
+});
+program
+    .command('diff')
+    .description('Compare current generated output with a fresh build from policy')
+    .option('-p, --policy <path>', 'Policy file path (default: policy/security.yml or policy/base.yml)', null)
+    .option('-o, --out-dir <dir>', 'Existing output directory to compare', 'dist')
+    .option('-t, --target <platform>', 'Target platform (aws | cloudflare)', 'aws')
+    .action((opts) => {
+    const cwd = process.cwd();
+    const policyPath = resolvePolicyPath(cwd, opts.policy);
+    const existingOutDir = path.isAbsolute(opts.outDir) ? opts.outDir : path.join(cwd, opts.outDir);
+    const tmpRoot = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cdn-security-diff-'));
+    const freshOutDir = path.join(tmpRoot, 'dist');
+    try {
+        const { compile } = require(path.join(pkgRoot, 'lib'));
+        const result = compile({
+            policyPath,
+            outDir: freshOutDir,
+            target: opts.target,
+            cwd,
+            pkgRoot,
+            env: process.env,
+        });
+        result.warnings.forEach((w) => console.warn(w));
+        if (!result.ok) {
+            result.errors.forEach((e) => console.error('[ERROR]', e));
+            process.exit(1);
+        }
+        const existingFiles = collectFiles(existingOutDir);
+        const freshFiles = collectFiles(freshOutDir);
+        const allFiles = Array.from(new Set(existingFiles.concat(freshFiles))).sort();
+        const diffs = [];
+        for (const rel of allFiles) {
+            const existingPath = path.join(existingOutDir, rel);
+            const freshPath = path.join(freshOutDir, rel);
+            if (!fs.existsSync(existingPath)) {
+                diffs.push(`MISSING ${rel}`);
+                continue;
+            }
+            if (!fs.existsSync(freshPath)) {
+                diffs.push(`EXTRA ${rel}`);
+                continue;
+            }
+            if (fs.readFileSync(existingPath, 'utf8') !== fs.readFileSync(freshPath, 'utf8')) {
+                diffs.push(`CHANGED ${rel}`);
+            }
+        }
+        if (diffs.length === 0) {
+            console.log('[OK] Generated output matches policy.');
+            process.exit(0);
+        }
+        diffs.forEach((line) => console.log(line));
+        process.exit(1);
+    }
+    finally {
+        fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
 });
 program
     .command('emit-waf')
@@ -220,7 +358,7 @@ program
     }
     console.log('[INFO] Target:', result.target === 'aws' ? 'AWS WAFv2 / CloudFront infra' : 'Cloudflare WAF');
     if (result.infraFiles.length > 0) {
-        console.log('[SUCCESS] Generated ' + path.join(result.outDir, 'infra', '*.tf.json'));
+        result.infraFiles.forEach((f) => console.log('[SUCCESS] Generated ' + f));
     }
 });
 program

@@ -42,6 +42,12 @@ firewall:
   waf:
     scope: CLOUDFRONT
     rate_limit: 1000
+    rate_limit_rules:
+      - name: by-uri
+        limit: 1000
+        aggregate_key_type: CUSTOM_KEYS
+        custom_keys:
+          - uri_path: {}
     managed_rules:
       - AWSManagedRulesCommonRuleSet
 `;
@@ -134,12 +140,20 @@ test('emit-waf --target cloudflare writes cloudflare-waf.tf.json', () => {
   }
 });
 
-test('emit-waf --format cloudformation exits 2 with clear message (stubbed)', () => {
+test('emit-waf --format cloudformation writes AWS WAFv2 CloudFormation JSON', () => {
   const ctx = runEmitWaf(BASIC_AWS_POLICY, ['--target', 'aws', '--format', 'cloudformation']);
   try {
-    assert.strictEqual(ctx.status, 2, 'cloudformation stub must exit 2 so pipelines fail loudly');
-    assert.ok(/not yet implemented/i.test(ctx.stderr), `expected "not yet implemented" in stderr, got: ${ctx.stderr}`);
-    assert.ok(!fs.existsSync(path.join(ctx.outDir, 'infra')), 'stub must not produce any infra output');
+    assert.strictEqual(ctx.status, 0, `cloudformation emit failed: ${ctx.stderr}`);
+    const cfnPath = path.join(ctx.outDir, 'infra', 'waf-cloudformation.json');
+    assert.ok(fs.existsSync(cfnPath), `expected ${cfnPath} to exist`);
+    const doc = JSON.parse(fs.readFileSync(cfnPath, 'utf8'));
+    assert.strictEqual(doc.AWSTemplateFormatVersion, '2010-09-09');
+    assert.ok(Object.values(doc.Resources).some((r: any) => r.Type === 'AWS::WAFv2::RuleGroup'));
+    assert.ok(Object.values(doc.Resources).some((r: any) => r.Type === 'AWS::WAFv2::WebACL'));
+    assert.ok(JSON.stringify(doc).includes('"CustomKeys"'), 'expected CUSTOM_KEYS rate statements to use CloudFormation CustomKeys');
+    assert.ok(!JSON.stringify(doc).includes('"CustomKey"'), 'CloudFormation must not emit Terraform-style CustomKey');
+    const edgeDir = path.join(ctx.outDir, 'edge');
+    assert.ok(!fs.existsSync(edgeDir), 'emit-waf cloudformation must not emit edge code');
   } finally {
     ctx.cleanup();
   }
