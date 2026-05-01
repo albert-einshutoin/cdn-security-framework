@@ -18,6 +18,7 @@
 - `src/types/policy.d.ts` の schema 由来型生成と drift check を追加。
 - 注入後 AST 検証と template injection contract のドキュメントを追加。
 - compiler phase の strict typecheck と、CI report 対応の初期 Vitest contract test suite を追加。
+- 将来の plugin-safe emitter path に向けた ADR 0001 と isolated esbuild virtual-module prototype を追加。
 
 ## [1.2.0] - 2026-04-29
 

@@ -36,3 +36,9 @@ Bundler or AST-level config embedding is not rejected forever, but it is not the
 - dependency restraint: runtime code generation does not require a bundling step
 
 Revisit this only if marker-based injection causes concrete bugs that the current validation cannot catch.
+
+## Future Emitter Path
+
+See [ADR 0001: Plugin-Safe Emitter Path](./adr/0001-plugin-safe-emitter-path.md)
+for the isolated bundler-backed prototype and the migration criteria for any
+future plugin-safe emitter.

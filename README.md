@@ -109,6 +109,7 @@ See [IaC integration](docs/iac.md) for Terraform / CloudFormation / CDK / WAF us
 - [Supply chain](docs/supply-chain.md) — SLSA v1 provenance and `npm audit signatures`
 - [Template injection contract](docs/template-injection-contract.md) — marker-safe, parse-checked runtime config injection
 - [Test strategy](docs/test-strategy.md) — Vitest migration policy and release-gate test workflow
+- [ADR 0001: Plugin-safe emitter path](docs/adr/0001-plugin-safe-emitter-path.md) — bundler-backed prototype and migration criteria
 
 ---
 
