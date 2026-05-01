@@ -18,15 +18,11 @@ export type CompileResultBase = {
     outDir: string | null;
     target: string;
 };
-export declare function resolveAbsolute(inputPath: string, cwd: string): string;
-export declare function listInfraArtifacts(outDir: string, sinceMs?: number): string[];
-export declare function compileArtifacts(opts?: CompileArtifactsOptions): {
-    edgeFiles: string[];
-    infraFiles: string[];
-    policyPath: string | null;
-    outDir: string | null;
-    target: string;
+export type CompileArtifactsResult = CompileResultBase & {
     ok: boolean;
     errors: string[];
     warnings: string[];
 };
+export declare function resolveAbsolute(inputPath: string, cwd: string): string;
+export declare function listInfraArtifacts(outDir: string, sinceMs?: number): string[];
+export declare function compileArtifacts(opts?: CompileArtifactsOptions): CompileArtifactsResult;

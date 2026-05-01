@@ -8,7 +8,7 @@ const path = require('path');
 const Ajv = require('ajv');
 const { validateAuthGates, parsePathPatterns, } = require('../scripts/lib/compile-core');
 const DEFAULT_PKG_ROOT = path.join(__dirname, '..');
-function formatAjvErrors(errors) {
+function formatAjvErrors(errors = []) {
     return errors.map((err) => {
         const loc = err.instancePath || '(root)';
         const key = err.params && err.params.additionalProperty
@@ -29,6 +29,12 @@ function validateCorsCredentials(policy) {
         '  - response_headers.cors: allow_origins cannot include "*" when allow_credentials is true',
     ];
 }
+function getStringProp(value, key) {
+    if (!value || typeof value !== 'object')
+        return undefined;
+    const entry = value[key];
+    return typeof entry === 'string' ? entry : undefined;
+}
 function validatePolicy(opts) {
     const pkgRoot = (opts && opts.pkgRoot) || DEFAULT_PKG_ROOT;
     const policy = opts ? opts.policy : null;
@@ -40,9 +46,10 @@ function validatePolicy(opts) {
         schema = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'policy', 'schema.json'), 'utf8'));
     }
     catch (e) {
+        const message = e instanceof Error ? e.message : String(e);
         return {
             ok: false,
-            errors: [`failed to load schema: ${e.message}`],
+            errors: [`failed to load schema: ${message}`],
             warnings,
         };
     }
@@ -65,7 +72,8 @@ function validatePolicy(opts) {
         }
     }
     catch (e) {
-        errors.push(`  - request.block.path_patterns: ${e.message}`);
+        const message = e instanceof Error ? e.message : String(e);
+        errors.push(`  - request.block.path_patterns: ${message}`);
     }
     try {
         validateAuthGates(policy, {
@@ -74,12 +82,16 @@ function validatePolicy(opts) {
         });
     }
     catch (e) {
-        if (Array.isArray(e.validationErrors)) {
+        if (e &&
+            typeof e === 'object' &&
+            'validationErrors' in e &&
+            Array.isArray(e.validationErrors)) {
             errors.push('Auth gate validation failed:');
             e.validationErrors.forEach((msg) => errors.push('  - ' + msg));
         }
         else {
-            errors.push('Auth gate validation error: ' + e.message);
+            const message = e instanceof Error ? e.message : String(e);
+            errors.push('Auth gate validation error: ' + message);
         }
     }
     const waf = (policy && policy.firewall && policy.firewall.waf) || {};
@@ -105,11 +117,13 @@ function validatePolicy(opts) {
         }
     }
     const originAuth = policy && policy.origin && policy.origin.auth;
-    if (originAuth && originAuth.type === 'custom_header' && originAuth.secret_env) {
-        const envVal = env[originAuth.secret_env];
+    const originAuthType = getStringProp(originAuth, 'type');
+    const originSecretEnv = getStringProp(originAuth, 'secret_env');
+    if (originAuthType === 'custom_header' && originSecretEnv) {
+        const envVal = env[originSecretEnv];
         if (envVal !== undefined && envVal.length === 0) {
             warnings.push('origin.auth.secret_env "' +
-                originAuth.secret_env +
+                originSecretEnv +
                 '" is set but empty in the current shell. The edge will refuse to forward the origin-auth header, breaking origin trust. Unset the env or supply a value.');
         }
     }

@@ -12,9 +12,24 @@ const path = require('path');
 const { parsePolicyFile } = require('../parser');
 const { validatePolicy } = require('../validator');
 
+import type { CDNSecurityFrameworkPolicy } from '../types/policy';
+
 const DEFAULT_PKG_ROOT = path.join(__dirname, '..');
 
-function lintPolicy(opts: any = {}) {
+type LintPolicyOptions = {
+  policyPath?: string;
+  pkgRoot?: string;
+  env?: NodeJS.ProcessEnv;
+};
+
+type LintPolicyResult = {
+  ok: boolean;
+  errors: string[];
+  warnings: string[];
+  policy: Partial<CDNSecurityFrameworkPolicy> | null;
+};
+
+function lintPolicy(opts: LintPolicyOptions = {}): LintPolicyResult {
   opts = opts || {};
   const pkgRoot = opts.pkgRoot || DEFAULT_PKG_ROOT;
   const policyPath = opts.policyPath;

@@ -23,6 +23,16 @@ function listInfraArtifacts(outDir, sinceMs = 0) {
         .map((name) => path.join(infraDir, name))
         .filter((filePath) => sinceMs <= 0 || fs.statSync(filePath).mtimeMs >= sinceMs);
 }
+function collectStderrWarnings(result, warnings) {
+    if (result.stderr) {
+        warnings.push(...result.stderr.trim().split('\n').filter(Boolean));
+    }
+}
+function collectFailedSpawn(label, result, errors) {
+    errors.push(`${label} failed (status ${result.status})`);
+    if (result.stderr)
+        errors.push(result.stderr.trim());
+}
 function compileArtifacts(opts = {}) {
     opts = opts || {};
     const cwd = opts.cwd || process.cwd();
@@ -83,14 +93,10 @@ function compileArtifacts(opts = {}) {
             ...permissiveFlag,
         ], { cwd, encoding: 'utf8', env });
         if (compileResult.status !== 0) {
-            errors.push(`edge compile failed (status ${compileResult.status})`);
-            if (compileResult.stderr)
-                errors.push(compileResult.stderr.trim());
+            collectFailedSpawn('edge compile', compileResult, errors);
             return { ok: false, errors, warnings, ...baseResult };
         }
-        if (compileResult.stderr) {
-            warnings.push(...compileResult.stderr.trim().split('\n').filter(Boolean));
-        }
+        collectStderrWarnings(compileResult, warnings);
         baseResult.edgeFiles = AWS_EDGE_FILES.map((f) => path.join(outDir, 'edge', f));
         const infraPath = path.join(pkgRoot, 'scripts', 'compile-infra.js');
         const infraResult = spawnSync(process.execPath, [
@@ -101,14 +107,10 @@ function compileArtifacts(opts = {}) {
             ...(opts.ruleGroupOnly ? ['--rule-group-only'] : []),
         ], { cwd, encoding: 'utf8', env });
         if (infraResult.status !== 0) {
-            errors.push(`infra compile failed (status ${infraResult.status})`);
-            if (infraResult.stderr)
-                errors.push(infraResult.stderr.trim());
+            collectFailedSpawn('infra compile', infraResult, errors);
             return { ok: false, errors, warnings, ...baseResult };
         }
-        if (infraResult.stderr) {
-            warnings.push(...infraResult.stderr.trim().split('\n').filter(Boolean));
-        }
+        collectStderrWarnings(infraResult, warnings);
         baseResult.infraFiles = listInfraArtifacts(outDir, compileStartedAt);
     }
     else {
@@ -120,14 +122,10 @@ function compileArtifacts(opts = {}) {
             ...permissiveFlag,
         ], { cwd, encoding: 'utf8', env });
         if (cfResult.status !== 0) {
-            errors.push(`cloudflare edge compile failed (status ${cfResult.status})`);
-            if (cfResult.stderr)
-                errors.push(cfResult.stderr.trim());
+            collectFailedSpawn('cloudflare edge compile', cfResult, errors);
             return { ok: false, errors, warnings, ...baseResult };
         }
-        if (cfResult.stderr) {
-            warnings.push(...cfResult.stderr.trim().split('\n').filter(Boolean));
-        }
+        collectStderrWarnings(cfResult, warnings);
         baseResult.edgeFiles = CF_EDGE_FILES.map((f) => path.join(outDir, 'edge', f));
         const cfWafPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare-waf.js');
         const cfWafResult = spawnSync(process.execPath, [
@@ -137,14 +135,10 @@ function compileArtifacts(opts = {}) {
             ...(opts.failOnWafApproximation ? ['--fail-on-waf-approximation'] : []),
         ], { cwd, encoding: 'utf8', env });
         if (cfWafResult.status !== 0) {
-            errors.push(`cloudflare waf compile failed (status ${cfWafResult.status})`);
-            if (cfWafResult.stderr)
-                errors.push(cfWafResult.stderr.trim());
+            collectFailedSpawn('cloudflare waf compile', cfWafResult, errors);
             return { ok: false, errors, warnings, ...baseResult };
         }
-        if (cfWafResult.stderr) {
-            warnings.push(...cfWafResult.stderr.trim().split('\n').filter(Boolean));
-        }
+        collectStderrWarnings(cfWafResult, warnings);
         baseResult.infraFiles = listInfraArtifacts(outDir, compileStartedAt);
     }
     return { ok: true, errors, warnings, ...baseResult };

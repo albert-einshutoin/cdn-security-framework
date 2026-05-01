@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Split the compiler into parser, validator, and emitter phase modules behind the programmatic API.
 - Added schema-derived policy type generation and a drift check for `src/types/policy.d.ts`.
 - Added post-injection AST validation plus a documented template injection contract.
+- Added strict compiler-phase typechecking and an initial Vitest contract test suite with CI reporting.
 
 ## [1.2.0] - 2026-04-29
 
