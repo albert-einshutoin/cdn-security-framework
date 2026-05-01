@@ -28,18 +28,44 @@ describe('bundler emitter prototype', () => {
   });
 
   test('rejects source that shadows the generated config binding', async () => {
-    const { buildBundlerEmitterPrototype } = requireFromRepo('./scripts/lib/bundler-emitter-prototype');
+    const {
+      assertNoConfigBindingShadow,
+      buildBundlerEmitterPrototype,
+    } = requireFromRepo('./scripts/lib/bundler-emitter-prototype');
 
-    await expect(buildBundlerEmitterPrototype({
-      source: [
+    for (const source of [
+      [
         'import { CFG } from "cdn-security:config";',
         'function handler(CFG) { return CFG.mode; }',
         'export { handler };',
       ].join('\n'),
-      configExports: {
-        CFG: { mode: 'enforce' },
-      },
-    })).rejects.toThrow(/shadows config binding/);
+      [
+        'import { CFG } from "cdn-security:config";',
+        'function handler({ CFG }) { return CFG.mode; }',
+        'export { handler };',
+      ].join('\n'),
+      [
+        'import { CFG } from "cdn-security:config";',
+        'function handler(CFG = {}) { return CFG.mode; }',
+        'export { handler };',
+      ].join('\n'),
+    ]) {
+      await expect(buildBundlerEmitterPrototype({
+        source,
+        configExports: {
+          CFG: { mode: 'enforce' },
+        },
+      })).rejects.toThrow(/shadows config binding/);
+    }
+
+    for (const source of [
+      'const { CFG } = input;',
+      'const [CFG] = input;',
+      'const { config: CFG } = input;',
+      'const { ...CFG } = input;',
+    ]) {
+      expect(() => assertNoConfigBindingShadow(source, ['CFG'])).toThrow(/shadows config binding/);
+    }
   });
 
   test('rejects output with duplicated generated config bindings', () => {

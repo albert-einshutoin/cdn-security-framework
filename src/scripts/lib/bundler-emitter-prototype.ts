@@ -64,6 +64,42 @@ function identifierName(node: AstNode | null | undefined): string | null {
     : null;
 }
 
+function collectPatternBindingNames(node: AstNode | null | undefined, names: Set<string>, matches: string[]): void {
+  if (!node) return;
+  const name = identifierName(node);
+  if (name) {
+    if (names.has(name)) matches.push(name);
+    return;
+  }
+
+  if (node.type === 'ObjectPattern') {
+    for (const property of (node.properties as AstNode[] | undefined) || []) {
+      if (property.type === 'RestElement') {
+        collectPatternBindingNames(property.argument as AstNode | undefined, names, matches);
+      } else {
+        collectPatternBindingNames(property.value as AstNode | undefined, names, matches);
+      }
+    }
+    return;
+  }
+
+  if (node.type === 'ArrayPattern') {
+    for (const element of (node.elements as AstNode[] | undefined) || []) {
+      collectPatternBindingNames(element, names, matches);
+    }
+    return;
+  }
+
+  if (node.type === 'AssignmentPattern') {
+    collectPatternBindingNames(node.left as AstNode | undefined, names, matches);
+    return;
+  }
+
+  if (node.type === 'RestElement') {
+    collectPatternBindingNames(node.argument as AstNode | undefined, names, matches);
+  }
+}
+
 function collectBindingNames(node: AstNode, names: Set<string>, moduleName: string): string[] {
   const matches: string[] = [];
   visitNode(node, (entry) => {
@@ -77,8 +113,7 @@ function collectBindingNames(node: AstNode, names: Set<string>, moduleName: stri
     }
 
     if (entry.type === 'VariableDeclarator') {
-      const name = identifierName(entry.id || null);
-      if (name && names.has(name)) matches.push(name);
+      collectPatternBindingNames(entry.id || null, names, matches);
       return;
     }
 
@@ -90,8 +125,7 @@ function collectBindingNames(node: AstNode, names: Set<string>, moduleName: stri
       const name = identifierName(entry.id || null);
       if (name && names.has(name)) matches.push(name);
       for (const param of entry.params || []) {
-        const paramName = identifierName(param);
-        if (paramName && names.has(paramName)) matches.push(paramName);
+        collectPatternBindingNames(param, names, matches);
       }
       return;
     }
