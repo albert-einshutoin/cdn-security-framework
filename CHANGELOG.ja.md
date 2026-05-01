@@ -9,6 +9,8 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-05-01
+
 ### 追加
 
 - `emit-waf --format cloudformation` で AWS CloudFormation WAFv2 出力に対応。
@@ -107,7 +109,8 @@
 
 ---
 
-[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.0.0...v1.1.0
 [0.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/releases/tag/v0.1.0
