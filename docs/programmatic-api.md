@@ -21,7 +21,7 @@ The CLI (`bin/cli.js`) now delegates to these same functions. If a bug shows up 
 
 ## Scope note
 
-`compile()` and `emitWaf()` currently invoke the existing compiler scripts in a subprocess via `spawnSync`. The API contract (inputs, outputs, error semantics) is stable; the subprocess boundary is an implementation detail that will move in-process under issue #69 without changing the surface. `lintPolicy()` and `migratePolicy()` already run fully in-process.
+The compiler is split into parser, validator, and emitter phase modules. `lintPolicy()` runs parser + validator fully in-process. `compile()` uses those phase boundaries and the emitter phase still delegates to the existing target scripts where necessary to preserve generated output compatibility.
 
 ## Reference
 
@@ -85,7 +85,7 @@ Emit only the infra/WAF config. `edgeFiles` is always `[]`.
 
 Same input shape as `compile` plus `format: 'terraform' | 'cloudformation' | 'cdk'` (defaults to `'terraform'`).
 
-Only `terraform` is generated today. `cloudformation` and `cdk` return `{ ok: false, formatNotImplemented: true, errors: [...] }`. The CLI translates `formatNotImplemented: true` to exit code 2 so pipelines can distinguish "not implemented" from "implementation failed".
+`terraform` is supported for AWS and Cloudflare. `cloudformation` is supported for AWS and writes `dist/infra/waf-cloudformation.json`. `cdk` returns `{ ok: false, formatNotImplemented: true, errors: [...] }`. The CLI translates `formatNotImplemented: true` to exit code 2 so pipelines can distinguish "not implemented" from "implementation failed".
 
 ```js
 const { emitWaf } = require('cdn-security-framework');
@@ -94,7 +94,7 @@ const result = emitWaf({
   policyPath: 'policy/security.yml',
   outDir: 'dist',
   target: 'aws',
-  format: 'terraform',
+  format: 'cloudformation',
 });
 ```
 
@@ -142,7 +142,7 @@ interface MigrateResult {
 
 ### `runDoctor(opts)`
 
-Run environment diagnostics. Returns `{ exitCode: number, report: {...} }`. Unlike the other functions, `runDoctor` already pre-dates this surface and is re-exported unchanged.
+Run environment diagnostics. Returns `{ exitCode: number, report: {...} }`. Pass `strict: true` to make warning checks fail with exit code `1`, matching `cdn-security doctor --strict`.
 
 ## Error semantics
 
@@ -166,4 +166,4 @@ When building your own wrapper, prefer inspecting the structured flags rather th
 
 - [CLI reference](./cli.md)
 - [Schema migration](./schema-migration.md)
-- Roadmap item #69 (in-process compile) in [ROADMAP.md](./ROADMAP.md)
+- [Template injection contract](./template-injection-contract.md)

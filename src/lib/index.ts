@@ -16,10 +16,10 @@
  *     ...cmdSpecific,           // per-function extra fields (see each docstring)
  *   }
  *
- * Scope note: v1 of this API provides a stable contract. compile() and
- * emitWaf() currently delegate to subprocesses internally; that is an
- * implementation detail and will be replaced by in-process module boundaries
- * in #69 (module split) without changing the public shape.
+ * Scope note: v1 of this API provides a stable contract. The compiler now has
+ * explicit parser / validator / emitter phase modules. The emitter phase still
+ * delegates to the existing target scripts for behaviour-preserving output,
+ * without changing the public shape.
  */
 
 export type CompileTarget = 'aws' | 'cloudflare';
@@ -95,6 +95,7 @@ export interface DoctorOptions {
   envProvider?: (name: string) => string | undefined;
   spawnSync?: typeof import('child_process').spawnSync;
   log?: boolean;
+  strict?: boolean;
 }
 
 export interface DoctorCheck {
@@ -108,6 +109,7 @@ export interface DoctorReport {
   generatedAt: string;
   cdnSecurityVersion: string;
   policyPath: string;
+  strict: boolean;
   exitCode: number;
   checks: DoctorCheck[];
 }

@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-05-01
+
+### Added
+
+- Added AWS CloudFormation WAFv2 output via `emit-waf --format cloudformation`.
+- Added policy authoring DX commands: `explain`, `diff`, and `doctor --strict`.
+- Added shared template injection helpers so compiler config injection is structured and marker-safe.
+- Split the compiler into parser, validator, and emitter phase modules behind the programmatic API.
+- Added schema-derived policy type generation and a drift check for `src/types/policy.d.ts`.
+- Added post-injection AST validation plus a documented template injection contract.
+- Added strict compiler-phase typechecking and an initial Vitest contract test suite with CI reporting.
+- Added ADR 0001 and an isolated esbuild virtual-module prototype for a future plugin-safe emitter path.
+
 ## [1.2.0] - 2026-04-29
 
 ### Security
@@ -96,7 +109,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.0.0...v1.1.0
 [0.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/releases/tag/v0.1.0

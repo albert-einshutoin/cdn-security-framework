@@ -22,12 +22,7 @@
 function set(headers, k, v) { headers[k.toLowerCase()] = { value: v }; }
 
 const RESPONSE_CFG = {
-  headers: {
-    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": "strict-origin-when-cross-origin",
-    "permissions-policy": "camera=(), microphone=(), geolocation=()",
-  },
+  headers: {"strict-transport-security":"max-age=31536000; includeSubDomains; preload","x-content-type-options":"nosniff","referrer-policy":"strict-origin-when-cross-origin","permissions-policy":"camera=(), microphone=(), geolocation=()"},
   csp_public: "default-src 'self'; script-src 'self' 'nonce-{{nonce}}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
   csp_admin: "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
   csp_report_only: "",

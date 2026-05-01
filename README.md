@@ -92,20 +92,24 @@ This framework addresses these with **"policy-driven" + "runtime separation"**.
     aws/
   dist/
     edge/                  # Generated: deploy this (viewer-request.js, viewer-response.js, origin-request.js)
-    infra/                 # Generated when policy has firewall: waf-rules.tf.json (Terraform)
+    infra/                 # Generated WAF IaC: Terraform JSON and optional CloudFormation
   runtimes/                # Legacy / reference; deploy from dist/edge/
   examples/
 ```
 
-See [IaC integration](docs/iac.md) for Terraform / CDK / WAF usage.
+See [IaC integration](docs/iac.md) for Terraform / CloudFormation / CDK / WAF usage.
 
 ### Operational docs
-- [CLI reference](docs/cli.md) — `init` / `build` / `emit-waf` / `doctor` / `migrate`
+- [CLI reference](docs/cli.md) — `init` / `build` / `emit-waf` / `doctor` / `explain` / `diff` / `migrate`
 - [Programmatic API](docs/programmatic-api.md) — `require('cdn-security-framework')` for CI / IaC integration
+- [Compiler strictness](docs/compiler-strictness.md) — phase contracts, strict checks, and remaining dynamic areas
 - [Archetypes](docs/archetypes.md) — app-shaped policy presets (SPA, REST API, admin, microservice)
 - [Secret rotation runbook](docs/runbooks/secret-rotation.md) — JWT / JWKS / signed URL / admin token / origin secret
 - [Schema migration](docs/schema-migration.md) — how `policy/schema.json` evolves and the `migrate` CLI
 - [Supply chain](docs/supply-chain.md) — SLSA v1 provenance and `npm audit signatures`
+- [Template injection contract](docs/template-injection-contract.md) — marker-safe, parse-checked runtime config injection
+- [Test strategy](docs/test-strategy.md) — Vitest migration policy and release-gate test workflow
+- [ADR 0001: Plugin-safe emitter path](docs/adr/0001-plugin-safe-emitter-path.md) — bundler-backed prototype and migration criteria
 
 ---
 
@@ -169,9 +173,12 @@ Runs runtime, unit, drift, and security-baseline checks used by CI.
 
 ```bash
 npx cdn-security doctor
+npx cdn-security explain
 ```
 
 One-shot pass/fail report: Node version, policy parseability / schema version, every env var referenced by auth gates (`EDGE_ADMIN_TOKEN`, `JWT_SECRET`, `ORIGIN_SECRET`, ...), `dist/edge/` writability, and `npm ls` cleanliness. Writes `doctor-report.json` for CI capture. See [CLI reference](docs/cli.md) for details.
+
+`explain` prints a read-only policy posture summary for review and onboarding.
 
 ### 5. Deploy
 

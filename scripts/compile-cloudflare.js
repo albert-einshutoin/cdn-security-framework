@@ -9,6 +9,7 @@ const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
 const { parsePathPatterns, regexesLiteralCode, validateAuthGates, hasAllowPlaceholderFlag, hasFailOnPermissiveFlag, warnIfPermissive, warnSignedUrlReplay, buildObsConfig, } = require('./lib/compile-core');
+const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
 const securityPath = path.join(repoRoot, 'policy', 'security.yml');
@@ -150,33 +151,36 @@ const geoBlockCountries = Array.isArray(fwGeo.block_countries)
 const geoAllowCountries = Array.isArray(fwGeo.allow_countries)
     ? fwGeo.allow_countries.map((c) => String(c || '').trim().toUpperCase()).filter(Boolean)
     : [];
-const cfgCode = [
-    'const CFG = {',
-    `  mode: ${JSON.stringify(defaults.mode || 'enforce')},`,
-    `  allowMethods: new Set(${JSON.stringify(allowMethods)}),`,
-    `  maxQueryLength: ${Number(limits.max_query_length) || 1024},`,
-    `  maxQueryParams: ${Number(limits.max_query_params) || 30},`,
-    `  maxUriLength: ${Number(limits.max_uri_length) || 2048},`,
-    `  maxHeaderSize: ${Number(limits.max_header_size) || 0},`,
-    `  maxHeaderCount: ${Number.isFinite(Number(limits.max_header_count)) ? Math.max(1, Math.min(500, Number(limits.max_header_count))) : 64},`,
-    `  dropQueryKeys: new Set(${JSON.stringify(dropQueryKeysArray)}),`,
-    `  uaDenyContains: ${JSON.stringify(block.ua_contains || ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests'])},`,
-    `  blockPathContains: ${JSON.stringify(blockPathContains)},`,
-    `  blockPathRegexes: ${regexesLiteralCode(blockPathRegexSources)},`,
-    `  normalizePath: { collapseSlashes: ${!!pathNormalize.collapse_slashes}, removeDotSegments: ${!!pathNormalize.remove_dot_segments} },`,
-    `  requiredHeaders: ${JSON.stringify(requiredHeaders)},`,
-    `  allowedHosts: ${JSON.stringify(allowedHosts)},`,
-    `  trustForwardedFor: ${trustForwardedFor ? 'true' : 'false'},`,
-    `  cors: ${JSON.stringify(corsConfig)},`,
-    `  authGates: ${JSON.stringify(authGates)},`,
-    `  originAuth: ${JSON.stringify(originAuth)},`,
-    `  jwksStaleIfErrorSec: ${jwksStaleIfError},`,
-    `  jwksNegativeCacheSec: ${jwksNegativeCache},`,
-    `  geoBlockCountries: new Set(${JSON.stringify(geoBlockCountries)}),`,
-    `  geoAllowCountries: new Set(${JSON.stringify(geoAllowCountries)}),`,
-    `  obs: ${JSON.stringify(buildObsConfig(policy))},`,
-    '};',
-].join('\n');
+const cfgCode = renderConstObject('CFG', {
+    mode: defaults.mode || 'enforce',
+    allowMethods: runtimeCode(`new Set(${JSON.stringify(allowMethods)})`),
+    maxQueryLength: Number(limits.max_query_length) || 1024,
+    maxQueryParams: Number(limits.max_query_params) || 30,
+    maxUriLength: Number(limits.max_uri_length) || 2048,
+    maxHeaderSize: Number(limits.max_header_size) || 0,
+    maxHeaderCount: Number.isFinite(Number(limits.max_header_count))
+        ? Math.max(1, Math.min(500, Number(limits.max_header_count)))
+        : 64,
+    dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(dropQueryKeysArray)})`),
+    uaDenyContains: block.ua_contains || ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests'],
+    blockPathContains,
+    blockPathRegexes: runtimeCode(regexesLiteralCode(blockPathRegexSources)),
+    normalizePath: {
+        collapseSlashes: !!pathNormalize.collapse_slashes,
+        removeDotSegments: !!pathNormalize.remove_dot_segments,
+    },
+    requiredHeaders,
+    allowedHosts,
+    trustForwardedFor,
+    cors: corsConfig,
+    authGates,
+    originAuth,
+    jwksStaleIfErrorSec: jwksStaleIfError,
+    jwksNegativeCacheSec: jwksNegativeCache,
+    geoBlockCountries: runtimeCode(`new Set(${JSON.stringify(geoBlockCountries)})`),
+    geoAllowCountries: runtimeCode(`new Set(${JSON.stringify(geoAllowCountries)})`),
+    obs: buildObsConfig(policy),
+});
 let adminPathPrefixes = ['/admin', '/docs', '/swagger'];
 let adminCacheControl = 'no-store';
 for (const route of routes) {
@@ -192,37 +196,35 @@ for (const route of routes) {
 }
 const authProtectedPrefixesForResp = Array.from(new Set((authGates || []).flatMap((g) => Array.isArray(g.protectedPrefixes) ? g.protectedPrefixes : [])));
 const forceVaryAuth = resHeaders.force_vary_auth !== false;
-const responseCfgCode = [
-    'const RESPONSE_CFG = {',
-    '  headers: {',
-    `    "strict-transport-security": ${JSON.stringify(resHeaders.hsts || 'max-age=31536000; includeSubDomains; preload')},`,
-    `    "x-content-type-options": ${JSON.stringify(resHeaders.x_content_type_options || 'nosniff')},`,
-    `    "referrer-policy": ${JSON.stringify(resHeaders.referrer_policy || 'strict-origin-when-cross-origin')},`,
-    `    "permissions-policy": ${JSON.stringify(resHeaders.permissions_policy || 'camera=(), microphone=(), geolocation=()')},`,
-    '  },',
-    `  csp_public: ${JSON.stringify(resHeaders.csp_public || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';")},`,
-    `  csp_admin: ${JSON.stringify(resHeaders.csp_admin || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';")},`,
-    `  csp_report_only: ${JSON.stringify(resHeaders.csp_report_only || '')},`,
-    `  csp_report_uri: ${JSON.stringify(resHeaders.csp_report_uri || '')},`,
-    `  csp_nonce: ${resHeaders.csp_nonce === true ? 'true' : 'false'},`,
-    `  coop: ${JSON.stringify(resHeaders.coop || '')},`,
-    `  coep: ${JSON.stringify(resHeaders.coep || '')},`,
-    `  corp: ${JSON.stringify(resHeaders.corp || '')},`,
-    `  reporting_endpoints: ${JSON.stringify(resHeaders.reporting_endpoints || '')},`,
-    `  adminPathPrefixes: ${JSON.stringify(adminPathPrefixes)},`,
-    `  adminCacheControl: ${JSON.stringify(adminCacheControl)},`,
-    `  authProtectedPrefixes: ${JSON.stringify(authProtectedPrefixesForResp)},`,
-    `  forceVaryAuth: ${forceVaryAuth ? 'true' : 'false'},`,
-    `  clearSiteDataPaths: ${JSON.stringify(Array.isArray(resHeaders.clear_site_data_paths)
+const responseCfgCode = renderConstObject('RESPONSE_CFG', {
+    headers: {
+        'strict-transport-security': resHeaders.hsts || 'max-age=31536000; includeSubDomains; preload',
+        'x-content-type-options': resHeaders.x_content_type_options || 'nosniff',
+        'referrer-policy': resHeaders.referrer_policy || 'strict-origin-when-cross-origin',
+        'permissions-policy': resHeaders.permissions_policy || 'camera=(), microphone=(), geolocation=()',
+    },
+    csp_public: resHeaders.csp_public || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
+    csp_admin: resHeaders.csp_admin || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+    csp_report_only: resHeaders.csp_report_only || '',
+    csp_report_uri: resHeaders.csp_report_uri || '',
+    csp_nonce: resHeaders.csp_nonce === true,
+    coop: resHeaders.coop || '',
+    coep: resHeaders.coep || '',
+    corp: resHeaders.corp || '',
+    reporting_endpoints: resHeaders.reporting_endpoints || '',
+    adminPathPrefixes,
+    adminCacheControl,
+    authProtectedPrefixes: authProtectedPrefixesForResp,
+    forceVaryAuth,
+    clearSiteDataPaths: Array.isArray(resHeaders.clear_site_data_paths)
         ? resHeaders.clear_site_data_paths.filter((s) => typeof s === 'string' && s.trim())
-        : [])},`,
-    `  clearSiteDataTypes: ${JSON.stringify(Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
+        : [],
+    clearSiteDataTypes: Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
         ? resHeaders.clear_site_data_types
-        : ['cache', 'cookies', 'storage'])},`,
-    `  cors: ${JSON.stringify(corsConfig)},`,
-    `  cookie_attributes: ${JSON.stringify(resHeaders.cookie_attributes || null)},`,
-    '};',
-].join('\n');
+        : ['cache', 'cookies', 'storage'],
+    cors: corsConfig,
+    cookie_attributes: resHeaders.cookie_attributes || null,
+});
 const templatePath = path.join(repoRoot, 'templates', 'cloudflare', 'index.ts');
 let code;
 try {
@@ -235,8 +237,9 @@ catch (e) {
     }
     throw e;
 }
-code = code.replace('// {{INJECT_CONFIG}}', cfgCode);
-code = code.replace('// {{INJECT_RESPONSE_CFG}}', responseCfgCode);
+code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode);
+code = injectTemplateCode(code, '// {{INJECT_RESPONSE_CFG}}', responseCfgCode);
+assertInjectedConstDeclarations(code, ['CFG', 'RESPONSE_CFG'], { loader: 'ts' });
 const distDir = path.join(outDir, 'edge', 'cloudflare');
 fs.mkdirSync(distDir, { recursive: true });
 const outPath = path.join(distDir, 'index.ts');

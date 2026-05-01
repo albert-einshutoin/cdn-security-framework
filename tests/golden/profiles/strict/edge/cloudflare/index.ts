@@ -17,7 +17,7 @@ const CFG = {
   uaDenyContains: ["sqlmap","nikto","acunetix","masscan","python-requests","zgrab","nmap","curl","wget","scanner"],
   blockPathContains: ["/../","..","%2e%2e","%2e%2e"],
   blockPathRegexes: [/%2f\.\.\//i, /\.\.%2f/i, /\\\.\.\\/i],
-  normalizePath: { collapseSlashes: false, removeDotSegments: false },
+  normalizePath: {"collapseSlashes":false,"removeDotSegments":false},
   requiredHeaders: ["user-agent"],
   allowedHosts: [],
   trustForwardedFor: false,
@@ -32,12 +32,7 @@ const CFG = {
 };
 
 const RESPONSE_CFG = {
-  headers: {
-    "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
-    "x-content-type-options": "nosniff",
-    "referrer-policy": "no-referrer",
-    "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=()",
-  },
+  headers: {"strict-transport-security":"max-age=31536000; includeSubDomains; preload","x-content-type-options":"nosniff","referrer-policy":"no-referrer","permissions-policy":"camera=(), microphone=(), geolocation=(), payment=()"},
   csp_public: "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self';",
   csp_admin: "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';",
   csp_report_only: "",

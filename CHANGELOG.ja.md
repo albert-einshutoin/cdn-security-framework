@@ -9,6 +9,19 @@
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-05-01
+
+### 追加
+
+- `emit-waf --format cloudformation` で AWS CloudFormation WAFv2 出力に対応。
+- ポリシー作成 DX として `explain`、`diff`、`doctor --strict` を追加。
+- コンパイラの設定注入を構造化し、テンプレートマーカーの欠落や重複を検知できる共通 helper を追加。
+- compiler を parser / validator / emitter の phase module に分割し、programmatic API の裏側で利用する構成にした。
+- `src/types/policy.d.ts` の schema 由来型生成と drift check を追加。
+- 注入後 AST 検証と template injection contract のドキュメントを追加。
+- compiler phase の strict typecheck と、CI report 対応の初期 Vitest contract test suite を追加。
+- 将来の plugin-safe emitter path に向けた ADR 0001 と isolated esbuild virtual-module prototype を追加。
+
 ## [1.2.0] - 2026-04-29
 
 ### セキュリティ
@@ -96,7 +109,8 @@
 
 ---
 
-[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.0.0...v1.1.0
 [0.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/releases/tag/v0.1.0
