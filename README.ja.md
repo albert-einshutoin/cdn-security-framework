@@ -109,6 +109,7 @@ Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.
 - [サプライチェーン](docs/supply-chain.ja.md) — SLSA v1 provenance と `npm audit signatures`
 - [テンプレート注入契約](docs/template-injection-contract.ja.md) — marker-safe かつ parse-checked な runtime config 注入
 - [テスト戦略](docs/test-strategy.ja.md) — Vitest 移行方針と release gate の test workflow
+- [ADR 0001: Plugin-safe emitter path](docs/adr/0001-plugin-safe-emitter-path.ja.md) — bundler-backed prototype と移行条件
 
 ---
 
