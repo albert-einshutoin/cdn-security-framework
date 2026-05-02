@@ -85,14 +85,16 @@ async function runGeneratedWorker(generated: string, query: string, options: any
     delete require.cache[modPath];
     const worker = require(modPath).default;
     const body = options.rawBody || JSON.stringify({ query });
-    const req = new Request(options.url || 'https://edge.example.com/graphql', {
-      method: 'POST',
+    const method = options.method || 'POST';
+    const init: any = {
+      method,
       headers: {
         'user-agent': 'runtime-test',
         'content-type': options.contentType || 'application/json',
       },
-      body,
-    });
+    };
+    if (method !== 'GET' && method !== 'HEAD') init.body = body;
+    const req = new Request(options.url || 'https://edge.example.com/graphql', init);
     const res = await worker.fetch(req, {});
     return { res, fetchCalls };
   } finally {
@@ -341,6 +343,135 @@ routes:
   const stderr = String(caught && caught.stderr ? caught.stderr : '');
   assert.ok(/allowed_algorithms/.test(stderr) && /RS256/.test(stderr),
     'stderr should mention allowed_algorithms and the verifier alg; got:\n' + stderr);
+});
+
+test('cloudflare response DLP masks response body and headers', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-dlp-mask-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+response_dlp:
+  enabled: true
+  action: mask
+  mask: "[MASKED]"
+  body:
+    max_bytes: 4096
+    content_types: ["application/json"]
+  headers:
+    names: ["x-api-key"]
+`);
+
+  const { res } = await runGeneratedWorker(generated, 'query { viewer { id } }', {
+    method: 'GET',
+    url: 'https://edge.example.com/data',
+    originBody: '{"secret":"sk-live-abcdefghijklmnop","card":"4111 1111 1111 1111"}',
+    originHeaders: {
+      'content-type': 'application/json',
+      'x-api-key': 'ghp_abcdefghijklmnop',
+    },
+  });
+  const body = await res.text();
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.headers.get('x-edge-dlp'), 'mask');
+  assert.strictEqual(res.headers.get('x-api-key'), '[MASKED]');
+  assert.ok(!body.includes('sk-live-abcdefghijklmnop'), body);
+  assert.ok(!body.includes('4111 1111 1111 1111'), body);
+  assert.ok(body.includes('[MASKED]'), body);
+});
+
+test('cloudflare response DLP blocks response body findings', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-dlp-block-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+response_dlp:
+  enabled: true
+  action: block
+  block_status: 451
+`);
+
+  const { res } = await runGeneratedWorker(generated, 'query { viewer { id } }', {
+    method: 'GET',
+    url: 'https://edge.example.com/data',
+    originBody: 'token ghp_abcdefghijklmnop',
+    originHeaders: { 'content-type': 'text/plain' },
+  });
+  assert.strictEqual(res.status, 451);
+  assert.strictEqual(res.headers.get('x-edge-dlp'), 'block');
+  assert.match(await res.text(), /Response blocked by edge DLP/);
+});
+
+test('cloudflare response DLP report-only logs but leaves response unchanged', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-dlp-report-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+response_dlp:
+  enabled: true
+  action: report_only
+`);
+
+  const { res } = await runGeneratedWorker(generated, 'query { viewer { id } }', {
+    method: 'GET',
+    url: 'https://edge.example.com/data',
+    originBody: 'token ghp_abcdefghijklmnop',
+    originHeaders: { 'content-type': 'text/plain' },
+  });
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(res.headers.get('x-edge-dlp'), 'report_only');
+  assert.strictEqual(await res.text(), 'token ghp_abcdefghijklmnop');
+});
+
+test('cloudflare compile rejects unsafe response DLP custom regex', () => {
+  let caught: any;
+  try {
+    compileCloudflare(`
+version: 1
+project: cf-dlp-redos-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+response_dlp:
+  enabled: true
+  detectors:
+    custom_regex:
+      - name: bad
+        pattern: "^(a+)+$"
+`);
+  } catch (e: any) {
+    caught = e;
+  }
+  assert.ok(caught, 'expected compile-cloudflare to reject nested quantifier custom regex');
+  const stderr = String(caught && caught.stderr ? caught.stderr : '');
+  assert.ok(/response_dlp/.test(stderr) && /ReDoS/.test(stderr), 'stderr should mention response_dlp ReDoS guard; got:\n' + stderr);
+});
+
+test('aws compile warns response DLP is unsupported for CloudFront Functions', () => {
+  const result = compileAws(`
+version: 1
+project: aws-dlp-unsupported-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+response_dlp:
+  enabled: true
+  action: block
+`);
+
+  assert.strictEqual(result.status, 0);
+  assert.ok(/response_dlp is enabled/.test(result.stderr), result.stderr);
+  assert.ok(/CloudFront Functions cannot inspect response bodies/.test(result.stderr), result.stderr);
 });
 
 runTests().then(() => {

@@ -17,6 +17,7 @@ const {
   hasFailOnPermissiveFlag,
   warnIfPermissive,
   warnWeakAwsCspNonce,
+  warnUnsupportedAwsResponseDlp,
   warnSignedUrlReplay,
   buildGraphqlGuardConfig,
   warnUnsupportedGraphqlGuard,
@@ -240,6 +241,29 @@ test('warnUnsupportedGraphqlGuard stays silent for Cloudflare target', () => {
   const result = warnUnsupportedGraphqlGuard(
     { request: { graphql_guard: { endpoint_paths: ['/graphql'] } } },
     'cloudflare',
+    { logger: { error: (msg: string) => messages.push(msg) } },
+  );
+
+  assert.strictEqual(result.warned, false);
+  assert.deepStrictEqual(messages, []);
+});
+
+test('warnUnsupportedAwsResponseDlp warns when response DLP is enabled for AWS', () => {
+  const messages: string[] = [];
+  const result = warnUnsupportedAwsResponseDlp(
+    { response_dlp: { enabled: true, action: 'block' } },
+    { logger: { error: (msg: string) => messages.push(msg) } },
+  );
+
+  assert.strictEqual(result.warned, true);
+  assert.strictEqual(messages.length, 1);
+  assert.match(messages[0], /response_dlp|CloudFront Functions cannot inspect response bodies/);
+});
+
+test('warnUnsupportedAwsResponseDlp stays silent when response DLP is disabled', () => {
+  const messages: string[] = [];
+  const result = warnUnsupportedAwsResponseDlp(
+    { response_dlp: { enabled: false } },
     { logger: { error: (msg: string) => messages.push(msg) } },
   );
 

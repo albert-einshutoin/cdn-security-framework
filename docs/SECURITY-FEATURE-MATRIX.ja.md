@@ -119,6 +119,15 @@
 | オリジン認証 | — | ✓ | ✓ | — |
 | タイムアウト | — | — | — | ✓ |
 | モニターモード | ✓ | ✓ | ✓ | — |
+| レスポンス DLP マスク/ブロック | 未対応: body inspection 不可 | ヘッダー/body は可能だが既定生成なし | ✓ | — |
+
+### レスポンス DLP
+
+`response_dlp` は optional で、現時点では Cloudflare Workers target が enforcement 対応です。設定したレスポンスヘッダーと、サイズ上限内のテキスト系レスポンスボディを検査し、`report_only`、`mask`、`block` を適用できます。
+
+built-in detector は API key prefix（`sk-live-`、`sk_test_`、`ghp_`）と、Luhn 検証に通った credit-card-like 値を高信頼として扱います。custom regex はビルド時に compile し、256 文字・10 件までに制限し、nested quantifier 系の ReDoS 形状は拒否します。
+
+body inspection は設定されたテキスト系 `Content-Type` と `body.max_bytes`（既定 32768、最大 131072）に限定します。上限超過または非テキストレスポンスは変更せず通します。CloudFront Functions はレスポンス body を検査できないため、`response_dlp.enabled: true` の AWS compile では unsupported warning を出します。
 
 ---
 

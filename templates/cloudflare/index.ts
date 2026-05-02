@@ -631,6 +631,150 @@ function handleCorsPreflight(request: Request): Response | null {
   return new Response(null, { status: 204, headers });
 }
 
+type DlpScanResult = { matched: boolean; detectors: string[]; masked: string };
+
+function isDlpEnabled(): boolean {
+  return Boolean(RESPONSE_CFG.responseDlp && RESPONSE_CFG.responseDlp.enabled);
+}
+
+function responseDlpLog(action: string, detectors: string[], ctx: ReqCtx, surface: string, status: number) {
+  logEvent(action === 'report_only' ? 'monitor' : 'block', {
+    status,
+    block_reason: 'response_dlp_' + action,
+    dlp_surface: surface,
+    dlp_detectors: detectors.join(','),
+    method: ctx.method,
+    uri: ctx.uri,
+    correlation_id: ctx.correlationId,
+  });
+}
+
+function luhnOk(value: string): boolean {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length < 13 || digits.length > 19) return false;
+  let sum = 0;
+  let doubleIt = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let n = digits.charCodeAt(i) - 48;
+    if (n < 0 || n > 9) return false;
+    if (doubleIt) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+    doubleIt = !doubleIt;
+  }
+  return sum % 10 === 0;
+}
+
+function replaceAllWithDetector(input: string, re: RegExp, detector: string, mask: string, detectors: Set<string>): string {
+  const flags = re.flags.indexOf('g') === -1 ? re.flags + 'g' : re.flags;
+  const globalRe = new RegExp(re.source, flags);
+  return input.replace(globalRe, (match: string) => {
+    detectors.add(detector);
+    return mask;
+  });
+}
+
+function scanAndMaskDlp(input: string): DlpScanResult {
+  const dlp = RESPONSE_CFG.responseDlp || {};
+  const builtIn: string[] = dlp.detectors && Array.isArray(dlp.detectors.builtIn)
+    ? dlp.detectors.builtIn
+    : ['api_key', 'credit_card'];
+  const mask = typeof dlp.mask === 'string' ? dlp.mask : '[REDACTED]';
+  const detectors = new Set<string>();
+  let masked = input;
+
+  if (builtIn.indexOf('api_key') !== -1) {
+    masked = masked.replace(/\b(?:sk-live-|sk_test_|ghp_)[A-Za-z0-9_=-]{8,}\b/g, (match: string) => {
+      detectors.add('api_key');
+      return mask;
+    });
+  }
+
+  if (builtIn.indexOf('credit_card') !== -1) {
+    masked = masked.replace(/\b(?:\d[ -]?){13,19}\b/g, (match: string) => {
+      if (!luhnOk(match)) return match;
+      detectors.add('credit_card');
+      return mask;
+    });
+  }
+
+  const customRegexes: RegExp[] = Array.isArray(RESPONSE_CFG.responseDlpCustomRegexes)
+    ? RESPONSE_CFG.responseDlpCustomRegexes
+    : [];
+  const customNames: string[] = dlp.detectors && Array.isArray(dlp.detectors.customRegexNames)
+    ? dlp.detectors.customRegexNames
+    : [];
+  for (let i = 0; i < customRegexes.length; i++) {
+    masked = replaceAllWithDetector(masked, customRegexes[i], customNames[i] || 'custom', mask, detectors);
+  }
+
+  return { matched: detectors.size > 0, detectors: Array.from(detectors), masked };
+}
+
+function dlpCanInspectBody(out: Response): boolean {
+  const dlp = RESPONSE_CFG.responseDlp || {};
+  if (!dlp.body || !dlp.body.enabled) return false;
+  const contentType = (out.headers.get('content-type') || '').toLowerCase();
+  const allowed: string[] = Array.isArray(dlp.body.contentTypes) ? dlp.body.contentTypes : [];
+  if (allowed.length > 0 && !allowed.some((ct: string) => contentType.indexOf(ct) !== -1)) return false;
+  const len = Number(out.headers.get('content-length') || '0');
+  const maxBytes = Number(dlp.body.maxBytes) || 32768;
+  return !Number.isFinite(len) || len === 0 || len <= maxBytes;
+}
+
+async function applyResponseDlp(out: Response, ctx: ReqCtx): Promise<Response> {
+  if (!isDlpEnabled()) return out;
+  const dlp = RESPONSE_CFG.responseDlp;
+  const action = dlp.action || 'report_only';
+  const blockStatus = Number(dlp.blockStatus) || 451;
+
+  if (dlp.headers && dlp.headers.enabled) {
+    const names: string[] = Array.isArray(dlp.headers.names) ? dlp.headers.names : [];
+    for (const name of names) {
+      const value = out.headers.get(name);
+      if (!value) continue;
+      const scan = scanAndMaskDlp(value);
+      if (!scan.matched) continue;
+      responseDlpLog(action, scan.detectors, ctx, 'header:' + name, blockStatus);
+      out.headers.set('X-Edge-DLP', action);
+      if (action === 'block') {
+        return new Response(dlp.blockBody || 'Response blocked by edge DLP', {
+          status: blockStatus,
+          headers: { 'Cache-Control': 'no-store', 'X-Edge-DLP': 'block' },
+        });
+      }
+      if (action === 'mask') out.headers.set(name, scan.masked);
+    }
+  }
+
+  if (!dlpCanInspectBody(out)) return out;
+  const clone = out.clone();
+  const text = await clone.text();
+  const maxBytes = Number(dlp.body.maxBytes) || 32768;
+  if (new TextEncoder().encode(text).length > maxBytes) return out;
+  const scan = scanAndMaskDlp(text);
+  if (!scan.matched) return out;
+  responseDlpLog(action, scan.detectors, ctx, 'body', blockStatus);
+  out.headers.set('X-Edge-DLP', action);
+  if (action === 'block') {
+    return new Response(dlp.blockBody || 'Response blocked by edge DLP', {
+      status: blockStatus,
+      headers: { 'Cache-Control': 'no-store', 'X-Edge-DLP': 'block' },
+    });
+  }
+  if (action === 'report_only') return out;
+  const maskedHeaders = new Headers(out.headers);
+  maskedHeaders.delete('content-length');
+  maskedHeaders.set('X-Edge-DLP', 'mask');
+  return new Response(scan.masked, {
+    status: out.status,
+    statusText: out.statusText,
+    headers: maskedHeaders,
+  });
+}
+
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
@@ -1033,6 +1177,6 @@ export default {
       }
     }
 
-    return out;
+    return await applyResponseDlp(out, ctx);
   },
 };

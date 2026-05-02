@@ -5,7 +5,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { DEFAULT_CONTAINS, parsePathPatterns, hasCatastrophicBacktrackShape, regexesLiteralCode, getAuthGates, validateAuthGates, validateJwksUrl, build, PLACEHOLDER_TOKEN, hasFailOnPermissiveFlag, warnIfPermissive, warnWeakAwsCspNonce, warnSignedUrlReplay, buildGraphqlGuardConfig, warnUnsupportedGraphqlGuard, validateOriginAuth, } = require('./lib/compile-core');
+const { DEFAULT_CONTAINS, parsePathPatterns, hasCatastrophicBacktrackShape, regexesLiteralCode, getAuthGates, validateAuthGates, validateJwksUrl, build, PLACEHOLDER_TOKEN, hasFailOnPermissiveFlag, warnIfPermissive, warnWeakAwsCspNonce, warnUnsupportedAwsResponseDlp, warnSignedUrlReplay, buildGraphqlGuardConfig, warnUnsupportedGraphqlGuard, validateOriginAuth, } = require('./lib/compile-core');
 const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
 function test(name, fn) {
     try {
@@ -157,6 +157,19 @@ test('warnUnsupportedGraphqlGuard warns for AWS body-unreadable target', () => {
 test('warnUnsupportedGraphqlGuard stays silent for Cloudflare target', () => {
     const messages = [];
     const result = warnUnsupportedGraphqlGuard({ request: { graphql_guard: { endpoint_paths: ['/graphql'] } } }, 'cloudflare', { logger: { error: (msg) => messages.push(msg) } });
+    assert.strictEqual(result.warned, false);
+    assert.deepStrictEqual(messages, []);
+});
+test('warnUnsupportedAwsResponseDlp warns when response DLP is enabled for AWS', () => {
+    const messages = [];
+    const result = warnUnsupportedAwsResponseDlp({ response_dlp: { enabled: true, action: 'block' } }, { logger: { error: (msg) => messages.push(msg) } });
+    assert.strictEqual(result.warned, true);
+    assert.strictEqual(messages.length, 1);
+    assert.match(messages[0], /response_dlp|CloudFront Functions cannot inspect response bodies/);
+});
+test('warnUnsupportedAwsResponseDlp stays silent when response DLP is disabled', () => {
+    const messages = [];
+    const result = warnUnsupportedAwsResponseDlp({ response_dlp: { enabled: false } }, { logger: { error: (msg) => messages.push(msg) } });
     assert.strictEqual(result.warned, false);
     assert.deepStrictEqual(messages, []);
 });

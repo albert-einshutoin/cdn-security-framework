@@ -529,6 +529,16 @@ function warnUnsupportedGraphqlGuard(policy, target, options = {}) {
     logger.error(msg);
     return { warned: true, warnings: [msg] };
 }
+function warnUnsupportedAwsResponseDlp(policy, options = {}) {
+    const logger = options.logger || console;
+    if (!policy || !policy.response_dlp || policy.response_dlp.enabled !== true) {
+        return { warned: false, warnings: [] };
+    }
+    const msg = '[WARN] response_dlp is enabled but AWS CloudFront Functions cannot inspect response bodies. ' +
+        'The AWS target does not enforce response DLP masking/blocking; use the Cloudflare Workers target for body/header response DLP or enforce DLP at the origin/Lambda@Edge.';
+    logger.error(msg);
+    return { warned: true, warnings: [msg] };
+}
 // Normalize observability config for injection into edge CFG objects.
 // Kept next to the compiler so every target (CFF / Lambda@Edge / Worker)
 // sees identical defaults and casing.
@@ -766,6 +776,7 @@ function main(argv = process.argv.slice(2)) {
     warnSignedUrlReplay(policy);
     warnWeakAwsCspNonce(policy);
     warnUnsupportedGraphqlGuard(policy, 'aws');
+    warnUnsupportedAwsResponseDlp(policy);
     validateAuthGates(policy, { allowPlaceholderToken });
     try {
         validateOriginAuth(policy, { strict: strictOriginAuth });
@@ -808,6 +819,7 @@ module.exports = {
     validateOriginAuth,
     warnIfPermissive,
     warnWeakAwsCspNonce,
+    warnUnsupportedAwsResponseDlp,
     warnSignedUrlReplay,
     buildGraphqlGuardConfig,
     warnUnsupportedGraphqlGuard,
