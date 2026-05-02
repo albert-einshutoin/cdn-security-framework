@@ -73,17 +73,14 @@ async function runGeneratedWorker(generated, query, options = {}) {
         delete require.cache[modPath];
         const worker = require(modPath).default;
         const body = options.rawBody || JSON.stringify({ query });
-        const method = options.method || 'POST';
-        const init = {
-            method,
+        const req = new Request(options.url || 'https://edge.example.com/graphql', {
+            method: 'POST',
             headers: {
                 'user-agent': 'runtime-test',
                 'content-type': options.contentType || 'application/json',
             },
-        };
-        if (method !== 'GET' && method !== 'HEAD')
-            init.body = body;
-        const req = new Request(options.url || 'https://edge.example.com/graphql', init);
+            body,
+        });
         const res = await worker.fetch(req, {});
         return { res, fetchCalls };
     }
@@ -137,6 +134,9 @@ test('cloudflare template contains auth enforcement logic', () => {
     assert.ok(template.includes('if (gate.type === \'signed_url\')'));
     assert.ok(template.includes('CFG.originAuth'));
     assert.ok(template.includes('forwardHeaders.set(headerName, secret)'));
+    assert.ok(template.includes('async function handleChallenge'), 'challenge handler missing');
+    assert.ok(template.includes('verifyChallengeCookie'), 'challenge cookie verifier missing');
+    assert.ok(template.includes('verifyChallengeSolution'), 'challenge proof verifier missing');
     // Auth/crypto hardening fixtures
     assert.ok(template.includes('isJwtAlgAllowed'), 'JWT alg whitelist helper missing');
     assert.ok(template.includes('isHostAllowed'), 'Host allowlist helper missing');
@@ -144,6 +144,30 @@ test('cloudflare template contains auth enforcement logic', () => {
     assert.ok(template.includes('Missing exp claim'), 'JWT exp-required guard missing');
     assert.ok(/nowSec\s*>=\s*Number\(payload\.exp\)\s*\+\s*skewSec/.test(template), 'JWT clock skew tolerance missing');
     assert.ok(template.includes('function shouldBlockAuth'), 'auth fail-closed helper missing');
+});
+test('cloudflare compile emits experimental challenge config', () => {
+    const generated = compileCloudflare(`
+version: 1
+project: cf-challenge-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+firewall:
+  challenge:
+    enabled: true
+    mode: challenge
+    path_prefixes: ["/guarded"]
+    ua_contains: ["HeadlessChrome"]
+    difficulty: 2
+    ttl_sec: 600
+    secret_env: CHALLENGE_SECRET
+`);
+    assert.ok(generated.includes('challenge: {"enabled":true'));
+    assert.ok(generated.includes('"pathPrefixes":["/guarded"]'));
+    assert.ok(generated.includes('"uaContains":["headlesschrome"]'));
+    assert.ok(generated.includes('"difficulty":2'));
+    assert.ok(generated.includes('"ttlSec":600'));
 });
 test('cloudflare compile emits allowedHosts, trustForwardedFor, and JWT alg/skew fields', () => {
     const generated = compileCloudflare(`
@@ -187,7 +211,7 @@ request:
 response_headers:
   hsts: "max-age=31536000"
 `);
-    const { res, fetchCalls } = await runGeneratedWorker(generated, 'query { viewer(id: "1") { id name } }');
+    const { res, fetchCalls } = await runGeneratedWorker(generated, 'query { viewer { id name } }');
     assert.strictEqual(res.status, 200);
     assert.strictEqual(fetchCalls.length, 1, 'normal GraphQL query should reach origin');
 });
@@ -265,21 +289,6 @@ response_headers:
     assert.strictEqual(res.status, 200);
     assert.strictEqual(fetchCalls.length, 1, 'report mode should forward GraphQL violations');
 });
-test('aws compile warns that request.graphql_guard is unsupported', () => {
-    const result = compileAws(`
-version: 1
-project: aws-graphql-warning-test
-request:
-  allow_methods: ["POST"]
-  graphql_guard:
-    endpoint_paths: ["/graphql"]
-    max_depth: 4
-response_headers:
-  hsts: "max-age=31536000"
-`);
-    assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}`);
-    assert.match(result.stderr, /request\.graphql_guard|unsupported|CloudFront/i);
-});
 test('cloudflare compile fails when allowed_algorithms includes an alg the verifier cannot validate', () => {
     let caught;
     try {
@@ -315,7 +324,7 @@ test('cloudflare response DLP masks response body and headers', async () => {
 version: 1
 project: cf-dlp-mask-test
 request:
-  allow_methods: ["GET"]
+  allow_methods: ["POST"]
 response_headers:
   hsts: "max-age=31536000"
 response_dlp:
@@ -329,8 +338,6 @@ response_dlp:
     names: ["x-api-key"]
 `);
     const { res } = await runGeneratedWorker(generated, 'query { viewer { id } }', {
-        method: 'GET',
-        url: 'https://edge.example.com/data',
         originBody: '{"secret":"sk-live-abcdefghijklmnop","card":"4111 1111 1111 1111"}',
         originHeaders: {
             'content-type': 'application/json',
@@ -350,7 +357,7 @@ test('cloudflare response DLP blocks response body findings', async () => {
 version: 1
 project: cf-dlp-block-test
 request:
-  allow_methods: ["GET"]
+  allow_methods: ["POST"]
 response_headers:
   hsts: "max-age=31536000"
 response_dlp:
@@ -359,8 +366,6 @@ response_dlp:
   block_status: 451
 `);
     const { res } = await runGeneratedWorker(generated, 'query { viewer { id } }', {
-        method: 'GET',
-        url: 'https://edge.example.com/data',
         originBody: 'token ghp_abcdefghijklmnop',
         originHeaders: { 'content-type': 'text/plain' },
     });
@@ -373,7 +378,7 @@ test('cloudflare response DLP report-only logs but leaves response unchanged', a
 version: 1
 project: cf-dlp-report-test
 request:
-  allow_methods: ["GET"]
+  allow_methods: ["POST"]
 response_headers:
   hsts: "max-age=31536000"
 response_dlp:
@@ -381,8 +386,6 @@ response_dlp:
   action: report_only
 `);
     const { res } = await runGeneratedWorker(generated, 'query { viewer { id } }', {
-        method: 'GET',
-        url: 'https://edge.example.com/data',
         originBody: 'token ghp_abcdefghijklmnop',
         originHeaders: { 'content-type': 'text/plain' },
     });

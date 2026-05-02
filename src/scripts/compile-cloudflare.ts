@@ -17,6 +17,7 @@ const {
   compileRegexOrThrow,
   warnIfPermissive,
   warnSignedUrlReplay,
+  buildChallengeConfig,
   buildGraphqlGuardConfig,
   buildObsConfig,
 } = require('./lib/compile-core');
@@ -226,6 +227,7 @@ const geoBlockCountries = Array.isArray(fwGeo.block_countries)
 const geoAllowCountries = Array.isArray(fwGeo.allow_countries)
   ? fwGeo.allow_countries.map((c: unknown) => String(c || '').trim().toUpperCase()).filter(Boolean)
   : [];
+const challengeConfig = buildChallengeConfig(policy);
 
 const cfgCode = renderConstObject('CFG', {
   mode: defaults.mode || 'enforce',
@@ -255,6 +257,7 @@ const cfgCode = renderConstObject('CFG', {
   jwksNegativeCacheSec: jwksNegativeCache,
   geoBlockCountries: runtimeCode(`new Set(${JSON.stringify(geoBlockCountries)})`),
   geoAllowCountries: runtimeCode(`new Set(${JSON.stringify(geoAllowCountries)})`),
+  challenge: challengeConfig,
   graphqlGuard: buildGraphqlGuardConfig(policy),
   obs: buildObsConfig(policy),
 });

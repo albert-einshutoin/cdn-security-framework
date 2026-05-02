@@ -44,6 +44,37 @@ function createSignedUrlQuery(pathname, params, secret) {
     const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
     return canonical + '&sig=' + sig;
 }
+function challengeUaHash(ua) {
+    return crypto.createHash('sha256').update(ua || '').digest('hex').slice(0, 16);
+}
+function findChallengeNonce(seed, difficulty) {
+    const prefix = '0'.repeat(difficulty);
+    for (let i = 0; i < 2000000; i++) {
+        const nonce = i.toString(16);
+        const digest = crypto.createHash('sha256').update(seed + ':' + nonce).digest('hex');
+        if (digest.startsWith(prefix))
+            return nonce;
+    }
+    throw new Error('could not solve test challenge');
+}
+function createChallengeSolutionQuery(seed, exp, ua, secret, difficulty) {
+    const sig = crypto.createHmac('sha256', secret)
+        .update(seed + ':' + String(exp) + ':' + challengeUaHash(ua))
+        .digest('base64url');
+    const nonce = findChallengeNonce(seed, difficulty);
+    return new URLSearchParams({
+        __cdn_challenge_seed: seed,
+        __cdn_challenge_exp: String(exp),
+        __cdn_challenge_nonce: nonce,
+        __cdn_challenge_sig: sig,
+    }).toString();
+}
+function createChallengeCookie(exp, ua, secret) {
+    const sig = crypto.createHmac('sha256', secret)
+        .update(String(exp) + ':' + challengeUaHash(ua))
+        .digest('base64url');
+    return `${exp}.${sig}`;
+}
 function test(name, fn) {
     return Promise.resolve()
         .then(fn)
@@ -319,6 +350,106 @@ origin:
         });
         assert.strictEqual(res.status, 403);
         assert.strictEqual(await res.text(), 'Forbidden');
+    });
+    await test('experimental JS challenge returns HTML for matching suspicious path', async () => {
+        const challengePolicy = BASE_POLICY.replace('max_query_length: 64', 'max_query_length: 512') + `
+firewall:
+  challenge:
+    enabled: true
+    mode: challenge
+    path_prefixes: ["/guarded"]
+    ua_contains: ["headless-test"]
+    difficulty: 1
+    ttl_sec: 120
+    secret_env: CHALLENGE_SECRET
+`;
+        const challengeJs = transpileToJs(compileWorker(challengePolicy));
+        const { worker } = loadWorker(challengeJs);
+        const res = await dispatch(worker, 'https://example.com/guarded/page', {
+            method: 'GET',
+            headers: { 'user-agent': 'Mozilla/5.0' },
+        }, {
+            EDGE_ADMIN_TOKEN: 'integration-test-token',
+            CHALLENGE_SECRET: 'integration-challenge-secret',
+        });
+        assert.strictEqual(res.status, 403);
+        assert.match(res.headers.get('content-type') || '', /text\/html/);
+        assert.match(await res.text(), /Security check/);
+    });
+    await test('experimental JS challenge accepts solved proof and then solved cookie', async () => {
+        const challengePolicy = BASE_POLICY.replace('max_query_length: 64', 'max_query_length: 512') + `
+firewall:
+  challenge:
+    enabled: true
+    mode: challenge
+    path_prefixes: ["/guarded"]
+    difficulty: 1
+    ttl_sec: 120
+    secret_env: CHALLENGE_SECRET
+`;
+        const challengeJs = transpileToJs(compileWorker(challengePolicy));
+        const { worker } = loadWorker(challengeJs, {
+            fetchStub: async () => new Response('guarded ok', { status: 200 }),
+        });
+        const ua = 'Mozilla/5.0';
+        const secret = 'integration-challenge-secret';
+        const exp = Math.floor(Date.now() / 1000) + 120;
+        const query = createChallengeSolutionQuery('abcdefghijklmnop', exp, ua, secret, 1);
+        const solved = await dispatch(worker, 'https://example.com/guarded/page?' + query, {
+            method: 'GET',
+            headers: { 'user-agent': ua },
+        }, {
+            EDGE_ADMIN_TOKEN: 'integration-test-token',
+            CHALLENGE_SECRET: secret,
+        });
+        assert.strictEqual(solved.status, 302);
+        const setCookie = solved.headers.get('set-cookie') || '';
+        assert.match(setCookie, /__cdn_challenge=/);
+        const cookieValue = /__cdn_challenge=([^;]+)/.exec(setCookie)?.[1] || '';
+        const passed = await dispatch(worker, 'https://example.com/guarded/page', {
+            method: 'GET',
+            headers: { 'user-agent': ua, cookie: '__cdn_challenge=' + cookieValue },
+        }, {
+            EDGE_ADMIN_TOKEN: 'integration-test-token',
+            CHALLENGE_SECRET: secret,
+        });
+        assert.strictEqual(passed.status, 200);
+        assert.strictEqual(await passed.text(), 'guarded ok');
+    });
+    await test('experimental JS challenge re-challenges expired or invalid cookies', async () => {
+        const challengePolicy = BASE_POLICY.replace('max_query_length: 64', 'max_query_length: 512') + `
+firewall:
+  challenge:
+    enabled: true
+    mode: challenge
+    path_prefixes: ["/guarded"]
+    difficulty: 1
+    ttl_sec: 120
+    secret_env: CHALLENGE_SECRET
+`;
+        const challengeJs = transpileToJs(compileWorker(challengePolicy));
+        const { worker } = loadWorker(challengeJs);
+        const ua = 'Mozilla/5.0';
+        const secret = 'integration-challenge-secret';
+        const expired = createChallengeCookie(Math.floor(Date.now() / 1000) - 10, ua, secret);
+        const res = await dispatch(worker, 'https://example.com/guarded/page', {
+            method: 'GET',
+            headers: { 'user-agent': ua, cookie: '__cdn_challenge=' + expired },
+        }, {
+            EDGE_ADMIN_TOKEN: 'integration-test-token',
+            CHALLENGE_SECRET: secret,
+        });
+        assert.strictEqual(res.status, 403);
+        assert.match(await res.text(), /Security check/);
+        const invalid = await dispatch(worker, 'https://example.com/guarded/page', {
+            method: 'GET',
+            headers: { 'user-agent': ua, cookie: '__cdn_challenge=9999999999.invalid' },
+        }, {
+            EDGE_ADMIN_TOKEN: 'integration-test-token',
+            CHALLENGE_SECRET: secret,
+        });
+        assert.strictEqual(invalid.status, 403);
+        assert.match(await invalid.text(), /Security check/);
     });
     await test('blocked request emits structured JSON log with status/block_reason/uri', async () => {
         const { worker, logs } = loadWorker(js, { env: { EDGE_ADMIN_TOKEN: 'integration-test-token' } });

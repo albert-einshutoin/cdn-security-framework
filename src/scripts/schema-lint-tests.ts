@@ -144,6 +144,67 @@ test('lint accepts firewall.waf.rate_limit at AWS WAF ceiling', () => {
   }
 });
 
+test('lint accepts firewall.challenge at configured bounds', () => {
+  const yaml = basePolicy({
+    extra: `firewall:
+  challenge:
+    enabled: true
+    mode: challenge
+    path_prefixes: ["/guarded"]
+    ua_contains: ["headless"]
+    difficulty: 6
+    ttl_sec: 86400
+    secret_env: CHALLENGE_SECRET
+    cookie_name: __cdn_challenge
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result: any = runLint(file);
+    assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint rejects firewall.challenge difficulty above maximum', () => {
+  const yaml = basePolicy({
+    extra: `firewall:
+  challenge:
+    enabled: true
+    mode: challenge
+    difficulty: 7
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result: any = runLint(file);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr + result.stdout, /challenge|difficulty|maximum|<=\s*6/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint rejects firewall.challenge ttl below minimum', () => {
+  const yaml = basePolicy({
+    extra: `firewall:
+  challenge:
+    enabled: true
+    mode: challenge
+    ttl_sec: 30
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result: any = runLint(file);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr + result.stdout, /challenge|ttl_sec|minimum|>=\s*60/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('lint rejects cors.max_age beyond 86400', () => {
   const yaml = basePolicy({
     extra: `response_headers:

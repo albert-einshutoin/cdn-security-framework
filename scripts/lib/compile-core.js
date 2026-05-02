@@ -492,6 +492,55 @@ function warnWeakAwsCspNonce(policy, options = {}) {
     logger.error(msg);
     return { warned: true, warnings: [msg] };
 }
+function warnUnsupportedAwsResponseDlp(policy, options = {}) {
+    const logger = options.logger || console;
+    if (!policy || !policy.response_dlp || policy.response_dlp.enabled !== true) {
+        return { warned: false, warnings: [] };
+    }
+    const msg = '[WARN] response_dlp is enabled but AWS CloudFront Functions cannot inspect response bodies. ' +
+        'The AWS target does not enforce response DLP masking/blocking; use the Cloudflare Workers target for body/header response DLP or enforce DLP at the origin/Lambda@Edge.';
+    logger.error(msg);
+    return { warned: true, warnings: [msg] };
+}
+function buildChallengeConfig(policy) {
+    const raw = policy && policy.firewall && policy.firewall.challenge;
+    if (!raw || raw.enabled !== true)
+        return null;
+    const pathPrefixes = Array.isArray(raw.path_prefixes)
+        ? raw.path_prefixes.map((p) => (typeof p === 'string' ? p.trim() : '')).filter(Boolean)
+        : [];
+    const uaContains = Array.isArray(raw.ua_contains)
+        ? raw.ua_contains.map((s) => (typeof s === 'string' ? s.trim().toLowerCase() : '')).filter(Boolean)
+        : [];
+    return {
+        enabled: true,
+        mode: raw.mode === 'report' || raw.mode === 'block' || raw.mode === 'challenge' ? raw.mode : 'challenge',
+        pathPrefixes,
+        uaContains,
+        difficulty: Number.isFinite(Number(raw.difficulty))
+            ? Math.max(1, Math.min(6, Number(raw.difficulty)))
+            : 3,
+        ttlSec: Number.isFinite(Number(raw.ttl_sec))
+            ? Math.max(60, Math.min(86400, Number(raw.ttl_sec)))
+            : 900,
+        secretEnv: typeof raw.secret_env === 'string' && raw.secret_env.trim()
+            ? raw.secret_env.trim()
+            : 'CHALLENGE_SECRET',
+        cookieName: typeof raw.cookie_name === 'string' && raw.cookie_name.trim()
+            ? raw.cookie_name.trim()
+            : '__cdn_challenge',
+    };
+}
+function warnUnsupportedAwsChallenge(policy, options = {}) {
+    const logger = options.logger || console;
+    const challenge = buildChallengeConfig(policy);
+    if (!challenge)
+        return { warned: false, warnings: [] };
+    const msg = '[WARN] firewall.challenge is enabled but the AWS / CloudFront targets do not support the experimental JS challenge primitive. ' +
+        'CloudFront Functions cannot reliably serve and verify the HTML proof-of-work flow in this framework; use --target cloudflare or disable firewall.challenge for AWS builds.';
+    logger.error(msg);
+    return { warned: true, warnings: [msg] };
+}
 function buildGraphqlGuardConfig(policy) {
     const guard = policy && policy.request && policy.request.graphql_guard;
     if (!guard || typeof guard !== 'object')
@@ -526,16 +575,6 @@ function warnUnsupportedGraphqlGuard(policy, target, options = {}) {
     const msg = `[WARN] request.graphql_guard is configured but target "${target}" cannot read request bodies at the edge. ` +
         'GraphQL depth/complexity enforcement is unsupported for CloudFront Functions/Lambda@Edge output; ' +
         'use the Cloudflare Workers target or enforce this guard at the origin.';
-    logger.error(msg);
-    return { warned: true, warnings: [msg] };
-}
-function warnUnsupportedAwsResponseDlp(policy, options = {}) {
-    const logger = options.logger || console;
-    if (!policy || !policy.response_dlp || policy.response_dlp.enabled !== true) {
-        return { warned: false, warnings: [] };
-    }
-    const msg = '[WARN] response_dlp is enabled but AWS CloudFront Functions cannot inspect response bodies. ' +
-        'The AWS target does not enforce response DLP masking/blocking; use the Cloudflare Workers target for body/header response DLP or enforce DLP at the origin/Lambda@Edge.';
     logger.error(msg);
     return { warned: true, warnings: [msg] };
 }
@@ -775,8 +814,9 @@ function main(argv = process.argv.slice(2)) {
     // Non-fatal advisory: signed_url protecting write-like paths without nonce_param.
     warnSignedUrlReplay(policy);
     warnWeakAwsCspNonce(policy);
-    warnUnsupportedGraphqlGuard(policy, 'aws');
     warnUnsupportedAwsResponseDlp(policy);
+    warnUnsupportedAwsChallenge(policy);
+    warnUnsupportedGraphqlGuard(policy, 'aws');
     validateAuthGates(policy, { allowPlaceholderToken });
     try {
         validateOriginAuth(policy, { strict: strictOriginAuth });
@@ -821,6 +861,8 @@ module.exports = {
     warnWeakAwsCspNonce,
     warnUnsupportedAwsResponseDlp,
     warnSignedUrlReplay,
+    buildChallengeConfig,
+    warnUnsupportedAwsChallenge,
     buildGraphqlGuardConfig,
     warnUnsupportedGraphqlGuard,
     validateJwksUrl,

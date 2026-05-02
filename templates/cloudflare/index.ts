@@ -153,7 +153,7 @@ async function readLimitedRequestText(request: Request, maxBytes: number): Promi
 
 function extractGraphqlQuery(bodyText: string, contentType: string): { ok: boolean; query: string; reason?: string } {
   if (/application\/graphql/i.test(contentType)) {
-    return bodyText.trim() ? { ok: true, query: bodyText } : { ok: false, query: '', reason: 'Malformed GraphQL query' };
+    return { ok: true, query: bodyText };
   }
   try {
     const parsed = JSON.parse(bodyText);
@@ -180,9 +180,8 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
   let maxDepth = 0;
   let aliases = 0;
   let fields = 0;
-  let parenDepth = 0;
-  let bracketDepth = 0;
   let i = 0;
+  let selectionDepth = 0;
   let prevToken = '';
 
   while (i < query.length) {
@@ -219,46 +218,12 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
       continue;
     }
 
-    if (query.slice(i, i + 3) === '...') {
-      prevToken = '...';
-      i += 3;
-      continue;
-    }
-
-    if (ch === '(') {
-      parenDepth++;
-      prevToken = ch;
-      i++;
-      continue;
-    }
-    if (ch === ')') {
-      parenDepth--;
-      if (parenDepth < 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
-      prevToken = ch;
-      i++;
-      continue;
-    }
-    if (ch === '[') {
-      bracketDepth++;
-      prevToken = ch;
-      i++;
-      continue;
-    }
-    if (ch === ']') {
-      bracketDepth--;
-      if (bracketDepth < 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
-      prevToken = ch;
-      i++;
-      continue;
-    }
-
     if (ch === '{') {
-      if (parenDepth === 0) {
-        depth++;
-        if (depth > maxDepth) maxDepth = depth;
-        if (maxDepth > guard.maxDepth) {
-          return { ok: false, reason: 'GraphQL depth limit exceeded', depth: maxDepth, aliases, fields };
-        }
+      depth++;
+      selectionDepth++;
+      if (depth > maxDepth) maxDepth = depth;
+      if (maxDepth > guard.maxDepth) {
+        return { ok: false, reason: 'GraphQL depth limit exceeded', depth: maxDepth, aliases, fields };
       }
       prevToken = '{';
       i++;
@@ -266,10 +231,9 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
     }
 
     if (ch === '}') {
-      if (parenDepth === 0) {
-        depth--;
-        if (depth < 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
-      }
+      depth--;
+      selectionDepth = Math.max(0, selectionDepth - 1);
+      if (depth < 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
       prevToken = '}';
       i++;
       continue;
@@ -283,13 +247,13 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
       let j = i;
       while (j < query.length && /\s/.test(query[j])) j++;
 
-      if (depth > 0 && parenDepth === 0 && bracketDepth === 0 && !keywords.has(name) && prevToken !== '@' && prevToken !== 'on') {
+      if (selectionDepth > 0 && !keywords.has(name) && prevToken !== '$' && prevToken !== '@') {
         if (query[j] === ':') {
           aliases++;
           if (aliases > guard.maxAliases) {
             return { ok: false, reason: 'GraphQL alias limit exceeded', depth: maxDepth, aliases, fields };
           }
-        } else if (prevToken !== '...') {
+        } else {
           fields++;
           if (fields > guard.maxFields) {
             return { ok: false, reason: 'GraphQL field limit exceeded', depth: maxDepth, aliases, fields };
@@ -300,15 +264,13 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
       continue;
     }
 
-    if (ch === '@' || ch === ':' || ch === '$' || ch === '!' || ch === '=') {
+    if (ch === '$' || ch === '@' || ch === ':' || ch === '(' || ch === ')' || ch === '[' || ch === ']') {
       prevToken = ch;
     }
     i++;
   }
 
-  if (depth !== 0 || parenDepth !== 0 || bracketDepth !== 0) {
-    return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
-  }
+  if (depth !== 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
   if (maxDepth === 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
   return { ok: true, depth: maxDepth, aliases, fields };
 }
@@ -344,8 +306,7 @@ async function enforceGraphqlGuard(request: Request, pathname: string, ctx: ReqC
     logEvent('monitor', fields);
     return null;
   }
-  logEvent(CFG.mode === 'monitor' ? 'monitor' : 'block', fields);
-  return CFG.mode === 'monitor' ? null : deny(400, fields.block_reason);
+  return shouldBlock(400, fields.block_reason, ctx);
 }
 
 function base64UrlToBytes(input: string): Uint8Array {
@@ -631,6 +592,203 @@ function handleCorsPreflight(request: Request): Response | null {
   return new Response(null, { status: 204, headers });
 }
 
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  const bytes = new Uint8Array(digest);
+  let hex = '';
+  for (const b of bytes) hex += b.toString(16).padStart(2, '0');
+  return hex;
+}
+
+function readCookie(request: Request, name: string): string {
+  const cookie = request.headers.get('cookie') || '';
+  const parts = cookie.split(';');
+  for (const part of parts) {
+    const i = part.indexOf('=');
+    if (i === -1) continue;
+    const key = part.slice(0, i).trim();
+    if (key === name) return part.slice(i + 1).trim();
+  }
+  return '';
+}
+
+function removeChallengeParams(url: URL): URL {
+  const clean = new URL(url.toString());
+  clean.searchParams.delete('__cdn_challenge_seed');
+  clean.searchParams.delete('__cdn_challenge_exp');
+  clean.searchParams.delete('__cdn_challenge_nonce');
+  clean.searchParams.delete('__cdn_challenge_sig');
+  return clean;
+}
+
+function challengeMatches(url: URL, uaLower: string): boolean {
+  const ch = CFG.challenge;
+  if (!ch || ch.enabled !== true) return false;
+  const prefixes: string[] = Array.isArray(ch.pathPrefixes) ? ch.pathPrefixes : [];
+  const uaContains: string[] = Array.isArray(ch.uaContains) ? ch.uaContains : [];
+  const pathHit = prefixes.some((p: string) => url.pathname === p || url.pathname.startsWith(p + '/'));
+  const uaHit = uaLower && uaContains.some((s: string) => s && uaLower.includes(s));
+  return pathHit || uaHit;
+}
+
+async function challengeUaBinding(ua: string): Promise<string> {
+  return (await sha256Hex(ua || '')).slice(0, 16);
+}
+
+async function verifyChallengeCookie(request: Request, env: WorkerEnv, ua: string): Promise<boolean> {
+  const ch = CFG.challenge;
+  if (!ch || ch.enabled !== true) return false;
+  const secret = env[ch.secretEnv || 'CHALLENGE_SECRET'] || '';
+  if (!secret) return false;
+  const raw = readCookie(request, ch.cookieName || '__cdn_challenge');
+  const parts = raw.split('.');
+  if (parts.length !== 2) return false;
+  const exp = Number(parts[0]);
+  const sig = parts[1];
+  if (!Number.isFinite(exp) || Math.floor(Date.now() / 1000) > exp) return false;
+  const uaHash = await challengeUaBinding(ua);
+  const expected = await hmacSha256Base64Url(secret, String(exp) + ':' + uaHash);
+  return timingSafeEqual(expected, sig);
+}
+
+async function verifyChallengeSolution(url: URL, env: WorkerEnv, ua: string): Promise<boolean> {
+  const ch = CFG.challenge;
+  if (!ch || ch.enabled !== true) return false;
+  const secret = env[ch.secretEnv || 'CHALLENGE_SECRET'] || '';
+  if (!secret) return false;
+  const seed = url.searchParams.get('__cdn_challenge_seed') || '';
+  const expRaw = url.searchParams.get('__cdn_challenge_exp') || '';
+  const nonce = url.searchParams.get('__cdn_challenge_nonce') || '';
+  const sig = url.searchParams.get('__cdn_challenge_sig') || '';
+  if (!seed || !expRaw || !nonce || !sig) return false;
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(seed)) return false;
+  if (!/^[0-9a-f]{1,16}$/i.test(nonce)) return false;
+  const exp = Number(expRaw);
+  if (!Number.isFinite(exp) || Math.floor(Date.now() / 1000) > exp) return false;
+  const uaHash = await challengeUaBinding(ua);
+  const expectedSig = await hmacSha256Base64Url(secret, seed + ':' + expRaw + ':' + uaHash);
+  if (!timingSafeEqual(expectedSig, sig)) return false;
+  const difficulty = Math.max(1, Math.min(6, Number(ch.difficulty) || 3));
+  const digest = await sha256Hex(seed + ':' + nonce);
+  return digest.startsWith('0'.repeat(difficulty));
+}
+
+function randomChallengeSeed(): string {
+  const buf = new Uint8Array(18);
+  crypto.getRandomValues(buf);
+  let binary = '';
+  for (const b of buf) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function challengeResponse(url: URL, env: WorkerEnv, ua: string, ctx: ReqCtx): Promise<Response> {
+  const ch = CFG.challenge;
+  const secret = ch ? (env[ch.secretEnv || 'CHALLENGE_SECRET'] || '') : '';
+  if (!secret) {
+    logEvent('block', {
+      status: 503,
+      block_reason: 'challenge_secret_missing',
+      method: ctx.method,
+      uri: ctx.uri,
+      correlation_id: ctx.correlationId,
+    });
+    return deny(503, 'Service Unavailable');
+  }
+  const seed = randomChallengeSeed();
+  const exp = String(Math.floor(Date.now() / 1000) + Math.min(300, Math.max(60, Number(ch.ttlSec) || 900)));
+  const uaHash = await challengeUaBinding(ua);
+  const sig = await hmacSha256Base64Url(secret, seed + ':' + exp + ':' + uaHash);
+  const target = removeChallengeParams(url).toString();
+  const difficulty = Math.max(1, Math.min(6, Number(ch.difficulty) || 3));
+  const payload = JSON.stringify({ seed, exp, sig, target, difficulty }).replace(/</g, '\\u003c');
+
+  logEvent('challenge', {
+    status: 403,
+    block_reason: 'js_challenge_required',
+    method: ctx.method,
+    uri: ctx.uri,
+    correlation_id: ctx.correlationId,
+  });
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Security check</title>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:2rem;line-height:1.5;color:#172033}main{max-width:42rem;margin:auto}</style>
+</head>
+<body>
+<main>
+<h1>Security check</h1>
+<p>This site is running a lightweight browser verification. It should finish automatically.</p>
+<noscript><p>JavaScript is required to complete this experimental verification. Contact the site operator if you cannot enable it.</p></noscript>
+</main>
+<script>
+const c=${payload};
+async function hex(s){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return Array.from(new Uint8Array(b),x=>x.toString(16).padStart(2,'0')).join('')}
+(async()=>{const prefix='0'.repeat(c.difficulty);for(let i=0;i<2000000;i++){const n=i.toString(16);if((await hex(c.seed+':'+n)).startsWith(prefix)){const u=new URL(c.target);u.searchParams.set('__cdn_challenge_seed',c.seed);u.searchParams.set('__cdn_challenge_exp',c.exp);u.searchParams.set('__cdn_challenge_nonce',n);u.searchParams.set('__cdn_challenge_sig',c.sig);location.replace(u.toString());return}}document.body.querySelector('main').insertAdjacentHTML('beforeend','<p>Verification took too long. Please reload.</p>')})().catch(()=>document.body.querySelector('main').insertAdjacentHTML('beforeend','<p>Verification failed. Please reload.</p>'));
+</script>
+</body>
+</html>`;
+  return new Response(html, {
+    status: 403,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
+async function handleChallenge(request: Request, url: URL, env: WorkerEnv, ua: string, uaLower: string, ctx: ReqCtx): Promise<Response | null> {
+  const ch = CFG.challenge;
+  if (!ch || ch.enabled !== true || !challengeMatches(url, uaLower)) return null;
+
+  if (ch.mode === 'report') {
+    logEvent('challenge_report', {
+      status: 200,
+      block_reason: 'js_challenge_report',
+      method: ctx.method,
+      uri: ctx.uri,
+      correlation_id: ctx.correlationId,
+    });
+    return null;
+  }
+  if (ch.mode === 'block') {
+    return shouldBlock(403, 'Forbidden', ctx);
+  }
+
+  if (await verifyChallengeCookie(request, env, ua)) return null;
+
+  const hasSolution = url.searchParams.has('__cdn_challenge_seed') ||
+    url.searchParams.has('__cdn_challenge_exp') ||
+    url.searchParams.has('__cdn_challenge_nonce') ||
+    url.searchParams.has('__cdn_challenge_sig');
+  if (hasSolution && await verifyChallengeSolution(url, env, ua)) {
+    const clean = removeChallengeParams(url);
+    const ttl = Math.max(60, Math.min(86400, Number(ch.ttlSec) || 900));
+    const exp = Math.floor(Date.now() / 1000) + ttl;
+    const uaHash = await challengeUaBinding(ua);
+    const secret = env[ch.secretEnv || 'CHALLENGE_SECRET'] || '';
+    const sig = await hmacSha256Base64Url(secret, String(exp) + ':' + uaHash);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: clean.toString(),
+        'cache-control': 'no-store',
+        'set-cookie': `${ch.cookieName || '__cdn_challenge'}=${exp}.${sig}; Max-Age=${ttl}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+      },
+    });
+  }
+
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return shouldBlock(403, 'Forbidden', ctx);
+  }
+  return challengeResponse(url, env, ua, ctx);
+}
+
 type DlpScanResult = { matched: boolean; detectors: string[]; masked: string };
 
 function isDlpEnabled(): boolean {
@@ -872,6 +1030,9 @@ export default {
       if (r) return r;
     }
     const uaLower = ua.toLowerCase();
+    const challenge = await handleChallenge(request, url, env, ua, uaLower, ctx);
+    if (challenge) return challenge;
+
     for (const s of CFG.uaDenyContains) {
       if (uaLower.includes(s)) {
         const r = shouldBlock(403, 'Forbidden', ctx);
