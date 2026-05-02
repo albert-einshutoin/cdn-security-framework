@@ -17,6 +17,7 @@ const {
   hasFailOnPermissiveFlag,
   warnIfPermissive,
   warnWeakAwsCspNonce,
+  warnUnsupportedAwsResponseDlp,
   warnSignedUrlReplay,
   validateOriginAuth,
 } = require('./lib/compile-core');
@@ -196,6 +197,29 @@ test('parsePathPatterns lowercases contains entries so uppercase policy survives
   const fromLegacy = parsePathPatterns(['/INTERNAL/', '(?i)\\.{2}/']);
   assert.ok(fromLegacy.contains.includes('/internal/'), 'plain upper entry normalized');
   assert.ok(fromLegacy.contains.every((c: string) => c === c.toLowerCase()), 'mapped entries normalized');
+});
+
+test('warnUnsupportedAwsResponseDlp warns when response DLP is enabled for AWS', () => {
+  const messages: string[] = [];
+  const result = warnUnsupportedAwsResponseDlp(
+    { response_dlp: { enabled: true, action: 'block' } },
+    { logger: { error: (msg: string) => messages.push(msg) } },
+  );
+
+  assert.strictEqual(result.warned, true);
+  assert.strictEqual(messages.length, 1);
+  assert.match(messages[0], /response_dlp|CloudFront Functions cannot inspect response bodies/);
+});
+
+test('warnUnsupportedAwsResponseDlp stays silent when response DLP is disabled', () => {
+  const messages: string[] = [];
+  const result = warnUnsupportedAwsResponseDlp(
+    { response_dlp: { enabled: false } },
+    { logger: { error: (msg: string) => messages.push(msg) } },
+  );
+
+  assert.strictEqual(result.warned, false);
+  assert.deepStrictEqual(messages, []);
 });
 
 test('regexesLiteralCode emits real RegExp literals with flags', () => {
