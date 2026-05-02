@@ -19,6 +19,8 @@ const {
   warnWeakAwsCspNonce,
   warnUnsupportedAwsResponseDlp,
   warnSignedUrlReplay,
+  buildGraphqlGuardConfig,
+  warnUnsupportedGraphqlGuard,
   validateOriginAuth,
 } = require('./lib/compile-core');
 const {
@@ -197,6 +199,53 @@ test('parsePathPatterns lowercases contains entries so uppercase policy survives
   const fromLegacy = parsePathPatterns(['/INTERNAL/', '(?i)\\.{2}/']);
   assert.ok(fromLegacy.contains.includes('/internal/'), 'plain upper entry normalized');
   assert.ok(fromLegacy.contains.every((c: string) => c === c.toLowerCase()), 'mapped entries normalized');
+});
+
+test('buildGraphqlGuardConfig normalizes configured limits and defaults endpoint', () => {
+  const cfg = buildGraphqlGuardConfig({
+    request: {
+      graphql_guard: {
+        max_depth: 7,
+        max_aliases: 3,
+        max_fields: 50,
+        mode: 'report',
+      },
+    },
+  });
+
+  assert.deepStrictEqual(cfg, {
+    endpointPaths: ['/graphql'],
+    maxDepth: 7,
+    maxAliases: 3,
+    maxFields: 50,
+    maxBodyBytes: 65536,
+    mode: 'report',
+  });
+});
+
+test('warnUnsupportedGraphqlGuard warns for AWS body-unreadable target', () => {
+  const messages: string[] = [];
+  const result = warnUnsupportedGraphqlGuard(
+    { request: { graphql_guard: { endpoint_paths: ['/graphql'] } } },
+    'aws',
+    { logger: { error: (msg: string) => messages.push(msg) } },
+  );
+
+  assert.strictEqual(result.warned, true);
+  assert.strictEqual(messages.length, 1);
+  assert.match(messages[0], /unsupported|cannot read request bodies|CloudFront/i);
+});
+
+test('warnUnsupportedGraphqlGuard stays silent for Cloudflare target', () => {
+  const messages: string[] = [];
+  const result = warnUnsupportedGraphqlGuard(
+    { request: { graphql_guard: { endpoint_paths: ['/graphql'] } } },
+    'cloudflare',
+    { logger: { error: (msg: string) => messages.push(msg) } },
+  );
+
+  assert.strictEqual(result.warned, false);
+  assert.deepStrictEqual(messages, []);
 });
 
 test('warnUnsupportedAwsResponseDlp warns when response DLP is enabled for AWS', () => {

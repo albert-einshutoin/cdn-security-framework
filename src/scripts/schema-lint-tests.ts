@@ -295,6 +295,53 @@ test('lint accepts Cloudflare override fields inside rate_limit_rules[]', () => 
   }
 });
 
+test('lint accepts request.graphql_guard configuration', () => {
+  const yaml = `
+version: 1
+project: schema-lint-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql", "/api/graphql"]
+    max_depth: 8
+    max_aliases: 20
+    max_fields: 200
+    max_body_bytes: 65536
+    mode: report
+response_headers:
+  hsts: "max-age=31536000"
+`;
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result: any = runLint(file);
+    assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint rejects request.graphql_guard max_depth above maximum', () => {
+  const yaml = `
+version: 1
+project: schema-lint-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 100
+response_headers:
+  hsts: "max-age=31536000"
+`;
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result: any = runLint(file);
+    assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+    assert.match(result.stderr + result.stdout, /graphql_guard|max_depth|maximum|<=\s*64/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test('lint rejects origin.timeout.read above 60', () => {
   const yaml = basePolicy({
     extra: `origin:

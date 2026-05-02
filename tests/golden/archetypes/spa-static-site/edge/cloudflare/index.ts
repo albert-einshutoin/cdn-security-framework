@@ -28,6 +28,7 @@ const CFG = {
   jwksNegativeCacheSec: 60,
   geoBlockCountries: new Set([]),
   geoAllowCountries: new Set([]),
+  graphqlGuard: null,
   obs: {"logFormat":"json","correlationHeader":"","sampleRate":0,"auditLogAuth":false,"auditHashSub":false},
 };
 
@@ -142,6 +143,14 @@ function shouldBlockAuth(code: number, msg: string, ctx?: ReqCtx | null): Respon
   return deny(code, 'Denied');
 }
 
+type GraphqlScanResult = {
+  ok: boolean;
+  reason?: string;
+  depth: number;
+  aliases: number;
+  fields: number;
+};
+
 function normalizePath(pathname: string): string {
   let p = pathname;
   if (CFG.normalizePath.collapseSlashes) {
@@ -157,6 +166,232 @@ function normalizePath(pathname: string): string {
     p = out.join('/') || '/';
   }
   return p;
+}
+
+function isGraphqlPath(pathname: string): boolean {
+  const guard = CFG.graphqlGuard;
+  if (!guard || !Array.isArray(guard.endpointPaths) || guard.endpointPaths.length === 0) return false;
+  return guard.endpointPaths.some((p: string) => pathname === p || pathname.startsWith(p + '/'));
+}
+
+async function readLimitedRequestText(request: Request, maxBytes: number): Promise<{ ok: boolean; text: string; reason?: string }> {
+  const body = request.clone().body;
+  if (!body) return { ok: true, text: '' };
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = '';
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    total += chunk.value.byteLength;
+    if (total > maxBytes) {
+      try { await reader.cancel(); } catch (_e) { /* ignore */ }
+      return { ok: false, text: '', reason: 'GraphQL body too large' };
+    }
+    text += decoder.decode(chunk.value, { stream: true });
+  }
+  text += decoder.decode();
+  return { ok: true, text };
+}
+
+function extractGraphqlQuery(bodyText: string, contentType: string): { ok: boolean; query: string; reason?: string } {
+  if (/application\/graphql/i.test(contentType)) {
+    return bodyText.trim() ? { ok: true, query: bodyText } : { ok: false, query: '', reason: 'Malformed GraphQL query' };
+  }
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (typeof parsed?.query !== 'string' || parsed.query.trim() === '') {
+      return { ok: false, query: '', reason: 'Malformed GraphQL query' };
+    }
+    return { ok: true, query: parsed.query };
+  } catch (_e) {
+    return { ok: false, query: '', reason: 'Malformed GraphQL body' };
+  }
+}
+
+function isGraphqlNameStart(ch: string): boolean {
+  return typeof ch === 'string' && ch.length === 1 && /[A-Za-z_]/.test(ch);
+}
+
+function isGraphqlNameChar(ch: string): boolean {
+  return typeof ch === 'string' && ch.length === 1 && /[A-Za-z0-9_]/.test(ch);
+}
+
+function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
+  const keywords = new Set(['query', 'mutation', 'subscription', 'fragment', 'on', 'true', 'false', 'null']);
+  let depth = 0;
+  let maxDepth = 0;
+  let aliases = 0;
+  let fields = 0;
+  let parenDepth = 0;
+  let bracketDepth = 0;
+  let i = 0;
+  let prevToken = '';
+
+  while (i < query.length) {
+    const ch = query[i];
+
+    if (ch === '#') {
+      while (i < query.length && query[i] !== '\n' && query[i] !== '\r') i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      if (query.slice(i, i + 3) === '"""') {
+        i += 3;
+        const end = query.indexOf('"""', i);
+        if (end === -1) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+        i = end + 3;
+        continue;
+      }
+      i++;
+      let closed = false;
+      while (i < query.length) {
+        if (query[i] === '\\') {
+          i += 2;
+          continue;
+        }
+        if (query[i] === '"') {
+          i++;
+          closed = true;
+          break;
+        }
+        i++;
+      }
+      if (!closed) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+      continue;
+    }
+
+    if (query.slice(i, i + 3) === '...') {
+      prevToken = '...';
+      i += 3;
+      continue;
+    }
+
+    if (ch === '(') {
+      parenDepth++;
+      prevToken = ch;
+      i++;
+      continue;
+    }
+    if (ch === ')') {
+      parenDepth--;
+      if (parenDepth < 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+      prevToken = ch;
+      i++;
+      continue;
+    }
+    if (ch === '[') {
+      bracketDepth++;
+      prevToken = ch;
+      i++;
+      continue;
+    }
+    if (ch === ']') {
+      bracketDepth--;
+      if (bracketDepth < 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+      prevToken = ch;
+      i++;
+      continue;
+    }
+
+    if (ch === '{') {
+      if (parenDepth === 0) {
+        depth++;
+        if (depth > maxDepth) maxDepth = depth;
+        if (maxDepth > guard.maxDepth) {
+          return { ok: false, reason: 'GraphQL depth limit exceeded', depth: maxDepth, aliases, fields };
+        }
+      }
+      prevToken = '{';
+      i++;
+      continue;
+    }
+
+    if (ch === '}') {
+      if (parenDepth === 0) {
+        depth--;
+        if (depth < 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+      }
+      prevToken = '}';
+      i++;
+      continue;
+    }
+
+    if (isGraphqlNameStart(ch)) {
+      const start = i;
+      i++;
+      while (i < query.length && isGraphqlNameChar(query[i])) i++;
+      const name = query.slice(start, i);
+      let j = i;
+      while (j < query.length && /\s/.test(query[j])) j++;
+
+      if (depth > 0 && parenDepth === 0 && bracketDepth === 0 && !keywords.has(name) && prevToken !== '@' && prevToken !== 'on') {
+        if (query[j] === ':') {
+          aliases++;
+          if (aliases > guard.maxAliases) {
+            return { ok: false, reason: 'GraphQL alias limit exceeded', depth: maxDepth, aliases, fields };
+          }
+        } else if (prevToken !== '...') {
+          fields++;
+          if (fields > guard.maxFields) {
+            return { ok: false, reason: 'GraphQL field limit exceeded', depth: maxDepth, aliases, fields };
+          }
+        }
+      }
+      prevToken = name;
+      continue;
+    }
+
+    if (ch === '@' || ch === ':' || ch === '$' || ch === '!' || ch === '=') {
+      prevToken = ch;
+    }
+    i++;
+  }
+
+  if (depth !== 0 || parenDepth !== 0 || bracketDepth !== 0) {
+    return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+  }
+  if (maxDepth === 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+  return { ok: true, depth: maxDepth, aliases, fields };
+}
+
+async function enforceGraphqlGuard(request: Request, pathname: string, ctx: ReqCtx): Promise<Response | null> {
+  const guard = CFG.graphqlGuard;
+  if (!guard || request.method !== 'POST' || !isGraphqlPath(pathname)) return null;
+
+  const body = await readLimitedRequestText(request, guard.maxBodyBytes || 65536);
+  let scan: GraphqlScanResult;
+  if (!body.ok) {
+    scan = { ok: false, reason: body.reason || 'GraphQL body too large', depth: 0, aliases: 0, fields: 0 };
+  } else {
+    const extracted = extractGraphqlQuery(body.text, request.headers.get('content-type') || '');
+    scan = extracted.ok
+      ? scanGraphqlQuery(extracted.query, guard)
+      : { ok: false, reason: extracted.reason || 'Malformed GraphQL query', depth: 0, aliases: 0, fields: 0 };
+  }
+
+  if (scan.ok) return null;
+
+  const fields = {
+    status: 400,
+    block_reason: scan.reason || 'GraphQL guard violation',
+    method: ctx.method,
+    uri: ctx.uri,
+    correlation_id: ctx.correlationId,
+    graphql_depth: scan.depth,
+    graphql_aliases: scan.aliases,
+    graphql_fields: scan.fields,
+  };
+  if (guard.mode === 'report') {
+    logEvent('monitor', fields);
+    return null;
+  }
+  logEvent(CFG.mode === 'monitor' ? 'monitor' : 'block', fields);
+  return CFG.mode === 'monitor' ? null : deny(400, fields.block_reason);
 }
 
 function base64UrlToBytes(input: string): Uint8Array {
@@ -703,6 +938,9 @@ export default {
 
     for (const k of CFG.dropQueryKeys) url.searchParams.delete(k);
 
+    const graphqlGuardResponse = await enforceGraphqlGuard(request, url.pathname, ctx);
+    if (graphqlGuardResponse) return graphqlGuardResponse;
+
     // Nonce to forward to origin after a successful signed_url verification.
     // Collected here and attached when we build the origin-facing Request.
     let signedUrlNonce: string | null = null;
@@ -865,6 +1103,7 @@ export default {
       headers: forwardHeaders,
       body: request.body,
       redirect: request.redirect,
+      ...({ duplex: 'half' } as any),
     }));
 
     const out = new Response(res.body, res);

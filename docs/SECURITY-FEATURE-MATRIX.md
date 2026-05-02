@@ -57,6 +57,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | **Header count limit** | Supported | `request.limits.max_header_count` (default 64, clamped 1..500) → 431 if exceeded. Enforced in CFF viewer-request and Cloudflare Worker entry. |
 | **Path normalization** | Supported | `request.normalize.path.collapse_slashes`, `remove_dot_segments` clean up URIs. |
 | **Query normalization** | Supported | `request.normalize.drop_query_keys` strips tracking params (utm_*, gclid, etc.). |
+| **GraphQL depth/complexity guard** | Cloudflare Workers only | `request.graphql_guard` inspects POST GraphQL bodies for depth, aliases, fields, and malformed documents. AWS targets warn because CloudFront edge output cannot read request bodies. |
 | **Required headers** | Supported | `request.block.header_missing` checks for required headers (generalized, not just UA). |
 | **Bot/scanner (User-Agent)** | Supported | `request.block.ua_contains` blocks known scanners. |
 | **Fingerprint (JA3/JA4)** | Supported | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints` generate WAF fingerprint rules in `dist/infra/waf-rules.tf.json`. Start with `fingerprint_action: count`, then promote to `block`. |

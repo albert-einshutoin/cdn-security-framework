@@ -77,6 +77,37 @@ export interface CDNSecurityFrameworkPolicy {
         remove_dot_segments?: boolean;
       };
     };
+    /**
+     * Optional GraphQL request guard for body-readable targets such as Cloudflare Workers. AWS CloudFront Functions/Lambda@Edge output cannot read request bodies and emits an unsupported warning when this is configured.
+     */
+    graphql_guard?: {
+      /**
+       * GraphQL endpoint path prefixes. Defaults to ["/graphql"] when omitted.
+       *
+       * @minItems 1
+       */
+      endpoint_paths?: [string, ...string[]];
+      /**
+       * Maximum selection-set nesting depth accepted by the lightweight scanner.
+       */
+      max_depth?: number;
+      /**
+       * Maximum number of field aliases accepted in one GraphQL document.
+       */
+      max_aliases?: number;
+      /**
+       * Maximum number of field names accepted in one GraphQL document.
+       */
+      max_fields?: number;
+      /**
+       * Maximum request body bytes the edge will read for GraphQL inspection. Defaults to 65536.
+       */
+      max_body_bytes?: number;
+      /**
+       * `block` rejects violating requests; `report` logs the violation and forwards the request.
+       */
+      mode?: "block" | "report";
+    };
   };
   routes?: {
     name: string;

@@ -124,6 +124,47 @@
               }
             }
           }
+        },
+        "graphql_guard": {
+          "description": "Optional GraphQL request guard for body-readable targets such as Cloudflare Workers. AWS CloudFront Functions/Lambda@Edge output cannot read request bodies and emits an unsupported warning when this is configured.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "endpoint_paths": {
+              "description": "GraphQL endpoint path prefixes. Defaults to [\"/graphql\"] when omitted.",
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "minItems": 1
+            },
+            "max_depth": {
+              "description": "Maximum selection-set nesting depth accepted by the lightweight scanner.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "max_aliases": {
+              "description": "Maximum number of field aliases accepted in one GraphQL document.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "max_fields": {
+              "description": "Maximum number of field names accepted in one GraphQL document.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50000
+            },
+            "max_body_bytes": {
+              "description": "Maximum request body bytes the edge will read for GraphQL inspection. Defaults to 65536.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "mode": {
+              "description": "`block` rejects violating requests; `report` logs the violation and forwards the request.",
+              "enum": ["block", "report"]
+            }
+          }
         }
       }
     },

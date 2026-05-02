@@ -59,6 +59,7 @@
 | **ヘッダー数制限** | ✅ 対応 | `request.limits.max_header_count`（既定 64、1..500 にクランプ）→ 超過時 431。CFF viewer-request と Cloudflare Worker の入口で適用。 |
 | **パス正規化** | ✅ 対応 | `request.normalize.path.collapse_slashes`, `remove_dot_segments` で URI をクリーンアップ。 |
 | **クエリ正規化** | ✅ 対応 | `request.normalize.drop_query_keys` でトラッキングパラメータ（utm_*、gclid 等）を除去。 |
+| **GraphQL depth/complexity guard** | Cloudflare Workers のみ | `request.graphql_guard` で POST GraphQL body を検査し、depth、alias 数、field 数、malformed document を検出。AWS target は CloudFront edge output が request body を読めないため未対応警告のみ。 |
 | **必須ヘッダー** | ✅ 対応 | `request.block.header_missing` で必須ヘッダーをチェック（UA 以外も対応）。 |
 | **Bot/スキャナ対策（User-Agent）** | ✅ 対応 | `request.block.ua_contains` で既知スキャナをブロック。 |
 | **指紋（JA3/JA4）** | ✅ 対応 | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints` からルール生成。初期は `fingerprint_action: count`、検証後 `block` へ昇格。 |

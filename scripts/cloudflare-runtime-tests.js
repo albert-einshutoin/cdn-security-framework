@@ -173,6 +173,113 @@ routes:
     assert.ok(generated.includes('"allowed_algorithms":["RS256"]'), 'allowed_algorithms emitted without "none" or cross-alg entries');
     assert.ok(generated.includes('"clock_skew_sec":60'));
 });
+test('cloudflare graphql guard allows normal GraphQL POST', async () => {
+    const generated = compileCloudflare(`
+version: 1
+project: cf-graphql-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 4
+    max_aliases: 2
+    max_fields: 8
+response_headers:
+  hsts: "max-age=31536000"
+`);
+    const { res, fetchCalls } = await runGeneratedWorker(generated, 'query { viewer(id: "1") { id name } }');
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(fetchCalls.length, 1, 'normal GraphQL query should reach origin');
+});
+test('cloudflare graphql guard blocks deep GraphQL POST', async () => {
+    const generated = compileCloudflare(`
+version: 1
+project: cf-graphql-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 2
+    max_aliases: 10
+    max_fields: 20
+response_headers:
+  hsts: "max-age=31536000"
+`);
+    const { res, fetchCalls } = await runGeneratedWorker(generated, 'query { a { b { c } } }');
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(fetchCalls.length, 0, 'deep GraphQL query should not reach origin');
+});
+test('cloudflare graphql guard blocks excessive aliases and repeated fields', async () => {
+    const generated = compileCloudflare(`
+version: 1
+project: cf-graphql-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 4
+    max_aliases: 1
+    max_fields: 3
+response_headers:
+  hsts: "max-age=31536000"
+`);
+    const aliased = await runGeneratedWorker(generated, 'query { a: viewer { id } b: viewer { id } }');
+    assert.strictEqual(aliased.res.status, 400);
+    assert.strictEqual(aliased.fetchCalls.length, 0);
+    const fields = await runGeneratedWorker(generated, 'query { viewer { id name email createdAt } }');
+    assert.strictEqual(fields.res.status, 400);
+    assert.strictEqual(fields.fetchCalls.length, 0);
+});
+test('cloudflare graphql guard blocks malformed GraphQL body', async () => {
+    const generated = compileCloudflare(`
+version: 1
+project: cf-graphql-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 4
+response_headers:
+  hsts: "max-age=31536000"
+`);
+    const { res, fetchCalls } = await runGeneratedWorker(generated, 'query { viewer { id }', {
+        rawBody: JSON.stringify({ query: 'query { viewer { id }' }),
+    });
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(fetchCalls.length, 0);
+});
+test('cloudflare graphql guard report mode logs and forwards violations', async () => {
+    const generated = compileCloudflare(`
+version: 1
+project: cf-graphql-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 1
+    mode: report
+response_headers:
+  hsts: "max-age=31536000"
+`);
+    const { res, fetchCalls } = await runGeneratedWorker(generated, 'query { viewer { id } }');
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(fetchCalls.length, 1, 'report mode should forward GraphQL violations');
+});
+test('aws compile warns that request.graphql_guard is unsupported', () => {
+    const result = compileAws(`
+version: 1
+project: aws-graphql-warning-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 4
+response_headers:
+  hsts: "max-age=31536000"
+`);
+    assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}`);
+    assert.match(result.stderr, /request\.graphql_guard|unsupported|CloudFront/i);
+});
 test('cloudflare compile fails when allowed_algorithms includes an alg the verifier cannot validate', () => {
     let caught;
     try {
