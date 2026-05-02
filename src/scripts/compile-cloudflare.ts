@@ -15,6 +15,7 @@ const {
   hasFailOnPermissiveFlag,
   warnIfPermissive,
   warnSignedUrlReplay,
+  buildGraphqlGuardConfig,
   buildObsConfig,
 } = require('./lib/compile-core');
 const {
@@ -188,6 +189,7 @@ const cfgCode = renderConstObject('CFG', {
   jwksNegativeCacheSec: jwksNegativeCache,
   geoBlockCountries: runtimeCode(`new Set(${JSON.stringify(geoBlockCountries)})`),
   geoAllowCountries: runtimeCode(`new Set(${JSON.stringify(geoAllowCountries)})`),
+  graphqlGuard: buildGraphqlGuardConfig(policy),
   obs: buildObsConfig(policy),
 });
 

@@ -4,16 +4,25 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
+const esbuild = require('esbuild');
 
-function test(name: string, fn: () => void) {
-  try {
-    fn();
-    console.log('OK:', name);
-  } catch (e: any) {
-    console.error('FAIL:', name);
-    console.error(e && e.stack ? e.stack : e);
-    process.exitCode = 1;
+const tests: Array<{ name: string; fn: () => void | Promise<void> }> = [];
+
+function test(name: string, fn: () => void | Promise<void>) {
+  tests.push({ name, fn });
+}
+
+async function runTests() {
+  for (const t of tests) {
+    try {
+      await t.fn();
+      console.log('OK:', t.name);
+    } catch (e: any) {
+      console.error('FAIL:', t.name);
+      console.error(e && e.stack ? e.stack : e);
+      process.exitCode = 1;
+    }
   }
 }
 
@@ -35,6 +44,61 @@ function compileCloudflare(policyContent: string): string {
 
   fs.rmSync(tempDir, { recursive: true, force: true });
   return generated;
+}
+
+function compileAws(policyContent: string): { status: number | null; stderr: string } {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'aws-runtime-'));
+  const policyPath = path.join(tempDir, 'policy.yml');
+  const outDir = path.join(tempDir, 'out');
+
+  fs.writeFileSync(policyPath, policyContent, 'utf8');
+  const result = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile.js'), '--policy', policyPath, '--out-dir', outDir, '--allow-placeholder-token'], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+  });
+
+  fs.rmSync(tempDir, { recursive: true, force: true });
+  return { status: result.status, stderr: result.stderr || '' };
+}
+
+async function runGeneratedWorker(generated: string, query: string, options: any = {}) {
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-worker-'));
+  const modPath = path.join(tempDir, 'worker.cjs');
+  const compiled = esbuild.transformSync(generated, {
+    loader: 'ts',
+    format: 'cjs',
+    target: 'es2022',
+  }).code;
+
+  const previousFetch = globalThis.fetch;
+  const fetchCalls: any[] = [];
+  (globalThis as any).fetch = async (input: any) => {
+    fetchCalls.push(input);
+    return new Response(options.originBody || 'origin-ok', {
+      status: options.originStatus || 200,
+      headers: options.originHeaders || {},
+    });
+  };
+
+  try {
+    fs.writeFileSync(modPath, compiled, 'utf8');
+    delete require.cache[modPath];
+    const worker = require(modPath).default;
+    const body = options.rawBody || JSON.stringify({ query });
+    const req = new Request(options.url || 'https://edge.example.com/graphql', {
+      method: 'POST',
+      headers: {
+        'user-agent': 'runtime-test',
+        'content-type': options.contentType || 'application/json',
+      },
+      body,
+    });
+    const res = await worker.fetch(req, {});
+    return { res, fetchCalls };
+  } finally {
+    (globalThis as any).fetch = previousFetch;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
 }
 
 test('cloudflare compile injects jwt, signed_url, and origin auth config', () => {
@@ -128,6 +192,126 @@ routes:
   assert.ok(generated.includes('"clock_skew_sec":60'));
 });
 
+test('cloudflare graphql guard allows normal GraphQL POST', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-graphql-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 4
+    max_aliases: 2
+    max_fields: 8
+response_headers:
+  hsts: "max-age=31536000"
+`);
+
+  const { res, fetchCalls } = await runGeneratedWorker(generated, 'query { viewer(id: "1") { id name } }');
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(fetchCalls.length, 1, 'normal GraphQL query should reach origin');
+});
+
+test('cloudflare graphql guard blocks deep GraphQL POST', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-graphql-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 2
+    max_aliases: 10
+    max_fields: 20
+response_headers:
+  hsts: "max-age=31536000"
+`);
+
+  const { res, fetchCalls } = await runGeneratedWorker(generated, 'query { a { b { c } } }');
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(fetchCalls.length, 0, 'deep GraphQL query should not reach origin');
+});
+
+test('cloudflare graphql guard blocks excessive aliases and repeated fields', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-graphql-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 4
+    max_aliases: 1
+    max_fields: 3
+response_headers:
+  hsts: "max-age=31536000"
+`);
+
+  const aliased = await runGeneratedWorker(generated, 'query { a: viewer { id } b: viewer { id } }');
+  assert.strictEqual(aliased.res.status, 400);
+  assert.strictEqual(aliased.fetchCalls.length, 0);
+
+  const fields = await runGeneratedWorker(generated, 'query { viewer { id name email createdAt } }');
+  assert.strictEqual(fields.res.status, 400);
+  assert.strictEqual(fields.fetchCalls.length, 0);
+});
+
+test('cloudflare graphql guard blocks malformed GraphQL body', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-graphql-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 4
+response_headers:
+  hsts: "max-age=31536000"
+`);
+
+  const { res, fetchCalls } = await runGeneratedWorker(generated, 'query { viewer { id }', {
+    rawBody: JSON.stringify({ query: 'query { viewer { id }' }),
+  });
+  assert.strictEqual(res.status, 400);
+  assert.strictEqual(fetchCalls.length, 0);
+});
+
+test('cloudflare graphql guard report mode logs and forwards violations', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-graphql-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 1
+    mode: report
+response_headers:
+  hsts: "max-age=31536000"
+`);
+
+  const { res, fetchCalls } = await runGeneratedWorker(generated, 'query { viewer { id } }');
+  assert.strictEqual(res.status, 200);
+  assert.strictEqual(fetchCalls.length, 1, 'report mode should forward GraphQL violations');
+});
+
+test('aws compile warns that request.graphql_guard is unsupported', () => {
+  const result = compileAws(`
+version: 1
+project: aws-graphql-warning-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 4
+response_headers:
+  hsts: "max-age=31536000"
+`);
+
+  assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}`);
+  assert.match(result.stderr, /request\.graphql_guard|unsupported|CloudFront/i);
+});
+
 test('cloudflare compile fails when allowed_algorithms includes an alg the verifier cannot validate', () => {
   let caught: any;
   try {
@@ -159,8 +343,9 @@ routes:
     'stderr should mention allowed_algorithms and the verifier alg; got:\n' + stderr);
 });
 
-if (process.exitCode) {
-  process.exit(process.exitCode);
-}
-
-console.log('Cloudflare runtime tests passed.');
+runTests().then(() => {
+  if (process.exitCode) {
+    process.exit(process.exitCode);
+  }
+  console.log('Cloudflare runtime tests passed.');
+});
