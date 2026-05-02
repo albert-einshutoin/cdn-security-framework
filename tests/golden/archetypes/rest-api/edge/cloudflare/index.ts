@@ -29,6 +29,7 @@ const CFG = {
   geoBlockCountries: new Set([]),
   geoAllowCountries: new Set([]),
   challenge: null,
+  graphqlGuard: null,
   obs: {"logFormat":"json","correlationHeader":"traceparent","sampleRate":0,"auditLogAuth":true,"auditHashSub":true},
 };
 
@@ -51,6 +52,8 @@ const RESPONSE_CFG = {
   clearSiteDataTypes: ["cache","cookies","storage"],
   cors: {"allow_origins":["https://app.example.com"],"allow_methods":["GET","POST","PUT","PATCH","DELETE","OPTIONS"],"allow_headers":["authorization","content-type","x-request-id"],"allow_credentials":true,"max_age":600},
   cookie_attributes: null,
+  responseDlp: {"enabled":false,"action":"report_only","mask":"[REDACTED]","blockStatus":451,"blockBody":"Response blocked by edge DLP","body":{"enabled":false,"maxBytes":32768,"contentTypes":["text/","application/json","application/xml","text/xml","application/javascript"]},"headers":{"enabled":false,"names":["set-cookie","authorization","x-api-key"]},"detectors":{"builtIn":["api_key","credit_card"],"customRegexNames":[]}},
+  responseDlpCustomRegexes: [],
 };
 
 type WorkerEnv = Record<string, string | undefined>;
@@ -141,6 +144,14 @@ function shouldBlockAuth(code: number, msg: string, ctx?: ReqCtx | null): Respon
   return deny(code, 'Denied');
 }
 
+type GraphqlScanResult = {
+  ok: boolean;
+  reason?: string;
+  depth: number;
+  aliases: number;
+  fields: number;
+};
+
 function normalizePath(pathname: string): string {
   let p = pathname;
   if (CFG.normalizePath.collapseSlashes) {
@@ -156,6 +167,193 @@ function normalizePath(pathname: string): string {
     p = out.join('/') || '/';
   }
   return p;
+}
+
+function isGraphqlPath(pathname: string): boolean {
+  const guard = CFG.graphqlGuard;
+  if (!guard || !Array.isArray(guard.endpointPaths) || guard.endpointPaths.length === 0) return false;
+  return guard.endpointPaths.some((p: string) => pathname === p || pathname.startsWith(p + '/'));
+}
+
+async function readLimitedRequestText(request: Request, maxBytes: number): Promise<{ ok: boolean; text: string; reason?: string }> {
+  const body = request.clone().body;
+  if (!body) return { ok: true, text: '' };
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = '';
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    total += chunk.value.byteLength;
+    if (total > maxBytes) {
+      try { await reader.cancel(); } catch (_e) { /* ignore */ }
+      return { ok: false, text: '', reason: 'GraphQL body too large' };
+    }
+    text += decoder.decode(chunk.value, { stream: true });
+  }
+  text += decoder.decode();
+  return { ok: true, text };
+}
+
+function extractGraphqlQuery(bodyText: string, contentType: string): { ok: boolean; query: string; reason?: string } {
+  if (/application\/graphql/i.test(contentType)) {
+    return { ok: true, query: bodyText };
+  }
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (typeof parsed?.query !== 'string' || parsed.query.trim() === '') {
+      return { ok: false, query: '', reason: 'Malformed GraphQL query' };
+    }
+    return { ok: true, query: parsed.query };
+  } catch (_e) {
+    return { ok: false, query: '', reason: 'Malformed GraphQL body' };
+  }
+}
+
+function isGraphqlNameStart(ch: string): boolean {
+  return typeof ch === 'string' && ch.length === 1 && /[A-Za-z_]/.test(ch);
+}
+
+function isGraphqlNameChar(ch: string): boolean {
+  return typeof ch === 'string' && ch.length === 1 && /[A-Za-z0-9_]/.test(ch);
+}
+
+function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
+  const keywords = new Set(['query', 'mutation', 'subscription', 'fragment', 'on', 'true', 'false', 'null']);
+  let depth = 0;
+  let maxDepth = 0;
+  let aliases = 0;
+  let fields = 0;
+  let i = 0;
+  let selectionDepth = 0;
+  let prevToken = '';
+
+  while (i < query.length) {
+    const ch = query[i];
+
+    if (ch === '#') {
+      while (i < query.length && query[i] !== '\n' && query[i] !== '\r') i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      if (query.slice(i, i + 3) === '"""') {
+        i += 3;
+        const end = query.indexOf('"""', i);
+        if (end === -1) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+        i = end + 3;
+        continue;
+      }
+      i++;
+      let closed = false;
+      while (i < query.length) {
+        if (query[i] === '\\') {
+          i += 2;
+          continue;
+        }
+        if (query[i] === '"') {
+          i++;
+          closed = true;
+          break;
+        }
+        i++;
+      }
+      if (!closed) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+      continue;
+    }
+
+    if (ch === '{') {
+      depth++;
+      selectionDepth++;
+      if (depth > maxDepth) maxDepth = depth;
+      if (maxDepth > guard.maxDepth) {
+        return { ok: false, reason: 'GraphQL depth limit exceeded', depth: maxDepth, aliases, fields };
+      }
+      prevToken = '{';
+      i++;
+      continue;
+    }
+
+    if (ch === '}') {
+      depth--;
+      selectionDepth = Math.max(0, selectionDepth - 1);
+      if (depth < 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+      prevToken = '}';
+      i++;
+      continue;
+    }
+
+    if (isGraphqlNameStart(ch)) {
+      const start = i;
+      i++;
+      while (i < query.length && isGraphqlNameChar(query[i])) i++;
+      const name = query.slice(start, i);
+      let j = i;
+      while (j < query.length && /\s/.test(query[j])) j++;
+
+      if (selectionDepth > 0 && !keywords.has(name) && prevToken !== '$' && prevToken !== '@') {
+        if (query[j] === ':') {
+          aliases++;
+          if (aliases > guard.maxAliases) {
+            return { ok: false, reason: 'GraphQL alias limit exceeded', depth: maxDepth, aliases, fields };
+          }
+        } else {
+          fields++;
+          if (fields > guard.maxFields) {
+            return { ok: false, reason: 'GraphQL field limit exceeded', depth: maxDepth, aliases, fields };
+          }
+        }
+      }
+      prevToken = name;
+      continue;
+    }
+
+    if (ch === '$' || ch === '@' || ch === ':' || ch === '(' || ch === ')' || ch === '[' || ch === ']') {
+      prevToken = ch;
+    }
+    i++;
+  }
+
+  if (depth !== 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+  if (maxDepth === 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+  return { ok: true, depth: maxDepth, aliases, fields };
+}
+
+async function enforceGraphqlGuard(request: Request, pathname: string, ctx: ReqCtx): Promise<Response | null> {
+  const guard = CFG.graphqlGuard;
+  if (!guard || request.method !== 'POST' || !isGraphqlPath(pathname)) return null;
+
+  const body = await readLimitedRequestText(request, guard.maxBodyBytes || 65536);
+  let scan: GraphqlScanResult;
+  if (!body.ok) {
+    scan = { ok: false, reason: body.reason || 'GraphQL body too large', depth: 0, aliases: 0, fields: 0 };
+  } else {
+    const extracted = extractGraphqlQuery(body.text, request.headers.get('content-type') || '');
+    scan = extracted.ok
+      ? scanGraphqlQuery(extracted.query, guard)
+      : { ok: false, reason: extracted.reason || 'Malformed GraphQL query', depth: 0, aliases: 0, fields: 0 };
+  }
+
+  if (scan.ok) return null;
+
+  const fields = {
+    status: 400,
+    block_reason: scan.reason || 'GraphQL guard violation',
+    method: ctx.method,
+    uri: ctx.uri,
+    correlation_id: ctx.correlationId,
+    graphql_depth: scan.depth,
+    graphql_aliases: scan.aliases,
+    graphql_fields: scan.fields,
+  };
+  if (guard.mode === 'report') {
+    logEvent('monitor', fields);
+    return null;
+  }
+  return shouldBlock(400, fields.block_reason, ctx);
 }
 
 function base64UrlToBytes(input: string): Uint8Array {
@@ -638,6 +836,150 @@ async function handleChallenge(request: Request, url: URL, env: WorkerEnv, ua: s
   return challengeResponse(url, env, ua, ctx);
 }
 
+type DlpScanResult = { matched: boolean; detectors: string[]; masked: string };
+
+function isDlpEnabled(): boolean {
+  return Boolean(RESPONSE_CFG.responseDlp && RESPONSE_CFG.responseDlp.enabled);
+}
+
+function responseDlpLog(action: string, detectors: string[], ctx: ReqCtx, surface: string, status: number) {
+  logEvent(action === 'report_only' ? 'monitor' : 'block', {
+    status,
+    block_reason: 'response_dlp_' + action,
+    dlp_surface: surface,
+    dlp_detectors: detectors.join(','),
+    method: ctx.method,
+    uri: ctx.uri,
+    correlation_id: ctx.correlationId,
+  });
+}
+
+function luhnOk(value: string): boolean {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length < 13 || digits.length > 19) return false;
+  let sum = 0;
+  let doubleIt = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let n = digits.charCodeAt(i) - 48;
+    if (n < 0 || n > 9) return false;
+    if (doubleIt) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+    doubleIt = !doubleIt;
+  }
+  return sum % 10 === 0;
+}
+
+function replaceAllWithDetector(input: string, re: RegExp, detector: string, mask: string, detectors: Set<string>): string {
+  const flags = re.flags.indexOf('g') === -1 ? re.flags + 'g' : re.flags;
+  const globalRe = new RegExp(re.source, flags);
+  return input.replace(globalRe, (match: string) => {
+    detectors.add(detector);
+    return mask;
+  });
+}
+
+function scanAndMaskDlp(input: string): DlpScanResult {
+  const dlp = RESPONSE_CFG.responseDlp || {};
+  const builtIn: string[] = dlp.detectors && Array.isArray(dlp.detectors.builtIn)
+    ? dlp.detectors.builtIn
+    : ['api_key', 'credit_card'];
+  const mask = typeof dlp.mask === 'string' ? dlp.mask : '[REDACTED]';
+  const detectors = new Set<string>();
+  let masked = input;
+
+  if (builtIn.indexOf('api_key') !== -1) {
+    masked = masked.replace(/\b(?:sk-live-|sk_test_|ghp_)[A-Za-z0-9_=-]{8,}\b/g, (match: string) => {
+      detectors.add('api_key');
+      return mask;
+    });
+  }
+
+  if (builtIn.indexOf('credit_card') !== -1) {
+    masked = masked.replace(/\b(?:\d[ -]?){13,19}\b/g, (match: string) => {
+      if (!luhnOk(match)) return match;
+      detectors.add('credit_card');
+      return mask;
+    });
+  }
+
+  const customRegexes: RegExp[] = Array.isArray(RESPONSE_CFG.responseDlpCustomRegexes)
+    ? RESPONSE_CFG.responseDlpCustomRegexes
+    : [];
+  const customNames: string[] = dlp.detectors && Array.isArray(dlp.detectors.customRegexNames)
+    ? dlp.detectors.customRegexNames
+    : [];
+  for (let i = 0; i < customRegexes.length; i++) {
+    masked = replaceAllWithDetector(masked, customRegexes[i], customNames[i] || 'custom', mask, detectors);
+  }
+
+  return { matched: detectors.size > 0, detectors: Array.from(detectors), masked };
+}
+
+function dlpCanInspectBody(out: Response): boolean {
+  const dlp = RESPONSE_CFG.responseDlp || {};
+  if (!dlp.body || !dlp.body.enabled) return false;
+  const contentType = (out.headers.get('content-type') || '').toLowerCase();
+  const allowed: string[] = Array.isArray(dlp.body.contentTypes) ? dlp.body.contentTypes : [];
+  if (allowed.length > 0 && !allowed.some((ct: string) => contentType.indexOf(ct) !== -1)) return false;
+  const len = Number(out.headers.get('content-length') || '0');
+  const maxBytes = Number(dlp.body.maxBytes) || 32768;
+  return !Number.isFinite(len) || len === 0 || len <= maxBytes;
+}
+
+async function applyResponseDlp(out: Response, ctx: ReqCtx): Promise<Response> {
+  if (!isDlpEnabled()) return out;
+  const dlp = RESPONSE_CFG.responseDlp;
+  const action = dlp.action || 'report_only';
+  const blockStatus = Number(dlp.blockStatus) || 451;
+
+  if (dlp.headers && dlp.headers.enabled) {
+    const names: string[] = Array.isArray(dlp.headers.names) ? dlp.headers.names : [];
+    for (const name of names) {
+      const value = out.headers.get(name);
+      if (!value) continue;
+      const scan = scanAndMaskDlp(value);
+      if (!scan.matched) continue;
+      responseDlpLog(action, scan.detectors, ctx, 'header:' + name, blockStatus);
+      out.headers.set('X-Edge-DLP', action);
+      if (action === 'block') {
+        return new Response(dlp.blockBody || 'Response blocked by edge DLP', {
+          status: blockStatus,
+          headers: { 'Cache-Control': 'no-store', 'X-Edge-DLP': 'block' },
+        });
+      }
+      if (action === 'mask') out.headers.set(name, scan.masked);
+    }
+  }
+
+  if (!dlpCanInspectBody(out)) return out;
+  const clone = out.clone();
+  const text = await clone.text();
+  const maxBytes = Number(dlp.body.maxBytes) || 32768;
+  if (new TextEncoder().encode(text).length > maxBytes) return out;
+  const scan = scanAndMaskDlp(text);
+  if (!scan.matched) return out;
+  responseDlpLog(action, scan.detectors, ctx, 'body', blockStatus);
+  out.headers.set('X-Edge-DLP', action);
+  if (action === 'block') {
+    return new Response(dlp.blockBody || 'Response blocked by edge DLP', {
+      status: blockStatus,
+      headers: { 'Cache-Control': 'no-store', 'X-Edge-DLP': 'block' },
+    });
+  }
+  if (action === 'report_only') return out;
+  const maskedHeaders = new Headers(out.headers);
+  maskedHeaders.delete('content-length');
+  maskedHeaders.set('X-Edge-DLP', 'mask');
+  return new Response(scan.masked, {
+    status: out.status,
+    statusText: out.statusText,
+    headers: maskedHeaders,
+  });
+}
+
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
@@ -757,6 +1099,9 @@ export default {
     }
 
     for (const k of CFG.dropQueryKeys) url.searchParams.delete(k);
+
+    const graphqlGuardResponse = await enforceGraphqlGuard(request, url.pathname, ctx);
+    if (graphqlGuardResponse) return graphqlGuardResponse;
 
     // Nonce to forward to origin after a successful signed_url verification.
     // Collected here and attached when we build the origin-facing Request.
@@ -920,6 +1265,7 @@ export default {
       headers: forwardHeaders,
       body: request.body,
       redirect: request.redirect,
+      ...({ duplex: 'half' } as any),
     }));
 
     const out = new Response(res.body, res);
@@ -1039,6 +1385,6 @@ export default {
       }
     }
 
-    return out;
+    return await applyResponseDlp(out, ctx);
   },
 };

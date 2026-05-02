@@ -124,6 +124,47 @@
               }
             }
           }
+        },
+        "graphql_guard": {
+          "description": "Optional GraphQL request guard for body-readable targets such as Cloudflare Workers. AWS CloudFront Functions/Lambda@Edge output cannot read request bodies and emits an unsupported warning when this is configured.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "endpoint_paths": {
+              "description": "GraphQL endpoint path prefixes. Defaults to [\"/graphql\"] when omitted.",
+              "type": "array",
+              "items": { "type": "string", "minLength": 1 },
+              "minItems": 1
+            },
+            "max_depth": {
+              "description": "Maximum selection-set nesting depth accepted by the lightweight scanner.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 64
+            },
+            "max_aliases": {
+              "description": "Maximum number of field aliases accepted in one GraphQL document.",
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 10000
+            },
+            "max_fields": {
+              "description": "Maximum number of field names accepted in one GraphQL document.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50000
+            },
+            "max_body_bytes": {
+              "description": "Maximum request body bytes the edge will read for GraphQL inspection. Defaults to 65536.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 1048576
+            },
+            "mode": {
+              "description": "`block` rejects violating requests; `report` logs the violation and forwards the request.",
+              "enum": ["block", "report"]
+            }
+          }
         }
       }
     },
@@ -292,6 +333,80 @@
             "secure": { "type": "boolean" },
             "http_only": { "type": "boolean" },
             "same_site": { "enum": ["Strict", "Lax", "None"] }
+          }
+        }
+      }
+    },
+    "response_dlp": {
+      "description": "Optional response DLP guard. Cloudflare Workers can inspect configured response headers and bounded text-like bodies; AWS CloudFront Functions cannot inspect response bodies and emit an unsupported warning.",
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "enabled": { "type": "boolean" },
+        "action": {
+          "description": "`report_only` logs findings without mutation, `mask` replaces matched values, and `block` returns a synthetic blocked response.",
+          "enum": ["report_only", "mask", "block"]
+        },
+        "mask": { "type": "string" },
+        "block_status": {
+          "type": "integer",
+          "minimum": 400,
+          "maximum": 599
+        },
+        "block_body": { "type": "string" },
+        "body": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "max_bytes": {
+              "description": "Maximum response body size to inspect on Cloudflare Workers. Larger bodies are passed through unmodified.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 131072
+            },
+            "content_types": {
+              "description": "Lowercase substring allowlist for text-like Content-Type values eligible for body inspection.",
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "headers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "names": {
+              "description": "Response header names to inspect and optionally mask/block.",
+              "type": "array",
+              "items": { "type": "string" }
+            }
+          }
+        },
+        "detectors": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "built_in": {
+              "description": "Built-in high-confidence detectors. `credit_card` requires a Luhn-valid 13-19 digit candidate.",
+              "type": "array",
+              "items": { "enum": ["api_key", "credit_card"] }
+            },
+            "custom_regex": {
+              "description": "Custom response detectors. Patterns are compiled at build time, capped to 256 characters, and rejected for nested-quantifier ReDoS shapes.",
+              "type": "array",
+              "maxItems": 10,
+              "items": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["name", "pattern"],
+                "properties": {
+                  "name": { "type": "string", "minLength": 1, "maxLength": 64 },
+                  "pattern": { "type": "string", "minLength": 1, "maxLength": 256 }
+                }
+              }
+            }
           }
         }
       }

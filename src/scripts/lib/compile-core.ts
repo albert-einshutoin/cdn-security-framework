@@ -528,6 +528,18 @@ function warnWeakAwsCspNonce(policy: any, options: any = {}) {
   return { warned: true, warnings: [msg] };
 }
 
+function warnUnsupportedAwsResponseDlp(policy: any, options: any = {}) {
+  const logger = options.logger || console;
+  if (!policy || !policy.response_dlp || policy.response_dlp.enabled !== true) {
+    return { warned: false, warnings: [] };
+  }
+  const msg =
+    '[WARN] response_dlp is enabled but AWS CloudFront Functions cannot inspect response bodies. ' +
+    'The AWS target does not enforce response DLP masking/blocking; use the Cloudflare Workers target for body/header response DLP or enforce DLP at the origin/Lambda@Edge.';
+  logger.error(msg);
+  return { warned: true, warnings: [msg] };
+}
+
 function buildChallengeConfig(policy: any) {
   const raw = policy && policy.firewall && policy.firewall.challenge;
   if (!raw || raw.enabled !== true) return null;
@@ -567,6 +579,47 @@ function warnUnsupportedAwsChallenge(policy: any, options: any = {}) {
   const msg =
     '[WARN] firewall.challenge is enabled but the AWS / CloudFront targets do not support the experimental JS challenge primitive. ' +
     'CloudFront Functions cannot reliably serve and verify the HTML proof-of-work flow in this framework; use --target cloudflare or disable firewall.challenge for AWS builds.';
+  logger.error(msg);
+  return { warned: true, warnings: [msg] };
+}
+
+function buildGraphqlGuardConfig(policy: any) {
+  const guard = policy && policy.request && policy.request.graphql_guard;
+  if (!guard || typeof guard !== 'object') return null;
+
+  const endpointPaths = Array.isArray(guard.endpoint_paths)
+    ? guard.endpoint_paths
+        .map((p: any) => (typeof p === 'string' ? p.trim() : ''))
+        .filter(Boolean)
+    : ['/graphql'];
+
+  return {
+    endpointPaths: endpointPaths.length > 0 ? endpointPaths : ['/graphql'],
+    maxDepth: Number.isFinite(Number(guard.max_depth))
+      ? Math.max(1, Math.min(64, Number(guard.max_depth)))
+      : 10,
+    maxAliases: Number.isFinite(Number(guard.max_aliases))
+      ? Math.max(0, Math.min(10000, Number(guard.max_aliases)))
+      : 20,
+    maxFields: Number.isFinite(Number(guard.max_fields))
+      ? Math.max(1, Math.min(50000, Number(guard.max_fields)))
+      : 200,
+    maxBodyBytes: Number.isFinite(Number(guard.max_body_bytes))
+      ? Math.max(1, Math.min(1048576, Number(guard.max_body_bytes)))
+      : 65536,
+    mode: guard.mode === 'report' ? 'report' : 'block',
+  };
+}
+
+function warnUnsupportedGraphqlGuard(policy: any, target: string, options: any = {}) {
+  const logger = options.logger || console;
+  const guard = buildGraphqlGuardConfig(policy);
+  if (!guard || target === 'cloudflare') return { warned: false, warnings: [] };
+
+  const msg =
+    `[WARN] request.graphql_guard is configured but target "${target}" cannot read request bodies at the edge. ` +
+    'GraphQL depth/complexity enforcement is unsupported for CloudFront Functions/Lambda@Edge output; ' +
+    'use the Cloudflare Workers target or enforce this guard at the origin.';
   logger.error(msg);
   return { warned: true, warnings: [msg] };
 }
@@ -827,7 +880,9 @@ function main(argv: string[] = process.argv.slice(2)) {
   // Non-fatal advisory: signed_url protecting write-like paths without nonce_param.
   warnSignedUrlReplay(policy);
   warnWeakAwsCspNonce(policy);
+  warnUnsupportedAwsResponseDlp(policy);
   warnUnsupportedAwsChallenge(policy);
+  warnUnsupportedGraphqlGuard(policy, 'aws');
 
   validateAuthGates(policy, { allowPlaceholderToken });
 
@@ -872,9 +927,12 @@ module.exports = {
   validateOriginAuth,
   warnIfPermissive,
   warnWeakAwsCspNonce,
+  warnUnsupportedAwsResponseDlp,
   warnSignedUrlReplay,
   buildChallengeConfig,
   warnUnsupportedAwsChallenge,
+  buildGraphqlGuardConfig,
+  warnUnsupportedGraphqlGuard,
   validateJwksUrl,
   build,
   main,

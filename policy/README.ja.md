@@ -83,6 +83,10 @@ node scripts/policy-lint.js policy/base.yml
 | `request.limits.max_header_size` | 1 | 65,536 | バイト |
 | `routes[].auth_gate.clock_skew_sec` | 0 | 600 | 秒 |
 | `routes[].auth_gate.cache_ttl_sec` | 0 | 86,400 | 秒（1 日） |
+| `request.graphql_guard.max_depth` | 1 | 64 | Cloudflare Workers のみ |
+| `request.graphql_guard.max_aliases` | 0 | 10,000 | Cloudflare Workers のみ |
+| `request.graphql_guard.max_fields` | 1 | 50,000 | Cloudflare Workers のみ |
+| `request.graphql_guard.max_body_bytes` | 1 | 1,048,576 | 複製した POST body から検査するバイト数 |
 | `response_headers.cors.max_age` | 0 | 86,400 | 秒（ブラウザ CORS 上限） |
 | `firewall.waf.rate_limit` | 100 | 2,000,000,000 | AWS WAFv2 の 5 分レートウィンドウ |
 | `firewall.challenge.difficulty` | 1 | 6 | SHA-256 hex の先頭ゼロ数（Cloudflare Workers 実験的機能） |
@@ -109,6 +113,7 @@ npx cdn-security build --fail-on-permissive
 * [プロファイル](../docs/profiles.ja.md) — プロファイル選択と本番 CI の permissive ゲート。
 * [Edge JS Challenge](../docs/edge-js-challenge.ja.md) — Cloudflare Workers の実験的 JS challenge / lightweight PoW primitive。
 * [ポリシーとランタイムの同期](../docs/policy-runtime-sync.ja.md) — ポリシーとランタイムの同期方法。
+* [GraphQL Guard](../docs/graphql-guard.ja.md) — Cloudflare Workers の GraphQL depth/complexity request body guard。
 * [アーキテクチャ](../docs/architecture.ja.md) — ポリシー駆動の設計。
 
 ---

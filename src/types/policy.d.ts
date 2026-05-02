@@ -77,6 +77,37 @@ export interface CDNSecurityFrameworkPolicy {
         remove_dot_segments?: boolean;
       };
     };
+    /**
+     * Optional GraphQL request guard for body-readable targets such as Cloudflare Workers. AWS CloudFront Functions/Lambda@Edge output cannot read request bodies and emits an unsupported warning when this is configured.
+     */
+    graphql_guard?: {
+      /**
+       * GraphQL endpoint path prefixes. Defaults to ["/graphql"] when omitted.
+       *
+       * @minItems 1
+       */
+      endpoint_paths?: [string, ...string[]];
+      /**
+       * Maximum selection-set nesting depth accepted by the lightweight scanner.
+       */
+      max_depth?: number;
+      /**
+       * Maximum number of field aliases accepted in one GraphQL document.
+       */
+      max_aliases?: number;
+      /**
+       * Maximum number of field names accepted in one GraphQL document.
+       */
+      max_fields?: number;
+      /**
+       * Maximum request body bytes the edge will read for GraphQL inspection. Defaults to 65536.
+       */
+      max_body_bytes?: number;
+      /**
+       * `block` rejects violating requests; `report` logs the violation and forwards the request.
+       */
+      mode?: "block" | "report";
+    };
   };
   routes?: {
     name: string;
@@ -177,6 +208,290 @@ export interface CDNSecurityFrameworkPolicy {
       secure?: boolean;
       http_only?: boolean;
       same_site?: "Strict" | "Lax" | "None";
+    };
+  };
+  /**
+   * Optional response DLP guard. Cloudflare Workers can inspect configured response headers and bounded text-like bodies; AWS CloudFront Functions cannot inspect response bodies and emit an unsupported warning.
+   */
+  response_dlp?: {
+    enabled?: boolean;
+    /**
+     * `report_only` logs findings without mutation, `mask` replaces matched values, and `block` returns a synthetic blocked response.
+     */
+    action?: "report_only" | "mask" | "block";
+    mask?: string;
+    block_status?: number;
+    block_body?: string;
+    body?: {
+      enabled?: boolean;
+      /**
+       * Maximum response body size to inspect on Cloudflare Workers. Larger bodies are passed through unmodified.
+       */
+      max_bytes?: number;
+      /**
+       * Lowercase substring allowlist for text-like Content-Type values eligible for body inspection.
+       */
+      content_types?: string[];
+    };
+    headers?: {
+      enabled?: boolean;
+      /**
+       * Response header names to inspect and optionally mask/block.
+       */
+      names?: string[];
+    };
+    detectors?: {
+      /**
+       * Built-in high-confidence detectors. `credit_card` requires a Luhn-valid 13-19 digit candidate.
+       */
+      built_in?: ("api_key" | "credit_card")[];
+      /**
+       * Custom response detectors. Patterns are compiled at build time, capped to 256 characters, and rejected for nested-quantifier ReDoS shapes.
+       *
+       * @maxItems 10
+       */
+      custom_regex?:
+        | []
+        | [
+            {
+              name: string;
+              pattern: string;
+            }
+          ]
+        | [
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            }
+          ]
+        | [
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            }
+          ]
+        | [
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            }
+          ]
+        | [
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            }
+          ]
+        | [
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            }
+          ]
+        | [
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            }
+          ]
+        | [
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            }
+          ]
+        | [
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            }
+          ]
+        | [
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            },
+            {
+              name: string;
+              pattern: string;
+            }
+          ];
     };
   };
   firewall?: {

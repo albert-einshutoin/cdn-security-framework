@@ -60,6 +60,7 @@
 | **ヘッダー数制限** | ✅ 対応 | `request.limits.max_header_count`（既定 64、1..500 にクランプ）→ 超過時 431。CFF viewer-request と Cloudflare Worker の入口で適用。 |
 | **パス正規化** | ✅ 対応 | `request.normalize.path.collapse_slashes`, `remove_dot_segments` で URI をクリーンアップ。 |
 | **クエリ正規化** | ✅ 対応 | `request.normalize.drop_query_keys` でトラッキングパラメータ（utm_*、gclid 等）を除去。 |
+| **GraphQL depth/complexity guard** | Cloudflare Workers のみ | `request.graphql_guard` で POST GraphQL body を検査し、depth、alias 数、field 数、malformed document を検出。AWS target は CloudFront edge output が request body を読めないため未対応警告のみ。 |
 | **必須ヘッダー** | ✅ 対応 | `request.block.header_missing` で必須ヘッダーをチェック（UA 以外も対応）。 |
 | **Bot/スキャナ対策（User-Agent）** | ✅ 対応 | `request.block.ua_contains` で既知スキャナをブロック。 |
 | **指紋（JA3/JA4）** | ✅ 対応 | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints` からルール生成。初期は `fingerprint_action: count`、検証後 `block` へ昇格。 |
@@ -120,6 +121,15 @@
 | オリジン認証 | — | ✓ | ✓ | — |
 | タイムアウト | — | — | — | ✓ |
 | モニターモード | ✓ | ✓ | ✓ | — |
+| レスポンス DLP マスク/ブロック | 未対応: body inspection 不可 | ヘッダー/body は可能だが既定生成なし | ✓ | — |
+
+### レスポンス DLP
+
+`response_dlp` は optional で、現時点では Cloudflare Workers target が enforcement 対応です。設定したレスポンスヘッダーと、サイズ上限内のテキスト系レスポンスボディを検査し、`report_only`、`mask`、`block` を適用できます。
+
+built-in detector は API key prefix（`sk-live-`、`sk_test_`、`ghp_`）と、Luhn 検証に通った credit-card-like 値を高信頼として扱います。custom regex はビルド時に compile し、256 文字・10 件までに制限し、nested quantifier 系の ReDoS 形状は拒否します。
+
+body inspection は設定されたテキスト系 `Content-Type` と `body.max_bytes`（既定 32768、最大 131072）に限定します。上限超過または非テキストレスポンスは変更せず通します。CloudFront Functions はレスポンス body を検査できないため、`response_dlp.enabled: true` の AWS compile では unsupported warning を出します。
 
 ---
 
