@@ -5,7 +5,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { DEFAULT_CONTAINS, parsePathPatterns, hasCatastrophicBacktrackShape, regexesLiteralCode, getAuthGates, validateAuthGates, validateJwksUrl, build, PLACEHOLDER_TOKEN, hasFailOnPermissiveFlag, warnIfPermissive, warnWeakAwsCspNonce, warnSignedUrlReplay, validateOriginAuth, } = require('./lib/compile-core');
+const { DEFAULT_CONTAINS, parsePathPatterns, hasCatastrophicBacktrackShape, regexesLiteralCode, getAuthGates, validateAuthGates, validateJwksUrl, build, PLACEHOLDER_TOKEN, hasFailOnPermissiveFlag, warnIfPermissive, warnWeakAwsCspNonce, warnUnsupportedAwsResponseDlp, warnSignedUrlReplay, validateOriginAuth, } = require('./lib/compile-core');
 const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
 function test(name, fn) {
     try {
@@ -126,6 +126,19 @@ test('parsePathPatterns lowercases contains entries so uppercase policy survives
     const fromLegacy = parsePathPatterns(['/INTERNAL/', '(?i)\\.{2}/']);
     assert.ok(fromLegacy.contains.includes('/internal/'), 'plain upper entry normalized');
     assert.ok(fromLegacy.contains.every((c) => c === c.toLowerCase()), 'mapped entries normalized');
+});
+test('warnUnsupportedAwsResponseDlp warns when response DLP is enabled for AWS', () => {
+    const messages = [];
+    const result = warnUnsupportedAwsResponseDlp({ response_dlp: { enabled: true, action: 'block' } }, { logger: { error: (msg) => messages.push(msg) } });
+    assert.strictEqual(result.warned, true);
+    assert.strictEqual(messages.length, 1);
+    assert.match(messages[0], /response_dlp|CloudFront Functions cannot inspect response bodies/);
+});
+test('warnUnsupportedAwsResponseDlp stays silent when response DLP is disabled', () => {
+    const messages = [];
+    const result = warnUnsupportedAwsResponseDlp({ response_dlp: { enabled: false } }, { logger: { error: (msg) => messages.push(msg) } });
+    assert.strictEqual(result.warned, false);
+    assert.deepStrictEqual(messages, []);
 });
 test('regexesLiteralCode emits real RegExp literals with flags', () => {
     assert.strictEqual(regexesLiteralCode([]), '[]');
