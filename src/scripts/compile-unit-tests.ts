@@ -18,6 +18,8 @@ const {
   warnIfPermissive,
   warnWeakAwsCspNonce,
   warnSignedUrlReplay,
+  buildChallengeConfig,
+  warnUnsupportedAwsChallenge,
   validateOriginAuth,
 } = require('./lib/compile-core');
 const {
@@ -196,6 +198,43 @@ test('parsePathPatterns lowercases contains entries so uppercase policy survives
   const fromLegacy = parsePathPatterns(['/INTERNAL/', '(?i)\\.{2}/']);
   assert.ok(fromLegacy.contains.includes('/internal/'), 'plain upper entry normalized');
   assert.ok(fromLegacy.contains.every((c: string) => c === c.toLowerCase()), 'mapped entries normalized');
+});
+
+test('buildChallengeConfig normalizes experimental challenge defaults', () => {
+  const cfg = buildChallengeConfig({
+    firewall: {
+      challenge: {
+        enabled: true,
+        path_prefixes: ['/guarded'],
+        ua_contains: ['HeadlessChrome'],
+        difficulty: 99,
+        ttl_sec: 10,
+      },
+    },
+  });
+
+  assert.deepStrictEqual(cfg, {
+    enabled: true,
+    mode: 'challenge',
+    pathPrefixes: ['/guarded'],
+    uaContains: ['headlesschrome'],
+    difficulty: 6,
+    ttlSec: 60,
+    secretEnv: 'CHALLENGE_SECRET',
+    cookieName: '__cdn_challenge',
+  });
+});
+
+test('warnUnsupportedAwsChallenge warns for AWS target when challenge is enabled', () => {
+  const messages: string[] = [];
+  const result = warnUnsupportedAwsChallenge(
+    { firewall: { challenge: { enabled: true, mode: 'challenge' } } },
+    { logger: { error: (msg: string) => messages.push(msg) } },
+  );
+
+  assert.strictEqual(result.warned, true);
+  assert.strictEqual(messages.length, 1);
+  assert.match(messages[0], /firewall\.challenge|CloudFront|unsupported/i);
 });
 
 test('regexesLiteralCode emits real RegExp literals with flags', () => {

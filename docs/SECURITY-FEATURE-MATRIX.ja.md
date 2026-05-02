@@ -33,6 +33,7 @@
 | **WAF カスタムブロックレスポンス** | ✅ 対応 | `firewall.waf.block_response`（status_code, body, content_type）→ `custom_response_bodies` + `custom_response_body_key`。ベンダーリークを排除。 |
 | **WAF ロギング + レッダクション** | ✅ 対応 | `firewall.waf.logging.{enabled, destination_arn_env, redacted_fields[]}` → `aws_wafv2_logging_configuration`。CLOUDFRONT スコープでロギング無効時に lint 警告。 |
 | **TLS 指紋ルール（JA3/JA4）** | ✅ 対応 | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints` と `fingerprint_action: block|count` に対応。 |
+| **Edge JS challenge / lightweight PoW** | ⚠️ 部分対応 | `firewall.challenge` は Cloudflare Workers のみで適用。AWS ターゲットでは未対応警告を出します。詳細は [Edge JS Challenge](./edge-js-challenge.ja.md)。 |
 
 ---
 
@@ -89,7 +90,7 @@
 | カテゴリ | 対応済み | 部分対応 | 未対応 |
 |----------|----------|----------|--------|
 | **Transport** | HSTS, TLS 版, HTTP 版 | — | — |
-| **Firewall / Access** | レート制限（グローバル＋URI 単位）, Geo, IP, WAF マネージド, カスタムブロックレスポンス, ロギング, JA3/JA4 指紋ルール | — | — |
+| **Firewall / Access** | レート制限（グローバル＋URI 単位）, Geo, IP, WAF マネージド, カスタムブロックレスポンス, ロギング, JA3/JA4 指紋ルール | Edge JS challenge（Cloudflare Workers のみ） | — |
 | **Authentication** | トークン, Basic, JWT, 署名付き URL | — | — |
 | **Request Hygiene** | メソッド, URI/クエリ/ヘッダー制限, 正規化, UA ブロック, 必須ヘッダー, 指紋（JA3/JA4） | — | — |
 | **Response Security** | セキュリティヘッダー, CORS, Cookie 属性 | — | — |
@@ -105,6 +106,7 @@
 | パス正規化 | ✓ | — | ✓ | — |
 | 必須ヘッダー | ✓ | — | ✓ | — |
 | ヘッダーサイズ | — | ✓ | ✓ | — |
+| Edge JS challenge / PoW | — | — | ✓ | — |
 | CORS | ✓ | — | ✓ | — |
 | Basic 認証 | ✓ | — | ✓ | — |
 | Cookie 属性 | ✓ | — | ✓ | — |

@@ -77,6 +77,9 @@ test('cloudflare template contains auth enforcement logic', () => {
     assert.ok(template.includes('if (gate.type === \'signed_url\')'));
     assert.ok(template.includes('CFG.originAuth'));
     assert.ok(template.includes('forwardHeaders.set(headerName, secret)'));
+    assert.ok(template.includes('async function handleChallenge'), 'challenge handler missing');
+    assert.ok(template.includes('verifyChallengeCookie'), 'challenge cookie verifier missing');
+    assert.ok(template.includes('verifyChallengeSolution'), 'challenge proof verifier missing');
     // Auth/crypto hardening fixtures
     assert.ok(template.includes('isJwtAlgAllowed'), 'JWT alg whitelist helper missing');
     assert.ok(template.includes('isHostAllowed'), 'Host allowlist helper missing');
@@ -112,6 +115,30 @@ routes:
     assert.ok(/trustForwardedFor:\s*false/.test(generated));
     assert.ok(generated.includes('"allowed_algorithms":["RS256"]'), 'allowed_algorithms emitted without "none" or cross-alg entries');
     assert.ok(generated.includes('"clock_skew_sec":60'));
+});
+test('cloudflare compile emits experimental challenge config', () => {
+    const generated = compileCloudflare(`
+version: 1
+project: cf-challenge-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+firewall:
+  challenge:
+    enabled: true
+    mode: challenge
+    path_prefixes: ["/guarded"]
+    ua_contains: ["HeadlessChrome"]
+    difficulty: 2
+    ttl_sec: 600
+    secret_env: CHALLENGE_SECRET
+`);
+    assert.ok(generated.includes('challenge: {"enabled":true'));
+    assert.ok(generated.includes('"pathPrefixes":["/guarded"]'));
+    assert.ok(generated.includes('"uaContains":["headlesschrome"]'));
+    assert.ok(generated.includes('"difficulty":2'));
+    assert.ok(generated.includes('"ttlSec":600'));
 });
 test('cloudflare compile fails when allowed_algorithms includes an alg the verifier cannot validate', () => {
     let caught;

@@ -88,6 +88,8 @@ issue with the use case.
 | `routes[].auth_gate.cache_ttl_sec` | 0 | 86,400 | Seconds (1 day) |
 | `response_headers.cors.max_age` | 0 | 86,400 | Seconds (browser CORS cap) |
 | `firewall.waf.rate_limit` | 100 | 2,000,000,000 | AWS WAFv2 rate-based window |
+| `firewall.challenge.difficulty` | 1 | 6 | Leading SHA-256 hex zeroes (Cloudflare Workers experimental) |
+| `firewall.challenge.ttl_sec` | 60 | 86,400 | Solved challenge cookie lifetime |
 | `origin.timeout.connect` | 1 | 10 | CloudFront cap |
 | `origin.timeout.read` | 1 | 60 | CloudFront cap |
 
@@ -108,6 +110,7 @@ See [docs/profiles.md](../docs/profiles.md) for the full profile comparison and 
 ## Related
 
 * [Profiles](../docs/profiles.md) — how to choose a profile and gate permissive in production CI.
+* [Edge JS Challenge](../docs/edge-js-challenge.md) — experimental Cloudflare Workers JS challenge / lightweight PoW primitive.
 * [Policy and runtime sync](../docs/policy-runtime-sync.md) — how to keep policy and runtimes in sync.
 * [Architecture](../docs/architecture.md) — policy-driven design.
 

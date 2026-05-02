@@ -492,6 +492,45 @@ function warnWeakAwsCspNonce(policy, options = {}) {
     logger.error(msg);
     return { warned: true, warnings: [msg] };
 }
+function buildChallengeConfig(policy) {
+    const raw = policy && policy.firewall && policy.firewall.challenge;
+    if (!raw || raw.enabled !== true)
+        return null;
+    const pathPrefixes = Array.isArray(raw.path_prefixes)
+        ? raw.path_prefixes.map((p) => (typeof p === 'string' ? p.trim() : '')).filter(Boolean)
+        : [];
+    const uaContains = Array.isArray(raw.ua_contains)
+        ? raw.ua_contains.map((s) => (typeof s === 'string' ? s.trim().toLowerCase() : '')).filter(Boolean)
+        : [];
+    return {
+        enabled: true,
+        mode: raw.mode === 'report' || raw.mode === 'block' || raw.mode === 'challenge' ? raw.mode : 'challenge',
+        pathPrefixes,
+        uaContains,
+        difficulty: Number.isFinite(Number(raw.difficulty))
+            ? Math.max(1, Math.min(6, Number(raw.difficulty)))
+            : 3,
+        ttlSec: Number.isFinite(Number(raw.ttl_sec))
+            ? Math.max(60, Math.min(86400, Number(raw.ttl_sec)))
+            : 900,
+        secretEnv: typeof raw.secret_env === 'string' && raw.secret_env.trim()
+            ? raw.secret_env.trim()
+            : 'CHALLENGE_SECRET',
+        cookieName: typeof raw.cookie_name === 'string' && raw.cookie_name.trim()
+            ? raw.cookie_name.trim()
+            : '__cdn_challenge',
+    };
+}
+function warnUnsupportedAwsChallenge(policy, options = {}) {
+    const logger = options.logger || console;
+    const challenge = buildChallengeConfig(policy);
+    if (!challenge)
+        return { warned: false, warnings: [] };
+    const msg = '[WARN] firewall.challenge is enabled but the AWS / CloudFront targets do not support the experimental JS challenge primitive. ' +
+        'CloudFront Functions cannot reliably serve and verify the HTML proof-of-work flow in this framework; use --target cloudflare or disable firewall.challenge for AWS builds.';
+    logger.error(msg);
+    return { warned: true, warnings: [msg] };
+}
 // Normalize observability config for injection into edge CFG objects.
 // Kept next to the compiler so every target (CFF / Lambda@Edge / Worker)
 // sees identical defaults and casing.
@@ -728,6 +767,7 @@ function main(argv = process.argv.slice(2)) {
     // Non-fatal advisory: signed_url protecting write-like paths without nonce_param.
     warnSignedUrlReplay(policy);
     warnWeakAwsCspNonce(policy);
+    warnUnsupportedAwsChallenge(policy);
     validateAuthGates(policy, { allowPlaceholderToken });
     try {
         validateOriginAuth(policy, { strict: strictOriginAuth });
@@ -771,6 +811,8 @@ module.exports = {
     warnIfPermissive,
     warnWeakAwsCspNonce,
     warnSignedUrlReplay,
+    buildChallengeConfig,
+    warnUnsupportedAwsChallenge,
     validateJwksUrl,
     build,
     main,

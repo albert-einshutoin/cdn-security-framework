@@ -373,6 +373,50 @@
             "fingerprint_action": { "enum": ["block", "count"] }
           }
         },
+        "challenge": {
+          "description": "Experimental Cloudflare Workers-only JavaScript challenge / lightweight proof-of-work primitive. Opt in only after reviewing accessibility and false-positive impact. AWS CloudFront Functions / Lambda@Edge targets emit an unsupported warning because they cannot reliably serve and verify an HTML challenge response in this framework.",
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "enabled": { "type": "boolean" },
+            "mode": {
+              "description": "`report` logs matching traffic and allows it, `block` denies matching traffic, and `challenge` serves an HTML JS proof-of-work page until a valid cookie is set.",
+              "enum": ["report", "block", "challenge"]
+            },
+            "path_prefixes": {
+              "description": "Request path prefixes that should trigger the challenge policy.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "ua_contains": {
+              "description": "Case-insensitive User-Agent substrings that should trigger the challenge policy.",
+              "type": "array",
+              "items": { "type": "string" }
+            },
+            "difficulty": {
+              "description": "Number of leading SHA-256 hex zeroes required in SHA-256(seed:nonce). Keep low; this is a lightweight friction primitive, not CAPTCHA.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 6
+            },
+            "ttl_sec": {
+              "description": "Lifetime of the solved challenge cookie. Default 900 seconds.",
+              "type": "integer",
+              "minimum": 60,
+              "maximum": 86400
+            },
+            "secret_env": {
+              "description": "Cloudflare Worker runtime env var containing the HMAC secret used to sign challenge seeds and cookies. Default CHALLENGE_SECRET.",
+              "type": "string",
+              "pattern": "^[A-Z][A-Z0-9_]*$"
+            },
+            "cookie_name": {
+              "description": "Cookie name for solved challenges. Default __cdn_challenge.",
+              "type": "string",
+              "pattern": "^[A-Za-z0-9_.-]+$"
+            }
+          }
+        },
         "geo": {
           "type": "object",
           "additionalProperties": false,

@@ -31,6 +31,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | **WAF custom block response** | Supported | `firewall.waf.block_response` (status_code, body, content_type) → `custom_response_bodies` + `custom_response_body_key`. Removes vendor leak. |
 | **WAF logging + redaction** | Supported | `firewall.waf.logging.{enabled, destination_arn_env, redacted_fields[]}` → `aws_wafv2_logging_configuration`. Lint warns on CLOUDFRONT scope without logging. |
 | **TLS fingerprint rules (JA3/JA4)** | Supported | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints`, optional `fingerprint_action: block|count`. |
+| **Edge JS challenge / lightweight PoW** | Partial | `firewall.challenge` is enforced by Cloudflare Workers only. AWS targets emit an unsupported warning. See [Edge JS Challenge](./edge-js-challenge.md). |
 
 ---
 
@@ -87,7 +88,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | Category | Supported | Partial | Not supported |
 |----------|-----------|---------|---------------|
 | **Transport** | HSTS, TLS version, HTTP version | — | — |
-| **Firewall / Access** | Rate limit (global + per-URI), Geo, IP, WAF managed rules, custom block response, logging, JA3/JA4 fingerprint rules | — | — |
+| **Firewall / Access** | Rate limit (global + per-URI), Geo, IP, WAF managed rules, custom block response, logging, JA3/JA4 fingerprint rules | Edge JS challenge (Cloudflare Workers only) | — |
 | **Authentication** | Token, Basic, JWT, Signed URL | — | — |
 | **Request Hygiene** | Method, URI/Query/Header limits, Normalization, UA block, Required headers, Fingerprint (JA3/JA4) | — | — |
 | **Response Security** | Security headers, CORS, Cookie attributes | — | — |
@@ -103,6 +104,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | Path normalization | ✓ | — | ✓ | — |
 | Required headers | ✓ | — | ✓ | — |
 | Header size limit | — | ✓ | ✓ | — |
+| Edge JS challenge / PoW | — | — | ✓ | — |
 | CORS | ✓ | — | ✓ | — |
 | Basic auth | ✓ | — | ✓ | — |
 | Cookie attributes | ✓ | — | ✓ | — |

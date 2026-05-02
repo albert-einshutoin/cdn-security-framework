@@ -236,6 +236,40 @@ export interface CDNSecurityFrameworkPolicy {
       ja4_fingerprints?: string[];
       fingerprint_action?: "block" | "count";
     };
+    /**
+     * Experimental Cloudflare Workers-only JavaScript challenge / lightweight proof-of-work primitive. Opt in only after reviewing accessibility and false-positive impact. AWS CloudFront Functions / Lambda@Edge targets emit an unsupported warning because they cannot reliably serve and verify an HTML challenge response in this framework.
+     */
+    challenge?: {
+      enabled?: boolean;
+      /**
+       * `report` logs matching traffic and allows it, `block` denies matching traffic, and `challenge` serves an HTML JS proof-of-work page until a valid cookie is set.
+       */
+      mode?: "report" | "block" | "challenge";
+      /**
+       * Request path prefixes that should trigger the challenge policy.
+       */
+      path_prefixes?: string[];
+      /**
+       * Case-insensitive User-Agent substrings that should trigger the challenge policy.
+       */
+      ua_contains?: string[];
+      /**
+       * Number of leading SHA-256 hex zeroes required in SHA-256(seed:nonce). Keep low; this is a lightweight friction primitive, not CAPTCHA.
+       */
+      difficulty?: number;
+      /**
+       * Lifetime of the solved challenge cookie. Default 900 seconds.
+       */
+      ttl_sec?: number;
+      /**
+       * Cloudflare Worker runtime env var containing the HMAC secret used to sign challenge seeds and cookies. Default CHALLENGE_SECRET.
+       */
+      secret_env?: string;
+      /**
+       * Cookie name for solved challenges. Default __cdn_challenge.
+       */
+      cookie_name?: string;
+    };
     geo?: {
       block_countries?: string[];
       allow_countries?: string[];
