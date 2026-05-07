@@ -47,6 +47,28 @@ firewall:
     managed_rules:
       - AWSManagedRulesCommonRuleSet
 `;
+const STATIC_TOKEN_POLICY = `
+version: 1
+project: token-test
+request:
+  allow_methods: [GET, POST]
+routes:
+  - name: admin
+    match:
+      path_prefixes: ["/admin"]
+    auth_gate:
+      type: static_token
+      header: x-edge-token
+      token_env: EDGE_ADMIN_TOKEN
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    rate_limit: 1000
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+`;
 const BROKEN_POLICY = `
 version: 1
 request:
@@ -166,6 +188,28 @@ test('compile: aws target writes edge + infra, returns file lists', () => {
         assert.ok(result.edgeFiles.every((f) => fs.existsSync(f)), 'all edge files must exist');
         assert.ok(result.infraFiles.length > 0, 'aws target emits infra files');
         assert.ok(result.infraFiles.every((f) => fs.existsSync(f)));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('compile: allowPlaceholderToken permits non-production build without auth env', () => {
+    const ctx = tmpProject(STATIC_TOKEN_POLICY);
+    try {
+        const result = api.compile({
+            policyPath: ctx.policyPath,
+            outDir: ctx.outDir,
+            target: 'aws',
+            allowPlaceholderToken: true,
+            env: Object.assign({}, process.env, {
+                EDGE_ADMIN_TOKEN: '',
+                ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+            }),
+        });
+        assert.strictEqual(result.ok, true, `compile failed: ${result.errors.join(' ')}`);
+        const viewer = fs.readFileSync(path.join(ctx.outDir, 'edge', 'viewer-request.js'), 'utf8');
+        assert.ok(viewer.includes('INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN'));
+        assert.ok(result.warnings.some((w) => /allow-placeholder-token/.test(w)));
     }
     finally {
         ctx.cleanup();
@@ -345,6 +389,33 @@ test('CLI backwards-compat: `cdn-security build --target aws` still succeeds', (
         assert.strictEqual(result.status, 0, `CLI build failed: ${result.stderr}`);
         assert.ok(fs.existsSync(path.join(ctx.outDir, 'edge', 'viewer-request.js')));
         assert.ok(fs.existsSync(path.join(ctx.outDir, 'infra', 'waf-rules.tf.json')));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: build --allow-placeholder-token succeeds without auth env', () => {
+    const ctx = tmpProject(BASIC_AWS_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'build',
+            '-p', ctx.policyPath,
+            '-o', ctx.outDir,
+            '--target', 'aws',
+            '--allow-placeholder-token',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: Object.assign({}, process.env, {
+                EDGE_ADMIN_TOKEN: '',
+                ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+            }),
+        });
+        assert.strictEqual(result.status, 0, `CLI build failed: ${result.stderr}`);
+        assert.ok(result.stderr.includes('Generated artifacts are NOT safe for production'));
+        assert.ok(fs.existsSync(path.join(ctx.outDir, 'edge', 'viewer-request.js')));
     }
     finally {
         ctx.cleanup();

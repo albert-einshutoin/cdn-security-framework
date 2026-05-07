@@ -19,6 +19,7 @@ export type CompileArtifactsOptions = {
   target?: CompileTarget;
   failOnPermissive?: boolean;
   failOnWafApproximation?: boolean;
+  allowPlaceholderToken?: boolean;
   outputMode?: string;
   ruleGroupOnly?: boolean;
   cwd?: string;
@@ -126,6 +127,7 @@ export function compileArtifacts(opts: CompileArtifactsOptions = {}): CompileArt
   }
 
   const permissiveFlag = opts.failOnPermissive ? ['--fail-on-permissive'] : [];
+  const placeholderFlag = opts.allowPlaceholderToken ? ['--allow-placeholder-token'] : [];
 
   if (target === 'aws') {
     const compilePath = path.join(pkgRoot, 'scripts', 'compile.js');
@@ -136,6 +138,7 @@ export function compileArtifacts(opts: CompileArtifactsOptions = {}): CompileArt
         '--policy', policyPath,
         '--out-dir', outDir,
         ...permissiveFlag,
+        ...placeholderFlag,
       ],
       { cwd, encoding: 'utf8', env },
     );
@@ -173,6 +176,7 @@ export function compileArtifacts(opts: CompileArtifactsOptions = {}): CompileArt
         '--policy', policyPath,
         '--out-dir', outDir,
         ...permissiveFlag,
+        ...placeholderFlag,
       ],
       { cwd, encoding: 'utf8', env },
     );
