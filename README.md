@@ -161,6 +161,9 @@ This validates the policy and generates Edge Runtime code into `dist/edge/`.
 ### 4. Test
 
 ```bash
+export EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy
+export ORIGIN_SECRET=ci-origin-secret-not-for-deploy
+
 npm run test:runtime
 npm run test:unit
 npm run test:drift
@@ -168,6 +171,9 @@ npm run test:security-baseline
 ```
 
 Runs runtime, unit, drift, and security-baseline checks used by CI.
+`EDGE_ADMIN_TOKEN` is required by generated artifacts that include the built-in
+admin `static_token` gate. `ORIGIN_SECRET` is required by origin-auth fixture
+policies used by the broader drift/release checks.
 
 ### 4.5 Diagnose (optional but recommended before first deploy)
 
