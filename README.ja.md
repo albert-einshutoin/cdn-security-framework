@@ -159,6 +159,9 @@ production ではない fixture build だけなら
 ### 4. テスト
 
 ```bash
+export EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy
+export ORIGIN_SECRET=ci-origin-secret-not-for-deploy
+
 npm run test:runtime
 npm run test:unit
 npm run test:drift
@@ -166,6 +169,8 @@ npm run test:security-baseline
 ```
 
 CI と同じ runtime / unit / drift / security-baseline チェックを実行します。
+`EDGE_ADMIN_TOKEN` は組み込み admin `static_token` gate を含む生成 artifact に必要です。
+`ORIGIN_SECRET` は origin-auth fixture policy を含む drift / release 系チェックで必要です。
 
 ### 4.5 環境診断（初回デプロイ前の任意実行、推奨）
 

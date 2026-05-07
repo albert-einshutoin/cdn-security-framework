@@ -17,9 +17,22 @@
 
 ## local workflow
 
+- generated artifact や release gate 系チェックを実行する前に、CI と同じ用途の
+  fixture secret を設定します。
+
+  ```bash
+  export EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy
+  export ORIGIN_SECRET=ci-origin-secret-not-for-deploy
+  ```
+
 - Vitest の focused check: `npm run test:vitest`
 - 既存 unit suite: `npm run test:unit`
 - release gate 全体: `npm run test:all`
+
+`EDGE_ADMIN_TOKEN` は `static_token` 認証ゲートを含む CloudFront Functions artifact
+に焼き込まれます。`ORIGIN_SECRET` は drift / release gate で使う origin-auth fixture
+向けです。これらの値は local / CI 検証専用であり、production build では deploy 用の
+secret を使ってください。
 
 `CI=true` の場合、Vitest は `reports/vitest-junit.xml` に JUnit output を出します。
 
