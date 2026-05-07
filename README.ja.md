@@ -144,10 +144,17 @@ npx cdn-security init
 `policy/security.yml` を編集し、次を実行します。
 
 ```bash
+# policy に static_token 認証ゲートがある場合は、参照先の build-time secret を
+# 先に設定します。組み込みの base/admin 例は EDGE_ADMIN_TOKEN を使います。
+export EDGE_ADMIN_TOKEN=replace-with-a-deploy-secret
+
 npx cdn-security build
 ```
 
 ポリシーが検証され、`dist/edge/viewer-request.js` などが生成されます。
+production ではない fixture build だけなら
+`npx cdn-security build --allow-placeholder-token` も使えますが、placeholder token
+を含む artifact はデプロイしないでください。
 
 ### 4. テスト
 
@@ -168,6 +175,8 @@ npx cdn-security explain
 ```
 
 Node バージョン、ポリシーのパース/スキーマバージョン、認証ゲートが参照する全環境変数（`EDGE_ADMIN_TOKEN`・`JWT_SECRET`・`ORIGIN_SECRET` など）、`dist/edge/` の書き込み可否、`npm ls` の健全性を一括で pass/fail 判定します。CI でアーティファクト化できる `doctor-report.json` も書き出します。詳細は [CLI リファレンス](docs/cli.ja.md)。
+CloudFront Functions の static token gate は生成 artifact に焼き込まれるため、
+`doctor` も `build` と同じ環境変数を設定した状態で実行してください。
 
 `explain` はポリシーの姿勢を読み取り専用で要約し、レビューやオンボーディングに使えます。
 

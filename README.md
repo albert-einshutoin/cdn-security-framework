@@ -145,6 +145,10 @@ Or with an archetype: `npx cdn-security init --platform aws --archetype rest-api
 Edit `policy/security.yml` as needed, then:
 
 ```bash
+# If your policy has a static_token auth gate, set the referenced build-time
+# secret first. The built-in base/admin examples use EDGE_ADMIN_TOKEN.
+export EDGE_ADMIN_TOKEN=replace-with-a-deploy-secret
+
 # AWS (default): generates viewer-request.js, viewer-response.js, origin-request.js
 npx cdn-security build
 
@@ -157,6 +161,9 @@ npx cdn-security build --rule-group-only
 ```
 
 This validates the policy and generates Edge Runtime code into `dist/edge/`.
+For non-production fixture builds, you can use
+`npx cdn-security build --allow-placeholder-token`, but never deploy artifacts
+that contain the placeholder token.
 
 ### 4. Test
 
@@ -177,6 +184,8 @@ npx cdn-security explain
 ```
 
 One-shot pass/fail report: Node version, policy parseability / schema version, every env var referenced by auth gates (`EDGE_ADMIN_TOKEN`, `JWT_SECRET`, `ORIGIN_SECRET`, ...), `dist/edge/` writability, and `npm ls` cleanliness. Writes `doctor-report.json` for CI capture. See [CLI reference](docs/cli.md) for details.
+Run it with the same env vars you will use for `build`, because CloudFront
+Functions bake static token gates into the generated artifact.
 
 `explain` prints a read-only policy posture summary for review and onboarding.
 
