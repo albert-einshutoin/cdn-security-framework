@@ -129,6 +129,8 @@ Built-in detectors cover API-key prefixes (`sk-live-`, `sk_test_`, `ghp_`) and c
 
 Body inspection is limited to configured text-like `Content-Type` values and `body.max_bytes` (default 32768, maximum 131072). Larger or non-text responses pass through unchanged. CloudFront Functions cannot inspect response bodies; the AWS compiler emits an unsupported warning when `response_dlp.enabled: true`.
 
+See [Response DLP](./response-dlp.md) for the policy shape, rollout guidance, target support, and performance constraints.
+
 ---
 
 ## Usage Examples

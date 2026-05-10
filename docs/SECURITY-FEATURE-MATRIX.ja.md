@@ -131,6 +131,8 @@ built-in detector は API key prefix（`sk-live-`、`sk_test_`、`ghp_`）と、
 
 body inspection は設定されたテキスト系 `Content-Type` と `body.max_bytes`（既定 32768、最大 131072）に限定します。上限超過または非テキストレスポンスは変更せず通します。CloudFront Functions はレスポンス body を検査できないため、`response_dlp.enabled: true` の AWS compile では unsupported warning を出します。
 
+policy shape、rollout guidance、target support、performance constraints は [レスポンス DLP](./response-dlp.ja.md) を参照してください。
+
 ---
 
 ## 使用例

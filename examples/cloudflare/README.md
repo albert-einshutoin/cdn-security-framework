@@ -31,6 +31,21 @@ This installs the framework from the repo root (`file:../..`) and creates `polic
 
 Edit `policy/security.yml` to adjust allowed methods, block rules, routes, response headers, etc.
 
+Cloudflare Workers can also enforce response DLP. Start in `report_only` mode before masking or blocking:
+
+```yaml
+response_dlp:
+  enabled: true
+  action: report_only
+  body:
+    max_bytes: 32768
+    content_types: ["text/", "application/json"]
+  headers:
+    names: ["set-cookie", "authorization", "x-api-key"]
+```
+
+See [Response DLP](../../docs/response-dlp.md) for detector behavior and rollout notes.
+
 ### 3. Build
 
 ```bash
@@ -92,3 +107,4 @@ curl -i "https://YOUR_WORKER_DOMAIN/foo/../bar"
 - [Cloudflare Workers Runtime](../../runtimes/cloudflare-workers/README.md)
 - [Quick Start](../../docs/quickstart.md)
 - [Policy and runtime sync](../../docs/policy-runtime-sync.md)
+- [Response DLP](../../docs/response-dlp.md)

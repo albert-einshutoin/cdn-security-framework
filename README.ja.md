@@ -106,6 +106,7 @@ Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.
 - [プログラマティック API](docs/programmatic-api.ja.md) — `require('cdn-security-framework')` で CI / IaC から直接呼び出し
 - [Compiler strictness](docs/compiler-strictness.ja.md) — phase contract、strict check、残る dynamic area
 - [アーキタイプ](docs/archetypes.ja.md) — アプリ形状別プリセット（SPA / REST API / 管理画面 / マイクロサービス）
+- [レスポンス DLP](docs/response-dlp.ja.md) — Cloudflare Workers で高信頼の漏えい値を mask/block する設定
 - [シークレットローテーション runbook](docs/runbooks/secret-rotation.ja.md) — JWT / JWKS / 署名付き URL / 管理トークン / origin シークレット
 - [スキーママイグレーション](docs/schema-migration.ja.md) — `policy/schema.json` のバージョン契約と `migrate` CLI
 - [サプライチェーン](docs/supply-chain.ja.md) — SLSA v1 provenance と `npm audit signatures`
