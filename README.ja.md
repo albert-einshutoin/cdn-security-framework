@@ -12,6 +12,8 @@
 > **「CDN セキュリティを“設計思想ごと”再利用可能にし、
 > 世界中の誰でも短時間で安全な初期構成を作れるようにする」**
 
+**最初に推奨する導入ルート:** `npx cdn-security init --platform aws --archetype spa-static-site --force` から始め、生成された policy を build し、AWS CloudFront Function と WAF Terraform 出力を既存 IaC に組み込みます。Cloudflare Workers も対応していますが、現時点で最初の本番導入パスとして最も揃っているのは AWS + Terraform です。
+
 ---
 
 ## なぜこのフレームワークが必要か

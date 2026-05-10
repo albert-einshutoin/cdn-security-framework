@@ -13,6 +13,8 @@ The goal is simple.
 
 > **"Make CDN security reusable as a design philosophy, so anyone in the world can build a secure initial setup in a short time."**
 
+**Recommended first path:** start with `npx cdn-security init --platform aws --archetype spa-static-site --force`, build the generated policy, then wire the AWS CloudFront Function and WAF Terraform outputs into your existing infrastructure. Cloudflare Workers is also supported, but the AWS + Terraform path is the most complete first deployment path today.
+
 ---
 
 ## Why This Framework Is Needed

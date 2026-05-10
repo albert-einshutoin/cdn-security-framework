@@ -6,14 +6,14 @@ This document describes how to use the generated **`dist/edge/`** and **`dist/in
 
 ## Overview
 
-After `npx cdn-security build` (and `npx cdn-security build --target aws` for Infra):
+After `npx cdn-security build`:
 
 | Output | Use |
 |--------|-----|
 | **dist/edge/viewer-request.js** | CloudFront Function (Viewer Request) |
 | **dist/edge/viewer-response.js** | CloudFront Function (Viewer Response) |
 | **dist/edge/cloudflare/index.ts** | Cloudflare Worker (when built with `--target cloudflare`). Output is TypeScript; Wrangler compiles it on deploy. Without Wrangler, a TypeScript build step is required. |
-| **dist/infra/waf-rules.tf.json** | Terraform JSON: `aws_wafv2_rule_group` (rate-based rule). Use when policy has `firewall.waf`. |
+| **dist/infra/waf-rules.tf.json** | Terraform JSON: WAFv2 rule group / Web ACL resources. Use when policy has `firewall.waf`. |
 | **dist/infra/waf-cloudformation.json** | AWS CloudFormation: `AWS::WAFv2::*` resources. Generate with `emit-waf --format cloudformation`. |
 
 ---
@@ -72,43 +72,38 @@ If you generate `dist/edge/origin-request.js`, zip it and use `aws_lambda_functi
 
 ## Terraform: WAF (Infra)
 
-When your policy includes a **`firewall.waf`** section, the build outputs **`dist/infra/waf-rules.tf.json`** (Terraform JSON). You can:
+When your policy includes a **`firewall.waf`** section, the build outputs **`dist/infra/waf-rules.tf.json`** (Terraform JSON). The simplest production path is to copy or generate that file into the same Terraform root that owns your CloudFront distribution, then reference the generated Web ACL ARN from your distribution.
 
-- **Option A**: Import the rule group by referencing the JSON file (e.g. `terraform plan` in a directory that includes this file, or use `terraform import` if the resource is created elsewhere).
-- **Option B**: Use the generated rule group in your Terraform by **inlining** or **reading** the JSON and creating an `aws_wafv2_rule_group` resource that matches.
+### Recommended layout
 
-### Using the generated waf-rules.tf.json
+```text
+infra/
+  main.tf
+  cdn-security.auto.tf.json   # copied from dist/infra/waf-rules.tf.json
+```
 
-The file is valid Terraform JSON. You can:
+Build and copy:
 
-1. **Copy into your Terraform module**: Place `waf-rules.tf.json` in a Terraform directory and run `terraform plan` / `apply` in that directory; Terraform will manage the rule group.
-2. **Reference from another module**: Use a module that reads the JSON or use `terraform import` to attach the rule group to your Web ACL.
+```bash
+EDGE_ADMIN_TOKEN=replace-with-a-deploy-secret npx cdn-security build
+cp dist/infra/waf-rules.tf.json infra/cdn-security.auto.tf.json
+```
 
-Example: ensure the build has run, then in a Terraform config directory:
+Then attach the generated Web ACL. The generated resource names include the sanitized `project` value from your policy; if your policy uses `project: example-cdn-security`, the Web ACL resource name is `aws_wafv2_web_acl.example_cdn_security`.
 
 ```hcl
-# In the same repo, or copy dist/infra/waf-rules.tf.json into this directory
-# Then reference the rule group in your Web ACL:
-resource "aws_wafv2_web_acl" "main" {
-  name  = "main"
-  scope = "REGIONAL"
-  default_action { allow {} }
-  rule {
-    name     = "rate-limit"
-    priority = 1
-    override_action { none {} }
-    statement {
-      rule_group_reference_statement {
-        arn = aws_wafv2_rule_group.example_cdn_security_rate_limit[0].arn
-      }
-    }
-    visibility_config { ... }
+resource "aws_cloudfront_distribution" "main" {
+  # ...
+
+  web_acl_id = aws_wafv2_web_acl.example_cdn_security.arn
+
+  default_cache_behavior {
+    # ...
   }
-  visibility_config { ... }
 }
 ```
 
-If you keep the generated file in `dist/infra/`, run Terraform from the repo root or from a subdirectory that includes `dist/infra/waf-rules.tf.json` so the rule group is defined in the same state.
+For existing Web ACL ownership, run `npx cdn-security build --rule-group-only` and attach the generated rule group from your hand-written `aws_wafv2_web_acl`. Keep the generated JSON in the same Terraform state as the Web ACL, otherwise Terraform cannot reference the generated resources directly.
 
 ---
 

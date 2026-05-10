@@ -84,6 +84,7 @@ function compileArtifacts(opts = {}) {
         return { ok: false, errors, warnings, ...baseResult };
     }
     const permissiveFlag = opts.failOnPermissive ? ['--fail-on-permissive'] : [];
+    const placeholderFlag = opts.allowPlaceholderToken ? ['--allow-placeholder-token'] : [];
     if (target === 'aws') {
         const compilePath = path.join(pkgRoot, 'scripts', 'compile.js');
         const compileResult = spawnSync(process.execPath, [
@@ -91,6 +92,7 @@ function compileArtifacts(opts = {}) {
             '--policy', policyPath,
             '--out-dir', outDir,
             ...permissiveFlag,
+            ...placeholderFlag,
         ], { cwd, encoding: 'utf8', env });
         if (compileResult.status !== 0) {
             collectFailedSpawn('edge compile', compileResult, errors);
@@ -120,6 +122,7 @@ function compileArtifacts(opts = {}) {
             '--policy', policyPath,
             '--out-dir', outDir,
             ...permissiveFlag,
+            ...placeholderFlag,
         ], { cwd, encoding: 'utf8', env });
         if (cfResult.status !== 0) {
             collectFailedSpawn('cloudflare edge compile', cfResult, errors);

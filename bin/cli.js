@@ -196,6 +196,7 @@ program
     .option('--rule-group-only', 'AWS only: generate WAF rule groups without aws_wafv2_web_acl output')
     .option('--fail-on-permissive', 'Exit non-zero when policy.metadata.risk_level is "permissive" (gate for production CI)')
     .option('--fail-on-waf-approximation', 'Cloudflare only: exit non-zero when the policy relies on approximate or unsupported Cloudflare WAF mappings (see docs/cloudflare-waf-parity.md)')
+    .option('--allow-placeholder-token', 'Allow non-production placeholder credentials for static_token/basic_auth gates when referenced env vars are unset')
     .action((opts) => {
     const { compile } = require(path.join(pkgRoot, 'lib'));
     const cwd = process.cwd();
@@ -213,6 +214,7 @@ program
         ruleGroupOnly: !!opts.ruleGroupOnly,
         failOnPermissive: !!opts.failOnPermissive,
         failOnWafApproximation: !!opts.failOnWafApproximation,
+        allowPlaceholderToken: !!opts.allowPlaceholderToken,
         cwd,
         pkgRoot,
     });

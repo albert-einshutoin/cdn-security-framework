@@ -5,6 +5,7 @@ export type CompileArtifactsOptions = {
     target?: CompileTarget;
     failOnPermissive?: boolean;
     failOnWafApproximation?: boolean;
+    allowPlaceholderToken?: boolean;
     outputMode?: string;
     ruleGroupOnly?: boolean;
     cwd?: string;
