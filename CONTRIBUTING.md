@@ -14,10 +14,10 @@ Thank you for your interest in contributing. This document explains how to propo
 
 ### Code and documentation
 
-1. **Fork** the repository and create a branch from `main` (e.g. `fix/admin-gate`, `docs/quickstart`).
+1. **Fork** the repository and create a branch from `develop` (e.g. `fix/admin-gate`, `docs/quickstart`).
 2. **Make your changes** in small, focused commits. Use English for all non–`.ja` files and code comments; Japanese only in `.ja` files.
 3. **Test** manually: run the runtime you changed (e.g. CloudFront Functions in console, Workers with `wrangler dev`) and verify behavior.
-4. **Open a Pull Request** against `main` with a short description and, if relevant, link to an issue.
+4. **Open a Pull Request** against `develop` with a short description and, if relevant, link to an issue.
 
 ---
 
@@ -41,12 +41,12 @@ Before opening a PR, ensure these checks pass locally:
 6. `npm run test:drift`
 7. `npm run test:security-baseline`
 
-GitHub Actions runs the same gate on push/PR to `main`.
+GitHub Actions runs the same gate on push/PR to `develop`.
 
 Release is automated by tag:
 
 1. Update `package.json` version.
-2. Push commit to `main`.
+2. Push commit to the release branch.
 3. Push tag `vX.Y.Z`.
 4. `.github/workflows/release-npm.yml` runs the full gate and publishes to npm only when green.
 
@@ -71,10 +71,28 @@ Release is automated by tag:
 
 ## Repository layout
 
+- `src/` - TypeScript source. Edit this for CLI, compiler, library, and test logic.
+- `bin/`, `lib/`, `scripts/`, `parser/`, `validator/`, `emitter/` - Compiled JavaScript and `.d.ts` package artifacts emitted by `npm run build:ts`. Do not edit these directly.
 - `docs/` – Architecture, threat model, decision matrix, quick start (English + `.ja`).
 - `policy/` – YAML policy; `profiles/` holds profile variants (e.g. `balanced.yml`).
+- `templates/` - Runtime templates used by the compiler to generate deployable edge code.
+- `tests/golden/` - Generated drift fixtures. Update via the drift workflow, not by hand.
 - `runtimes/` – CloudFront Functions, Lambda@Edge, Cloudflare Workers. Code and comments in **English**.
 - `examples/` – Deploy examples for AWS CloudFront and Cloudflare.
+
+---
+
+## Source vs generated artifacts
+
+The authoritative implementation source is `src/**/*.ts`, plus runtime templates under `templates/` and policy/docs files. The root-level JavaScript files are committed so npm consumers can run the package without a TypeScript build step and so CLI smoke tests work from a checkout.
+
+When changing TypeScript source:
+
+1. Edit the matching file under `src/`.
+2. Run `npm run build:ts`.
+3. Commit both the `src/**/*.ts` change and the generated package artifact (`scripts/*.js`, `lib/*.js`, etc.) when the artifact is part of the package surface.
+
+Do not edit generated JavaScript or `.d.ts` files directly. `.gitattributes` marks package artifacts, golden fixtures, coverage output, and generated type files as generated so GitHub language statistics reflect the hand-written source more accurately.
 
 ---
 

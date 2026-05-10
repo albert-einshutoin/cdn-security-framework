@@ -72,8 +72,12 @@
 
 ```
   README.md
+  src/
+    bin/cli.ts             # CLI の TypeScript ソース
+    scripts/               # compiler / test / tool の TypeScript ソース
+    lib/                   # public library API の TypeScript ソース
   bin/
-    cli.js                 # CLI エントリ (npx cdn-security)
+    cli.js                 # compiled package artifact: CLI エントリ (npx cdn-security)
   docs/
     quickstart.md
     policy-runtime-sync.md
@@ -81,7 +85,7 @@
     security.yml / base.yml
     profiles/
   scripts/
-    compile.js
+    compile.js             # src/scripts/*.ts から compile された artifact
     compile-cloudflare.js
     compile-infra.js
     policy-lint.js
@@ -98,6 +102,8 @@
   runtimes/                # レガシー・参照用。デプロイは dist/edge/ から
   examples/
 ```
+
+package code の正となるソースは `src/**/*.ts` です。root 配下の JavaScript と `.d.ts` は `npm run build:ts` が生成する package artifact で、npm 利用者が TypeScript build なしで CLI を実行できるよう commit しています。`templates/` 配下の runtime template は手書きで、deploy 可能な `dist/edge/` 出力を生成するために使われます。
 
 Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.md) を参照。
 
