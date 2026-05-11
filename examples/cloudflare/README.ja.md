@@ -31,6 +31,21 @@ npm run init
 
 `policy/security.yml` を編集し、許可メソッド・ブロックルール・ルート・レスポンスヘッダーなどを調整します。
 
+Cloudflare Workers ではレスポンス DLP も enforcement できます。mask/block の前に `report_only` で開始してください。
+
+```yaml
+response_dlp:
+  enabled: true
+  action: report_only
+  body:
+    max_bytes: 32768
+    content_types: ["text/", "application/json"]
+  headers:
+    names: ["set-cookie", "authorization", "x-api-key"]
+```
+
+detector の挙動と rollout メモは [レスポンス DLP](../../docs/response-dlp.ja.md) を参照してください。
+
 ### 3. ビルド
 
 ```bash
@@ -92,3 +107,4 @@ curl -i "https://YOUR_WORKER_DOMAIN/foo/../bar"
 - [Cloudflare Workers ランタイム](../../runtimes/cloudflare-workers/README.ja.md)
 - [クイックスタート](../../docs/quickstart.ja.md)
 - [ポリシーとランタイムの同期](../../docs/policy-runtime-sync.ja.md)
+- [レスポンス DLP](../../docs/response-dlp.ja.md)
