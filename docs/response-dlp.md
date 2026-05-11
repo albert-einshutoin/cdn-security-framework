@@ -70,7 +70,7 @@ Header inspection is limited to `headers.names`. If no names are configured, the
 ## Operational Notes
 
 - Do not use response DLP as the only protection for secrets. Prevent sensitive values from reaching the origin response whenever possible.
-- Use `report_only` first and monitor `response_dlp_report_only` log events before switching to `mask` or `block`.
+- Use `report_only` first and monitor DLP findings where `event` is `monitor` and `block_reason` is `response_dlp_report_only` before switching to `mask` or `block`.
 - Keep `max_bytes` close to the largest response shape you intentionally inspect.
 - Avoid custom regexes that scan broad text with ambiguous wildcards. Build-time guards catch common ReDoS shapes, but narrow patterns are still safer and faster.
 - Compressed or encrypted payloads are not decoded by this feature unless the runtime exposes a readable decoded body.

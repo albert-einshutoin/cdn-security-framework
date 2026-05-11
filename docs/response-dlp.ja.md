@@ -70,7 +70,7 @@ header inspection は `headers.names` に限定されます。未設定の場合
 ## 運用メモ
 
 - response DLP を secret 保護の唯一の手段にしないでください。可能な限り origin response に sensitive value を出さない設計を優先します。
-- まず `report_only` を使い、`response_dlp_report_only` log event を確認してから `mask` または `block` に切り替えてください。
+- まず `report_only` を使い、`event` が `monitor`、`block_reason` が `response_dlp_report_only` の DLP finding を確認してから `mask` または `block` に切り替えてください。
 - `max_bytes` は、実際に検査したい最大レスポンスサイズに近い値にしてください。
 - 広いテキストに曖昧な wildcard を当てる custom regex は避けてください。build-time guard は一般的な ReDoS 形状を拒否しますが、狭い pattern の方が安全で高速です。
 - 圧縮または暗号化された payload は、runtime が readable decoded body として露出しない限り decode しません。
