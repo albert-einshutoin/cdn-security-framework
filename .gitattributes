@@ -1,0 +1,25 @@
+# Keep GitHub language statistics focused on hand-written source.
+# These files are committed for npm package usability, CLI smoke tests, or
+# generated-output drift checks, but contributors should edit src/**/*.ts,
+# templates/**, policy/**, and docs/** instead.
+
+/bin/**/*.js linguist-generated=true
+/bin/**/*.d.ts linguist-generated=true
+/emitter/**/*.js linguist-generated=true
+/emitter/**/*.d.ts linguist-generated=true
+/lib/**/*.js linguist-generated=true
+/lib/**/*.d.ts linguist-generated=true
+/parser/**/*.js linguist-generated=true
+/parser/**/*.d.ts linguist-generated=true
+/validator/**/*.js linguist-generated=true
+/validator/**/*.d.ts linguist-generated=true
+/scripts/**/*.js linguist-generated=true
+/scripts/**/*.d.ts linguist-generated=true
+
+/tests/golden/** linguist-generated=true
+/dist/** linguist-generated=true
+/coverage/** linguist-generated=true
+/examples/**/dist/** linguist-generated=true
+
+# Generated from policy/schema.json by npm run types:gen.
+/src/types/policy.d.ts linguist-generated=true
