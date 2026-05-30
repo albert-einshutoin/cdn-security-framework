@@ -14,6 +14,7 @@ npx cdn-security <subcommand> [options]
 | `build` | Validate policy, compile edge runtime + infra config. |
 | `emit-waf` | Emit infra config only (no edge code). For redeploying firewall rules without touching edge. |
 | `doctor` | One-shot environment diagnostics. Exits non-zero on any failing check. |
+| `readiness` | Production release gate that combines diagnostics and policy posture findings. |
 | `explain` | Print a concise policy posture summary for review and onboarding. |
 | `diff` | Compare generated output against the current `dist/` tree and fail on drift. |
 | `migrate` | Migrate a policy file between schema versions (stub — v1 is the only shipped version today). |
@@ -102,6 +103,20 @@ Exit code is `0` when no check has status `fail`, else `1`. With `--strict`, war
     name: doctor-report
     path: doctor-report.json
 ```
+
+## `readiness`
+
+```bash
+npx cdn-security readiness
+npx cdn-security readiness --target cloudflare
+npx cdn-security readiness --strict
+npx cdn-security readiness --json
+npx cdn-security readiness --report readiness-report.json
+```
+
+Runs a production-oriented release gate over the selected policy. It reuses environment diagnostics and policy validation, then adds production posture checks for risk level, enforce mode, method restrictions, response headers, WAF rate limits, managed-rule coverage, and target-specific unsupported controls.
+
+Exit code is `1` when any finding has severity `fail`. With `--strict`, warning findings also fail the command. Use `--json` for stdout JSON, or `--report <path>` to write the same machine-readable report while keeping the human summary on stdout/stderr.
 
 ## `explain`
 

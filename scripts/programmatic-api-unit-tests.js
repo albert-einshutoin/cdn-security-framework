@@ -77,6 +77,30 @@ response_headers:
   hsts: "max-age=1"
 unknown_top_level_key: true
 `;
+const READINESS_AWS_POLICY = `
+version: 1
+project: readiness-test
+metadata:
+  risk_level: balanced
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, HEAD]
+response_headers:
+  hsts: "max-age=31536000; includeSubDomains"
+  csp_public: "default-src 'self'; frame-ancestors 'none'"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    rate_limit: 1000
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+      - AWSManagedRulesIPReputationList
+    logging:
+      enabled: true
+      destination_arn_env: WAF_LOG_DESTINATION_ARN
+      redacted_fields: [authorization, cookie]
+`;
 function tmpProject(yamlBody) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'api-'));
     const policyDir = path.join(tmp, 'policy');
@@ -438,6 +462,75 @@ test('CLI authoring DX: explain summarizes policy posture', () => {
         assert.ok(/Policy: api-test/.test(result.stdout));
         assert.ok(/Allowed methods: GET, POST/.test(result.stdout));
         assert.ok(/WAF:/.test(result.stdout));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: readiness passes production-shaped policy and writes report', () => {
+    const ctx = tmpProject(READINESS_AWS_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const reportPath = path.join(ctx.tmp, 'readiness-report.json');
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'aws',
+            '--report', reportPath,
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `readiness failed: ${result.stderr}`);
+        assert.ok(/Readiness: PASS/.test(result.stdout));
+        const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+        assert.strictEqual(report.status, 'pass');
+        assert.deepStrictEqual(report.summary, { fail: 0, warn: 0 });
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: readiness fails when referenced build secret is missing', () => {
+    const ctx = tmpProject(STATIC_TOKEN_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'aws',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: Object.assign({}, process.env, { EDGE_ADMIN_TOKEN: '' }),
+        });
+        assert.strictEqual(result.status, 1);
+        assert.ok(/doctor\.env_vars_referenced_by_policy/.test(result.stderr));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: readiness strict mode fails on warnings', () => {
+    const ctx = tmpProject(BASIC_AWS_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'aws',
+            '--strict',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 1);
+        assert.ok(/firewall\.waf\.managed_rules\.core_signal_missing/.test(result.stderr));
     }
     finally {
         ctx.cleanup();

@@ -36,6 +36,14 @@ type DoctorOptions = {
   strict?: boolean;
 };
 
+type ReadinessOptions = {
+  policy?: string | null;
+  target: string;
+  report?: string | null;
+  json?: boolean;
+  strict?: boolean;
+};
+
 type EmitWafOptions = {
   policy?: string | null;
   outDir: string;
@@ -123,6 +131,203 @@ function explainPolicy(policy: any): string[] {
     .filter((key) => responseHeaders[key] !== undefined);
   lines.push(`Response headers: ${headerKeys.join(', ') || '(defaults only)'}`);
   return lines;
+}
+
+type ReadinessSeverity = 'fail' | 'warn';
+type ReadinessFinding = {
+  id: string;
+  severity: ReadinessSeverity;
+  detail: string;
+  recommendation: string;
+};
+
+function readinessFinding(
+  severity: ReadinessSeverity,
+  id: string,
+  detail: string,
+  recommendation: string
+): ReadinessFinding {
+  return { severity, id, detail, recommendation };
+}
+
+function evaluateReadiness(policy: any, target: string, lintWarnings: string[]): ReadinessFinding[] {
+  const findings: ReadinessFinding[] = [];
+  const metadata = (policy && policy.metadata) || {};
+  const defaults = (policy && policy.defaults) || {};
+  const request = (policy && policy.request) || {};
+  const responseHeaders = (policy && policy.response_headers) || {};
+  const firewall = (policy && policy.firewall) || {};
+  const waf = firewall.waf || {};
+
+  const riskLevel = metadata.risk_level;
+  if (riskLevel === 'permissive') {
+    findings.push(readinessFinding(
+      'fail',
+      'policy.risk_level.permissive',
+      'metadata.risk_level is "permissive", which is intentionally loose.',
+      'Use a balanced or strict policy for production, or remove the permissive tag only after tightening the policy.'
+    ));
+  } else if (!riskLevel) {
+    findings.push(readinessFinding(
+      'warn',
+      'policy.risk_level.missing',
+      'metadata.risk_level is not set.',
+      'Set metadata.risk_level to balanced or strict so production gates can reason about policy intent.'
+    ));
+  }
+
+  const mode = defaults.mode || 'enforce';
+  if (mode !== 'enforce') {
+    findings.push(readinessFinding(
+      'fail',
+      'policy.mode.not_enforce',
+      `defaults.mode is "${mode}", so some controls may only observe traffic.`,
+      'Use defaults.mode: enforce for production release artifacts.'
+    ));
+  }
+
+  if (!Array.isArray(request.allow_methods) || request.allow_methods.length === 0) {
+    findings.push(readinessFinding(
+      'fail',
+      'request.allow_methods.empty',
+      'request.allow_methods is empty or missing.',
+      'Declare the smallest method set required by the application.'
+    ));
+  }
+  if (Array.isArray(request.allow_methods) && request.allow_methods.includes('TRACE')) {
+    findings.push(readinessFinding(
+      'fail',
+      'request.allow_methods.trace',
+      'TRACE is allowed.',
+      'Remove TRACE from request.allow_methods for production.'
+    ));
+  }
+
+  if (!responseHeaders.hsts) {
+    findings.push(readinessFinding(
+      'warn',
+      'response_headers.hsts.missing',
+      'HSTS is not configured.',
+      'Configure response_headers.hsts for HTTPS-only production sites.'
+    ));
+  }
+  if (!responseHeaders.csp_public && !responseHeaders.csp_admin) {
+    findings.push(readinessFinding(
+      'warn',
+      'response_headers.csp.missing',
+      'No CSP policy is configured.',
+      'Add csp_public and, if needed, csp_admin before production rollout.'
+    ));
+  }
+
+  if (!firewall.waf) {
+    findings.push(readinessFinding(
+      'warn',
+      'firewall.waf.missing',
+      'firewall.waf is not configured.',
+      'Add WAF rate limits and managed rules for production traffic.'
+    ));
+  } else {
+    if (!waf.rate_limit && !Array.isArray(waf.rate_limit_rules)) {
+      findings.push(readinessFinding(
+        'warn',
+        'firewall.waf.rate_limit.missing',
+        'No global or scoped WAF rate limit is configured.',
+        'Set firewall.waf.rate_limit or firewall.waf.rate_limit_rules for production.'
+      ));
+    }
+    const managed = Array.isArray(waf.managed_rules) ? waf.managed_rules : [];
+    const hasCoreSignal = managed.some((r: string) =>
+      r === 'AWSManagedRulesBotControlRuleSet' ||
+      r === 'AWSManagedRulesATPRuleSet' ||
+      r === 'AWSManagedRulesIPReputationList' ||
+      r === 'AWSManagedRulesAnonymousIpList'
+    );
+    if (!hasCoreSignal) {
+      findings.push(readinessFinding(
+        'warn',
+        'firewall.waf.managed_rules.core_signal_missing',
+        'Managed WAF rules omit BotControl, ATP, IPReputation, and AnonymousIp.',
+        'Consider at least AWSManagedRulesIPReputationList and AWSManagedRulesAnonymousIpList for production enforce mode.'
+      ));
+    }
+    if (target === 'cloudflare') {
+      const { classifyManagedRule } = require(path.join(pkgRoot, 'scripts', 'lib', 'cloudflare-waf-parity.js'));
+      for (const rule of managed) {
+        const entry = classifyManagedRule(rule);
+        if (entry.status === 'unsupported') {
+          findings.push(readinessFinding(
+            'fail',
+            `cloudflare.waf.managed_rule.unsupported.${rule}`,
+            `${rule} has no Cloudflare WAF mapping and would be emitted disabled.`,
+            'Remove the AWS-only managed rule from Cloudflare builds or replace it with an explicit Cloudflare rule.'
+          ));
+        } else if (entry.status === 'approximate') {
+          findings.push(readinessFinding(
+            'warn',
+            `cloudflare.waf.managed_rule.approximate.${rule}`,
+            `${rule} maps only approximately to Cloudflare.`,
+            'Review docs/cloudflare-waf-parity.md and decide whether the approximation is acceptable before production.'
+          ));
+        }
+      }
+    }
+  }
+
+  if (target === 'aws') {
+    if (request.graphql_guard) {
+      findings.push(readinessFinding(
+        'fail',
+        'target.aws.graphql_guard.unsupported',
+        'request.graphql_guard is configured, but AWS edge output cannot read request bodies.',
+        'Use Cloudflare Workers for this guard or enforce GraphQL limits at the origin.'
+      ));
+    }
+    if (firewall.challenge) {
+      findings.push(readinessFinding(
+        'fail',
+        'target.aws.challenge.unsupported',
+        'firewall.challenge is configured, but Edge JS challenge is Cloudflare Workers-only.',
+        'Disable firewall.challenge for AWS builds or use a Cloudflare target.'
+      ));
+    }
+    if (policy && policy.response_dlp && policy.response_dlp.enabled === true) {
+      findings.push(readinessFinding(
+        'fail',
+        'target.aws.response_dlp.unsupported',
+        'response_dlp is enabled, but AWS CloudFront Functions cannot inspect response bodies.',
+        'Use Cloudflare Workers or enforce response DLP in Lambda/origin/application code.'
+      ));
+    }
+  }
+
+  for (const warning of lintWarnings) {
+    if (warning.includes('managed_rules does not include any of BotControl')) {
+      continue;
+    }
+    findings.push(readinessFinding(
+      'warn',
+      'policy.lint.warning',
+      warning,
+      'Review the policy lint warning before promoting this artifact.'
+    ));
+  }
+
+  return findings;
+}
+
+function printReadinessReport(report: any): void {
+  console.log(`Readiness: ${report.status.toUpperCase()} (target=${report.target}, policy=${report.policyPath})`);
+  if (report.findings.length === 0) {
+    console.log('[OK] No production readiness findings.');
+    return;
+  }
+  for (const finding of report.findings) {
+    const marker = finding.severity === 'fail' ? 'FAIL' : 'WARN';
+    const stream = finding.severity === 'fail' ? console.error : console.warn;
+    stream(`[${marker}] ${finding.id}: ${finding.detail}`);
+    stream(`       ${finding.recommendation}`);
+  }
 }
 
 function collectFiles(root: string): string[] {
@@ -321,6 +526,91 @@ program
       strict: opts.strict,
     });
     process.exit(result.exitCode);
+  });
+
+program
+  .command('readiness')
+  .description('Evaluate whether a policy is ready for production release gates')
+  .option('-p, --policy <path>', 'Policy file path (default: policy/security.yml or policy/base.yml)', null)
+  .option('-t, --target <platform>', 'Target platform (aws | cloudflare)', 'aws')
+  .option('--report <path>', 'Write machine-readable JSON report to this path', null)
+  .option('--json', 'Print machine-readable JSON instead of a human report')
+  .option('--strict', 'Exit non-zero on warnings as well as failures')
+  .action((opts: ReadinessOptions) => {
+    const cwd = process.cwd();
+    const policyPath = resolvePolicyPath(cwd, opts.policy);
+    const target = opts.target === 'cloudflare' ? 'cloudflare' : 'aws';
+    const { lintPolicy } = require(path.join(pkgRoot, 'lib'));
+    const { runDoctor } = require(path.join(pkgRoot, 'scripts', 'cli-doctor.js'));
+
+    const doctor = runDoctor({
+      cwd,
+      pkgRoot,
+      policyPath,
+      reportPath: null,
+      log: false,
+      strict: false,
+    });
+    const findings: ReadinessFinding[] = [];
+    for (const check of doctor.report.checks) {
+      if (check.status === 'fail') {
+        findings.push(readinessFinding(
+          'fail',
+          `doctor.${check.name}`,
+          check.detail,
+          'Fix this environment diagnostic before building production artifacts.'
+        ));
+      } else if (check.status === 'warn') {
+        findings.push(readinessFinding(
+          'warn',
+          `doctor.${check.name}`,
+          check.detail,
+          'Review this environment diagnostic before release.'
+        ));
+      }
+    }
+
+    let policy = null;
+    const lint = lintPolicy({ policyPath, pkgRoot, env: process.env });
+    lint.errors.forEach((error: string) => findings.push(readinessFinding(
+      'fail',
+      'policy.lint.error',
+      error,
+      'Fix policy validation before production release.'
+    )));
+    if (lint.policy && typeof lint.policy === 'object') {
+      policy = lint.policy;
+      findings.push(...evaluateReadiness(policy, target, lint.warnings));
+    }
+
+    const failCount = findings.filter((f) => f.severity === 'fail').length;
+    const warnCount = findings.filter((f) => f.severity === 'warn').length;
+    const strict = Boolean(opts.strict);
+    const exitCode = failCount > 0 || (strict && warnCount > 0) ? 1 : 0;
+    const status = failCount > 0 ? 'fail' : warnCount > 0 ? 'warn' : 'pass';
+    const report = {
+      generatedAt: new Date().toISOString(),
+      policyPath,
+      target,
+      strict,
+      status,
+      exitCode,
+      summary: { fail: failCount, warn: warnCount },
+      findings,
+    };
+
+    if (opts.report) {
+      const reportPath = path.isAbsolute(opts.report) ? opts.report : path.join(cwd, opts.report);
+      fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
+    }
+
+    if (opts.json) {
+      console.log(JSON.stringify(report, null, 2));
+    } else {
+      printReadinessReport(report);
+    }
+
+    process.exit(exitCode);
   });
 
 program
