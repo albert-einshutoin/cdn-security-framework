@@ -72,8 +72,8 @@
   "dependencies": {
     "acorn": "^8.16.0",
     "ajv": "^8.20.0",
-    "commander": "^11.0.0",
-    "inquirer": "^13.4.2",
+    "commander": "^14.0.3",
+    "inquirer": "^14.0.1",
     "js-yaml": "^4.1.0"
   },
   "files": [
@@ -126,11 +126,11 @@
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^25.6.0",
+    "@types/node": "^25.9.1",
     "c8": "^11.0.0",
     "esbuild": "^0.28.0",
     "json-schema-to-typescript": "^15.0.4",
     "typescript": "^6.0.3",
-    "vitest": "^4.1.5"
+    "vitest": "^4.1.7"
   }
 }
