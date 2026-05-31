@@ -15,6 +15,7 @@ npx cdn-security <subcommand> [options]
 | `emit-waf` | インフラ設定のみ生成（エッジは生成しない）。エッジはそのままで WAF ルールだけ再デプロイしたいとき。 |
 | `doctor` | 環境診断をワンショット実行。失敗チェックがあれば非ゼロ終了。 |
 | `readiness` | 環境診断と policy posture を統合する本番リリースゲート。 |
+| `deploy-template` | AWS / Cloudflare の artifact deployment 用 GitHub Actions workflow template を生成。 |
 | `explain` | レビューやオンボーディング向けにポリシーの要点を表示。 |
 | `diff` | 現在の `dist/` と再生成結果を比較し、drift があれば失敗。 |
 | `migrate` | スキーマのバージョン間マイグレーション（現状 v1 のみの stub）。 |
@@ -117,6 +118,19 @@ npx cdn-security readiness --report readiness-report.json
 選択した policy に対して、本番向けのリリースゲートを実行します。環境診断と policy validation を再利用し、そのうえで risk level、enforce mode、HTTP method 制限、レスポンスヘッダー、WAF rate limit、managed rule のカバレッジ、target 固有の未対応機能を確認します。
 
 `fail` finding が 1 件でもあれば exit `1` です。`--strict` では warning finding も失敗扱いになります。`--json` は stdout に JSON を出力し、`--report <path>` は人間向け summary を出しつつ同じ machine-readable report をファイルに書き出します。
+
+## `deploy-template`
+
+```bash
+npx cdn-security deploy-template
+npx cdn-security deploy-template --target aws
+npx cdn-security deploy-template --target cloudflare
+npx cdn-security deploy-template --out-dir .github/workflows --force
+```
+
+生成された edge / infra artifact のための GitHub Actions workflow starter を書き出します。AWS template は `dist/edge/` と `dist/infra/` を build して upload し、後続の Terraform / CDK / CloudFront release flow に渡せる形にします。Cloudflare template は Worker を build し、`wrangler deploy --secrets-file` で設定済み runtime secret を code と一緒に渡して artifact も upload します。
+
+template は `EDGE_ADMIN_TOKEN`、`BASIC_AUTH_CREDS`、`URL_SIGNING_SECRET`、`JWT_SECRET`、`ORIGIN_SECRET`、`CHALLENGE_SECRET`、`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID` などの GitHub Secrets 名だけを参照し、secret 値は含みません。Cloudflare で policy が追加の `*_env` 名を使う場合は `CDN_SECURITY_WORKER_SECRET_NAMES` を拡張してください。既存ファイルは `--force` を付けない限り上書きしません。
 
 ## `explain`
 

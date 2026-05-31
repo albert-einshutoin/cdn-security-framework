@@ -157,6 +157,191 @@ function printReadinessReport(report) {
         stream(`       ${finding.recommendation}`);
     }
 }
+function renderAwsDeploymentWorkflow() {
+    return `name: CDN Security AWS Build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'policy/**'
+      - 'templates/**'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/cdn-security-aws.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  build-cdn-security:
+    runs-on: ubuntu-latest
+    env:
+      # Configure these as repository secrets. Do not commit production values.
+      EDGE_ADMIN_TOKEN: \${{ secrets.EDGE_ADMIN_TOKEN }}
+      ORIGIN_SECRET: \${{ secrets.ORIGIN_SECRET }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.17.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Diagnose environment
+        run: npx cdn-security doctor --no-report --strict
+
+      - name: Check production readiness
+        run: npx cdn-security readiness --target aws --strict --report readiness-report.json
+
+      - name: Build AWS edge and WAF artifacts
+        run: npx cdn-security build --target aws --out-dir dist
+
+      - name: Upload generated artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdn-security-aws-artifacts
+          path: |
+            dist/edge/
+            dist/infra/
+            readiness-report.json
+
+      # Deployment is intentionally left explicit. Wire dist/edge/*.js and
+      # dist/infra/*.tf.json into your Terraform/CDK/CloudFront release flow.
+`;
+}
+function renderCloudflareDeploymentWorkflow() {
+    return `name: CDN Security Cloudflare Deploy
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - 'policy/**'
+      - 'templates/**'
+      - 'wrangler.toml'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/cdn-security-cloudflare.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy-cdn-security:
+    runs-on: ubuntu-latest
+    env:
+      # Configure these as repository secrets. Do not commit production values.
+      EDGE_ADMIN_TOKEN: \${{ secrets.EDGE_ADMIN_TOKEN }}
+      BASIC_AUTH_CREDS: \${{ secrets.BASIC_AUTH_CREDS }}
+      URL_SIGNING_SECRET: \${{ secrets.URL_SIGNING_SECRET }}
+      JWT_SECRET: \${{ secrets.JWT_SECRET }}
+      ORIGIN_SECRET: \${{ secrets.ORIGIN_SECRET }}
+      CHALLENGE_SECRET: \${{ secrets.CHALLENGE_SECRET }}
+      CLOUDFLARE_API_TOKEN: \${{ secrets.CLOUDFLARE_API_TOKEN }}
+      CLOUDFLARE_ACCOUNT_ID: \${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+      CDN_SECURITY_WORKER_SECRET_NAMES: EDGE_ADMIN_TOKEN,BASIC_AUTH_CREDS,URL_SIGNING_SECRET,JWT_SECRET,ORIGIN_SECRET,CHALLENGE_SECRET
+      CDN_SECURITY_WORKER_SECRETS_FILE: \${{ runner.temp }}/cdn-security-worker-secrets.json
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20.17.0'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Diagnose environment
+        run: npx cdn-security doctor --no-report --strict
+
+      - name: Check production readiness
+        run: npx cdn-security readiness --target cloudflare --strict --report readiness-report.json
+
+      - name: Build Cloudflare Worker and WAF artifacts
+        run: npx cdn-security build --target cloudflare --out-dir dist
+
+      - name: Prepare Worker runtime secrets
+        run: |
+          node <<'NODE'
+          const fs = require('fs');
+          const secretsFile = process.env.CDN_SECURITY_WORKER_SECRETS_FILE || '/tmp/cdn-security-worker-secrets.json';
+          const names = (process.env.CDN_SECURITY_WORKER_SECRET_NAMES || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean);
+          const secrets = {};
+          for (const name of names) {
+            const value = process.env[name];
+            if (value) secrets[name] = value;
+          }
+          if (Object.keys(secrets).length === 0) {
+            console.log('[INFO] No Worker runtime secrets configured; deploying without --secrets-file.');
+            process.exit(0);
+          }
+          fs.writeFileSync(secretsFile, JSON.stringify(secrets));
+          NODE
+
+      - name: Deploy Worker with Wrangler
+        run: |
+          if [ -f "$CDN_SECURITY_WORKER_SECRETS_FILE" ]; then
+            trap 'rm -f "$CDN_SECURITY_WORKER_SECRETS_FILE"' EXIT
+            npx wrangler deploy dist/edge/cloudflare/index.ts --secrets-file "$CDN_SECURITY_WORKER_SECRETS_FILE"
+          else
+            npx wrangler deploy dist/edge/cloudflare/index.ts
+          fi
+
+      - name: Upload generated artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: cdn-security-cloudflare-artifacts
+          path: |
+            dist/edge/cloudflare/
+            dist/infra/
+            readiness-report.json
+
+      # Configure wrangler.toml, routes, account-specific bindings, and any
+      # extra policy secret env names before enabling production deploys.
+`;
+}
+function writeDeploymentTemplates(opts, cwd) {
+    const target = opts.target || 'all';
+    if (!['aws', 'cloudflare', 'all'].includes(target)) {
+        throw new Error('Invalid --target. Use aws, cloudflare, or all.');
+    }
+    const outDir = path.isAbsolute(opts.outDir) ? opts.outDir : path.join(cwd, opts.outDir);
+    fs.mkdirSync(outDir, { recursive: true });
+    const templates = [];
+    if (target === 'aws' || target === 'all') {
+        templates.push({ file: 'cdn-security-aws.yml', content: renderAwsDeploymentWorkflow() });
+    }
+    if (target === 'cloudflare' || target === 'all') {
+        templates.push({ file: 'cdn-security-cloudflare.yml', content: renderCloudflareDeploymentWorkflow() });
+    }
+    const existing = templates
+        .map((template) => path.join(outDir, template.file))
+        .filter((filePath) => fs.existsSync(filePath));
+    if (existing.length > 0 && !opts.force) {
+        throw new Error(`${existing.join(', ')} already exists. Use --force to overwrite.`);
+    }
+    const written = [];
+    for (const template of templates) {
+        const filePath = path.join(outDir, template.file);
+        fs.writeFileSync(filePath, template.content, 'utf8');
+        written.push(filePath);
+    }
+    return written;
+}
 function collectFiles(root) {
     if (!fs.existsSync(root))
         return [];
@@ -406,6 +591,22 @@ program
         printReadinessReport(report);
     }
     process.exit(exitCode);
+});
+program
+    .command('deploy-template')
+    .description('Generate GitHub Actions deployment workflow templates for generated CDN security artifacts')
+    .option('-o, --out-dir <dir>', 'Workflow output directory', '.github/workflows')
+    .option('-t, --target <platform>', 'Target platform: aws | cloudflare | all', 'all')
+    .option('-f, --force', 'Overwrite existing generated workflow templates')
+    .action((opts) => {
+    try {
+        const files = writeDeploymentTemplates(opts, process.cwd());
+        files.forEach((filePath) => console.log('[SUCCESS] Generated ' + filePath));
+    }
+    catch (e) {
+        console.error('[ERROR]', e.message);
+        process.exit(1);
+    }
 });
 program
     .command('explain')
