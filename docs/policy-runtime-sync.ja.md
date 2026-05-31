@@ -53,6 +53,6 @@
 | `request.normalize.drop_query_keys` | `CFG.dropQueryKeys` | 同様                | `CFG.dropQueryKeys`  |
 | `routes[].auth_gate`     | `CFG.authGates` (static_token / Basic) | JWT / 署名付き URL の検証 | `CFG.authGates` (static token / Basic / JWT / 署名付き URL) |
 | `response_headers`       | `viewer-response.js`   | Origin response     | レスポンスヘッダー設定 |
-| `origin.auth`            | —                      | カスタムヘッダー注入 | upstream fetch にカスタムヘッダー注入 |
+| `origin.auth`            | —                      | カスタムヘッダー注入または HMAC 署名 | upstream fetch にカスタムヘッダー注入または HMAC 署名 |
 
 関連: [アーキテクチャ](architecture.ja.md)、[判断マトリクス](decision-matrix.ja.md)、[観測とメトリクス](observability.ja.md)。

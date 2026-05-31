@@ -23,7 +23,7 @@ const CFG = {
   trustForwardedFor: false,
   cors: null,
   authGates: [],
-  originAuth: {"type":"custom_header","header":"x-edge-secret","secret_env":"ORIGIN_SECRET"},
+  originAuth: {"type":"hmac_signature","secret_env":"ORIGIN_SECRET","header_prefix":"X-CDN-Auth","timestamp_tolerance_seconds":300,"include_body_hash":false,"signed_components":["method","path","query","body","timestamp","nonce"]},
   jwksStaleIfErrorSec: 3600,
   jwksNegativeCacheSec: 60,
   geoBlockCountries: new Set([]),
@@ -598,6 +598,50 @@ function canonicalSignedUrlPayload(pathname: string, params: URLSearchParams, si
     .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
     .join('&');
   return query ? `${pathname}?${query}` : pathname;
+}
+
+function canonicalOriginAuthQuery(params: URLSearchParams): string {
+  const pairs: Array<[string, string]> = [];
+  params.forEach((value, key) => pairs.push([key, value]));
+  pairs.sort((a, b) => {
+    if (a[0] === b[0]) return a[1] < b[1] ? -1 : (a[1] > b[1] ? 1 : 0);
+    return a[0] < b[0] ? -1 : 1;
+  });
+  return pairs
+    .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
+    .join('&');
+}
+
+function originAuthSignedComponents(auth: any): string[] {
+  return Array.isArray(auth.signed_components) && auth.signed_components.length > 0
+    ? auth.signed_components
+    : ['method', 'path', 'query', 'body', 'timestamp', 'nonce'];
+}
+
+function canonicalOriginAuthInput(request: Request, url: URL, auth: any, timestamp: string, nonce: string, bodyHash: string): string {
+  const values: Record<string, string> = {
+    method: String(request.method || '').toUpperCase(),
+    path: url.pathname || '/',
+    query: canonicalOriginAuthQuery(url.searchParams),
+    body: bodyHash || '',
+    timestamp,
+    nonce,
+  };
+  return originAuthSignedComponents(auth).map((component) => values[component] || '').join('\n');
+}
+
+async function sha256HexBytes(input: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', input);
+  const bytes = new Uint8Array(digest);
+  let hex = '';
+  for (const b of bytes) hex += b.toString(16).padStart(2, '0');
+  return hex;
+}
+
+function randomOriginAuthNonce(): string {
+  const buf = new Uint8Array(16);
+  crypto.getRandomValues(buf);
+  return Array.from(buf, (b: number) => b.toString(16).padStart(2, '0')).join('');
 }
 
 function isHostAllowed(hostHeader: string): boolean {
@@ -1222,12 +1266,30 @@ export default {
     for (const h of ['transfer-encoding', 'connection', 'keep-alive', 'te', 'upgrade', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'trailer']) {
       forwardHeaders.delete(h);
     }
-    if (CFG.originAuth && CFG.originAuth.type === 'custom_header') {
+    if (CFG.originAuth && (CFG.originAuth.type === 'custom_header' || CFG.originAuth.type === 'hmac_signature')) {
       const envName = CFG.originAuth.secret_env || '';
       const secret = envName ? (env[envName] || '') : '';
       if (secret) {
-        const headerName = CFG.originAuth.header || 'X-Origin-Verify';
-        forwardHeaders.set(headerName, secret);
+        if (CFG.originAuth.type === 'hmac_signature') {
+          const prefix = CFG.originAuth.header_prefix || 'X-CDN-Auth';
+          const timestamp = String(Math.floor(Date.now() / 1000));
+          const nonce = randomOriginAuthNonce();
+          let bodyHash = '';
+          if (CFG.originAuth.include_body_hash === true) {
+            bodyHash = await sha256HexBytes(await request.clone().arrayBuffer());
+          }
+          const canonical = canonicalOriginAuthInput(request, url, CFG.originAuth, timestamp, nonce, bodyHash);
+          const signature = await hmacSha256Base64Url(secret, canonical);
+          forwardHeaders.set(prefix + '-Timestamp', timestamp);
+          forwardHeaders.set(prefix + '-Nonce', nonce);
+          if (CFG.originAuth.include_body_hash === true) {
+            forwardHeaders.set(prefix + '-Body-SHA256', bodyHash);
+          }
+          forwardHeaders.set(prefix + '-Signature', signature);
+        } else {
+          const headerName = CFG.originAuth.header || 'X-Origin-Verify';
+          forwardHeaders.set(headerName, secret);
+        }
       } else {
         console.log(JSON.stringify({
           ts: new Date().toISOString(),

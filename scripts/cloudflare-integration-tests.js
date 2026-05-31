@@ -44,6 +44,14 @@ function createSignedUrlQuery(pathname, params, secret) {
     const sig = crypto.createHmac('sha256', secret).update(payload).digest('base64url');
     return canonical + '&sig=' + sig;
 }
+function canonicalQuery(params) {
+    const pairs = [];
+    params.forEach((value, key) => pairs.push([key, value]));
+    return pairs
+        .sort((a, b) => a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0]))
+        .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
+        .join('&');
+}
 function challengeUaHash(ua) {
     return crypto.createHash('sha256').update(ua || '').digest('hex').slice(0, 16);
 }
@@ -283,6 +291,47 @@ origin:
         }, { EDGE_ADMIN_TOKEN: 'integration-test-token' });
         assert.strictEqual(res.status, 503);
         assert.strictEqual(fetched, false, 'origin fetch must not run when origin auth secret is missing');
+    });
+    await test('origin auth hmac signs upstream request with canonical query', async () => {
+        const originAuthPolicy = BASE_POLICY + `
+origin:
+  auth:
+    type: hmac_signature
+    secret_env: ORIGIN_HMAC_SECRET
+    header_prefix: X-CDN-Auth
+    timestamp_tolerance_seconds: 300
+    include_body_hash: false
+    signed_components: [method, path, query, body, timestamp, nonce]
+`;
+        const secret = 'cf-origin-hmac-secret';
+        const originJs = transpileToJs(compileWorker(originAuthPolicy, { env: { EDGE_ADMIN_TOKEN: 'integration-test-token' } }));
+        let forwarded = null;
+        const { worker } = loadWorker(originJs, {
+            env: { EDGE_ADMIN_TOKEN: 'integration-test-token' },
+            fetchStub: async (req) => {
+                forwarded = req;
+                return new Response('origin', { status: 200 });
+            },
+        });
+        const res = await dispatch(worker, 'https://example.com/hello?b=2&a=1', {
+            method: 'GET',
+            headers: { 'user-agent': 'Mozilla/5.0' },
+        }, {
+            EDGE_ADMIN_TOKEN: 'integration-test-token',
+            ORIGIN_HMAC_SECRET: secret,
+        });
+        assert.strictEqual(res.status, 200);
+        assert.ok(forwarded, 'origin fetch should receive a signed request');
+        const ts = forwarded.headers.get('X-CDN-Auth-Timestamp') || '';
+        const nonce = forwarded.headers.get('X-CDN-Auth-Nonce') || '';
+        const sig = forwarded.headers.get('X-CDN-Auth-Signature') || '';
+        const url = new URL(forwarded.url);
+        const canonical = ['GET', '/hello', canonicalQuery(url.searchParams), '', ts, nonce].join('\n');
+        const expected = crypto.createHmac('sha256', secret).update(canonical).digest('base64url');
+        assert.ok(Math.abs(Math.floor(Date.now() / 1000) - Number(ts)) <= 5, 'timestamp should be fresh');
+        assert.ok(/^[0-9a-f]{32}$/.test(nonce), 'nonce should be 16 random bytes as hex');
+        assert.strictEqual(sig, expected);
+        assert.strictEqual(forwarded.headers.get('X-CDN-Auth-Body-SHA256'), null);
     });
     await test('JWT missing exp is rejected by Cloudflare worker with 401', async () => {
         const jwtPolicy = BASE_POLICY + `

@@ -629,19 +629,50 @@
       "additionalProperties": false,
       "properties": {
         "auth": {
-          "description": "Origin authentication secret injected by the edge runtime. When `type: custom_header`, both `header` (non-empty) and `secret_env` (env var name matching `^[A-Z][A-Z0-9_]*$`) are required. The edge refuses to forward the header when the env var resolves to empty at build/runtime — preventing a silent auth-bypass where origin would otherwise see `X-Origin-Verify: ` and allow the request on trust. See docs/iac.md#origin-auth.",
+          "description": "Origin authentication injected by the edge runtime. `custom_header` forwards a static shared-secret header. `hmac_signature` signs method/path/query/body-hash/timestamp/nonce components with HMAC-SHA256 and emits derived headers under `header_prefix`. Secret values are always referenced by env var name only. See docs/origin-auth.md.",
           "type": "object",
           "additionalProperties": false,
           "required": ["type"],
           "properties": {
-            "type": { "enum": ["custom_header"] },
+            "type": { "enum": ["custom_header", "hmac_signature"] },
             "header": { "type": "string", "minLength": 1 },
-            "secret_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" }
+            "secret_env": { "type": "string", "pattern": "^[A-Z][A-Z0-9_]*$" },
+            "header_prefix": {
+              "description": "Header prefix for HMAC origin-auth headers. The runtime emits `<prefix>-Timestamp`, `<prefix>-Nonce`, optional `<prefix>-Body-SHA256`, and `<prefix>-Signature`.",
+              "type": "string",
+              "minLength": 1,
+              "pattern": "^[A-Za-z][A-Za-z0-9-]*$"
+            },
+            "timestamp_tolerance_seconds": {
+              "description": "Maximum timestamp age the origin should accept when verifying the generated HMAC signature.",
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 3600
+            },
+            "include_body_hash": {
+              "description": "When true, body-readable runtimes hash the request body and include the hex SHA-256 in both canonical signing input and `<prefix>-Body-SHA256`.",
+              "type": "boolean"
+            },
+            "signed_components": {
+              "description": "Canonical components included in the HMAC input, in order. Defaults to method, path, query, body, timestamp, nonce. Custom lists must include timestamp and nonce so replay headers are bound to the signature.",
+              "type": "array",
+              "minItems": 1,
+              "uniqueItems": true,
+              "items": { "enum": ["method", "path", "query", "body", "timestamp", "nonce"] },
+              "allOf": [
+                { "contains": { "const": "timestamp" } },
+                { "contains": { "const": "nonce" } }
+              ]
+            }
           },
           "allOf": [
             {
               "if": { "properties": { "type": { "const": "custom_header" } } },
               "then": { "required": ["header", "secret_env"] }
+            },
+            {
+              "if": { "properties": { "type": { "const": "hmac_signature" } } },
+              "then": { "required": ["secret_env"] }
             }
           ]
         },

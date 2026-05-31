@@ -79,7 +79,7 @@ This document maps **which security-related YAML settings are supported** by cat
 
 | Feature | Status | Notes |
 |---------|--------|-------|
-| **Origin auth (custom header)** | Supported | `origin.auth.type: custom_header` with `header` and `secret_env`. Lambda@Edge injects secret header. |
+| **Origin auth (custom header / HMAC)** | Supported | `origin.auth.type: custom_header` injects a shared secret. `hmac_signature` signs method/path/query/body-hash/timestamp/nonce for AWS Lambda@Edge and Cloudflare Workers. |
 | **Timeout** | Supported | `origin.timeout.connect` / `read` → `dist/infra/cloudfront-origin.tf.json` |
 
 ---

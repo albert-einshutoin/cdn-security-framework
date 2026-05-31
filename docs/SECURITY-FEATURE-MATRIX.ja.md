@@ -81,7 +81,7 @@
 
 | 項目 | 対応 | 備考 |
 |------|------|------|
-| **オリジンへの認証（カスタムヘッダー）** | ✅ 対応 | `origin.auth.type: custom_header` と `header`, `secret_env`。Lambda@Edge で秘密ヘッダーを注入。 |
+| **オリジンへの認証（カスタムヘッダー / HMAC）** | ✅ 対応 | `origin.auth.type: custom_header` は共有 secret を注入。`hmac_signature` は AWS Lambda@Edge / Cloudflare Workers で method/path/query/body hash/timestamp/nonce を署名。 |
 | **タイムアウト設定** | ✅ 対応 | `origin.timeout.connect` / `read` → `dist/infra/cloudfront-origin.tf.json` |
 
 ---

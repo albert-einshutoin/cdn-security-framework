@@ -399,22 +399,21 @@ function hasFailOnPermissiveFlag(argv) {
 function hasStrictOriginAuthFlag(argv) {
     return Array.isArray(argv) && argv.includes('--strict-origin-auth');
 }
-// Verify that when origin.auth.type=custom_header is configured, the env var
-// named by `secret_env` is present and non-empty in the build environment.
-// Called with { strict: true } under --strict-origin-auth and as a warning
-// otherwise, so dev builds keep working while CI can fail closed.
+// Verify that origin.auth secrets and runtime-shaping options are usable before
+// emitting code. Called with { strict: true } under --strict-origin-auth and as
+// a warning otherwise, so dev builds keep working while CI can fail closed.
 function validateOriginAuth(policy, options = {}) {
     const env = options.env || process.env;
     const strict = options.strict === true;
     const logger = options.logger || console;
     const auth = policy && policy.origin && policy.origin.auth;
-    if (!auth || auth.type !== 'custom_header')
+    if (!auth || !['custom_header', 'hmac_signature'].includes(auth.type))
         return { warnings: [], errors: [] };
     const warnings = [];
     const errors = [];
     const envName = auth.secret_env || '';
     if (!envName) {
-        errors.push('origin.auth.secret_env is required when type=custom_header');
+        errors.push(`origin.auth.secret_env is required when type=${auth.type}`);
     }
     else {
         const v = env[envName];
@@ -423,6 +422,29 @@ function validateOriginAuth(policy, options = {}) {
         }
         else if (v.length === 0) {
             (strict ? errors : warnings).push(`origin.auth.secret_env "${envName}" is set but empty. The edge will refuse to forward the origin-auth header, breaking origin trust.`);
+        }
+    }
+    if (auth.type === 'custom_header' && (!auth.header || typeof auth.header !== 'string')) {
+        errors.push('origin.auth.header is required when type=custom_header');
+    }
+    if (auth.type === 'hmac_signature') {
+        const prefix = auth.header_prefix || 'X-CDN-Auth';
+        if (typeof prefix !== 'string' || !/^[A-Za-z][A-Za-z0-9-]*$/.test(prefix)) {
+            errors.push('origin.auth.header_prefix must match ^[A-Za-z][A-Za-z0-9-]*$ when type=hmac_signature');
+        }
+        const tolerance = auth.timestamp_tolerance_seconds == null ? 300 : Number(auth.timestamp_tolerance_seconds);
+        if (!Number.isInteger(tolerance) || tolerance < 1 || tolerance > 3600) {
+            errors.push('origin.auth.timestamp_tolerance_seconds must be an integer from 1 to 3600 when type=hmac_signature');
+        }
+        if (auth.signed_components != null) {
+            const allowed = new Set(['method', 'path', 'query', 'body', 'timestamp', 'nonce']);
+            const components = Array.isArray(auth.signed_components) ? auth.signed_components : [];
+            if (components.length === 0 || components.some((c) => !allowed.has(c))) {
+                errors.push('origin.auth.signed_components must contain one or more of method, path, query, body, timestamp, nonce');
+            }
+            if (!components.includes('timestamp') || !components.includes('nonce')) {
+                errors.push('origin.auth.signed_components must include timestamp and nonce when type=hmac_signature');
+            }
         }
     }
     warnings.forEach((w) => logger.warn('[origin-auth] ' + w));

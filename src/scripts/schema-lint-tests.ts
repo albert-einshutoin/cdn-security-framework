@@ -604,6 +604,84 @@ test('lint accepts complete origin.auth.custom_header', () => {
   }
 });
 
+test('lint accepts origin.auth.hmac_signature with signing options', () => {
+  const yaml = basePolicy({
+    extra: `origin:
+  auth:
+    type: hmac_signature
+    secret_env: ORIGIN_AUTH_SECRET
+    header_prefix: X-CDN-Auth
+    timestamp_tolerance_seconds: 300
+    include_body_hash: false
+    signed_components: [method, path, query, body, timestamp, nonce]
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result: any = runLint(file);
+    assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint rejects origin.auth.hmac_signature missing secret_env', () => {
+  const yaml = basePolicy({
+    extra: `origin:
+  auth:
+    type: hmac_signature
+    header_prefix: X-CDN-Auth
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result: any = runLint(file);
+    assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+    assert.match(result.stderr + result.stdout, /secret_env|required/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint rejects origin.auth.hmac_signature invalid prefix and tolerance', () => {
+  const yaml = basePolicy({
+    extra: `origin:
+  auth:
+    type: hmac_signature
+    secret_env: ORIGIN_AUTH_SECRET
+    header_prefix: "bad header"
+    timestamp_tolerance_seconds: 9999
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result: any = runLint(file);
+    assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+    assert.match(result.stderr + result.stdout, /header_prefix|timestamp_tolerance_seconds|pattern|maximum/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test('lint rejects origin.auth.hmac_signature signed_components without replay fields', () => {
+  const yaml = basePolicy({
+    extra: `origin:
+  auth:
+    type: hmac_signature
+    secret_env: ORIGIN_AUTH_SECRET
+    signed_components: [method, path, query]
+`,
+  });
+  const { dir, file } = writeTempPolicy(yaml);
+  try {
+    const result: any = runLint(file);
+    assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+    assert.match(result.stderr + result.stdout, /signed_components|timestamp|nonce|contains/i);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 if (process.exitCode) {
   process.exit(process.exitCode);
 }

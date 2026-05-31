@@ -365,7 +365,7 @@ function createHS256Jwt(payload, secret) {
     return headerB64 + '.' + payloadB64 + '.' + sig;
 }
 // Build Lambda@Edge event format
-function buildLambdaEdgeEvent(uri, headers = {}, querystring = '') {
+function buildLambdaEdgeEvent(uri, headers = {}, querystring = '', method = 'GET') {
     const h = headers || {};
     const cfHeaders = {};
     for (const [k, v] of Object.entries(h)) {
@@ -375,6 +375,7 @@ function buildLambdaEdgeEvent(uri, headers = {}, querystring = '') {
         Records: [{
                 cf: {
                     request: {
+                        method,
                         uri: uri || '/',
                         headers: cfHeaders,
                         querystring: querystring || '',
@@ -755,6 +756,52 @@ async function runOriginAuthFailClosedTests() {
     console.log('--- origin-auth fail-closed: ' + (ok ? '1/1' : '0/1') + ' passed ---');
     return { failed: ok ? 0 : 1, total: 1 };
 }
+async function runOriginAuthHmacTests() {
+    const secret = 'origin-hmac-secret-for-runtime-test';
+    process.env.ORIGIN_HMAC_TEST_SECRET = secret;
+    const cfgCode = [
+        'const CFG = {',
+        '  project: "test",',
+        '  mode: "enforce",',
+        '  maxHeaderSize: 0,',
+        '  jwtGates: [],',
+        '  signedUrlGates: [],',
+        '  originAuth: {',
+        '    type: "hmac_signature",',
+        '    secret_env: "ORIGIN_HMAC_TEST_SECRET",',
+        '    header_prefix: "X-CDN-Auth",',
+        '    timestamp_tolerance_seconds: 300,',
+        '    include_body_hash: false,',
+        '    signed_components: ["method", "path", "query", "body", "timestamp", "nonce"]',
+        '  },',
+        '  trustForwardedFor: false,',
+        '  obs: { logFormat: "json", correlationHeader: "" }',
+        '};',
+    ].join('\n');
+    const hmacHandler = compileOriginTemplate(cfgCode);
+    if (!hmacHandler)
+        return { failed: 1, total: 1 };
+    const event = buildLambdaEdgeEvent('/origin/resource', {}, 'b=2&a=1', 'POST');
+    const result = await hmacHandler(event);
+    const headers = result && result.headers;
+    const ts = headers && headers['x-cdn-auth-timestamp'] && headers['x-cdn-auth-timestamp'][0].value;
+    const nonce = headers && headers['x-cdn-auth-nonce'] && headers['x-cdn-auth-nonce'][0].value;
+    const sig = headers && headers['x-cdn-auth-signature'] && headers['x-cdn-auth-signature'][0].value;
+    const canonical = ['POST', '/origin/resource', 'a=1&b=2', '', ts, nonce].join('\n');
+    const expected = crypto.createHmac('sha256', secret).update(canonical).digest('base64url');
+    const fresh = Math.abs(Math.floor(Date.now() / 1000) - Number(ts)) <= 5;
+    const ok = !!(result && result.uri === '/origin/resource' && ts && nonce && sig === expected && fresh && !headers['x-cdn-auth-body-sha256']);
+    if (!ok) {
+        console.error('FAIL: origin auth HMAC signs method/path/canonical query/timestamp/nonce');
+        console.error({ ts, nonce, sig, expected, headers });
+    }
+    else {
+        console.log('OK: origin auth HMAC signs method/path/canonical query/timestamp/nonce');
+    }
+    delete process.env.ORIGIN_HMAC_TEST_SECRET;
+    console.log('--- origin-auth hmac: ' + (ok ? '1/1' : '0/1') + ' passed ---');
+    return { failed: ok ? 0 : 1, total: 1 };
+}
 // Monitor mode tests: blocking checks should pass through
 async function runMonitorModeTests() {
     const testSecret = HS256_SECRET;
@@ -847,6 +894,9 @@ async function main() {
     const originAuthResult = await runOriginAuthFailClosedTests();
     totalFailed += originAuthResult.failed;
     totalTests += originAuthResult.total;
+    const originAuthHmacResult = await runOriginAuthHmacTests();
+    totalFailed += originAuthHmacResult.failed;
+    totalTests += originAuthHmacResult.total;
     const monitorResult = await runMonitorModeTests();
     totalFailed += monitorResult.failed;
     totalTests += monitorResult.total;

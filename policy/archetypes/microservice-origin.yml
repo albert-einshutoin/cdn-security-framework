@@ -53,12 +53,15 @@ origin:
     connect: 5
     read: 30
   # Edge signs every origin request with ORIGIN_SECRET so the origin can
-  # reject anything that didn't come through this CDN. Combine with an
-  # origin-side ACL that requires this header.
+  # reject anything that didn't come through this CDN or was replayed outside
+  # the timestamp/nonce window. See docs/origin-auth.md.
   auth:
-    type: custom_header
-    header: "x-edge-secret"
+    type: hmac_signature
     secret_env: "ORIGIN_SECRET"
+    header_prefix: "X-CDN-Auth"
+    timestamp_tolerance_seconds: 300
+    include_body_hash: false
+    signed_components: ["method", "path", "query", "body", "timestamp", "nonce"]
 
 firewall:
   waf:

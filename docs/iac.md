@@ -174,7 +174,7 @@ Re-run `npx cdn-security build` whenever you change `policy/security.yml`; then 
 
 <a id="origin-auth"></a>
 
-When `origin.auth.type: custom_header` is configured, the edge injects a shared secret header (default `X-Origin-Verify`) read from an environment variable at build/runtime:
+When `origin.auth.type: custom_header` is configured, the edge injects a shared secret header (default `X-Origin-Verify`) read from an environment variable at build/runtime. For replay-resistant request signing, use `origin.auth.type: hmac_signature`; canonicalization and backend verification examples live in [Origin Authentication](origin-auth.md).
 
 ```yaml
 origin:

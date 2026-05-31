@@ -173,7 +173,7 @@ distribution.addBehavior('*', origin, {
 
 <a id="origin-auth"></a>
 
-`origin.auth.type: custom_header` を設定すると、エッジが共有シークレットを `X-Origin-Verify`（既定）などのヘッダとして付与し、オリジンはそれを検証して「エッジ経由のトラフィックのみ信頼」できます。値は環境変数から読み込みます。
+`origin.auth.type: custom_header` を設定すると、エッジが共有シークレットを `X-Origin-Verify`（既定）などのヘッダとして付与し、オリジンはそれを検証して「エッジ経由のトラフィックのみ信頼」できます。値は環境変数から読み込みます。replay に強いリクエスト署名が必要な場合は `origin.auth.type: hmac_signature` を使います。canonicalization と backend verification の例は [オリジン認証](origin-auth.ja.md) を参照してください。
 
 ```yaml
 origin:
