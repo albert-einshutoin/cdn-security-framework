@@ -536,6 +536,100 @@ test('CLI authoring DX: readiness strict mode fails on warnings', () => {
         ctx.cleanup();
     }
 });
+test('CLI authoring DX: deploy-template emits AWS and Cloudflare workflow templates', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-template-'));
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const outDir = path.join(tmp, '.github', 'workflows');
+        const result = spawnSync(process.execPath, [
+            cli, 'deploy-template',
+            '--target', 'all',
+            '--out-dir', outDir,
+        ], {
+            cwd: tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `deploy-template failed: ${result.stderr}`);
+        const aws = fs.readFileSync(path.join(outDir, 'cdn-security-aws.yml'), 'utf8');
+        const cloudflare = fs.readFileSync(path.join(outDir, 'cdn-security-cloudflare.yml'), 'utf8');
+        assert.ok(aws.includes('cdn-security readiness --target aws --strict'));
+        assert.ok(aws.includes('${{ secrets.EDGE_ADMIN_TOKEN }}'));
+        assert.ok(aws.includes('cdn-security build --target aws --out-dir dist'));
+        assert.ok(cloudflare.includes('cdn-security readiness --target cloudflare --strict'));
+        assert.ok(cloudflare.includes('CDN_SECURITY_WORKER_SECRET_NAMES'));
+        assert.ok(cloudflare.includes('CDN_SECURITY_WORKER_SECRETS_FILE'));
+        assert.ok(cloudflare.includes('npx wrangler deploy dist/edge/cloudflare/index.ts --secrets-file'));
+        assert.ok(cloudflare.includes('${{ secrets.CLOUDFLARE_API_TOKEN }}'));
+        assert.ok(cloudflare.includes("'wrangler.toml'"));
+    }
+    finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+});
+test('CLI authoring DX: deploy-template refuses overwrite without --force', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-template-'));
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const outDir = path.join(tmp, '.github', 'workflows');
+        fs.mkdirSync(outDir, { recursive: true });
+        fs.writeFileSync(path.join(outDir, 'cdn-security-aws.yml'), 'existing\n', 'utf8');
+        const result = spawnSync(process.execPath, [
+            cli, 'deploy-template',
+            '--target', 'aws',
+            '--out-dir', outDir,
+        ], {
+            cwd: tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 1);
+        assert.ok(/already exists/.test(result.stderr));
+        const forced = spawnSync(process.execPath, [
+            cli, 'deploy-template',
+            '--target', 'aws',
+            '--out-dir', outDir,
+            '--force',
+        ], {
+            cwd: tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(forced.status, 0, `forced deploy-template failed: ${forced.stderr}`);
+        assert.ok(fs.readFileSync(path.join(outDir, 'cdn-security-aws.yml'), 'utf8').includes('CDN Security AWS Build'));
+    }
+    finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+});
+test('CLI authoring DX: deploy-template does not partially write on overwrite refusal', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-template-'));
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const outDir = path.join(tmp, '.github', 'workflows');
+        fs.mkdirSync(outDir, { recursive: true });
+        fs.writeFileSync(path.join(outDir, 'cdn-security-cloudflare.yml'), 'existing\n', 'utf8');
+        const result = spawnSync(process.execPath, [
+            cli, 'deploy-template',
+            '--target', 'all',
+            '--out-dir', outDir,
+        ], {
+            cwd: tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 1);
+        assert.ok(/already exists/.test(result.stderr));
+        assert.ok(!fs.existsSync(path.join(outDir, 'cdn-security-aws.yml')));
+        assert.strictEqual(fs.readFileSync(path.join(outDir, 'cdn-security-cloudflare.yml'), 'utf8'), 'existing\n');
+    }
+    finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+});
 test('CLI authoring DX: diff detects generated output drift', () => {
     const ctx = tmpProject(BASIC_AWS_POLICY);
     const { spawnSync } = require('child_process');
