@@ -647,7 +647,7 @@ export interface CDNSecurityFrameworkPolicy {
   };
   origin?: {
     /**
-     * Origin authentication secret injected by the edge runtime. When `type: custom_header`, both `header` (non-empty) and `secret_env` (env var name matching `^[A-Z][A-Z0-9_]*$`) are required. The edge refuses to forward the header when the env var resolves to empty at build/runtime — preventing a silent auth-bypass where origin would otherwise see `X-Origin-Verify: ` and allow the request on trust. See docs/iac.md#origin-auth.
+     * Origin authentication injected by the edge runtime. `custom_header` forwards a static shared-secret header. `hmac_signature` signs method/path/query/body-hash/timestamp/nonce components with HMAC-SHA256 and emits derived headers under `header_prefix`. Secret values are always referenced by env var name only. See docs/origin-auth.md.
      */
     auth?: {
       [k: string]: unknown;

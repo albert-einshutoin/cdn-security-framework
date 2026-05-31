@@ -1506,6 +1506,56 @@ test('validateOriginAuth passes when secret_env resolves to non-empty value', ()
   assert.strictEqual(result.warnings.length, 0);
 });
 
+test('validateOriginAuth validates hmac_signature options', () => {
+  const validPolicy = {
+    origin: {
+      auth: {
+        type: 'hmac_signature',
+        secret_env: 'ORIGIN_AUTH_SECRET',
+        header_prefix: 'X-CDN-Auth',
+        timestamp_tolerance_seconds: 300,
+        signed_components: ['method', 'path', 'query', 'body', 'timestamp', 'nonce'],
+      },
+    },
+  };
+  const logger = { warn: () => {}, error: () => {} };
+  const result: any = validateOriginAuth(validPolicy, {
+    env: { ORIGIN_AUTH_SECRET: 's3cr3t' },
+    strict: true,
+    logger,
+  });
+  assert.strictEqual(result.errors.length, 0);
+
+  const invalidPolicy = {
+    origin: {
+      auth: {
+        type: 'hmac_signature',
+        secret_env: 'ORIGIN_AUTH_SECRET',
+        header_prefix: 'bad header',
+        timestamp_tolerance_seconds: 0,
+      },
+    },
+  };
+  assert.throws(
+    () => validateOriginAuth(invalidPolicy, { env: { ORIGIN_AUTH_SECRET: 's3cr3t' }, strict: true, logger }),
+    /origin-auth validation failed/,
+  );
+
+  const replayWeakPolicy = {
+    origin: {
+      auth: {
+        type: 'hmac_signature',
+        secret_env: 'ORIGIN_AUTH_SECRET',
+        signed_components: ['method', 'path', 'query'],
+      },
+    },
+  };
+  assert.throws(
+    () => validateOriginAuth(replayWeakPolicy, { env: { ORIGIN_AUTH_SECRET: 's3cr3t' }, strict: true, logger }),
+    /origin-auth validation failed/,
+  );
+});
+
 test('validateOriginAuth is a no-op when origin.auth is absent', () => {
   const logger = { warn: () => {}, error: () => {} };
   const result: any = validateOriginAuth({}, { env: {}, strict: true, logger });
@@ -1526,6 +1576,34 @@ test('origin-request refuses to forward origin-auth header when env is empty', (
     const code = fs.readFileSync(path.join(tmpDir, 'edge/origin-request.js'), 'utf8');
     // Ensure the runtime code guards against a blank env var before forwarding.
     assert.match(code, /origin_auth_secret_missing/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
+test('build emits HMAC origin auth config for AWS origin-request', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-test-origin-hmac-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: { hsts: 'max-age=1' },
+      origin: {
+        auth: {
+          type: 'hmac_signature',
+          secret_env: 'ORIGIN_AUTH_SECRET',
+          header_prefix: 'X-CDN-Auth',
+          timestamp_tolerance_seconds: 300,
+          include_body_hash: false,
+          signed_components: ['method', 'path', 'query', 'body', 'timestamp', 'nonce'],
+        },
+      },
+    };
+    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge/origin-request.js'), 'utf8');
+    assert.match(code, /originAuth:\s*\{"type":"hmac_signature"/);
+    assert.match(code, /canonicalOriginAuthInput/);
+    assert.match(code, /X-CDN-Auth/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }

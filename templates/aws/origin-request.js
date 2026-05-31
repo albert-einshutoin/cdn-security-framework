@@ -508,8 +508,62 @@ function checkSignedUrlGates(request) {
   return null;
 }
 
-// Add origin auth header. Refuses to forward when the env var is unset / empty
-// so origin cannot mistake a blank `X-Origin-Verify` for a valid edge handoff.
+function titleHeaderName(name) {
+  return String(name || '').toLowerCase().replace(/(^|-)([a-z])/g, (_, d, c) => d + c.toUpperCase());
+}
+
+function canonicalOriginAuthQuery(querystring) {
+  const params = new URLSearchParams(querystring || '');
+  const pairs = [];
+  for (const [key, value] of params.entries()) pairs.push([key, value]);
+  pairs.sort((a, b) => {
+    if (a[0] === b[0]) return a[1] < b[1] ? -1 : (a[1] > b[1] ? 1 : 0);
+    return a[0] < b[0] ? -1 : 1;
+  });
+  return pairs
+    .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
+    .join('&');
+}
+
+function originAuthBodyHash(request, includeBodyHash) {
+  if (!includeBodyHash) return { ok: true, hash: '' };
+  const body = request && request.body;
+  if (!body || body.data == null) {
+    return { ok: true, hash: crypto.createHash('sha256').update(Buffer.alloc(0)).digest('hex') };
+  }
+  if (body.inputTruncated === true) {
+    return { ok: false, error: 'origin_auth_body_truncated' };
+  }
+  const encoding = body.encoding === 'base64' ? 'base64' : 'utf8';
+  const data = Buffer.from(String(body.data || ''), encoding);
+  return { ok: true, hash: crypto.createHash('sha256').update(data).digest('hex') };
+}
+
+function originAuthSignedComponents(auth) {
+  return Array.isArray(auth.signed_components) && auth.signed_components.length > 0
+    ? auth.signed_components
+    : ['method', 'path', 'query', 'body', 'timestamp', 'nonce'];
+}
+
+function canonicalOriginAuthInput(request, auth, timestamp, nonce, bodyHash) {
+  const values = {
+    method: String((request && request.method) || '').toUpperCase(),
+    path: (request && request.uri) || '/',
+    query: canonicalOriginAuthQuery((request && request.querystring) || ''),
+    body: bodyHash || '',
+    timestamp,
+    nonce,
+  };
+  return originAuthSignedComponents(auth).map((component) => values[component] || '').join('\n');
+}
+
+function setOriginAuthHeader(request, headerName, value) {
+  const key = titleHeaderName(headerName);
+  request.headers[String(headerName).toLowerCase()] = [{ key, value: String(value) }];
+}
+
+// Add origin auth headers. Refuses to forward when the env var is unset / empty
+// so origin cannot mistake a blank proof for a valid edge handoff.
 function addOriginAuth(request) {
   if (!CFG.originAuth) return null;
 
@@ -524,11 +578,33 @@ function addOriginAuth(request) {
     });
     return resp(503, 'Origin auth misconfigured');
   }
-  const headerName = (CFG.originAuth.header || 'X-Origin-Verify').toLowerCase();
-  request.headers[headerName] = [{
-    key: CFG.originAuth.header || 'X-Origin-Verify',
-    value: secret,
-  }];
+  if (CFG.originAuth.type === 'hmac_signature') {
+    const body = originAuthBodyHash(request, CFG.originAuth.include_body_hash === true);
+    if (!body.ok) {
+      logEvent('error', {
+        block_reason: body.error || 'origin_auth_body_unavailable',
+        secret_env: envName,
+        uri: request.uri || '',
+        correlation_id: readCorrelation(request),
+      });
+      return resp(503, 'Origin auth misconfigured');
+    }
+    const prefix = CFG.originAuth.header_prefix || 'X-CDN-Auth';
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const nonce = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+    const canonical = canonicalOriginAuthInput(request, CFG.originAuth, timestamp, nonce, body.hash);
+    const signature = crypto.createHmac('sha256', secret).update(canonical).digest('base64url');
+    setOriginAuthHeader(request, prefix + '-Timestamp', timestamp);
+    setOriginAuthHeader(request, prefix + '-Nonce', nonce);
+    if (CFG.originAuth.include_body_hash === true) {
+      setOriginAuthHeader(request, prefix + '-Body-SHA256', body.hash);
+    }
+    setOriginAuthHeader(request, prefix + '-Signature', signature);
+    return null;
+  }
+
+  const headerName = CFG.originAuth.header || 'X-Origin-Verify';
+  setOriginAuthHeader(request, headerName, secret);
   return null;
 }
 
@@ -543,8 +619,7 @@ function propagateCorrelation(request) {
   if (hasIncoming) return;
   // Lambda@Edge has crypto available — use randomUUID as a cheap ID.
   const id = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
-  const canonical = headerName.replace(/(^|-)([a-z])/g, (_, d, c) => d + c.toUpperCase());
-  request.headers[headerName] = [{ key: canonical, value: id }];
+  request.headers[headerName] = [{ key: titleHeaderName(headerName), value: id }];
 }
 
 // Structured log emitter for Lambda@Edge. Same JSON shape as the CloudFront
