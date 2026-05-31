@@ -28,9 +28,13 @@ npx cdn-security <subcommand> [options]
 npx cdn-security init                                      # interactive
 npx cdn-security init --platform aws --profile balanced    # non-interactive
 npx cdn-security init --platform aws --archetype rest-api  # archetype
+npx cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com
 ```
 
 - `--profile` and `--archetype` are mutually exclusive — a starter is either a security posture (profile) or an app shape (archetype).
+- `--guided` asks about app shape, CDN target, auth mode, protected paths, CORS origins, WAF posture, geo/IP constraints, and deployment intent.
+- Guided setup also has CI-friendly flags: `--app-shape`, `--auth`, `--admin-paths`, `--cors-origins`, `--waf`, `--geo-block`, `--ip-allowlist`, `--deployment`, and `--project`.
+- Generated guided policies include comments pointing to secret-management docs. Secret values are never written; only env var names such as `EDGE_ADMIN_TOKEN`, `BASIC_AUTH_CREDS`, `URL_SIGNING_SECRET`, or `WAF_LOG_DESTINATION_ARN` are referenced.
 - `--force` overwrites existing `policy/security.yml`.
 
 ## `build`

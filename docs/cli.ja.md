@@ -28,9 +28,13 @@ npx cdn-security <subcommand> [options]
 npx cdn-security init                                      # 対話形式
 npx cdn-security init --platform aws --profile balanced    # 非対話
 npx cdn-security init --platform aws --archetype rest-api  # アーキタイプ
+npx cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com
 ```
 
 - `--profile` と `--archetype` は排他指定です。スターターはセキュリティ強度（プロファイル）かアプリ形状（アーキタイプ）のいずれか。
+- `--guided` はアプリ形状、CDN target、auth mode、保護 path、CORS origin、WAF posture、geo/IP 制約、deployment intent を順に尋ねます。
+- guided setup は CI / scaffold script 向けに `--app-shape`、`--auth`、`--admin-paths`、`--cors-origins`、`--waf`、`--geo-block`、`--ip-allowlist`、`--deployment`、`--project` でも非対話実行できます。
+- guided policy には secret 管理 docs へのコメントを入れます。secret 値は書かず、`EDGE_ADMIN_TOKEN`、`BASIC_AUTH_CREDS`、`URL_SIGNING_SECRET`、`WAF_LOG_DESTINATION_ARN` などの env var 名だけを参照します。
 - `--force` で既存の `policy/security.yml` を上書きします。
 
 ## `build`
