@@ -445,6 +445,140 @@ test('CLI authoring DX: build --allow-placeholder-token succeeds without auth en
         ctx.cleanup();
     }
 });
+test('CLI authoring DX: init --guided emits lintable policy with selected shape', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-init-'));
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'init',
+            '--guided',
+            '--platform', 'cloudflare',
+            '--app-shape', 'rest-api',
+            '--auth', 'jwt',
+            '--admin-paths', '/api/',
+            '--cors-origins', 'https://app.example.com',
+            '--waf', 'strict',
+            '--geo-block', 'RU,CN',
+            '--ip-allowlist', '203.0.113.0/24',
+            '--deployment', 'github-actions',
+            '--project', 'guided-api',
+            '--force',
+        ], {
+            cwd: tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `guided init failed: ${result.stderr}`);
+        const policyPath = path.join(tmp, 'policy', 'security.yml');
+        const raw = fs.readFileSync(policyPath, 'utf8');
+        assert.ok(raw.includes('Secrets are referenced by environment variable name only'));
+        const policy = require('js-yaml').load(raw);
+        assert.strictEqual(policy.project, 'guided-api');
+        assert.strictEqual(policy.metadata.risk_level, 'strict');
+        assert.strictEqual(policy.routes[0].auth_gate.type, 'jwt');
+        assert.deepStrictEqual(policy.routes[0].match.path_prefixes, ['/api/']);
+        assert.deepStrictEqual(policy.response_headers.cors.allow_origins, ['https://app.example.com']);
+        assert.deepStrictEqual(policy.firewall.waf.managed_rules, ['AWSManagedRulesCommonRuleSet']);
+        assert.deepStrictEqual(policy.firewall.geo.block_countries, ['RU', 'CN']);
+        assert.deepStrictEqual(policy.firewall.ip.allowlist, ['203.0.113.0/24']);
+        const lint = api.lintPolicy({ policyPath });
+        assert.strictEqual(lint.ok, true, `guided policy lint failed: ${JSON.stringify(lint.errors)}`);
+        const readiness = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', policyPath,
+            '--target', 'cloudflare',
+            '--strict',
+        ], {
+            cwd: tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(readiness.status, 0, `guided policy readiness failed: ${readiness.stderr}`);
+    }
+    finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+});
+test('CLI backwards-compat: init --profile still scaffolds existing starter flow', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'profile-init-'));
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'init',
+            '--platform', 'aws',
+            '--profile', 'balanced',
+            '--force',
+        ], {
+            cwd: tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `profile init failed: ${result.stderr}`);
+        assert.ok(fs.existsSync(path.join(tmp, 'policy', 'security.yml')));
+        assert.ok(fs.existsSync(path.join(tmp, 'policy', 'profiles', 'balanced.yml')));
+    }
+    finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+});
+test('CLI authoring DX: init --guided non-interactive applies defaults without optional prompts', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-init-defaults-'));
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'init',
+            '--guided',
+            '--app-shape', 'rest-api',
+            '--auth', 'jwt',
+            '--waf', 'strict',
+            '--force',
+        ], {
+            cwd: tmp,
+            encoding: 'utf8',
+            env: process.env,
+            input: '',
+        });
+        assert.strictEqual(result.status, 0, `guided init defaults failed: ${result.stderr}`);
+        const raw = fs.readFileSync(path.join(tmp, 'policy', 'security.yml'), 'utf8');
+        const policy = require('js-yaml').load(raw);
+        assert.strictEqual(policy.project, 'guided-rest-api');
+        assert.strictEqual(policy.metadata.description, 'Guided setup: rest-api on aws, auth=jwt, deployment=build-only.');
+        assert.deepStrictEqual(policy.routes[0].match.path_prefixes, ['/api/']);
+        assert.deepStrictEqual(policy.response_headers.cors.allow_origins, ['https://app.example.com']);
+        assert.deepStrictEqual(policy.firewall.waf.managed_rules, [
+            'AWSManagedRulesCommonRuleSet',
+            'AWSManagedRulesKnownBadInputsRuleSet',
+            'AWSManagedRulesIPReputationList',
+            'AWSManagedRulesSQLiRuleSet',
+            'AWSManagedRulesAnonymousIpList',
+            'AWSManagedRulesBotControlRuleSet',
+        ]);
+        assert.deepStrictEqual(policy.firewall.waf.logging, {
+            enabled: true,
+            destination_arn_env: 'WAF_LOG_DESTINATION_ARN',
+            redacted_fields: ['authorization', 'cookie', 'x-api-key'],
+        });
+        assert.strictEqual(policy.firewall.geo, undefined);
+        assert.strictEqual(policy.firewall.ip, undefined);
+        const readiness = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', path.join(tmp, 'policy', 'security.yml'),
+            '--target', 'aws',
+            '--strict',
+        ], {
+            cwd: tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(readiness.status, 0, `guided default policy readiness failed: ${readiness.stderr}`);
+    }
+    finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+});
 test('CLI authoring DX: explain summarizes policy posture', () => {
     const ctx = tmpProject(BASIC_AWS_POLICY);
     try {

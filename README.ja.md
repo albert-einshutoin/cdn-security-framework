@@ -144,9 +144,10 @@ npm install --save-dev cdn-security-framework
 npx cdn-security init
 ```
 
-対話でプラットフォーム（AWS / Cloudflare）とプロファイル（Strict / Balanced / Permissive）を選ぶと、`policy/security.yml` と `policy/profiles/<profile>.yml` が作成されます。
+対話では guided setup、プロファイル（Strict / Balanced / Permissive）、またはアーキタイプ（`spa-static-site`, `rest-api`, `admin-panel`, `microservice-origin`）を選べます。guided setup はアプリ形状、CDN target、auth mode、CORS、WAF posture、deployment intent を順に尋ねます。
 
 非対話: `npx cdn-security init --platform aws --profile balanced --force`
+guided: `npx cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com --force`
 
 ### 3. 編集とビルド
 

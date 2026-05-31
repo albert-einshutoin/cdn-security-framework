@@ -144,10 +144,11 @@ npm install --save-dev cdn-security-framework
 npx cdn-security init
 ```
 
-Answer the prompts. You can start from a **profile** (`strict` / `balanced` / `permissive`) or an **archetype** (`spa-static-site`, `rest-api`, `admin-panel`, `microservice-origin`). This creates `policy/security.yml` and a reference copy under `policy/profiles/` or `policy/archetypes/`.
+Answer the prompts. You can use the guided setup, start from a **profile** (`strict` / `balanced` / `permissive`), or choose an **archetype** (`spa-static-site`, `rest-api`, `admin-panel`, `microservice-origin`). Guided setup asks about app shape, CDN target, auth mode, CORS, WAF posture, and deployment intent.
 
 Or non-interactive: `npx cdn-security init --platform aws --profile balanced --force`
 Or with an archetype: `npx cdn-security init --platform aws --archetype rest-api --force`
+Or guided: `npx cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com --force`
 
 ### 3. Edit and build
 
