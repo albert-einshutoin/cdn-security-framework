@@ -172,13 +172,25 @@ production ではない fixture build だけなら
 export EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy
 export ORIGIN_SECRET=ci-origin-secret-not-for-deploy
 
+npm run test:ci
+```
+
+単一 Node 版の CI 品質ゲートを実行します。audit、policy lint、build、runtime、
+unit、fuzz、integration、drift、security-baseline、coverage、package smoke を含みます。
+GitHub Actions の Node バージョン matrix は再現しません。CI 側では引き続き
+Node 20.17.0 / 22 / 24 で package smoke を走らせます。
+ローカルに `policy/security.yml` がある場合、`test:ci` はまずそれを lint/build し、
+runtime / coverage テスト用には `policy/base.yml` fixture を再生成します。
+
+局所確認には以下を使えます。
+
+```bash
 npm run test:runtime
 npm run test:unit
 npm run test:drift
 npm run test:security-baseline
 ```
 
-CI と同じ runtime / unit / drift / security-baseline チェックを実行します。
 `EDGE_ADMIN_TOKEN` は組み込み admin `static_token` gate を含む生成 artifact に必要です。
 `ORIGIN_SECRET` は origin-auth fixture policy を含む drift / release 系チェックで必要です。
 

@@ -43,6 +43,9 @@ node scripts/policy-lint.js policy/profiles/balanced.yml
 ### テスト
 
 ```bash
+npm run test:ci
+
+# 局所確認
 npm run test:runtime
 npm run test:unit
 npm run test:drift
@@ -68,6 +71,11 @@ GitHub Actions の `.github/workflows/policy-lint.yml` では、`main` への pu
 5. unit テスト（`npm run test:unit`）
 6. drift チェック（`npm run test:drift`）
 7. security baseline チェック（`npm run test:security-baseline`）
+8. coverage（`npm run test:coverage`）
+9. package smoke（`npm run test:package`）
+
+ローカルで単一 Node 版の同等ゲートを走らせる場合は `npm run test:ci` を使います。
+GitHub workflow では追加で Node バージョン matrix の package smoke も実行します。
 
 ---
 

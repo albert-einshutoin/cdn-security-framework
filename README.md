@@ -181,13 +181,25 @@ that contain the placeholder token.
 export EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy
 export ORIGIN_SECRET=ci-origin-secret-not-for-deploy
 
+npm run test:ci
+```
+
+Runs the single-Node CI quality gate, including audit, policy lint, build,
+runtime, unit, fuzz, integration, drift, security-baseline, coverage, and
+package smoke checks. It intentionally does not reproduce the GitHub Actions
+Node-version matrix; CI still runs package smoke on Node 20.17.0, 22, and 24.
+If you have a local `policy/security.yml`, `test:ci` lints and builds it first,
+then regenerates `policy/base.yml` fixtures for runtime and coverage tests.
+
+For focused local checks:
+
+```bash
 npm run test:runtime
 npm run test:unit
 npm run test:drift
 npm run test:security-baseline
 ```
 
-Runs runtime, unit, drift, and security-baseline checks used by CI.
 `EDGE_ADMIN_TOKEN` is required by generated artifacts that include the built-in
 admin `static_token` gate. `ORIGIN_SECRET` is required by origin-auth fixture
 policies used by the broader drift/release checks.

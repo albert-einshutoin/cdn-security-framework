@@ -31,17 +31,21 @@ Thank you for your interest in contributing. This document explains how to propo
 
 ## CI quality gate
 
-Before opening a PR, ensure these checks pass locally:
+Before opening a PR, export the CI fixture secrets and run the local CI gate:
 
-1. `npm run lint:policy -- policy/base.yml`
-2. `npm run build`
-3. `node scripts/compile-cloudflare.js`
-4. `npm run test:runtime`
-5. `npm run test:unit`
-6. `npm run test:drift`
-7. `npm run test:security-baseline`
+```bash
+export EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy
+export ORIGIN_SECRET=ci-origin-secret-not-for-deploy
+npm run test:ci
+```
 
-GitHub Actions runs the same gate on push/PR to `develop`.
+`test:ci` mirrors the single-Node GitHub Actions quality gate: audit, policy
+lint, AWS/Cloudflare builds, dist existence checks, runtime/unit/fuzz/integration
+tests, drift, security-baseline, coverage, and package smoke. The GitHub Actions
+Node-version matrix is still CI-only; local `test:ci` runs package smoke on your
+current Node version. When a local `policy/security.yml` exists, the script
+lints and builds it first, then regenerates `policy/base.yml` fixtures for the
+runtime and coverage suites.
 
 Release is automated by tag:
 
