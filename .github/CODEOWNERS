@@ -12,7 +12,7 @@
 /scripts/compile-cloudflare.js  @albert-einshutoin
 /scripts/compile-infra.js       @albert-einshutoin
 /scripts/policy-lint.js         @albert-einshutoin
-/scripts/security-baseline.js   @albert-einshutoin
+/scripts/security-baseline-check.js @albert-einshutoin
 /templates/                     @albert-einshutoin
 
 # Supply-chain / release
