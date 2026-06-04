@@ -44,14 +44,13 @@ request:
 routes:
   - name: api
     match:
-      path_prefixes: ["/api/"]
+      path_prefixes: ["/api"]
     auth_gate:
       type: jwt
       algorithm: RS256
       allowed_algorithms: [RS256]
       jwks_url: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example/.well-known/jwks.json"
       issuer: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example"
-      audience: "example-client-id"
       cache_ttl_sec: 3600
 response_headers:
   hsts: "max-age=31536000; includeSubDomains; preload"
@@ -90,10 +89,11 @@ npx cdn-security readiness --policy policy/security.yml --target aws --strict
 npx cdn-security build --policy policy/security.yml --target aws --out-dir dist
 ```
 
-Replace the Cognito region, user pool ID, client ID, and `firewall.jwks.allowed_hosts`
-entry together. For Cloudflare Workers, run the same recipe with
-`--target cloudflare`; keep `allowed_hosts` because Workers cannot perform
-low-level DNS safety checks before fetching JWKS.
+Replace the Cognito region, user pool ID, and `firewall.jwks.allowed_hosts`
+entry together. Cognito access tokens use `client_id` rather than `aud`; add
+`audience` only if you intentionally validate ID tokens. For Cloudflare Workers,
+run the same recipe with `--target cloudflare`; keep `allowed_hosts` because
+Workers cannot perform low-level DNS safety checks before fetching JWKS.
 
 ---
 
@@ -271,14 +271,13 @@ request:
 routes:
   - name: private-downloads
     match:
-      path_prefixes: ["/downloads/"]
+      path_prefixes: ["/downloads"]
     auth_gate:
       type: signed_url
       algorithm: HMAC-SHA256
       secret_env: URL_SIGNING_SECRET
       expires_param: exp
       signature_param: sig
-      exact_path: true
       nonce_param: nonce
     response:
       cache_control: "private, no-store"

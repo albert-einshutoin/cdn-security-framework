@@ -43,14 +43,13 @@ request:
 routes:
   - name: api
     match:
-      path_prefixes: ["/api/"]
+      path_prefixes: ["/api"]
     auth_gate:
       type: jwt
       algorithm: RS256
       allowed_algorithms: [RS256]
       jwks_url: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example/.well-known/jwks.json"
       issuer: "https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example"
-      audience: "example-client-id"
       cache_ttl_sec: 3600
 response_headers:
   hsts: "max-age=31536000; includeSubDomains; preload"
@@ -89,8 +88,10 @@ npx cdn-security readiness --policy policy/security.yml --target aws --strict
 npx cdn-security build --policy policy/security.yml --target aws --out-dir dist
 ```
 
-Cognito の region、user pool ID、client ID、`firewall.jwks.allowed_hosts`
-を必ず揃えて置き換えてください。Cloudflare Workers でも同じレシピを
+Cognito の region、user pool ID、`firewall.jwks.allowed_hosts` を必ず
+揃えて置き換えてください。Cognito access token は `aud` ではなく
+`client_id` を持つため、ID token を検証する意図がある場合だけ
+`audience` を追加してください。Cloudflare Workers でも同じレシピを
 `--target cloudflare` で使えます。Workers は JWKS fetch 前の低レベル DNS
 検査ができないため、`allowed_hosts` は維持してください。
 
@@ -268,14 +269,13 @@ request:
 routes:
   - name: private-downloads
     match:
-      path_prefixes: ["/downloads/"]
+      path_prefixes: ["/downloads"]
     auth_gate:
       type: signed_url
       algorithm: HMAC-SHA256
       secret_env: URL_SIGNING_SECRET
       expires_param: exp
       signature_param: sig
-      exact_path: true
       nonce_param: nonce
     response:
       cache_control: "private, no-store"

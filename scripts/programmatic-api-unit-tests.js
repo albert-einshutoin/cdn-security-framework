@@ -678,6 +678,32 @@ test('CLI authoring DX: capabilities JSON evaluates unsupported target controls'
         ctx.cleanup();
     }
 });
+test('CLI authoring DX: capabilities ignores disabled challenge controls', () => {
+    const disabledChallengePolicy = CAPABILITIES_POLICY.replace('  challenge:\n    enabled: true', '  challenge:\n    enabled: false');
+    const ctx = tmpProject(disabledChallengePolicy);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'capabilities',
+            '--policy', ctx.policyPath,
+            '--target', 'aws',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `capabilities JSON failed: ${result.stderr}`);
+        const report = JSON.parse(result.stdout);
+        assert.ok(report.policyEvaluation);
+        assert.ok(!report.policyEvaluation.configuredControls.some((cap) => cap.id === 'firewall.challenge'));
+        assert.ok(!report.policyEvaluation.findings.some((finding) => finding.capabilityId === 'firewall.challenge'));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
 test('CLI authoring DX: readiness passes production-shaped policy and writes report', () => {
     const ctx = tmpProject(READINESS_AWS_POLICY);
     try {
@@ -699,6 +725,29 @@ test('CLI authoring DX: readiness passes production-shaped policy and writes rep
         const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
         assert.strictEqual(report.status, 'pass');
         assert.deepStrictEqual(report.summary, { fail: 0, warn: 0 });
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: readiness ignores disabled challenge controls', () => {
+    const disabledChallengePolicy = READINESS_AWS_POLICY.replace('firewall:\n  waf:', 'firewall:\n  challenge:\n    enabled: false\n  waf:');
+    const ctx = tmpProject(disabledChallengePolicy);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'aws',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `readiness failed: ${result.stderr}`);
+        assert.ok(/Readiness: PASS/.test(result.stdout));
+        assert.ok(!/target\.aws\.challenge\.unsupported/.test(result.stdout + result.stderr));
     }
     finally {
         ctx.cleanup();

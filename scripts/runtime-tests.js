@@ -869,6 +869,16 @@ async function runOriginJwksHardeningTests() {
             body: JSON.stringify({ keys: [] }),
         },
         {
+            name: 'origin: RS256 JWKS DNS resolving to CGNAT range is rejected',
+            dns: makeDnsLookup('100.64.0.1'),
+            body: JSON.stringify({ keys: [] }),
+        },
+        {
+            name: 'origin: RS256 JWKS DNS resolving to multicast/reserved range is rejected',
+            dns: makeDnsLookup('224.0.0.1'),
+            body: JSON.stringify({ keys: [] }),
+        },
+        {
             name: 'origin: RS256 JWKS oversized response is rejected',
             dns: makeDnsLookup('93.184.216.34'),
             body: JSON.stringify({ keys: [], padding: 'a'.repeat((256 * 1024) + 1) }),
@@ -1053,9 +1063,71 @@ async function runOriginAuthHmacTests() {
     else {
         console.log('OK: origin auth HMAC signs method/path/canonical query/timestamp/nonce');
     }
+    const bodyHashCfgCode = [
+        'const CFG = {',
+        '  project: "test",',
+        '  mode: "enforce",',
+        '  maxHeaderSize: 0,',
+        '  jwtGates: [],',
+        '  signedUrlGates: [],',
+        '  originAuth: {',
+        '    type: "hmac_signature",',
+        '    secret_env: "ORIGIN_HMAC_TEST_SECRET",',
+        '    header_prefix: "X-CDN-Auth",',
+        '    timestamp_tolerance_seconds: 300,',
+        '    include_body_hash: true,',
+        '    signed_components: ["method", "path", "query", "body", "timestamp", "nonce"]',
+        '  },',
+        '  trustForwardedFor: false,',
+        '  obs: { logFormat: "json", correlationHeader: "" }',
+        '};',
+    ].join('\n');
+    const bodyHashHandler = compileOriginTemplate(bodyHashCfgCode);
+    let missingBodyOk = false;
+    let bodyPresentOk = false;
+    if (!bodyHashHandler) {
+        console.error('FAIL: origin auth HMAC body hash template compiles');
+    }
+    else {
+        const missingBodyResult = await bodyHashHandler(buildLambdaEdgeEvent('/origin/upload', {}, '', 'POST'));
+        missingBodyOk = !!(missingBodyResult && missingBodyResult.status === '503');
+        if (!missingBodyOk) {
+            console.error('FAIL: origin auth HMAC should fail closed when POST body is unavailable, got', missingBodyResult && missingBodyResult.status);
+        }
+        else {
+            console.log('OK: origin auth HMAC fails closed when POST body is unavailable');
+        }
+        const bodyEvent = buildLambdaEdgeEvent('/origin/upload', {}, '', 'POST');
+        const bodyData = Buffer.from('payload-for-origin-auth').toString('base64');
+        bodyEvent.Records[0].cf.request.body = {
+            data: bodyData,
+            encoding: 'base64',
+            inputTruncated: false,
+        };
+        const bodyResult = await bodyHashHandler(bodyEvent);
+        const bodyHeaders = bodyResult && bodyResult.headers;
+        const bodyTs = bodyHeaders && bodyHeaders['x-cdn-auth-timestamp'] && bodyHeaders['x-cdn-auth-timestamp'][0].value;
+        const bodyNonce = bodyHeaders && bodyHeaders['x-cdn-auth-nonce'] && bodyHeaders['x-cdn-auth-nonce'][0].value;
+        const bodySig = bodyHeaders && bodyHeaders['x-cdn-auth-signature'] && bodyHeaders['x-cdn-auth-signature'][0].value;
+        const bodyHash = bodyHeaders && bodyHeaders['x-cdn-auth-body-sha256'] && bodyHeaders['x-cdn-auth-body-sha256'][0].value;
+        const expectedBodyHash = crypto.createHash('sha256').update(Buffer.from('payload-for-origin-auth')).digest('hex');
+        const bodyCanonical = ['POST', '/origin/upload', '', expectedBodyHash, bodyTs, bodyNonce].join('\n');
+        const expectedBodySig = crypto.createHmac('sha256', secret).update(bodyCanonical).digest('base64url');
+        bodyPresentOk = !!(bodyResult && bodyResult.uri === '/origin/upload'
+            && bodyHash === expectedBodyHash
+            && bodySig === expectedBodySig);
+        if (!bodyPresentOk) {
+            console.error('FAIL: origin auth HMAC should sign available request body');
+            console.error({ bodyTs, bodyNonce, bodySig, expectedBodySig, bodyHash, expectedBodyHash, bodyHeaders });
+        }
+        else {
+            console.log('OK: origin auth HMAC signs available request body');
+        }
+    }
     delete process.env.ORIGIN_HMAC_TEST_SECRET;
-    console.log('--- origin-auth hmac: ' + (ok ? '1/1' : '0/1') + ' passed ---');
-    return { failed: ok ? 0 : 1, total: 1 };
+    const passed = [ok, missingBodyOk, bodyPresentOk].filter(Boolean).length;
+    console.log('--- origin-auth hmac: ' + passed + '/3 passed ---');
+    return { failed: 3 - passed, total: 3 };
 }
 // Monitor mode tests: blocking checks should pass through
 async function runMonitorModeTests() {

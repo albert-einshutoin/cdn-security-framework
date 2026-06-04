@@ -257,6 +257,9 @@ function routeAuthConfigured(policy, types) {
     const routes = Array.isArray(policy && policy.routes) ? policy.routes : [];
     return routes.some((route) => types.includes(route && route.auth_gate && route.auth_gate.type));
 }
+function firewallChallengeEnabled(policy) {
+    return Boolean(policy && policy.firewall && policy.firewall.challenge && policy.firewall.challenge.enabled === true);
+}
 function hasPolicyPath(policy, dottedPath) {
     const parts = dottedPath.split('.');
     let current = policy;
@@ -584,6 +587,7 @@ const CAPABILITY_MATRIX = [
         },
         deploySupport: { aws: 'warning-only', cloudflare: 'supported' },
         notes: 'Challenge enforcement is Cloudflare Workers-only; AWS builds warn when configured.',
+        configured: firewallChallengeEnabled,
     },
     {
         id: 'defaults.monitor_mode',
@@ -778,7 +782,7 @@ function evaluateReadiness(policy, target, lintWarnings) {
         if (request.graphql_guard) {
             findings.push(readinessFinding('fail', 'target.aws.graphql_guard.unsupported', 'request.graphql_guard is configured, but AWS edge output cannot read request bodies.', 'Use Cloudflare Workers for this guard or enforce GraphQL limits at the origin.'));
         }
-        if (firewall.challenge) {
+        if (firewallChallengeEnabled(policy)) {
             findings.push(readinessFinding('fail', 'target.aws.challenge.unsupported', 'firewall.challenge is configured, but Edge JS challenge is Cloudflare Workers-only.', 'Disable firewall.challenge for AWS builds or use a Cloudflare target.'));
         }
         if (policy && policy.response_dlp && policy.response_dlp.enabled === true) {
