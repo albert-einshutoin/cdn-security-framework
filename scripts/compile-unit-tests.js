@@ -717,6 +717,38 @@ test('validateAuthGates accepts jwks_url on allowed_hosts (case-insensitive)', (
     };
     validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true });
 });
+test('validateAuthGates requires jwks allowed_hosts when target cannot inspect DNS', () => {
+    const policy = {
+        routes: [
+            {
+                name: 'cloudflare-rs256',
+                auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://idp.example.com/jwks.json' },
+            },
+        ],
+    };
+    assert.throws(() => validateAuthGates(policy, {
+        exitOnError: false,
+        allowPlaceholderToken: true,
+        requireJwksAllowedHosts: true,
+    }), (err) => Array.isArray(err.validationErrors)
+        && err.validationErrors.some((e) => /cloudflare-rs256/.test(e) && /allowed_hosts/.test(e)));
+});
+test('validateAuthGates accepts required jwks allowed_hosts for matching RS256 host', () => {
+    const policy = {
+        firewall: { jwks: { allowed_hosts: ['idp.example.com'] } },
+        routes: [
+            {
+                name: 'cloudflare-rs256',
+                auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://idp.example.com/jwks.json' },
+            },
+        ],
+    };
+    validateAuthGates(policy, {
+        exitOnError: false,
+        allowPlaceholderToken: true,
+        requireJwksAllowedHosts: true,
+    });
+});
 test('warnSignedUrlReplay flags write-like signed_url gates missing nonce_param', () => {
     const captured = [];
     const logger = { error: (m) => captured.push(m) };

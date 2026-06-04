@@ -274,6 +274,12 @@ function validateAuthGates(policy: any, options: any = {}) {
   const routes = policy.routes || [];
   const errors: string[] = [];
   const jwksAllowedHosts = ((policy.firewall || {}).jwks || {}).allowed_hosts;
+  const normalizedJwksAllowedHosts = Array.isArray(jwksAllowedHosts)
+    ? jwksAllowedHosts
+      .map((h: any) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
+      .filter(Boolean)
+    : [];
+  const requireJwksAllowedHosts = options.requireJwksAllowedHosts === true;
 
   for (const route of routes) {
     const gate = route.auth_gate;
@@ -285,6 +291,9 @@ function validateAuthGates(policy: any, options: any = {}) {
       const alg = gate.algorithm || 'RS256';
       if (alg === 'RS256' && !gate.jwks_url) {
         errors.push(`Route "${name}": JWT+RS256 requires "jwks_url"`);
+      }
+      if (alg === 'RS256' && requireJwksAllowedHosts && normalizedJwksAllowedHosts.length === 0) {
+        errors.push(`Route "${name}": JWT+RS256 requires firewall.jwks.allowed_hosts for this target`);
       }
       if (gate.jwks_url) {
         const v = validateJwksUrl(gate.jwks_url, jwksAllowedHosts);

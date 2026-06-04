@@ -67,6 +67,8 @@ const jwksCache = new Map<string, JwksCacheEntry>();
 
 type JwksNegativeEntry = { failedAt: number; reason: string };
 const jwksNegativeCache = new Map<string, JwksNegativeEntry>();
+const JWKS_MAX_BODY_BYTES = 256 * 1024;
+const JWKS_MAX_KEYS = 100;
 
 function deny(code: number, msg: string) {
   return new Response(msg, { status: code, headers: { 'cache-control': 'no-store' } });
@@ -456,6 +458,48 @@ function isUnsafeJwksUrl(rawUrl: string): string | null {
   return null;
 }
 
+async function readLimitedResponseText(res: Response, maxBytes: number): Promise<string> {
+  const body = res.body;
+  if (!body) {
+    const text = await res.text();
+    if (new TextEncoder().encode(text).byteLength > maxBytes) {
+      throw new Error('JWKS response too large');
+    }
+    return text;
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    total += chunk.value.byteLength;
+    if (total > maxBytes) {
+      try { await reader.cancel(); } catch (_e) { /* ignore */ }
+      throw new Error('JWKS response too large');
+    }
+    chunks.push(chunk.value);
+  }
+
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
+function validateJwksKeys(body: any): Array<Record<string, any>> {
+  const keys = Array.isArray(body?.keys) ? body.keys : [];
+  if (keys.length > JWKS_MAX_KEYS) {
+    throw new Error('JWKS key count exceeds limit');
+  }
+  return keys;
+}
+
 async function fetchJwks(jwksUrl: string, ttlSec: number): Promise<Array<Record<string, any>>> {
   const unsafe = isUnsafeJwksUrl(jwksUrl);
   if (unsafe) {
@@ -491,8 +535,8 @@ async function fetchJwks(jwksUrl: string, ttlSec: number): Promise<Array<Record<
     // cloud-metadata endpoint or a different tenant's IdP.
     const res = await fetch(jwksUrl, { method: 'GET', redirect: 'error' });
     if (!res.ok) throw new Error('Failed to fetch JWKS: ' + res.status);
-    const body = await res.json();
-    const keys = Array.isArray((body as any)?.keys) ? (body as any).keys : [];
+    const bodyText = await readLimitedResponseText(res, JWKS_MAX_BODY_BYTES);
+    const keys = validateJwksKeys(JSON.parse(bodyText));
     jwksCache.set(jwksUrl, { fetchedAt: now, keys });
     jwksNegativeCache.delete(jwksUrl);
     return keys;
@@ -562,32 +606,36 @@ async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ va
 
   if (gate.algorithm === 'RS256') {
     if (!gate.jwks_url) return { valid: false, error: 'JWKS URL missing' };
-    let keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
-    let jwk = keys.find((k) => k.kid === header.kid && k.kty === 'RSA');
-    // Key rotation: if `kid` is not in our cache, invalidate and refetch once
-    // — the IdP may have rotated keys since our last fetch. This prevents a
-    // "stuck isolate" 401 storm after rotation.
-    if (!jwk) {
-      jwksCache.delete(gate.jwks_url);
-      keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
-      jwk = keys.find((k) => k.kid === header.kid && k.kty === 'RSA');
-    }
-    if (!jwk) return { valid: false, error: 'JWK key not found' };
+    try {
+      let keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
+      let jwk = keys.find((k) => k.kid === header.kid && k.kty === 'RSA');
+      // Key rotation: if `kid` is not in our cache, invalidate and refetch once
+      // — the IdP may have rotated keys since our last fetch. This prevents a
+      // "stuck isolate" 401 storm after rotation.
+      if (!jwk) {
+        jwksCache.delete(gate.jwks_url);
+        keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
+        jwk = keys.find((k) => k.kid === header.kid && k.kty === 'RSA');
+      }
+      if (!jwk) return { valid: false, error: 'JWK key not found' };
 
-    const verifyKey = await crypto.subtle.importKey(
-      'jwk',
-      jwk,
-      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-      false,
-      ['verify'],
-    );
-    const ok = await crypto.subtle.verify(
-      'RSASSA-PKCS1-v1_5',
-      verifyKey,
-      base64UrlToBytes(signatureB64),
-      new TextEncoder().encode(signData),
-    );
-    return ok ? { valid: true, payload } : { valid: false, error: 'Invalid signature' };
+      const verifyKey = await crypto.subtle.importKey(
+        'jwk',
+        jwk,
+        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+        false,
+        ['verify'],
+      );
+      const ok = await crypto.subtle.verify(
+        'RSASSA-PKCS1-v1_5',
+        verifyKey,
+        base64UrlToBytes(signatureB64),
+        new TextEncoder().encode(signData),
+      );
+      return ok ? { valid: true, payload } : { valid: false, error: 'Invalid signature' };
+    } catch (err: any) {
+      return { valid: false, error: err?.message || 'JWKS verification failed' };
+    }
   }
 
   return { valid: false, error: 'Unsupported JWT algorithm' };
