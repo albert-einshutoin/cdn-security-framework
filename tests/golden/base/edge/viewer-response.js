@@ -21,6 +21,14 @@
 
 function set(headers, k, v) { headers[k.toLowerCase()] = { value: v }; }
 
+function appendVary(headers, token) {
+  var existing = (headers["vary"] && headers["vary"].value) || '';
+  var tokens = existing.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+  var lower = tokens.map(function (s) { return s.toLowerCase(); });
+  if (lower.indexOf(token.toLowerCase()) === -1) tokens.push(token);
+  set(headers, "Vary", tokens.join(', '));
+}
+
 const RESPONSE_CFG = {
   headers: {"strict-transport-security":"max-age=31536000; includeSubDomains; preload","x-content-type-options":"nosniff","referrer-policy":"strict-origin-when-cross-origin","permissions-policy":"camera=(), microphone=(), geolocation=()"},
   csp_public: "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
@@ -111,12 +119,8 @@ function handler(event) {
   if (RESPONSE_CFG.forceVaryAuth && isAuthPath) {
     set(h, "Cache-Control", "no-store, no-cache, must-revalidate, private");
     set(h, "Pragma", "no-cache");
-    // Append Authorization+Cookie to Vary without clobbering existing Vary.
-    var existingVary = (h["vary"] && h["vary"].value) || '';
-    var tokens = existingVary.split(',').map(function (s) { return s.trim().toLowerCase(); }).filter(Boolean);
-    if (tokens.indexOf('authorization') === -1) tokens.push('Authorization');
-    if (tokens.indexOf('cookie') === -1) tokens.push('Cookie');
-    set(h, "Vary", tokens.join(', '));
+    appendVary(h, "Authorization");
+    appendVary(h, "Cookie");
   }
 
   // Clear-Site-Data on configured logout paths (issue #20). Only applied on
@@ -164,6 +168,7 @@ function handler(event) {
 
     if (origin && isAllowed) {
       set(h, 'Access-Control-Allow-Origin', origin);
+      appendVary(h, 'Origin');
       if (RESPONSE_CFG.cors.allow_credentials) {
         set(h, 'Access-Control-Allow-Credentials', 'true');
       }

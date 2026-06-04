@@ -1067,6 +1067,58 @@ test('response_headers: force_vary_auth=false disables Vary/no-store override', 
         fs.rmSync(tmpDir, { recursive: true, force: true });
     }
 });
+test('viewer-response CORS appends Vary Origin and preserves auth Vary tokens', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-cors-vary-response-'));
+    try {
+        process.env.ADMIN_TOKEN = 'test-token';
+        build({
+            version: 1,
+            request: { allow_methods: ['GET'] },
+            response_headers: {
+                cors: {
+                    allow_origins: ['https://app.example.com', 'https://admin.example.com'],
+                    allow_credentials: true,
+                    expose_headers: ['X-Request-Id'],
+                },
+            },
+            routes: [{
+                    name: 'api',
+                    match: { path_prefixes: ['/api'] },
+                    auth_gate: { type: 'static_token', header: 'x-admin-token', token_env: 'ADMIN_TOKEN' },
+                }],
+        }, { outDir: tmpDir });
+        const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
+        const handler = new Function(code + '\nreturn handler;')();
+        const merged = handler({
+            request: {
+                uri: '/api/data',
+                headers: { origin: { value: 'https://app.example.com' } },
+            },
+            response: {
+                statusCode: '200',
+                headers: { vary: { value: 'Accept-Language' } },
+            },
+        });
+        assert.strictEqual(merged.headers['access-control-allow-origin'].value, 'https://app.example.com');
+        assert.strictEqual(merged.headers['access-control-allow-credentials'].value, 'true');
+        assert.strictEqual(merged.headers.vary.value, 'Accept-Language, Authorization, Cookie, Origin');
+        const duplicate = handler({
+            request: {
+                uri: '/',
+                headers: { origin: { value: 'https://admin.example.com' } },
+            },
+            response: {
+                statusCode: '200',
+                headers: { vary: { value: 'Origin' } },
+            },
+        });
+        assert.strictEqual(duplicate.headers.vary.value, 'Origin');
+    }
+    finally {
+        delete process.env.ADMIN_TOKEN;
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
 test('response_headers: emits COOP/COEP/CORP/Reporting-Endpoints when configured', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-resp-iso-'));
     try {
@@ -1112,6 +1164,40 @@ test('response_headers: csp_nonce=true emits substitution hook and Report-Only c
         // Template must have nonce substitution hook + Report-Only emission path
         assert.match(resp, /'nonce-PLACEHOLDER'/);
         assert.match(resp, /Content-Security-Policy-Report-Only/);
+    }
+    finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+test('viewer-request CORS preflight includes Vary Origin', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-cors-vary-preflight-'));
+    try {
+        build({
+            version: 1,
+            request: { allow_methods: ['GET'] },
+            response_headers: {
+                cors: {
+                    allow_origins: ['https://app.example.com', 'https://admin.example.com'],
+                    allow_methods: ['GET', 'POST'],
+                    allow_headers: ['Authorization'],
+                    max_age: 600,
+                },
+            },
+            routes: [],
+        }, { outDir: tmpDir, allowPlaceholderToken: true });
+        const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+        const handler = new Function(code + '\nreturn handler;')();
+        const result = handler({
+            request: {
+                method: 'OPTIONS',
+                uri: '/api/data',
+                querystring: '',
+                headers: { origin: { value: 'https://app.example.com' } },
+            },
+        });
+        assert.strictEqual(result.statusCode, 204);
+        assert.strictEqual(result.headers['access-control-allow-origin'].value, 'https://app.example.com');
+        assert.strictEqual(result.headers.vary.value, 'Origin');
     }
     finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
