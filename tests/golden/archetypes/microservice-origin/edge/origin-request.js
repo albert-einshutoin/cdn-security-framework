@@ -292,6 +292,10 @@ async function verifyJwtRS256(token, gate) {
 
 // Verify JWT with HS256 (symmetric key)
 function verifyJwtHS256(token, secret, gate) {
+  if (!secret) {
+    return { valid: false, error: 'JWT secret not configured' };
+  }
+
   const parts = token.split('.');
   if (parts.length !== 3) return { valid: false, error: 'Invalid token format' };
 
@@ -442,6 +446,9 @@ async function checkJwtGates(request) {
       result = await verifyJwtRS256(jwt, gate);
     } else if (gate.algorithm === 'HS256' && gate.secret_env) {
       const secret = process.env[gate.secret_env] || '';
+      if (!secret) {
+        return resp(503, 'JWT gate misconfigured');
+      }
       result = verifyJwtHS256(jwt, secret, gate);
     } else {
       return resp(500, 'JWT gate misconfigured');

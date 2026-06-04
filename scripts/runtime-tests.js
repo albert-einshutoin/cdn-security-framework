@@ -733,6 +733,48 @@ async function runOriginRequestTests() {
     console.log('--- origin-request (enforce): ' + (originCases.length + extraAsserts - originFailed) + '/' + (originCases.length + extraAsserts) + ' passed ---');
     return { failed: originFailed, total: originCases.length + extraAsserts };
 }
+async function runOriginJwtSecretFailClosedTests() {
+    delete process.env.__MISSING_JWT_SECRET_FOR_TEST__;
+    const cfgCode = [
+        'const CFG = {',
+        '  project: "test",',
+        '  mode: "enforce",',
+        '  maxHeaderSize: 0,',
+        '  jwtGates: [{',
+        '    name: "api",',
+        '    protectedPrefixes: ["/api"],',
+        '    type: "jwt",',
+        '    algorithm: "HS256",',
+        '    jwks_url: "",',
+        '    issuer: "test-issuer",',
+        '    audience: "test-audience",',
+        '    secret_env: "__MISSING_JWT_SECRET_FOR_TEST__"',
+        '  }],',
+        '  signedUrlGates: [],',
+        '  originAuth: null,',
+        '  trustForwardedFor: false,',
+        '  obs: { logFormat: "json", correlationHeader: "" }',
+        '};',
+    ].join('\n');
+    const jwtHandler = compileOriginTemplate(cfgCode);
+    if (!jwtHandler)
+        return { failed: 1, total: 1 };
+    const previous = originHandler;
+    originHandler = jwtHandler;
+    const nowSec = Math.floor(Date.now() / 1000);
+    const emptySecretToken = createHS256Jwt({
+        sub: 'user1',
+        iss: 'test-issuer',
+        aud: 'test-audience',
+        exp: nowSec + 3600,
+    }, '');
+    const ok = await runAsyncCase('origin: missing HS256 JWT secret rejects empty-secret token', buildLambdaEdgeEvent('/api/data', {
+        Authorization: 'Bearer ' + emptySecretToken,
+    }), '503');
+    originHandler = previous;
+    console.log('--- origin-request jwt secret fail-closed: ' + (ok ? 1 : 0) + '/1 passed ---');
+    return { failed: ok ? 0 : 1, total: 1 };
+}
 async function runOriginAuthFailClosedTests() {
     const cfgCode = [
         'const CFG = {',
@@ -891,6 +933,9 @@ async function main() {
     const enforceResult = await runOriginRequestTests();
     totalFailed += enforceResult.failed;
     totalTests += enforceResult.total;
+    const jwtSecretResult = await runOriginJwtSecretFailClosedTests();
+    totalFailed += jwtSecretResult.failed;
+    totalTests += jwtSecretResult.total;
     const originAuthResult = await runOriginAuthFailClosedTests();
     totalFailed += originAuthResult.failed;
     totalTests += originAuthResult.total;
