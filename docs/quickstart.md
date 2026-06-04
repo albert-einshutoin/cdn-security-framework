@@ -16,6 +16,9 @@ Choose platform (AWS CloudFront / Cloudflare Workers) and either a profile (Stri
 Non-interactive: `npx cdn-security init --platform aws --profile balanced --force`
 Recommended first path: `npx cdn-security init --platform aws --archetype spa-static-site --force`
 
+For copyable end-to-end snippets such as Cognito JWT APIs, signed downloads, or
+Cloudflare GraphQL, see [Policy recipes](./recipes.md).
+
 ## 2. Edit policy and build
 
 Edit `policy/security.yml` as needed (allow_methods, block rules, routes, etc.), then:

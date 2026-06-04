@@ -16,6 +16,9 @@ npx cdn-security init
 非対話: `npx cdn-security init --platform aws --profile balanced --force`
 最初の推奨ルート: `npx cdn-security init --platform aws --archetype spa-static-site --force`
 
+Cognito JWT API、署名付き download、Cloudflare GraphQL など用途別の
+copyable snippet が必要な場合は [ポリシーレシピ](./recipes.ja.md) を参照してください。
+
 ## 2. ポリシー編集とビルド
 
 `policy/security.yml` を必要に応じて編集し（allow_methods、block ルール、routes など）、次を実行します。
