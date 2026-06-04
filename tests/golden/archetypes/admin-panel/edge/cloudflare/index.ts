@@ -561,6 +561,13 @@ function isJwtAlgAllowed(headerAlg: unknown, gate: any, expected: string): boole
   return allowed.includes(headerAlg);
 }
 
+function isMatchingRs256Jwk(key: any, kid: unknown): boolean {
+  return typeof kid === 'string' && kid.length > 0
+    && key?.kid === kid
+    && key?.kty === 'RSA'
+    && (!key.alg || key.alg === 'RS256');
+}
+
 async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ valid: boolean; error?: string; payload?: any }> {
   const parts = token.split('.');
   if (parts.length !== 3) return { valid: false, error: 'Invalid token format' };
@@ -608,14 +615,14 @@ async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ va
     if (!gate.jwks_url) return { valid: false, error: 'JWKS URL missing' };
     try {
       let keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
-      let jwk = keys.find((k) => k.kid === header.kid && k.kty === 'RSA');
+      let jwk = keys.find((k) => isMatchingRs256Jwk(k, header.kid));
       // Key rotation: if `kid` is not in our cache, invalidate and refetch once
       // — the IdP may have rotated keys since our last fetch. This prevents a
       // "stuck isolate" 401 storm after rotation.
       if (!jwk) {
         jwksCache.delete(gate.jwks_url);
         keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
-        jwk = keys.find((k) => k.kid === header.kid && k.kty === 'RSA');
+        jwk = keys.find((k) => isMatchingRs256Jwk(k, header.kid));
       }
       if (!jwk) return { valid: false, error: 'JWK key not found' };
 

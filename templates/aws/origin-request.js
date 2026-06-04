@@ -246,6 +246,11 @@ function isAlgAllowed(headerAlg, gate, expected) {
   return allowed.indexOf(headerAlg) !== -1;
 }
 
+function isMatchingRs256Jwk(key, kid) {
+  if (!key || !kid || typeof kid !== 'string') return false;
+  return key.kid === kid && key.kty === 'RSA' && (!key.alg || key.alg === 'RS256');
+}
+
 // Verify JWT signature (RS256)
 async function verifyJwtRS256(token, gate) {
   const parts = token.split('.');
@@ -300,11 +305,11 @@ async function verifyJwtRS256(token, gate) {
 
     // Fetch JWKS and find matching key; retry once on kid miss (cache refresh)
     let keys = await fetchJwks(jwksUrl);
-    let key = keys.find(k => k.kid === header.kid && k.alg === 'RS256');
+    let key = keys.find(k => isMatchingRs256Jwk(k, header.kid));
     if (!key) {
       invalidateJwksCache(jwksUrl);
       keys = await fetchJwks(jwksUrl);
-      key = keys.find(k => k.kid === header.kid && k.alg === 'RS256');
+      key = keys.find(k => isMatchingRs256Jwk(k, header.kid));
       if (!key) {
         return { valid: false, error: 'Key not found' };
       }

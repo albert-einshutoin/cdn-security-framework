@@ -50,6 +50,10 @@ uses the allowlist when present and additionally rejects DNS-resolved JWKS IPs
 in loopback, private, or link-local ranges at runtime.
 
 JWKS responses are capped at 256 KiB and 100 keys before parsing/caching.
+For RS256, both runtimes select JWKs by matching `kid`, requiring
+`kty: RSA`, and accepting either an omitted `alg` field or `alg: RS256`.
+JWKs with a conflicting `alg` are ignored; the JWT header algorithm allowlist
+remains the authority for accepted token algorithms.
 
 ### Behaviour Matrix
 

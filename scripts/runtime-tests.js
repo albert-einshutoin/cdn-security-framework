@@ -370,6 +370,13 @@ function createRS256Jwt(payload, kid = 'test-key') {
     const enc = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
     return enc(header) + '.' + enc(payload) + '.signature';
 }
+function createSignedRS256Jwt(payload, privateKey, kid = 'test-key') {
+    const header = { alg: 'RS256', typ: 'JWT', kid };
+    const enc = (obj) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+    const data = enc(header) + '.' + enc(payload);
+    const signature = crypto.sign('sha256', Buffer.from(data), privateKey).toString('base64url');
+    return data + '.' + signature;
+}
 // Build Lambda@Edge event format
 function buildLambdaEdgeEvent(uri, headers = {}, querystring = '', method = 'GET') {
     const h = headers || {};
@@ -905,6 +912,82 @@ async function runOriginJwksHardeningTests() {
     console.log('--- origin-request jwks hardening: ' + (cases.length - failed) + '/' + cases.length + ' passed ---');
     return { failed, total: cases.length };
 }
+async function runOriginRs256JwkAlgSelectionTests() {
+    const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const nowSec = Math.floor(Date.now() / 1000);
+    const token = createSignedRS256Jwt({
+        sub: 'user1',
+        iss: 'test-issuer',
+        aud: 'test-audience',
+        exp: nowSec + 3600,
+    }, privateKey);
+    const publicJwk = publicKey.export({ format: 'jwk' });
+    const cfgCode = [
+        'const CFG = {',
+        '  project: "test",',
+        '  mode: "enforce",',
+        '  maxHeaderSize: 0,',
+        '  jwtGates: [{',
+        '    name: "api",',
+        '    protectedPrefixes: ["/api"],',
+        '    type: "jwt",',
+        '    algorithm: "RS256",',
+        '    jwks_url: "https://idp.example.com/jwks.json",',
+        '    issuer: "test-issuer",',
+        '    audience: "test-audience",',
+        '    secret_env: ""',
+        '  }],',
+        '  signedUrlGates: [],',
+        '  originAuth: null,',
+        '  trustForwardedFor: false,',
+        '  obs: { logFormat: "json", correlationHeader: "" }',
+        '};',
+    ].join('\n');
+    const cases = [
+        {
+            name: 'origin: RS256 accepts matching RSA JWK with omitted alg',
+            key: { ...publicJwk, kid: 'test-key' },
+            expected: 'allow',
+            fetches: 1,
+        },
+        {
+            name: 'origin: RS256 accepts matching RSA JWK with alg=RS256',
+            key: { ...publicJwk, kid: 'test-key', alg: 'RS256' },
+            expected: 'allow',
+            fetches: 1,
+        },
+        {
+            name: 'origin: RS256 rejects matching kid with conflicting JWK alg',
+            key: { ...publicJwk, kid: 'test-key', alg: 'HS256' },
+            expected: '401',
+            fetches: 2,
+        },
+    ];
+    let failed = 0;
+    const previous = originHandler;
+    for (const c of cases) {
+        const calls = [];
+        const handlerForCase = compileOriginTemplate(cfgCode, {
+            dns: makeDnsLookup('93.184.216.34'),
+            https: makeJwksHttps(JSON.stringify({ keys: [c.key] }), calls),
+        });
+        if (!handlerForCase) {
+            console.error('FAIL:', c.name, '| failed to compile origin template');
+            failed++;
+            continue;
+        }
+        originHandler = handlerForCase;
+        const ok = await runAsyncCase(c.name, buildLambdaEdgeEvent('/api/data', { Authorization: 'Bearer ' + token }), c.expected);
+        if (!ok || calls.length !== c.fetches) {
+            if (ok)
+                console.error('FAIL:', c.name, '| expected', c.fetches, 'JWKS fetch(es), got', calls.length);
+            failed++;
+        }
+    }
+    originHandler = previous;
+    console.log('--- origin-request rs256 jwk alg selection: ' + (cases.length - failed) + '/' + cases.length + ' passed ---');
+    return { failed, total: cases.length };
+}
 async function runOriginAuthFailClosedTests() {
     const cfgCode = [
         'const CFG = {',
@@ -1069,6 +1152,9 @@ async function main() {
     const jwksHardeningResult = await runOriginJwksHardeningTests();
     totalFailed += jwksHardeningResult.failed;
     totalTests += jwksHardeningResult.total;
+    const rs256JwkAlgResult = await runOriginRs256JwkAlgSelectionTests();
+    totalFailed += rs256JwkAlgResult.failed;
+    totalTests += rs256JwkAlgResult.total;
     const originAuthResult = await runOriginAuthFailClosedTests();
     totalFailed += originAuthResult.failed;
     totalTests += originAuthResult.total;
