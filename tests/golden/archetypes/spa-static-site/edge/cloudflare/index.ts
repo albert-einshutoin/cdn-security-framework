@@ -169,6 +169,42 @@ function normalizePath(pathname: string): string {
   return p;
 }
 
+function rawPathnameFromRequestUrl(rawUrl: string): string {
+  const text = String(rawUrl || '');
+  const schemeIdx = text.indexOf('://');
+  let pathStart = -1;
+  if (schemeIdx !== -1) {
+    pathStart = text.indexOf('/', schemeIdx + 3);
+  } else if (text.startsWith('/')) {
+    pathStart = 0;
+  }
+  if (pathStart === -1) return '/';
+
+  let pathEnd = text.length;
+  const queryStart = text.indexOf('?', pathStart);
+  const hashStart = text.indexOf('#', pathStart);
+  if (queryStart !== -1 && queryStart < pathEnd) pathEnd = queryStart;
+  if (hashStart !== -1 && hashStart < pathEnd) pathEnd = hashStart;
+  return text.slice(pathStart, pathEnd) || '/';
+}
+
+function blockIfPathPattern(pathname: string, ctx: ReqCtx): Response | null {
+  const pathLower = pathname.toLowerCase();
+  for (const m of CFG.blockPathContains) {
+    if (pathLower.includes(m)) {
+      const r = shouldBlock(400, 'Bad Request', ctx);
+      if (r) return r;
+    }
+  }
+  for (const re of CFG.blockPathRegexes) {
+    if (re.test(pathname)) {
+      const r = shouldBlock(400, 'Bad Request', ctx);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
 function isGraphqlPath(pathname: string): boolean {
   const guard = CFG.graphqlGuard;
   if (!guard || !Array.isArray(guard.endpointPaths) || guard.endpointPaths.length === 0) return false;
@@ -1027,6 +1063,7 @@ async function applyResponseDlp(out: Response, ctx: ReqCtx): Promise<Response> {
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
+    const rawPathname = rawPathnameFromRequestUrl(request.url);
     const ctx = reqCtx(request);
 
     const preflight = handleCorsPreflight(request);
@@ -1064,7 +1101,7 @@ export default {
       if (r) return r;
     }
 
-    if (url.pathname.length > CFG.maxUriLength) {
+    if (rawPathname.length > CFG.maxUriLength) {
       const r = shouldBlock(414, 'URI Too Long', ctx);
       if (r) return r;
     }
@@ -1080,21 +1117,13 @@ export default {
       }
     }
 
+    const rawPathBlock = blockIfPathPattern(rawPathname, ctx);
+    if (rawPathBlock) return rawPathBlock;
+
     url.pathname = normalizePath(url.pathname);
 
-    const pathLower = url.pathname.toLowerCase();
-    for (const m of CFG.blockPathContains) {
-      if (pathLower.includes(m)) {
-        const r = shouldBlock(400, 'Bad Request', ctx);
-        if (r) return r;
-      }
-    }
-    for (const re of CFG.blockPathRegexes) {
-      if (re.test(url.pathname)) {
-        const r = shouldBlock(400, 'Bad Request', ctx);
-        if (r) return r;
-      }
-    }
+    const normalizedPathBlock = blockIfPathPattern(url.pathname, ctx);
+    if (normalizedPathBlock) return normalizedPathBlock;
 
     for (const h of CFG.requiredHeaders) {
       const val = request.headers.get(h);

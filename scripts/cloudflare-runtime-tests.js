@@ -89,6 +89,35 @@ async function runGeneratedWorker(generated, query, options = {}) {
         fs.rmSync(tempDir, { recursive: true, force: true });
     }
 }
+async function runGeneratedWorkerRequest(generated, request, options = {}) {
+    const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-worker-'));
+    const modPath = path.join(tempDir, 'worker.cjs');
+    const compiled = esbuild.transformSync(generated, {
+        loader: 'ts',
+        format: 'cjs',
+        target: 'es2022',
+    }).code;
+    const previousFetch = globalThis.fetch;
+    const fetchCalls = [];
+    globalThis.fetch = async (input) => {
+        fetchCalls.push(input);
+        return new Response(options.originBody || 'origin-ok', {
+            status: options.originStatus || 200,
+            headers: options.originHeaders || {},
+        });
+    };
+    try {
+        fs.writeFileSync(modPath, compiled, 'utf8');
+        delete require.cache[modPath];
+        const worker = require(modPath).default;
+        const res = await worker.fetch(request, options.env || {});
+        return { res, fetchCalls };
+    }
+    finally {
+        globalThis.fetch = previousFetch;
+        fs.rmSync(tempDir, { recursive: true, force: true });
+    }
+}
 test('cloudflare compile injects jwt, signed_url, and origin auth config', () => {
     const generated = compileCloudflare(`
 version: 1
@@ -144,6 +173,40 @@ test('cloudflare template contains auth enforcement logic', () => {
     assert.ok(template.includes('Missing exp claim'), 'JWT exp-required guard missing');
     assert.ok(/nowSec\s*>=\s*Number\(payload\.exp\)\s*\+\s*skewSec/.test(template), 'JWT clock skew tolerance missing');
     assert.ok(template.includes('function shouldBlockAuth'), 'auth fail-closed helper missing');
+});
+test('cloudflare blocks raw traversal before dot-segment normalization', async () => {
+    const generated = compileCloudflare(`
+version: 1
+project: cf-raw-path-test
+request:
+  allow_methods: ["GET"]
+  limits:
+    max_query_length: 1024
+    max_query_params: 30
+    max_uri_length: 2048
+  block:
+    path_patterns:
+      contains:
+        - "/../"
+  normalize:
+    path:
+      collapse_slashes: true
+      remove_dot_segments: true
+response_headers:
+  hsts: "max-age=31536000"
+`);
+    const headers = new Headers({ 'user-agent': 'runtime-test' });
+    const request = {
+        url: 'https://edge.example.com/public/../private',
+        method: 'GET',
+        headers,
+        body: null,
+        redirect: 'manual',
+        clone: () => new Request('https://edge.example.com/private', { method: 'GET', headers }),
+    };
+    const { res, fetchCalls } = await runGeneratedWorkerRequest(generated, request);
+    assert.strictEqual(res.status, 400);
+    assert.strictEqual(fetchCalls.length, 0, 'raw traversal should block before origin fetch');
 });
 test('cloudflare compile emits experimental challenge config', () => {
     const generated = compileCloudflare(`

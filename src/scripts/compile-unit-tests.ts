@@ -1329,6 +1329,46 @@ test('viewer-request enforces max_header_count with 431', () => {
   }
 });
 
+test('viewer-request checks raw traversal before dot-segment normalization', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-raw-traversal-'));
+  try {
+    build({
+      version: 1,
+      request: {
+        allow_methods: ['GET'],
+        block: { path_patterns: { contains: ['/../'] } },
+        normalize: { path: { collapse_slashes: true, remove_dot_segments: true } },
+      },
+      response_headers: {},
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    const handler = new Function(code + '\nreturn handler;')();
+
+    const blocked = handler({
+      request: {
+        method: 'GET',
+        uri: '/public/../private',
+        querystring: '',
+        headers: { 'user-agent': { value: 'Mozilla' } },
+      },
+    });
+    assert.strictEqual(blocked.statusCode, 400);
+
+    const benign = handler({
+      request: {
+        method: 'GET',
+        uri: '/public/./asset',
+        querystring: '',
+        headers: { 'user-agent': { value: 'Mozilla' } },
+      },
+    });
+    assert.strictEqual(benign.uri, '/public/asset');
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('response_headers.clear_site_data_paths emits directive + no-store on 2xx', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-csd-'));
   try {
