@@ -112,6 +112,7 @@ See [IaC integration](docs/iac.md) for Terraform / CloudFormation / CDK / WAF us
 - [Programmatic API](docs/programmatic-api.md) — `require('cdn-security-framework')` for CI / IaC integration
 - [Compiler strictness](docs/compiler-strictness.md) — phase contracts, strict checks, and remaining dynamic areas
 - [Archetypes](docs/archetypes.md) — app-shaped policy presets (SPA, REST API, admin, microservice)
+- [Policy recipes](docs/recipes.md) — copyable snippets for Cognito APIs, SPAs, admin panels, signed downloads, and Cloudflare GraphQL
 - [Response DLP](docs/response-dlp.md) — Cloudflare Workers response masking/blocking for high-confidence data leaks
 - [Secret rotation runbook](docs/runbooks/secret-rotation.md) — JWT / JWKS / signed URL / admin token / origin secret
 - [Schema migration](docs/schema-migration.md) — how `policy/schema.json` evolves and the `migrate` CLI
