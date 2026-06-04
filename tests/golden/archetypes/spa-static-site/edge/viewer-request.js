@@ -50,6 +50,14 @@ const CFG = {
     };
   }
 
+  function appendVary(headers, token) {
+    var existing = (headers["vary"] && headers["vary"].value) || '';
+    var tokens = existing.split(',').map(function (s) { return s.trim(); }).filter(Boolean);
+    var lower = tokens.map(function (s) { return s.toLowerCase(); });
+    if (lower.indexOf(token.toLowerCase()) === -1) tokens.push(token);
+    headers["vary"] = { value: tokens.join(', ') };
+  }
+
   // Structured log emitter. CloudFront Functions supports console.log + JSON.stringify
   // on flat primitives (our records only contain those). `event` distinguishes
   // block / monitor / audit records for downstream Logs Insights queries.
@@ -142,6 +150,7 @@ const CFG = {
       'access-control-allow-origin': { value: origin },
       'cache-control': { value: 'no-store' },
     };
+    appendVary(headers, 'Origin');
 
     if (CFG.cors.allow_methods) {
       headers['access-control-allow-methods'] = { value: CFG.cors.allow_methods.join(', ') };

@@ -7,6 +7,7 @@ The `response_headers` section of `policy/security.yml` drives what the viewer-r
 | Key | Type | Default | Notes |
 |---|---|---|---|
 | `force_vary_auth` | boolean | `true` | When `true`, any path matched by any `auth_gate.match.path_prefixes` receives `Cache-Control: no-store, no-cache, must-revalidate, private` and `Vary: Authorization, Cookie`. Prevents shared-cache mix-ups between identities. Disable only if you know the downstream caches do not key by user. |
+| `cors` | object | unset | Emits allowlisted CORS headers. When the runtime echoes a request `Origin` into `Access-Control-Allow-Origin`, it also merges `Origin` into `Vary` for cache correctness, including preflight responses. |
 | `csp_public` / `csp_admin` | string | safe defaults | CSP strings emitted for non-admin vs. admin paths. `'nonce-PLACEHOLDER'` is substituted at response time when `csp_nonce` is enabled. |
 | `csp_nonce` | boolean | `false` | When `true`, the framework injects a per-response nonce into any `'nonce-PLACEHOLDER'` token in `csp_public` / `csp_admin` / `csp_report_only`, and exposes it to the origin via `X-CSP-Nonce`. AWS target uses `Math.random` (non-CS-PRNG — see limits); Cloudflare target uses `crypto.getRandomValues`. |
 | `csp_report_only` | string | `""` | If set, emitted as `Content-Security-Policy-Report-Only` alongside the enforced CSP. Use this to A/B a new policy without breaking traffic. |
@@ -31,6 +32,10 @@ With `force_vary_auth: true` (default):
    - `Cache-Control: no-store, no-cache, must-revalidate, private`
    - `Pragma: no-cache`
    - `Vary: Authorization, Cookie` (merged into any existing `Vary`)
+
+### CORS cache safety
+
+When `response_headers.cors.allow_origins` is configured and the incoming `Origin` is allowed, AWS and Cloudflare echo that value in `Access-Control-Allow-Origin`. The framework also appends `Origin` to `Vary` without duplicating existing tokens, so shared caches do not reuse a response generated for a different allowed origin. The same rule applies to CORS preflight responses.
 
 ### CSP nonce rollout
 
@@ -103,3 +108,4 @@ The edge emits `Clear-Site-Data` only when the origin response is 2xx or 3xx so 
 - Issue #11 — per-response CSP nonces remove the need for `'unsafe-inline'`.
 - Issue #13 — Cloudflare target rewrites Set-Cookie attributes without corrupting multi-cookie responses; AWS target documents the single-cookie limit.
 - Issue #19 — `csp_report_only` ships alongside the enforced CSP for safe iterations.
+- Issue #144 — dynamic CORS origin echo adds `Vary: Origin` so caches key allowed origins correctly.

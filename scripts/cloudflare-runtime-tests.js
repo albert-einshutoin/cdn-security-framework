@@ -416,6 +416,56 @@ routes:
     assert.strictEqual(conflicting.res.status, 401);
     assert.strictEqual(conflicting.fetchCalls.length, 2, 'conflicting JWK alg should refetch once and not reach origin');
 });
+test('cloudflare CORS appends Vary Origin for preflight and origin responses', async () => {
+    const generated = compileCloudflare(`
+version: 1
+project: cf-cors-vary-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+  cors:
+    allow_origins:
+      - https://app.example.com
+      - https://admin.example.com
+    allow_methods: ["GET"]
+    allow_headers: ["Authorization", "X-Api-Token"]
+    allow_credentials: true
+    expose_headers: ["X-Request-Id"]
+routes:
+  - name: api
+    match:
+      path_prefixes: ["/api"]
+    auth_gate:
+      type: static_token
+      header: X-Api-Token
+      token_env: API_TOKEN
+`);
+    const preflight = await runGeneratedWorkerRequest(generated, new Request('https://edge.example.com/api/data', {
+        method: 'OPTIONS',
+        headers: { origin: 'https://app.example.com' },
+    }), { env: { API_TOKEN: 'test-token' } });
+    assert.strictEqual(preflight.res.status, 204);
+    assert.strictEqual(preflight.res.headers.get('access-control-allow-origin'), 'https://app.example.com');
+    assert.strictEqual(preflight.res.headers.get('vary'), 'Origin');
+    assert.strictEqual(preflight.fetchCalls.length, 0, 'CORS preflight should not reach origin');
+    const forwarded = await runGeneratedWorkerRequest(generated, new Request('https://edge.example.com/api/data', {
+        method: 'GET',
+        headers: {
+            origin: 'https://admin.example.com',
+            'user-agent': 'runtime-test',
+            'x-api-token': 'test-token',
+        },
+    }), {
+        env: { API_TOKEN: 'test-token' },
+        originHeaders: { vary: 'Accept-Language' },
+    });
+    assert.strictEqual(forwarded.res.status, 200);
+    assert.strictEqual(forwarded.res.headers.get('access-control-allow-origin'), 'https://admin.example.com');
+    assert.strictEqual(forwarded.res.headers.get('access-control-allow-credentials'), 'true');
+    assert.strictEqual(forwarded.res.headers.get('vary'), 'Accept-Language, Authorization, Cookie, Origin');
+    assert.strictEqual(forwarded.fetchCalls.length, 1, 'authorized CORS request should reach origin once');
+});
 test('cloudflare graphql guard allows normal GraphQL POST', async () => {
     const generated = compileCloudflare(`
 version: 1

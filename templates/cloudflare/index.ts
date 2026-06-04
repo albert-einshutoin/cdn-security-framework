@@ -704,6 +704,14 @@ function isHostAllowed(hostHeader: string): boolean {
   return false;
 }
 
+function appendVary(headers: Headers, token: string): void {
+  const existing = headers.get('vary') || '';
+  const tokens = existing.split(',').map((s: string) => s.trim()).filter(Boolean);
+  const lower = tokens.map((s: string) => s.toLowerCase());
+  if (lower.indexOf(token.toLowerCase()) === -1) tokens.push(token);
+  headers.set('Vary', tokens.join(', '));
+}
+
 function handleCorsPreflight(request: Request): Response | null {
   if (request.method !== 'OPTIONS' || !CFG.cors) return null;
 
@@ -714,15 +722,16 @@ function handleCorsPreflight(request: Request): Response | null {
   const isAllowed = allowedOrigins.includes('*') || allowedOrigins.includes(origin);
   if (!isAllowed) return null;
 
-  const headers: Record<string, string> = {
+  const headers = new Headers({
     'Access-Control-Allow-Origin': origin,
     'Cache-Control': 'no-store',
-  };
+  });
+  appendVary(headers, 'Origin');
 
-  if (CFG.cors.allow_methods) headers['Access-Control-Allow-Methods'] = CFG.cors.allow_methods.join(', ');
-  if (CFG.cors.allow_headers) headers['Access-Control-Allow-Headers'] = CFG.cors.allow_headers.join(', ');
-  if (CFG.cors.allow_credentials) headers['Access-Control-Allow-Credentials'] = 'true';
-  if (CFG.cors.max_age) headers['Access-Control-Max-Age'] = String(CFG.cors.max_age);
+  if (CFG.cors.allow_methods) headers.set('Access-Control-Allow-Methods', CFG.cors.allow_methods.join(', '));
+  if (CFG.cors.allow_headers) headers.set('Access-Control-Allow-Headers', CFG.cors.allow_headers.join(', '));
+  if (CFG.cors.allow_credentials) headers.set('Access-Control-Allow-Credentials', 'true');
+  if (CFG.cors.max_age) headers.set('Access-Control-Max-Age', String(CFG.cors.max_age));
 
   return new Response(null, { status: 204, headers });
 }
@@ -1413,12 +1422,8 @@ export default {
     if (RESPONSE_CFG.forceVaryAuth && isAuthPath) {
       out.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
       out.headers.set('Pragma', 'no-cache');
-      const existingVary = out.headers.get('vary') || '';
-      const tokens = existingVary.split(',').map((s: string) => s.trim()).filter(Boolean);
-      const lower = tokens.map((t: string) => t.toLowerCase());
-      if (lower.indexOf('authorization') === -1) tokens.push('Authorization');
-      if (lower.indexOf('cookie') === -1) tokens.push('Cookie');
-      out.headers.set('Vary', tokens.join(', '));
+      appendVary(out.headers, 'Authorization');
+      appendVary(out.headers, 'Cookie');
     }
 
     // Clear-Site-Data on configured logout paths (issue #20). Only on 2xx/3xx.
@@ -1479,6 +1484,7 @@ export default {
 
       if (origin && isAllowed) {
         out.headers.set('Access-Control-Allow-Origin', origin);
+        appendVary(out.headers, 'Origin');
         if (RESPONSE_CFG.cors.allow_credentials) out.headers.set('Access-Control-Allow-Credentials', 'true');
         if (RESPONSE_CFG.cors.expose_headers?.length > 0) out.headers.set('Access-Control-Expose-Headers', RESPONSE_CFG.cors.expose_headers.join(', '));
       }
