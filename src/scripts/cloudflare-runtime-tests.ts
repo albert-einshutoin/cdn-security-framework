@@ -2,6 +2,7 @@
 
 const assert = require('assert');
 const fs = require('fs');
+const nodeCrypto = require('crypto');
 const os = require('os');
 const path = require('path');
 const { execFileSync, spawnSync } = require('child_process');
@@ -72,6 +73,15 @@ function createUnsignedRs256Jwt(kid = 'test-key'): string {
     base64UrlJson({ sub: 'user1', iss: 'test', aud: 'test', exp: nowSec + 3600 }),
     'signature',
   ].join('.');
+}
+
+function createSignedRs256Jwt(payload: unknown, privateKey: any, kid = 'test-key'): string {
+  const data = [
+    base64UrlJson({ alg: 'RS256', typ: 'JWT', kid }),
+    base64UrlJson(payload),
+  ].join('.');
+  const signature = nodeCrypto.sign('sha256', Buffer.from(data), privateKey).toString('base64url');
+  return data + '.' + signature;
 }
 
 async function runGeneratedWorker(generated: string, query: string, options: any = {}) {
@@ -388,6 +398,65 @@ routes:
 
   assert.strictEqual(res.status, 401);
   assert.strictEqual(fetchCalls.length, 1, 'too-large JWKS key set should fail before origin fetch');
+});
+
+test('cloudflare RS256 JWT accepts omitted/matching JWK alg and rejects conflicting alg', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-jwk-alg-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+firewall:
+  jwks:
+    allowed_hosts: ["example.com"]
+routes:
+  - name: api-jwt
+    match:
+      path_prefixes: ["/api"]
+    auth_gate:
+      type: jwt
+      algorithm: RS256
+      jwks_url: https://example.com/jwks.json
+      issuer: test
+      audience: test
+`);
+  const { publicKey, privateKey } = nodeCrypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const publicJwk = publicKey.export({ format: 'jwk' });
+  const nowSec = Math.floor(Date.now() / 1000);
+  const token = createSignedRs256Jwt({
+    sub: 'user1',
+    iss: 'test',
+    aud: 'test',
+    exp: nowSec + 3600,
+  }, privateKey);
+
+  async function runCase(key: any) {
+    const req = new Request('https://edge.example.com/api/data', {
+      method: 'GET',
+      headers: {
+        'user-agent': 'runtime-test',
+        authorization: 'Bearer ' + token,
+      },
+    });
+    return runGeneratedWorkerRequest(generated, req, {
+      originBody: JSON.stringify({ keys: [key] }),
+      originHeaders: { 'content-type': 'application/json' },
+    });
+  }
+
+  const omitted = await runCase({ ...publicJwk, kid: 'test-key' });
+  assert.strictEqual(omitted.res.status, 200);
+  assert.strictEqual(omitted.fetchCalls.length, 2, 'omitted JWK alg should fetch JWKS then origin');
+
+  const matching = await runCase({ ...publicJwk, kid: 'test-key', alg: 'RS256' });
+  assert.strictEqual(matching.res.status, 200);
+  assert.strictEqual(matching.fetchCalls.length, 2, 'matching JWK alg should fetch JWKS then origin');
+
+  const conflicting = await runCase({ ...publicJwk, kid: 'test-key', alg: 'HS256' });
+  assert.strictEqual(conflicting.res.status, 401);
+  assert.strictEqual(conflicting.fetchCalls.length, 2, 'conflicting JWK alg should refetch once and not reach origin');
 });
 
 test('cloudflare graphql guard allows normal GraphQL POST', async () => {

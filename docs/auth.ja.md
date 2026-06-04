@@ -42,6 +42,10 @@ Lambda@Edge も allowlist がある場合は利用し、さらにランタイム
 ホストの DNS 解決先が loopback / private / link-local 範囲なら拒否する。
 
 JWKS レスポンスは parse / cache の前に 256 KiB、100 keys で上限をかける。
+RS256 では両 runtime とも `kid` 一致、`kty: RSA` 必須、かつ JWK の
+`alg` が省略または `RS256` の key を選択する。矛盾する `alg` を持つ
+JWK は無視する。受け入れる token algorithm の権威は JWT header の
+algorithm allowlist のまま。
 
 ### 挙動マトリクス
 
