@@ -413,10 +413,17 @@ const CFG = {
     const hc = shouldBlock(blockIfTooManyHeaders(req), req);
     if (hc) return hc;
 
-    // 3) Path normalization
+    // 3) Raw path traversal (coarse). Run before dot-segment normalization so
+    // suspicious input like /public/../private cannot be rewritten to /private
+    // before the block patterns see it.
+    const rawTraversal = shouldBlock(blockIfTraversal(req), req);
+    if (rawTraversal) return rawTraversal;
+
+    // 4) Path normalization
     normalizePath(req);
 
-    // 4) Path traversal (coarse)
+    // 4b) Path traversal after normalization. Preserves existing behavior for
+    // block rules that intentionally match canonicalized paths.
     const t = shouldBlock(blockIfTraversal(req), req);
     if (t) return t;
 
