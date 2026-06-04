@@ -107,6 +107,34 @@ firewall:
       redacted_fields: [authorization, cookie]
 `;
 
+const CAPABILITIES_POLICY = `
+version: 1
+project: capabilities-test
+metadata:
+  risk_level: balanced
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, POST]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 8
+response_headers:
+  hsts: "max-age=31536000"
+response_dlp:
+  enabled: true
+  action: report_only
+firewall:
+  challenge:
+    enabled: true
+    path_prefixes: ["/login"]
+  waf:
+    scope: CLOUDFRONT
+    rate_limit: 1000
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+`;
+
 function tmpProject(yamlBody: string) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'api-'));
   const policyDir = path.join(tmp, 'policy');
@@ -620,6 +648,63 @@ test('CLI authoring DX: explain summarizes policy posture', () => {
     assert.ok(/Policy: api-test/.test(result.stdout));
     assert.ok(/Allowed methods: GET, POST/.test(result.stdout));
     assert.ok(/WAF:/.test(result.stdout));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: capabilities prints target matrix', () => {
+  const { spawnSync } = require('child_process');
+  const cli = path.join(repoRoot, 'bin', 'cli.js');
+  const result: any = spawnSync(process.execPath, [
+    cli, 'capabilities',
+  ], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: process.env,
+  });
+  assert.strictEqual(result.status, 0, `capabilities failed: ${result.stderr}`);
+  assert.ok(/Target Capabilities Matrix/.test(result.stdout));
+  assert.ok(/AWS CloudFront Functions/.test(result.stdout));
+  assert.ok(/AWS Lambda@Edge/.test(result.stdout));
+  assert.ok(/Cloudflare Workers/.test(result.stdout));
+  assert.ok(/Terraform-backed WAF/.test(result.stdout));
+  assert.ok(/response\.response_dlp/.test(result.stdout));
+});
+
+test('CLI authoring DX: capabilities JSON evaluates unsupported target controls', () => {
+  const ctx = tmpProject(CAPABILITIES_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'capabilities',
+      '--policy', ctx.policyPath,
+      '--target', 'aws',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `capabilities JSON failed: ${result.stderr}`);
+    const report = JSON.parse(result.stdout);
+    assert.strictEqual(report.target, 'aws');
+    assert.ok(report.targets.some((target: any) => target.key === 'cloudfront_functions'));
+    assert.ok(report.capabilities.some((cap: any) => cap.id === 'request.graphql_guard'));
+    assert.ok(report.capabilities.some((cap: any) => cap.id === 'response.response_dlp'));
+    assert.ok(report.policyEvaluation);
+    assert.ok(report.policyEvaluation.configuredControls.some((cap: any) => cap.id === 'request.graphql_guard'));
+    assert.ok(report.policyEvaluation.configuredControls.some((cap: any) => cap.id === 'response.response_dlp'));
+    assert.ok(report.policyEvaluation.findings.some((finding: any) =>
+      finding.capabilityId === 'request.graphql_guard' && finding.status === 'warning-only'
+    ));
+    assert.ok(report.policyEvaluation.findings.some((finding: any) =>
+      finding.capabilityId === 'response.response_dlp' && finding.status === 'warning-only'
+    ));
+    assert.ok(report.policyEvaluation.findings.some((finding: any) =>
+      finding.capabilityId === 'firewall.challenge' && finding.status === 'warning-only'
+    ));
   } finally {
     ctx.cleanup();
   }

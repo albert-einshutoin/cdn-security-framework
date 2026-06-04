@@ -54,6 +54,12 @@ type ReadinessOptions = {
   strict?: boolean;
 };
 
+type CapabilitiesOptions = {
+  policy?: string | null;
+  target: string;
+  json?: boolean;
+};
+
 type DeployTemplateOptions = {
   outDir: string;
   target: string;
@@ -425,6 +431,512 @@ function explainPolicy(policy: any): string[] {
     .filter((key) => responseHeaders[key] !== undefined);
   lines.push(`Response headers: ${headerKeys.join(', ') || '(defaults only)'}`);
   return lines;
+}
+
+type CapabilityStatus = 'supported' | 'partial' | 'unsupported' | 'warning-only';
+type CapabilityTargetKey = 'cloudfront_functions' | 'lambda_edge' | 'cloudflare_workers' | 'terraform_waf';
+type CapabilityDeployTarget = 'aws' | 'cloudflare' | 'all';
+type CapabilityDeployStatus = {
+  aws: CapabilityStatus;
+  cloudflare: CapabilityStatus;
+};
+type CapabilityEntry = {
+  id: string;
+  category: string;
+  label: string;
+  policyPaths: string[];
+  support: Record<CapabilityTargetKey, CapabilityStatus>;
+  deploySupport: CapabilityDeployStatus;
+  notes: string;
+  configured?: (policy: any) => boolean;
+};
+type CapabilityFinding = {
+  severity: 'fail' | 'warn';
+  id: string;
+  capabilityId: string;
+  target: 'aws' | 'cloudflare';
+  status: CapabilityStatus;
+  detail: string;
+  recommendation: string;
+};
+
+const CAPABILITY_TARGETS: { key: CapabilityTargetKey; label: string }[] = [
+  { key: 'cloudfront_functions', label: 'AWS CloudFront Functions' },
+  { key: 'lambda_edge', label: 'AWS Lambda@Edge' },
+  { key: 'cloudflare_workers', label: 'Cloudflare Workers' },
+  { key: 'terraform_waf', label: 'Terraform-backed WAF' },
+];
+
+const CAPABILITY_STATUSES: CapabilityStatus[] = ['supported', 'partial', 'unsupported', 'warning-only'];
+
+function routeAuthConfigured(policy: any, types: string[]): boolean {
+  const routes = Array.isArray(policy && policy.routes) ? policy.routes : [];
+  return routes.some((route: any) => types.includes(route && route.auth_gate && route.auth_gate.type));
+}
+
+function hasPolicyPath(policy: any, dottedPath: string): boolean {
+  const parts = dottedPath.split('.');
+  let current = policy;
+  for (const part of parts) {
+    if (!current || typeof current !== 'object' || !Object.prototype.hasOwnProperty.call(current, part)) {
+      return false;
+    }
+    current = current[part];
+  }
+  return current !== undefined && current !== null;
+}
+
+function anyPolicyPath(policy: any, dottedPaths: string[]): boolean {
+  return dottedPaths.some((p) => hasPolicyPath(policy, p));
+}
+
+const CAPABILITY_MATRIX: CapabilityEntry[] = [
+  {
+    id: 'request.allow_methods',
+    category: 'Request hygiene',
+    label: 'HTTP method allowlist',
+    policyPaths: ['request.allow_methods'],
+    support: {
+      cloudfront_functions: 'supported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'Viewer-request and Worker runtimes reject methods outside request.allow_methods.',
+  },
+  {
+    id: 'request.uri_query_limits',
+    category: 'Request hygiene',
+    label: 'URI and query limits',
+    policyPaths: [
+      'request.limits.max_uri_length',
+      'request.limits.max_query_length',
+      'request.limits.max_query_params',
+    ],
+    support: {
+      cloudfront_functions: 'supported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'URI length, query length, and query parameter count are enforced before origin fetch.',
+  },
+  {
+    id: 'request.header_limits',
+    category: 'Request hygiene',
+    label: 'Header size and count limits',
+    policyPaths: ['request.limits.max_header_size', 'request.limits.max_header_count'],
+    support: {
+      cloudfront_functions: 'partial',
+      lambda_edge: 'partial',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'partial', cloudflare: 'supported' },
+    notes: 'Header count is available at viewer-request; full header byte inspection depends on body/header-readable runtimes.',
+  },
+  {
+    id: 'request.path_normalization',
+    category: 'Request hygiene',
+    label: 'Path and query normalization',
+    policyPaths: [
+      'request.normalize.path',
+      'request.normalize.drop_query_keys',
+    ],
+    support: {
+      cloudfront_functions: 'supported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'Dot-segment and slash normalization plus tracking-query stripping run at request entry.',
+  },
+  {
+    id: 'request.required_headers',
+    category: 'Request hygiene',
+    label: 'Required headers and scanner UA blocklist',
+    policyPaths: ['request.block.header_missing', 'request.block.ua_contains'],
+    support: {
+      cloudfront_functions: 'supported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'General required-header checks and User-Agent substring blocking are request-entry controls.',
+  },
+  {
+    id: 'request.graphql_guard',
+    category: 'Request hygiene',
+    label: 'GraphQL body depth and complexity guard',
+    policyPaths: ['request.graphql_guard'],
+    support: {
+      cloudfront_functions: 'warning-only',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'warning-only', cloudflare: 'supported' },
+    notes: 'Cloudflare Workers can inspect bounded request bodies; AWS edge output warns and does not enforce this guard.',
+  },
+  {
+    id: 'response.security_headers',
+    category: 'Response security',
+    label: 'Security headers and CSP',
+    policyPaths: [
+      'response_headers.hsts',
+      'response_headers.x_content_type_options',
+      'response_headers.referrer_policy',
+      'response_headers.permissions_policy',
+      'response_headers.csp_public',
+      'response_headers.csp_admin',
+      'response_headers.csp_report_only',
+    ],
+    support: {
+      cloudfront_functions: 'supported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'Viewer-response and Worker output inject browser security headers from response_headers.',
+  },
+  {
+    id: 'response.cors',
+    category: 'Response security',
+    label: 'CORS response headers and preflight',
+    policyPaths: ['response_headers.cors'],
+    support: {
+      cloudfront_functions: 'supported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'Dynamic allowlist echo is supported and appends Vary: Origin.',
+  },
+  {
+    id: 'response.cookie_attributes',
+    category: 'Response security',
+    label: 'Cookie attribute hardening',
+    policyPaths: ['response_headers.cookie_attributes'],
+    support: {
+      cloudfront_functions: 'supported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'Set-Cookie attributes can be hardened on response-capable targets.',
+  },
+  {
+    id: 'response.response_dlp',
+    category: 'Response security',
+    label: 'Response DLP masking/blocking',
+    policyPaths: ['response_dlp'],
+    support: {
+      cloudfront_functions: 'warning-only',
+      lambda_edge: 'partial',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'warning-only', cloudflare: 'supported' },
+    notes: 'Cloudflare Workers enforce header/body DLP; AWS output emits an unsupported warning because generated CFF cannot inspect response bodies.',
+    configured: (policy: any) => Boolean(policy && policy.response_dlp && policy.response_dlp.enabled === true),
+  },
+  {
+    id: 'auth.static_basic',
+    category: 'Authentication',
+    label: 'Static token and Basic auth gates',
+    policyPaths: ['routes[].auth_gate.type=static_token|basic_auth'],
+    support: {
+      cloudfront_functions: 'supported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'Header token and Basic credentials are enforced before origin fetch.',
+    configured: (policy: any) => routeAuthConfigured(policy, ['static_token', 'basic_auth']),
+  },
+  {
+    id: 'auth.jwt',
+    category: 'Authentication',
+    label: 'JWT validation',
+    policyPaths: ['routes[].auth_gate.type=jwt'],
+    support: {
+      cloudfront_functions: 'unsupported',
+      lambda_edge: 'supported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'HS256/RS256 JWT gates run in Lambda@Edge for AWS and in Workers for Cloudflare.',
+    configured: (policy: any) => routeAuthConfigured(policy, ['jwt']),
+  },
+  {
+    id: 'auth.signed_url',
+    category: 'Authentication',
+    label: 'Signed URL validation',
+    policyPaths: ['routes[].auth_gate.type=signed_url'],
+    support: {
+      cloudfront_functions: 'unsupported',
+      lambda_edge: 'supported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'Signed URL gates run where HMAC verification and origin request mutation are available.',
+    configured: (policy: any) => routeAuthConfigured(policy, ['signed_url']),
+  },
+  {
+    id: 'origin.auth',
+    category: 'Origin security',
+    label: 'Origin authentication',
+    policyPaths: ['origin.auth'],
+    support: {
+      cloudfront_functions: 'unsupported',
+      lambda_edge: 'supported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'Custom-header and HMAC origin auth are injected before origin fetch.',
+  },
+  {
+    id: 'origin.timeout',
+    category: 'Origin security',
+    label: 'Origin timeout settings',
+    policyPaths: ['origin.timeout'],
+    support: {
+      cloudfront_functions: 'unsupported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'unsupported',
+      terraform_waf: 'supported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'unsupported' },
+    notes: 'CloudFront origin timeout config is emitted as Terraform-backed infrastructure.',
+  },
+  {
+    id: 'transport.tls_http',
+    category: 'Transport',
+    label: 'TLS and HTTP version policy',
+    policyPaths: ['transport.tls', 'transport.http'],
+    support: {
+      cloudfront_functions: 'unsupported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'unsupported',
+      terraform_waf: 'supported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'unsupported' },
+    notes: 'CloudFront viewer protocol and security policy settings are emitted as Terraform-backed infrastructure.',
+  },
+  {
+    id: 'waf.rate_limit',
+    category: 'Firewall / WAF',
+    label: 'WAF rate limiting',
+    policyPaths: ['firewall.waf.rate_limit', 'firewall.waf.rate_limit_rules'],
+    support: {
+      cloudfront_functions: 'unsupported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'unsupported',
+      terraform_waf: 'supported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'Rate limits are emitted as AWS WAFv2 or Cloudflare WAF Terraform resources.',
+  },
+  {
+    id: 'waf.managed_rules',
+    category: 'Firewall / WAF',
+    label: 'WAF managed rules',
+    policyPaths: ['firewall.waf.managed_rules'],
+    support: {
+      cloudfront_functions: 'unsupported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'unsupported',
+      terraform_waf: 'partial',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'partial' },
+    notes: 'AWS managed rules are direct. Cloudflare mappings may be equivalent, approximate, or unsupported depending on the rule.',
+  },
+  {
+    id: 'waf.geo_ip',
+    category: 'Firewall / WAF',
+    label: 'Geo and IP allow/block lists',
+    policyPaths: ['firewall.geo', 'firewall.ip'],
+    support: {
+      cloudfront_functions: 'unsupported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'unsupported',
+      terraform_waf: 'supported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'Geo and IP controls are infrastructure/WAF controls rather than edge JavaScript controls.',
+  },
+  {
+    id: 'waf.fingerprints',
+    category: 'Firewall / WAF',
+    label: 'JA3/JA4 TLS fingerprint rules',
+    policyPaths: ['firewall.waf.ja3_fingerprints', 'firewall.waf.ja4_fingerprints'],
+    support: {
+      cloudfront_functions: 'unsupported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'unsupported',
+      terraform_waf: 'supported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'Fingerprint rules are emitted into the target WAF/IaC layer.',
+  },
+  {
+    id: 'firewall.challenge',
+    category: 'Firewall / WAF',
+    label: 'Edge JS challenge / lightweight PoW',
+    policyPaths: ['firewall.challenge'],
+    support: {
+      cloudfront_functions: 'warning-only',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'warning-only', cloudflare: 'supported' },
+    notes: 'Challenge enforcement is Cloudflare Workers-only; AWS builds warn when configured.',
+  },
+  {
+    id: 'defaults.monitor_mode',
+    category: 'Operations',
+    label: 'Monitor/report-only mode',
+    policyPaths: ['defaults.mode'],
+    support: {
+      cloudfront_functions: 'supported',
+      lambda_edge: 'supported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'supported', cloudflare: 'supported' },
+    notes: 'Edge runtimes log would-block events while forwarding where the control can safely monitor.',
+    configured: (policy: any) => Boolean(policy && policy.defaults && policy.defaults.mode === 'monitor'),
+  },
+];
+
+function serializeCapability(entry: CapabilityEntry) {
+  return {
+    id: entry.id,
+    category: entry.category,
+    label: entry.label,
+    policyPaths: entry.policyPaths,
+    support: entry.support,
+    deploySupport: entry.deploySupport,
+    notes: entry.notes,
+  };
+}
+
+function normalizeCapabilityTarget(raw: string): CapabilityDeployTarget {
+  if (raw === 'aws' || raw === 'cloudflare' || raw === 'all') return raw;
+  throw new Error('Invalid --target. Use aws, cloudflare, or all.');
+}
+
+function capabilityFinding(
+  entry: CapabilityEntry,
+  target: 'aws' | 'cloudflare',
+  status: CapabilityStatus
+): CapabilityFinding {
+  const severity = status === 'unsupported' ? 'fail' : 'warn';
+  const recommendations: Record<CapabilityStatus, string> = {
+    supported: 'No action required.',
+    partial: 'Review the matrix notes and target documentation before relying on full enforcement.',
+    unsupported: 'Remove this policy setting for the selected target or enforce it in another layer.',
+    'warning-only': 'Treat the compiler/readiness warning as non-enforcement and use a supported target or origin-side control.',
+  };
+  return {
+    severity,
+    id: `capability.${target}.${entry.id}.${status}`,
+    capabilityId: entry.id,
+    target,
+    status,
+    detail: `${entry.label} is ${status} for target ${target}.`,
+    recommendation: recommendations[status],
+  };
+}
+
+function evaluatePolicyCapabilities(policy: any, policyPath: string, target: CapabilityDeployTarget) {
+  const configured = CAPABILITY_MATRIX.filter((entry) => {
+    if (entry.configured) return entry.configured(policy);
+    return anyPolicyPath(policy, entry.policyPaths);
+  });
+  const deployTargets: ('aws' | 'cloudflare')[] = target === 'all' ? ['aws', 'cloudflare'] : [target];
+  const findings: CapabilityFinding[] = [];
+  const controls = configured.map((entry) => {
+    const targetSupport: Record<string, CapabilityStatus> = {};
+    for (const deployTarget of deployTargets) {
+      const status = entry.deploySupport[deployTarget];
+      targetSupport[deployTarget] = status;
+      if (status !== 'supported') findings.push(capabilityFinding(entry, deployTarget, status));
+    }
+    return Object.assign(serializeCapability(entry), { targetSupport });
+  });
+  return {
+    policyPath,
+    target,
+    configuredControls: controls,
+    findings,
+    summary: {
+      configured: controls.length,
+      fail: findings.filter((f) => f.severity === 'fail').length,
+      warn: findings.filter((f) => f.severity === 'warn').length,
+    },
+  };
+}
+
+function buildCapabilitiesReport(opts: { target: CapabilityDeployTarget; policyPath?: string | null }) {
+  const report: any = {
+    generatedAt: new Date().toISOString(),
+    target: opts.target,
+    statuses: CAPABILITY_STATUSES,
+    targets: CAPABILITY_TARGETS,
+    capabilities: CAPABILITY_MATRIX.map(serializeCapability),
+  };
+  if (opts.policyPath) {
+    const policy = loadPolicyDocument(opts.policyPath);
+    report.policyEvaluation = evaluatePolicyCapabilities(policy, opts.policyPath, opts.target);
+  }
+  return report;
+}
+
+function printCapabilitiesReport(report: any) {
+  console.log(`Target Capabilities Matrix (target=${report.target})`);
+  console.log(`Statuses: ${CAPABILITY_STATUSES.join(', ')}`);
+  const categories = Array.from(new Set(report.capabilities.map((entry: any) => entry.category)));
+  for (const category of categories) {
+    console.log('');
+    console.log(String(category));
+    for (const entry of report.capabilities.filter((cap: any) => cap.category === category)) {
+      const support = CAPABILITY_TARGETS
+        .map((target) => `${target.label}: ${entry.support[target.key]}`)
+        .join('; ');
+      console.log(`- ${entry.id}: ${entry.label}`);
+      console.log(`  ${support}`);
+      console.log(`  Policy: ${entry.policyPaths.join(', ') || '(none)'}`);
+      console.log(`  Notes: ${entry.notes}`);
+    }
+  }
+
+  if (!report.policyEvaluation) return;
+  const evaluation = report.policyEvaluation;
+  console.log('');
+  console.log(`Policy evaluation: ${evaluation.policyPath}`);
+  console.log(`Configured controls: ${evaluation.summary.configured}`);
+  if (evaluation.findings.length === 0) {
+    console.log('Findings: none');
+    return;
+  }
+  console.log(`Findings: ${evaluation.summary.fail} fail, ${evaluation.summary.warn} warn`);
+  for (const finding of evaluation.findings) {
+    console.log(`- [${finding.severity}] ${finding.id}: ${finding.detail}`);
+    console.log(`  Recommendation: ${finding.recommendation}`);
+  }
 }
 
 type ReadinessSeverity = 'fail' | 'warn';
@@ -1268,6 +1780,43 @@ program
     }
 
     process.exit(exitCode);
+  });
+
+program
+  .command('capabilities')
+  .description('Print target capability support matrix and optionally evaluate configured policy controls')
+  .option('-p, --policy <path>', 'Optional policy file path to evaluate against the selected target', null)
+  .option('-t, --target <platform>', 'Target platform for policy evaluation: aws | cloudflare | all', 'all')
+  .option('--json', 'Print machine-readable JSON instead of a human report')
+  .action((opts: CapabilitiesOptions) => {
+    let target: CapabilityDeployTarget;
+    try {
+      target = normalizeCapabilityTarget(opts.target || 'all');
+    } catch (e: any) {
+      console.error('[ERROR]', e.message);
+      process.exit(1);
+    }
+
+    let policyPath: string | null = null;
+    if (opts.policy) {
+      policyPath = path.isAbsolute(opts.policy) ? opts.policy : path.join(process.cwd(), opts.policy);
+      if (!fs.existsSync(policyPath)) {
+        console.error('[ERROR] Policy file not found:', policyPath);
+        process.exit(1);
+      }
+    }
+
+    try {
+      const report = buildCapabilitiesReport({ target, policyPath });
+      if (opts.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        printCapabilitiesReport(report);
+      }
+    } catch (e: any) {
+      console.error('[ERROR] Failed to inspect capabilities:', e.message);
+      process.exit(1);
+    }
   });
 
 program

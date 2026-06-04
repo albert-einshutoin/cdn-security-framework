@@ -15,6 +15,7 @@ npx cdn-security <subcommand> [options]
 | `emit-waf` | インフラ設定のみ生成（エッジは生成しない）。エッジはそのままで WAF ルールだけ再デプロイしたいとき。 |
 | `doctor` | 環境診断をワンショット実行。失敗チェックがあれば非ゼロ終了。 |
 | `readiness` | 環境診断と policy posture を統合する本番リリースゲート。 |
+| `capabilities` | target 対応状況の matrix を表示し、任意で policy control を target 別に評価。 |
 | `deploy-template` | AWS / Cloudflare の artifact deployment 用 GitHub Actions workflow template を生成。 |
 | `explain` | レビューやオンボーディング向けにポリシーの要点を表示。 |
 | `diff` | 現在の `dist/` と再生成結果を比較し、drift があれば失敗。 |
@@ -122,6 +123,19 @@ npx cdn-security readiness --report readiness-report.json
 選択した policy に対して、本番向けのリリースゲートを実行します。環境診断と policy validation を再利用し、そのうえで risk level、enforce mode、HTTP method 制限、レスポンスヘッダー、WAF rate limit、managed rule のカバレッジ、target 固有の未対応機能を確認します。
 
 `fail` finding が 1 件でもあれば exit `1` です。`--strict` では warning finding も失敗扱いになります。`--json` は stdout に JSON を出力し、`--report <path>` は人間向け summary を出しつつ同じ machine-readable report をファイルに書き出します。
+
+## `capabilities`
+
+```bash
+npx cdn-security capabilities
+npx cdn-security capabilities --json
+npx cdn-security capabilities --policy policy/security.yml --target aws
+npx cdn-security capabilities --policy policy/security.yml --target cloudflare --json
+```
+
+AWS CloudFront Functions、AWS Lambda@Edge、Cloudflare Workers、Terraform-backed WAF control の target 対応状況を表示します。status は `supported`、`partial`、`unsupported`、`warning-only` です。
+
+`--policy` を指定すると、設定済み control を検出し、選択 target で partial / unsupported / warning-only になる項目を `policyEvaluation.findings` に出します。このコマンドは読み取り専用で、finding があっても process は失敗させません。automation では `--json` の出力を検査してください。
 
 ## `deploy-template`
 
