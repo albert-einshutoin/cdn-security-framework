@@ -61,6 +61,19 @@ function compileAws(policyContent: string): { status: number | null; stderr: str
   return { status: result.status, stderr: result.stderr || '' };
 }
 
+function base64UrlJson(value: unknown): string {
+  return Buffer.from(JSON.stringify(value)).toString('base64url');
+}
+
+function createUnsignedRs256Jwt(kid = 'test-key'): string {
+  const nowSec = Math.floor(Date.now() / 1000);
+  return [
+    base64UrlJson({ alg: 'RS256', typ: 'JWT', kid }),
+    base64UrlJson({ sub: 'user1', iss: 'test', aud: 'test', exp: nowSec + 3600 }),
+    'signature',
+  ].join('.');
+}
+
 async function runGeneratedWorker(generated: string, query: string, options: any = {}) {
   const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-worker-'));
   const modPath = path.join(tempDir, 'worker.cjs');
@@ -267,6 +280,9 @@ request:
   trust_forwarded_for: false
 response_headers:
   hsts: "max-age=31536000"
+firewall:
+  jwks:
+    allowed_hosts: ["example.com"]
 routes:
   - name: api-jwt
     match:
@@ -287,6 +303,91 @@ routes:
   assert.ok(generated.includes('"allowed_algorithms":["RS256"]'),
     'allowed_algorithms emitted without "none" or cross-alg entries');
   assert.ok(generated.includes('"clock_skew_sec":60'));
+});
+
+test('cloudflare RS256 JWT rejects oversized JWKS responses before origin fetch', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-jwks-cap-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+firewall:
+  jwks:
+    allowed_hosts: ["example.com"]
+routes:
+  - name: api-jwt
+    match:
+      path_prefixes: ["/api"]
+    auth_gate:
+      type: jwt
+      algorithm: RS256
+      jwks_url: https://example.com/jwks.json
+      issuer: test
+      audience: test
+`);
+
+  const req = new Request('https://edge.example.com/api/data', {
+    method: 'GET',
+    headers: {
+      'user-agent': 'runtime-test',
+      authorization: 'Bearer ' + createUnsignedRs256Jwt(),
+    },
+  });
+  const oversizedJwks = JSON.stringify({ keys: [], padding: 'a'.repeat((256 * 1024) + 1) });
+  const { res, fetchCalls } = await runGeneratedWorkerRequest(generated, req, {
+    originBody: oversizedJwks,
+    originHeaders: { 'content-type': 'application/json' },
+  });
+
+  assert.strictEqual(res.status, 401);
+  assert.strictEqual(fetchCalls.length, 1, 'oversized JWKS should fail before origin fetch');
+});
+
+test('cloudflare RS256 JWT rejects JWKS documents with too many keys', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-jwks-key-cap-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+firewall:
+  jwks:
+    allowed_hosts: ["example.com"]
+routes:
+  - name: api-jwt
+    match:
+      path_prefixes: ["/api"]
+    auth_gate:
+      type: jwt
+      algorithm: RS256
+      jwks_url: https://example.com/jwks.json
+      issuer: test
+      audience: test
+`);
+
+  const req = new Request('https://edge.example.com/api/data', {
+    method: 'GET',
+    headers: {
+      'user-agent': 'runtime-test',
+      authorization: 'Bearer ' + createUnsignedRs256Jwt(),
+    },
+  });
+  const keys = Array.from({ length: 101 }, (_value, i) => ({
+    kid: 'key-' + i,
+    kty: 'RSA',
+    n: 'sXch7EoJ89XcP_Gyo-t6fA',
+    e: 'AQAB',
+  }));
+  const { res, fetchCalls } = await runGeneratedWorkerRequest(generated, req, {
+    originBody: JSON.stringify({ keys }),
+    originHeaders: { 'content-type': 'application/json' },
+  });
+
+  assert.strictEqual(res.status, 401);
+  assert.strictEqual(fetchCalls.length, 1, 'too-large JWKS key set should fail before origin fetch');
 });
 
 test('cloudflare graphql guard allows normal GraphQL POST', async () => {
@@ -402,6 +503,9 @@ request:
   allow_methods: ["GET"]
 response_headers:
   hsts: "max-age=31536000"
+firewall:
+  jwks:
+    allowed_hosts: ["example.com"]
 routes:
   - name: api-jwt
     match:

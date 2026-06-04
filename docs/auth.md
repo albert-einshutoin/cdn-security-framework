@@ -43,6 +43,14 @@ firewall:
     negative_cache_sec: 60
 ```
 
+For Cloudflare Worker builds, `firewall.jwks.allowed_hosts` is required when
+any RS256 JWT gate is configured. Workers cannot inspect DNS resolution targets
+before `fetch`, so the compiler pins JWKS hosts at build time. Lambda@Edge also
+uses the allowlist when present and additionally rejects DNS-resolved JWKS IPs
+in loopback, private, or link-local ranges at runtime.
+
+JWKS responses are capped at 256 KiB and 100 keys before parsing/caching.
+
 ### Behaviour Matrix
 
 | State | Network call? | Outcome |

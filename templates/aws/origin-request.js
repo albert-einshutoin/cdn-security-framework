@@ -14,6 +14,7 @@
  */
 
 const crypto = require('crypto');
+const dns = require('dns');
 const https = require('https');
 
 // {{INJECT_CONFIG}}
@@ -25,6 +26,8 @@ const https = require('https');
 let jwksCache = {};
 let jwksNegativeCache = {};
 const JWKS_CACHE_TTL = 600000; // 10 min fresh window (issue #41 default)
+const JWKS_MAX_BODY_BYTES = 256 * 1024;
+const JWKS_MAX_KEYS = 100;
 function jwksStaleIfErrorMs() {
   return (CFG && typeof CFG.jwksStaleIfErrorSec === 'number' ? CFG.jwksStaleIfErrorSec : 3600) * 1000;
 }
@@ -76,47 +79,98 @@ function isUnsafeJwksUrl(rawUrl) {
   if (u.username || u.password) return 'userinfo present';
   const host = (u.hostname || '').toLowerCase();
   if (!host || host === 'localhost') return 'loopback hostname';
-  if (/^127\./.test(host) || host === '::1' || host === '[::1]') return 'loopback literal';
-  if (/^10\./.test(host)) return 'rfc1918 10/8';
-  if (/^192\.168\./.test(host)) return 'rfc1918 192.168/16';
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return 'rfc1918 172.16/12';
-  if (/^169\.254\./.test(host)) return 'link-local / metadata';
-  if (/^0\./.test(host)) return 'reserved 0/8';
+  if (isUnsafeJwksAddress(host)) return 'private/loopback/link-local literal';
   return null;
+}
+
+function isUnsafeJwksAddress(address) {
+  const host = String(address || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host) return true;
+  if (/^127\./.test(host)) return true;
+  if (/^10\./.test(host)) return true;
+  if (/^192\.168\./.test(host)) return true;
+  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
+  if (/^169\.254\./.test(host)) return true;
+  if (/^0\./.test(host)) return true;
+  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
+  if (/^fe8|^fe9|^fea|^feb/.test(host)) return true;
+  if (/^fc|^fd/.test(host)) return true;
+  if (host.startsWith('::ffff:')) return true;
+  return false;
+}
+
+function jwksLookup(hostname, options, callback) {
+  dns.lookup(hostname, options, (err, address, family) => {
+    if (err) return callback(err);
+    const addresses = Array.isArray(address) ? address.map((entry) => entry && entry.address) : [address];
+    if (addresses.some((entry) => isUnsafeJwksAddress(entry))) {
+      return callback(new Error('JWKS hostname resolved to private/loopback/link-local range'));
+    }
+    return callback(null, address, family);
+  });
+}
+
+function validateJwksKeys(jwks) {
+  const keys = jwks && Array.isArray(jwks.keys) ? jwks.keys : [];
+  if (keys.length > JWKS_MAX_KEYS) {
+    throw new Error('JWKS key count exceeds limit');
+  }
+  return keys;
 }
 
 // Raw network fetch (no cache). Caller handles caching policy.
 function fetchJwksNetwork(url) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, (res) => {
+    let settled = false;
+    function rejectOnce(err) {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    }
+
+    const req = https.get(url, { lookup: jwksLookup }, (res) => {
       // Refuse to follow cross-origin redirects (302 to 169.254.169.254,
       // to http://, etc.). Node's https.get does not follow redirects by
       // default, but be explicit in case that ever changes.
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400) {
         res.resume();
-        reject(new Error('JWKS fetch refused redirect: ' + res.statusCode));
+        rejectOnce(new Error('JWKS fetch refused redirect: ' + res.statusCode));
         return;
       }
       if (res.statusCode !== 200) {
         res.resume();
-        reject(new Error('JWKS fetch failed: ' + res.statusCode));
+        rejectOnce(new Error('JWKS fetch failed: ' + res.statusCode));
         return;
       }
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
+      let bytes = 0;
+      res.on('data', (chunk) => {
+        if (settled) return;
+        bytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+        if (bytes > JWKS_MAX_BODY_BYTES) {
+          res.resume();
+          rejectOnce(new Error('JWKS response too large'));
+          req.destroy();
+          return;
+        }
+        data += chunk;
+      });
       res.on('end', () => {
+        if (settled) return;
         try {
           const jwks = JSON.parse(data);
-          resolve(jwks.keys);
+          const keys = validateJwksKeys(jwks);
+          settled = true;
+          resolve(keys);
         } catch (e) {
-          reject(e);
+          rejectOnce(e);
         }
       });
     });
-    req.on('error', reject);
+    req.on('error', rejectOnce);
     req.setTimeout(5000, () => {
+      rejectOnce(new Error('JWKS fetch timeout'));
       req.destroy();
-      reject(new Error('JWKS fetch timeout'));
     });
   });
 }

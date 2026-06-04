@@ -68,7 +68,7 @@ warnSignedUrlReplay(policy);
 // Cloudflare Workers reads env at runtime for static_token/basic_auth, so build
 // does not require the actual token value. Only structural gate fields matter.
 // We still validate jwt/signed_url required fields via the shared helper.
-validateAuthGates(policy, { allowPlaceholderToken: true });
+validateAuthGates(policy, { allowPlaceholderToken: true, requireJwksAllowedHosts: true });
 
 const defaults = policy.defaults || {};
 const request = policy.request || {};
