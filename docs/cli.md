@@ -15,6 +15,7 @@ npx cdn-security <subcommand> [options]
 | `emit-waf` | Emit infra config only (no edge code). For redeploying firewall rules without touching edge. |
 | `doctor` | One-shot environment diagnostics. Exits non-zero on any failing check. |
 | `readiness` | Production release gate that combines diagnostics and policy posture findings. |
+| `capabilities` | Print target support matrix and optionally evaluate policy controls against a target. |
 | `deploy-template` | Generate GitHub Actions workflow templates for AWS and Cloudflare artifact deployment. |
 | `explain` | Print a concise policy posture summary for review and onboarding. |
 | `diff` | Compare generated output against the current `dist/` tree and fail on drift. |
@@ -122,6 +123,19 @@ npx cdn-security readiness --report readiness-report.json
 Runs a production-oriented release gate over the selected policy. It reuses environment diagnostics and policy validation, then adds production posture checks for risk level, enforce mode, method restrictions, response headers, WAF rate limits, managed-rule coverage, and target-specific unsupported controls.
 
 Exit code is `1` when any finding has severity `fail`. With `--strict`, warning findings also fail the command. Use `--json` for stdout JSON, or `--report <path>` to write the same machine-readable report while keeping the human summary on stdout/stderr.
+
+## `capabilities`
+
+```bash
+npx cdn-security capabilities
+npx cdn-security capabilities --json
+npx cdn-security capabilities --policy policy/security.yml --target aws
+npx cdn-security capabilities --policy policy/security.yml --target cloudflare --json
+```
+
+Prints the target support matrix for AWS CloudFront Functions, AWS Lambda@Edge, Cloudflare Workers, and Terraform-backed WAF controls. Status values are `supported`, `partial`, `unsupported`, and `warning-only`.
+
+When `--policy` is provided, the command detects configured controls and reports target-specific findings for controls that are partial, unsupported, or warning-only. The command is read-only and does not fail the process for findings; use `--json` and inspect `policyEvaluation.findings` in automation.
 
 ## `deploy-template`
 

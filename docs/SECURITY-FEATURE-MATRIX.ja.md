@@ -123,6 +123,15 @@
 | モニターモード | ✓ | ✓ | ✓ | — |
 | レスポンス DLP マスク/ブロック | 未対応: body inspection 不可 | ヘッダー/body は可能だが既定生成なし | ✓ | — |
 
+同じ matrix は CLI からも確認できます。
+
+```bash
+npx cdn-security capabilities
+npx cdn-security capabilities --policy policy/security.yml --target aws --json
+```
+
+JSON 出力は automation 向けで、選択 target で `partial`、`unsupported`、`warning-only` になる設定済み control を `policyEvaluation.findings` に含めます。
+
 ### レスポンス DLP
 
 `response_dlp` は optional で、現時点では Cloudflare Workers target が enforcement 対応です。設定したレスポンスヘッダーと、サイズ上限内のテキスト系レスポンスボディを検査し、`report_only`、`mask`、`block` を適用できます。

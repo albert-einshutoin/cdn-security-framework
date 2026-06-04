@@ -108,7 +108,7 @@ package code の正となるソースは `src/**/*.ts` です。root 配下の J
 Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.md) を参照。
 
 ### 運用ドキュメント
-- [CLI リファレンス](docs/cli.ja.md) — `init` / `build` / `emit-waf` / `doctor` / `explain` / `diff` / `migrate`
+- [CLI リファレンス](docs/cli.ja.md) — `init` / `build` / `emit-waf` / `doctor` / `readiness` / `capabilities` / `explain` / `diff` / `migrate`
 - [プログラマティック API](docs/programmatic-api.ja.md) — `require('cdn-security-framework')` で CI / IaC から直接呼び出し
 - [Compiler strictness](docs/compiler-strictness.ja.md) — phase contract、strict check、残る dynamic area
 - [アーキタイプ](docs/archetypes.ja.md) — アプリ形状別プリセット（SPA / REST API / 管理画面 / マイクロサービス）
@@ -198,6 +198,7 @@ npm run test:security-baseline
 
 ```bash
 npx cdn-security doctor
+npx cdn-security capabilities --policy policy/security.yml --target aws
 npx cdn-security explain
 ```
 
@@ -206,6 +207,8 @@ CloudFront Functions の static token gate は生成 artifact に焼き込まれ
 `doctor` も `build` と同じ環境変数を設定した状態で実行してください。
 
 `explain` はポリシーの姿勢を読み取り専用で要約し、レビューやオンボーディングに使えます。
+
+`capabilities` は target 対応 matrix を表示し、`--policy` 指定時は `aws` / `cloudflare` で partial、unsupported、warning-only になる設定済み control を報告します。automation では `--json` を使ってください。
 
 ### 5. デプロイ
 

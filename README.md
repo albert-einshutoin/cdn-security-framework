@@ -108,7 +108,7 @@ The authoritative source for package code lives under `src/**/*.ts`. Root-level 
 See [IaC integration](docs/iac.md) for Terraform / CloudFormation / CDK / WAF usage.
 
 ### Operational docs
-- [CLI reference](docs/cli.md) — `init` / `build` / `emit-waf` / `doctor` / `explain` / `diff` / `migrate`
+- [CLI reference](docs/cli.md) — `init` / `build` / `emit-waf` / `doctor` / `readiness` / `capabilities` / `explain` / `diff` / `migrate`
 - [Programmatic API](docs/programmatic-api.md) — `require('cdn-security-framework')` for CI / IaC integration
 - [Compiler strictness](docs/compiler-strictness.md) — phase contracts, strict checks, and remaining dynamic areas
 - [Archetypes](docs/archetypes.md) — app-shaped policy presets (SPA, REST API, admin, microservice)
@@ -208,6 +208,7 @@ policies used by the broader drift/release checks.
 
 ```bash
 npx cdn-security doctor
+npx cdn-security capabilities --policy policy/security.yml --target aws
 npx cdn-security explain
 ```
 
@@ -216,6 +217,8 @@ Run it with the same env vars you will use for `build`, because CloudFront
 Functions bake static token gates into the generated artifact.
 
 `explain` prints a read-only policy posture summary for review and onboarding.
+
+`capabilities` prints the target support matrix and, with `--policy`, reports configured controls that are partial, unsupported, or warning-only for `aws` or `cloudflare`. Use `--json` for automation.
 
 ### 5. Deploy
 
