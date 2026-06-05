@@ -24,6 +24,10 @@ request:
     max_uri_length: 2048
     max_header_count: 48
 
+  anomaly_guards:
+    enabled: true
+    malformed_cookie: false
+
   block:
     path_patterns:
       contains:

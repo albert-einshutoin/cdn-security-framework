@@ -5,7 +5,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { DEFAULT_CONTAINS, parsePathPatterns, hasCatastrophicBacktrackShape, regexesLiteralCode, getAuthGates, validateAuthGates, validateJwksUrl, build, PLACEHOLDER_TOKEN, hasFailOnPermissiveFlag, warnIfPermissive, warnWeakAwsCspNonce, warnUnsupportedAwsResponseDlp, warnSignedUrlReplay, buildChallengeConfig, warnUnsupportedAwsChallenge, buildGraphqlGuardConfig, warnUnsupportedGraphqlGuard, validateOriginAuth, } = require('./lib/compile-core');
+const { DEFAULT_CONTAINS, parsePathPatterns, hasCatastrophicBacktrackShape, regexesLiteralCode, getAuthGates, validateAuthGates, validateJwksUrl, build, PLACEHOLDER_TOKEN, hasFailOnPermissiveFlag, warnIfPermissive, warnWeakAwsCspNonce, warnUnsupportedAwsResponseDlp, warnSignedUrlReplay, buildChallengeConfig, warnUnsupportedAwsChallenge, buildGraphqlGuardConfig, buildAnomalyGuardConfig, warnUnsupportedGraphqlGuard, validateOriginAuth, } = require('./lib/compile-core');
 const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
 function test(name, fn) {
     try {
@@ -145,6 +145,34 @@ test('buildGraphqlGuardConfig normalizes configured limits and defaults endpoint
         maxFields: 50,
         maxBodyBytes: 65536,
         mode: 'report',
+    });
+});
+test('buildAnomalyGuardConfig defaults disabled and normalizes enabled limits', () => {
+    assert.deepStrictEqual(buildAnomalyGuardConfig({ request: {} }), {
+        enabled: false,
+        crlf: false,
+        malformedCookie: false,
+        doubleEncodedTraversal: false,
+        maxCookieBytes: 4096,
+        maxCookiePairs: 80,
+    });
+    const cfg = buildAnomalyGuardConfig({
+        request: {
+            anomaly_guards: {
+                enabled: true,
+                crlf: false,
+                max_cookie_bytes: 999999,
+                max_cookie_pairs: 0,
+            },
+        },
+    });
+    assert.deepStrictEqual(cfg, {
+        enabled: true,
+        crlf: false,
+        malformedCookie: true,
+        doubleEncodedTraversal: true,
+        maxCookieBytes: 65536,
+        maxCookiePairs: 1,
     });
 });
 test('warnUnsupportedGraphqlGuard warns for AWS body-unreadable target', () => {

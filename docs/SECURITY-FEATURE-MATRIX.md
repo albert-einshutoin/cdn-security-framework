@@ -56,6 +56,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | **Query param count limit** | Supported | `request.limits.max_query_params` → 400 if exceeded. |
 | **Header size limit** | Supported | `request.limits.max_header_size` → 431 if exceeded. Lambda@Edge / Cloudflare only. |
 | **Header count limit** | Supported | `request.limits.max_header_count` (default 64, clamped 1..500) → 431 if exceeded. Enforced in CFF viewer-request and Cloudflare Worker entry. |
+| **Request anomaly guards** | Supported | `request.anomaly_guards` blocks CRLF indicators, malformed Cookie headers, and bounded double-encoded traversal signals in CFF viewer-request and Cloudflare Workers. |
 | **Path normalization** | Supported | `request.normalize.path.collapse_slashes`, `remove_dot_segments` clean up URIs. |
 | **Query normalization** | Supported | `request.normalize.drop_query_keys` strips tracking params (utm_*, gclid, etc.). |
 | **GraphQL depth/complexity guard** | Cloudflare Workers only | `request.graphql_guard` inspects POST GraphQL bodies for depth, aliases, fields, and malformed documents. AWS targets warn because CloudFront edge output cannot read request bodies. |
@@ -91,7 +92,7 @@ This document maps **which security-related YAML settings are supported** by cat
 | **Transport** | HSTS, TLS version, HTTP version | — | — |
 | **Firewall / Access** | Rate limit (global + per-URI), Geo, IP, WAF managed rules, custom block response, logging, JA3/JA4 fingerprint rules | Edge JS challenge (Cloudflare Workers only) | — |
 | **Authentication** | Token, Basic, JWT, Signed URL | — | — |
-| **Request Hygiene** | Method, URI/Query/Header limits, Normalization, UA block, Required headers, Fingerprint (JA3/JA4) | — | — |
+| **Request Hygiene** | Method, URI/Query/Header limits, Request anomaly guards, Normalization, UA block, Required headers, Fingerprint (JA3/JA4) | — | — |
 | **Response Security** | Security headers, CORS, Cookie attributes | — | — |
 | **Origin Security** | Origin auth, Timeout | — | — |
 
@@ -103,6 +104,7 @@ This document maps **which security-related YAML settings are supported** by cat
 |---------|---------------------|-------------|-------------------|-----------|
 | URI/Query limits | ✓ | — | ✓ | — |
 | Path normalization | ✓ | — | ✓ | — |
+| Request anomaly guards | ✓ | — | ✓ | — |
 | Required headers | ✓ | — | ✓ | — |
 | Header size limit | — | ✓ | ✓ | — |
 | Edge JS challenge / PoW | — | — | ✓ | — |
@@ -139,6 +141,14 @@ Built-in detectors cover API-key prefixes (`sk-live-`, `sk_test_`, `ghp_`) and c
 Body inspection is limited to configured text-like `Content-Type` values and `body.max_bytes` (default 32768, maximum 131072). Larger or non-text responses pass through unchanged. CloudFront Functions cannot inspect response bodies; the AWS compiler emits an unsupported warning when `response_dlp.enabled: true`.
 
 See [Response DLP](./response-dlp.md) for the policy shape, rollout guidance, target support, and performance constraints.
+
+### Request Anomaly Guards
+
+`request.anomaly_guards` is optional and enforced by CloudFront Functions
+viewer-request and Cloudflare Workers. It uses bounded string checks for CRLF
+indicators, malformed Cookie headers, and double-encoded traversal signals. See
+[Request Anomaly Guards](./request-anomaly-guards.md) for policy shape and
+rollout guidance.
 
 ---
 

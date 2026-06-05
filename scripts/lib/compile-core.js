@@ -598,6 +598,31 @@ function buildGraphqlGuardConfig(policy) {
         mode: guard.mode === 'report' ? 'report' : 'block',
     };
 }
+function buildAnomalyGuardConfig(policy) {
+    const raw = policy && policy.request && policy.request.anomaly_guards;
+    if (!raw || raw.enabled !== true) {
+        return {
+            enabled: false,
+            crlf: false,
+            malformedCookie: false,
+            doubleEncodedTraversal: false,
+            maxCookieBytes: 4096,
+            maxCookiePairs: 80,
+        };
+    }
+    return {
+        enabled: true,
+        crlf: raw.crlf !== false,
+        malformedCookie: raw.malformed_cookie !== false,
+        doubleEncodedTraversal: raw.double_encoded_traversal !== false,
+        maxCookieBytes: Number.isFinite(Number(raw.max_cookie_bytes))
+            ? Math.max(1, Math.min(65536, Number(raw.max_cookie_bytes)))
+            : 4096,
+        maxCookiePairs: Number.isFinite(Number(raw.max_cookie_pairs))
+            ? Math.max(1, Math.min(1000, Number(raw.max_cookie_pairs)))
+            : 80,
+    };
+}
 function warnUnsupportedGraphqlGuard(policy, target, options = {}) {
     const logger = options.logger || console;
     const guard = buildGraphqlGuardConfig(policy);
@@ -679,6 +704,7 @@ function build(policy, options = {}) {
         trustForwardedFor,
         cors: corsConfig,
         authGates,
+        anomalyGuards: buildAnomalyGuardConfig(policy),
         obs: obsCfg,
     });
     const templatePath = path.join(rootDir, 'templates', 'aws', 'viewer-request.js');
@@ -895,6 +921,7 @@ module.exports = {
     buildChallengeConfig,
     warnUnsupportedAwsChallenge,
     buildGraphqlGuardConfig,
+    buildAnomalyGuardConfig,
     warnUnsupportedGraphqlGuard,
     validateJwksUrl,
     build,

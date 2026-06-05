@@ -14,6 +14,10 @@ request:
     max_query_params: 30
     max_uri_length: 2048
 
+  anomaly_guards:
+    enabled: true
+    malformed_cookie: false
+
   block:
     path_patterns:
       - "(?i)\\.{2}/"       # ../

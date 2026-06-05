@@ -48,6 +48,7 @@ request:
     max_query_params: ${overrides.max_query_params ?? 30}
     max_uri_length: ${overrides.max_uri_length ?? 2048}
     max_header_size: ${overrides.max_header_size ?? 8192}
+${overrides.requestExtra || ''}
 response_headers:
   hsts: "max-age=31536000"
 ${overrides.extra || ''}
@@ -158,6 +159,44 @@ test('lint accepts firewall.challenge at configured bounds', () => {
     try {
         const result = runLint(file);
         assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint accepts request anomaly guards at configured bounds', () => {
+    const yaml = basePolicy({
+        requestExtra: `  anomaly_guards:
+    enabled: true
+    crlf: true
+    malformed_cookie: true
+    double_encoded_traversal: true
+    max_cookie_bytes: 65536
+    max_cookie_pairs: 1000
+`,
+    });
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint rejects request anomaly guard cookie bounds outside schema limits', () => {
+    const yaml = basePolicy({
+        requestExtra: `  anomaly_guards:
+    enabled: true
+    max_cookie_bytes: 70000
+    max_cookie_pairs: 1001
+`,
+    });
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.notStrictEqual(result.status, 0);
+        assert.match(result.stderr + result.stdout, /anomaly_guards|max_cookie_bytes|max_cookie_pairs|maximum/i);
     }
     finally {
         fs.rmSync(dir, { recursive: true, force: true });

@@ -8,7 +8,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
-const { parsePathPatterns, regexesLiteralCode, validateAuthGates, hasAllowPlaceholderFlag, hasFailOnPermissiveFlag, hasCatastrophicBacktrackShape, compileRegexOrThrow, warnIfPermissive, warnSignedUrlReplay, buildChallengeConfig, buildGraphqlGuardConfig, buildObsConfig, } = require('./lib/compile-core');
+const { parsePathPatterns, regexesLiteralCode, validateAuthGates, hasAllowPlaceholderFlag, hasFailOnPermissiveFlag, hasCatastrophicBacktrackShape, compileRegexOrThrow, warnIfPermissive, warnSignedUrlReplay, buildChallengeConfig, buildGraphqlGuardConfig, buildAnomalyGuardConfig, buildObsConfig, } = require('./lib/compile-core');
 const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
@@ -244,6 +244,7 @@ const cfgCode = renderConstObject('CFG', {
     geoAllowCountries: runtimeCode(`new Set(${JSON.stringify(geoAllowCountries)})`),
     challenge: challengeConfig,
     graphqlGuard: buildGraphqlGuardConfig(policy),
+    anomalyGuards: buildAnomalyGuardConfig(policy),
     obs: buildObsConfig(policy),
 });
 let adminPathPrefixes = ['/admin', '/docs', '/swagger'];

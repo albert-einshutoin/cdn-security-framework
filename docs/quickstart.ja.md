@@ -70,4 +70,4 @@ CI と同じ runtime / unit / drift / security-baseline チェックを実行し
 
 - `/admin` がトークン無しで 401
 - トークン付きで通る
-- Path traversal / 異常 UA / 過剰クエリが弾かれる
+- Path traversal / request anomaly indicator / 異常 UA / 過剰クエリが弾かれる

@@ -71,4 +71,4 @@ Use the generated files in **`dist/edge/`** with Terraform, CDK, or your CDN con
 
 - `/admin` returns 401 without a token
 - Request with valid token is allowed
-- Path traversal, anomalous User-Agent, and excessive query params are blocked
+- Path traversal, request anomaly indicators, anomalous User-Agent, and excessive query params are blocked
