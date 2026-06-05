@@ -44,7 +44,7 @@ The timestamp limits replay to `timestamp_tolerance_seconds`; the nonce lets you
 
 ## Body Hash
 
-`include_body_hash: false` is the default because not every edge phase can read bodies cheaply. Set it to `true` only when the runtime can read the body and the origin needs payload binding. AWS Lambda@Edge refuses to sign truncated request bodies.
+`include_body_hash: false` is the default because not every edge phase can read bodies cheaply. Set it to `true` only when the runtime can read the body and the origin needs payload binding. AWS Lambda@Edge refuses to sign truncated request bodies, or requests where headers show a payload was sent but CloudFront did not include the body. Legitimately empty requests still sign the empty SHA-256 digest.
 
 ## Node / Express Verification
 

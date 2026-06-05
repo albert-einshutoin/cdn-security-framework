@@ -474,6 +474,10 @@ function routeAuthConfigured(policy: any, types: string[]): boolean {
   return routes.some((route: any) => types.includes(route && route.auth_gate && route.auth_gate.type));
 }
 
+function firewallChallengeEnabled(policy: any): boolean {
+  return Boolean(policy && policy.firewall && policy.firewall.challenge && policy.firewall.challenge.enabled === true);
+}
+
 function hasPolicyPath(policy: any, dottedPath: string): boolean {
   const parts = dottedPath.split('.');
   let current = policy;
@@ -803,6 +807,7 @@ const CAPABILITY_MATRIX: CapabilityEntry[] = [
     },
     deploySupport: { aws: 'warning-only', cloudflare: 'supported' },
     notes: 'Challenge enforcement is Cloudflare Workers-only; AWS builds warn when configured.',
+    configured: firewallChallengeEnabled,
   },
   {
     id: 'defaults.monitor_mode',
@@ -1089,7 +1094,7 @@ function evaluateReadiness(policy: any, target: string, lintWarnings: string[]):
         'Use Cloudflare Workers for this guard or enforce GraphQL limits at the origin.'
       ));
     }
-    if (firewall.challenge) {
+    if (firewallChallengeEnabled(policy)) {
       findings.push(readinessFinding(
         'fail',
         'target.aws.challenge.unsupported',

@@ -86,13 +86,21 @@ function isUnsafeJwksUrl(rawUrl) {
 function isUnsafeJwksAddress(address) {
   const host = String(address || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
   if (!host) return true;
-  if (/^127\./.test(host)) return true;
-  if (/^10\./.test(host)) return true;
-  if (/^192\.168\./.test(host)) return true;
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return true;
-  if (/^169\.254\./.test(host)) return true;
-  if (/^0\./.test(host)) return true;
-  if (host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (ipv4) {
+    const octets = ipv4.slice(1, 5).map(Number);
+    if (octets.some((o) => o < 0 || o > 255)) return true;
+    const [a, b] = octets;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a === 0) return true;
+    if (a >= 224) return true;
+  }
+  if (host === '::' || host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
   if (/^fe8|^fe9|^fea|^feb/.test(host)) return true;
   if (/^fc|^fd/.test(host)) return true;
   if (host.startsWith('::ffff:')) return true;
@@ -578,6 +586,22 @@ function titleHeaderName(name) {
   return String(name || '').toLowerCase().replace(/(^|-)([a-z])/g, (_, d, c) => d + c.toUpperCase());
 }
 
+function firstHeaderValue(headers, name) {
+  const values = headers && headers[String(name || '').toLowerCase()];
+  return Array.isArray(values) && values[0] && values[0].value != null
+    ? String(values[0].value)
+    : '';
+}
+
+function originAuthPayloadExpected(request) {
+  const contentLength = firstHeaderValue(request && request.headers, 'content-length').trim();
+  if (contentLength) {
+    const parsed = Number(contentLength);
+    return Number.isFinite(parsed) ? parsed > 0 : true;
+  }
+  return firstHeaderValue(request && request.headers, 'transfer-encoding').trim() !== '';
+}
+
 function canonicalOriginAuthQuery(querystring) {
   const params = new URLSearchParams(querystring || '');
   const pairs = [];
@@ -595,6 +619,9 @@ function originAuthBodyHash(request, includeBodyHash) {
   if (!includeBodyHash) return { ok: true, hash: '' };
   const body = request && request.body;
   if (!body || body.data == null) {
+    if (originAuthPayloadExpected(request)) {
+      return { ok: false, error: 'origin_auth_body_unavailable' };
+    }
     return { ok: true, hash: crypto.createHash('sha256').update(Buffer.alloc(0)).digest('hex') };
   }
   if (body.inputTruncated === true) {

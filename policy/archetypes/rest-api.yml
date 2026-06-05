@@ -40,7 +40,7 @@ request:
 routes:
   - name: api
     match:
-      path_prefixes: ["/api/"]
+      path_prefixes: ["/api"]
     auth_gate:
       type: "jwt"
       algorithm: "RS256"

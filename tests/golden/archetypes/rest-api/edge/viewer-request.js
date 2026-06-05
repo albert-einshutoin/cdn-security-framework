@@ -34,7 +34,7 @@ const CFG = {
   allowedHosts: [],
   trustForwardedFor: false,
   cors: {"allow_origins":["https://app.example.com"],"allow_methods":["GET","POST","PUT","PATCH","DELETE","OPTIONS"],"allow_headers":["authorization","content-type","x-request-id"],"allow_credentials":true,"max_age":600},
-  authGates: [{"name":"api","protectedPrefixes":["/api/"],"type":"jwt"}],
+  authGates: [{"name":"api","protectedPrefixes":["/api"],"type":"jwt"}],
   obs: {"logFormat":"json","correlationHeader":"traceparent","sampleRate":0,"auditLogAuth":true,"auditHashSub":true},
 };
 
