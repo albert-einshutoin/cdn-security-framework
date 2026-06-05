@@ -1084,18 +1084,38 @@ async function runOriginAuthHmacTests() {
     ].join('\n');
     const bodyHashHandler = compileOriginTemplate(bodyHashCfgCode);
     let missingBodyOk = false;
+    let emptyBodyOk = false;
     let bodyPresentOk = false;
     if (!bodyHashHandler) {
         console.error('FAIL: origin auth HMAC body hash template compiles');
     }
     else {
-        const missingBodyResult = await bodyHashHandler(buildLambdaEdgeEvent('/origin/upload', {}, '', 'POST'));
+        const missingBodyResult = await bodyHashHandler(buildLambdaEdgeEvent('/origin/upload', { 'Content-Length': '23' }, '', 'POST'));
         missingBodyOk = !!(missingBodyResult && missingBodyResult.status === '503');
         if (!missingBodyOk) {
-            console.error('FAIL: origin auth HMAC should fail closed when POST body is unavailable, got', missingBodyResult && missingBodyResult.status);
+            console.error('FAIL: origin auth HMAC should fail closed when declared POST body is unavailable, got', missingBodyResult && missingBodyResult.status);
         }
         else {
-            console.log('OK: origin auth HMAC fails closed when POST body is unavailable');
+            console.log('OK: origin auth HMAC fails closed when declared POST body is unavailable');
+        }
+        const emptyBodyResult = await bodyHashHandler(buildLambdaEdgeEvent('/origin/empty', { 'Content-Length': '0' }, '', 'POST'));
+        const emptyHeaders = emptyBodyResult && emptyBodyResult.headers;
+        const emptyTs = emptyHeaders && emptyHeaders['x-cdn-auth-timestamp'] && emptyHeaders['x-cdn-auth-timestamp'][0].value;
+        const emptyNonce = emptyHeaders && emptyHeaders['x-cdn-auth-nonce'] && emptyHeaders['x-cdn-auth-nonce'][0].value;
+        const emptySig = emptyHeaders && emptyHeaders['x-cdn-auth-signature'] && emptyHeaders['x-cdn-auth-signature'][0].value;
+        const emptyHash = emptyHeaders && emptyHeaders['x-cdn-auth-body-sha256'] && emptyHeaders['x-cdn-auth-body-sha256'][0].value;
+        const expectedEmptyHash = crypto.createHash('sha256').update(Buffer.alloc(0)).digest('hex');
+        const emptyCanonical = ['POST', '/origin/empty', '', expectedEmptyHash, emptyTs, emptyNonce].join('\n');
+        const expectedEmptySig = crypto.createHmac('sha256', secret).update(emptyCanonical).digest('base64url');
+        emptyBodyOk = !!(emptyBodyResult && emptyBodyResult.uri === '/origin/empty'
+            && emptyHash === expectedEmptyHash
+            && emptySig === expectedEmptySig);
+        if (!emptyBodyOk) {
+            console.error('FAIL: origin auth HMAC should sign legitimately empty POST bodies');
+            console.error({ emptyTs, emptyNonce, emptySig, expectedEmptySig, emptyHash, expectedEmptyHash, emptyHeaders });
+        }
+        else {
+            console.log('OK: origin auth HMAC signs legitimately empty POST bodies');
         }
         const bodyEvent = buildLambdaEdgeEvent('/origin/upload', {}, '', 'POST');
         const bodyData = Buffer.from('payload-for-origin-auth').toString('base64');
@@ -1125,9 +1145,9 @@ async function runOriginAuthHmacTests() {
         }
     }
     delete process.env.ORIGIN_HMAC_TEST_SECRET;
-    const passed = [ok, missingBodyOk, bodyPresentOk].filter(Boolean).length;
-    console.log('--- origin-auth hmac: ' + passed + '/3 passed ---');
-    return { failed: 3 - passed, total: 3 };
+    const passed = [ok, missingBodyOk, emptyBodyOk, bodyPresentOk].filter(Boolean).length;
+    console.log('--- origin-auth hmac: ' + passed + '/4 passed ---');
+    return { failed: 4 - passed, total: 4 };
 }
 // Monitor mode tests: blocking checks should pass through
 async function runMonitorModeTests() {

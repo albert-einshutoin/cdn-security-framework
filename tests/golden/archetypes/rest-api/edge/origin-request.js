@@ -597,6 +597,22 @@ function titleHeaderName(name) {
   return String(name || '').toLowerCase().replace(/(^|-)([a-z])/g, (_, d, c) => d + c.toUpperCase());
 }
 
+function firstHeaderValue(headers, name) {
+  const values = headers && headers[String(name || '').toLowerCase()];
+  return Array.isArray(values) && values[0] && values[0].value != null
+    ? String(values[0].value)
+    : '';
+}
+
+function originAuthPayloadExpected(request) {
+  const contentLength = firstHeaderValue(request && request.headers, 'content-length').trim();
+  if (contentLength) {
+    const parsed = Number(contentLength);
+    return Number.isFinite(parsed) ? parsed > 0 : true;
+  }
+  return firstHeaderValue(request && request.headers, 'transfer-encoding').trim() !== '';
+}
+
 function canonicalOriginAuthQuery(querystring) {
   const params = new URLSearchParams(querystring || '');
   const pairs = [];
@@ -614,8 +630,7 @@ function originAuthBodyHash(request, includeBodyHash) {
   if (!includeBodyHash) return { ok: true, hash: '' };
   const body = request && request.body;
   if (!body || body.data == null) {
-    const method = String((request && request.method) || '').toUpperCase();
-    if (method && !['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+    if (originAuthPayloadExpected(request)) {
       return { ok: false, error: 'origin_auth_body_unavailable' };
     }
     return { ok: true, hash: crypto.createHash('sha256').update(Buffer.alloc(0)).digest('hex') };
