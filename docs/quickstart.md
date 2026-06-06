@@ -11,15 +11,23 @@ npm install --save-dev cdn-security-framework
 npx cdn-security init
 ```
 
-Choose platform (AWS CloudFront / Cloudflare Workers) and profile (Strict / Balanced / Permissive). This creates `policy/security.yml` and `policy/profiles/<profile>.yml`.
+Choose platform (AWS CloudFront / Cloudflare Workers) and either a profile (Strict / Balanced / Permissive) or an archetype (SPA, REST API, admin, microservice). This creates `policy/security.yml` and a reference copy under `policy/profiles/` or `policy/archetypes/`.
 
 Non-interactive: `npx cdn-security init --platform aws --profile balanced --force`
+Recommended first path: `npx cdn-security init --platform aws --archetype spa-static-site --force`
+
+For copyable end-to-end snippets such as Cognito JWT APIs, signed downloads, or
+Cloudflare GraphQL, see [Policy recipes](./recipes.md).
 
 ## 2. Edit policy and build
 
 Edit `policy/security.yml` as needed (allow_methods, block rules, routes, etc.), then:
 
 ```bash
+# If your policy has a static_token auth gate, set the referenced build-time
+# secret first. The built-in base/admin examples use EDGE_ADMIN_TOKEN.
+export EDGE_ADMIN_TOKEN=replace-with-a-deploy-secret
+
 # AWS (default)
 npx cdn-security build
 
@@ -34,13 +42,16 @@ This validates the policy and generates **Edge Runtime** code into `dist/edge/`.
 For `/admin`, `/docs`, `/swagger` protection:
 
 - Set `EDGE_ADMIN_TOKEN` in your environment or CDN secret management (e.g. Terraform, Wrangler).
-- The build injects it at compile time when the variable is set; otherwise it uses a placeholder you can replace in your deployment pipeline.
+- The build injects it at compile time when the variable is set. For local fixture builds only, `npx cdn-security build --allow-placeholder-token` emits an explicit insecure placeholder and a warning. Never deploy placeholder artifacts.
 
 You do **not** edit `viewer-request.js` by hand; the token is driven by policy (routes.auth_gate.token_env) and environment.
 
 ## 4. Test
 
 ```bash
+export EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy
+export ORIGIN_SECRET=ci-origin-secret-not-for-deploy
+
 npm run test:runtime
 npm run test:unit
 npm run test:drift
@@ -60,4 +71,4 @@ Use the generated files in **`dist/edge/`** with Terraform, CDK, or your CDN con
 
 - `/admin` returns 401 without a token
 - Request with valid token is allowed
-- Path traversal, anomalous User-Agent, and excessive query params are blocked
+- Path traversal, request anomaly indicators, anomalous User-Agent, and excessive query params are blocked

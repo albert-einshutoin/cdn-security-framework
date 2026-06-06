@@ -12,6 +12,8 @@
 > **「CDN セキュリティを“設計思想ごと”再利用可能にし、
 > 世界中の誰でも短時間で安全な初期構成を作れるようにする」**
 
+**最初に推奨する導入ルート:** `npx cdn-security init --platform aws --archetype spa-static-site --force` から始め、生成された policy を build し、AWS CloudFront Function と WAF Terraform 出力を既存 IaC に組み込みます。Cloudflare Workers も対応していますが、現時点で最初の本番導入パスとして最も揃っているのは AWS + Terraform です。
+
 ---
 
 ## なぜこのフレームワークが必要か
@@ -70,8 +72,12 @@
 
 ```
   README.md
+  src/
+    bin/cli.ts             # CLI の TypeScript ソース
+    scripts/               # compiler / test / tool の TypeScript ソース
+    lib/                   # public library API の TypeScript ソース
   bin/
-    cli.js                 # CLI エントリ (npx cdn-security)
+    cli.js                 # compiled package artifact: CLI エントリ (npx cdn-security)
   docs/
     quickstart.md
     policy-runtime-sync.md
@@ -79,7 +85,7 @@
     security.yml / base.yml
     profiles/
   scripts/
-    compile.js
+    compile.js             # src/scripts/*.ts から compile された artifact
     compile-cloudflare.js
     compile-infra.js
     policy-lint.js
@@ -97,13 +103,17 @@
   examples/
 ```
 
+package code の正となるソースは `src/**/*.ts` です。root 配下の JavaScript と `.d.ts` は `npm run build:ts` が生成する package artifact で、npm 利用者が TypeScript build なしで CLI を実行できるよう commit しています。`templates/` 配下の runtime template は手書きで、deploy 可能な `dist/edge/` 出力を生成するために使われます。
+
 Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.md) を参照。
 
 ### 運用ドキュメント
-- [CLI リファレンス](docs/cli.ja.md) — `init` / `build` / `emit-waf` / `doctor` / `explain` / `diff` / `migrate`
+- [CLI リファレンス](docs/cli.ja.md) — `init` / `build` / `emit-waf` / `doctor` / `readiness` / `capabilities` / `explain` / `diff` / `migrate`
 - [プログラマティック API](docs/programmatic-api.ja.md) — `require('cdn-security-framework')` で CI / IaC から直接呼び出し
 - [Compiler strictness](docs/compiler-strictness.ja.md) — phase contract、strict check、残る dynamic area
 - [アーキタイプ](docs/archetypes.ja.md) — アプリ形状別プリセット（SPA / REST API / 管理画面 / マイクロサービス）
+- [ポリシーレシピ](docs/recipes.ja.md) — Cognito API、SPA、管理画面、署名付き download、Cloudflare GraphQL の copyable snippet
+- [レスポンス DLP](docs/response-dlp.ja.md) — Cloudflare Workers で高信頼の漏えい値を mask/block する設定
 - [シークレットローテーション runbook](docs/runbooks/secret-rotation.ja.md) — JWT / JWKS / 署名付き URL / 管理トークン / origin シークレット
 - [スキーママイグレーション](docs/schema-migration.ja.md) — `policy/schema.json` のバージョン契約と `migrate` CLI
 - [サプライチェーン](docs/supply-chain.ja.md) — SLSA v1 provenance と `npm audit signatures`
@@ -135,21 +145,45 @@ npm install --save-dev cdn-security-framework
 npx cdn-security init
 ```
 
-対話でプラットフォーム（AWS / Cloudflare）とプロファイル（Strict / Balanced / Permissive）を選ぶと、`policy/security.yml` と `policy/profiles/<profile>.yml` が作成されます。
+対話では guided setup、プロファイル（Strict / Balanced / Permissive）、またはアーキタイプ（`spa-static-site`, `rest-api`, `admin-panel`, `microservice-origin`）を選べます。guided setup はアプリ形状、CDN target、auth mode、CORS、WAF posture、deployment intent を順に尋ねます。
 
 非対話: `npx cdn-security init --platform aws --profile balanced --force`
+guided: `npx cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com --force`
 
 ### 3. 編集とビルド
 
 `policy/security.yml` を編集し、次を実行します。
 
 ```bash
+# policy に static_token 認証ゲートがある場合は、参照先の build-time secret を
+# 先に設定します。組み込みの base/admin 例は EDGE_ADMIN_TOKEN を使います。
+export EDGE_ADMIN_TOKEN=replace-with-a-deploy-secret
+
 npx cdn-security build
 ```
 
 ポリシーが検証され、`dist/edge/viewer-request.js` などが生成されます。
+production ではない fixture build だけなら
+`npx cdn-security build --allow-placeholder-token` も使えますが、placeholder token
+を含む artifact はデプロイしないでください。
 
 ### 4. テスト
+
+```bash
+export EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy
+export ORIGIN_SECRET=ci-origin-secret-not-for-deploy
+
+npm run test:ci
+```
+
+単一 Node 版の CI 品質ゲートを実行します。audit、policy lint、build、runtime、
+unit、fuzz、integration、drift、security-baseline、coverage、package smoke を含みます。
+GitHub Actions の Node バージョン matrix は再現しません。CI 側では引き続き
+Node 20.17.0 / 22 / 24 で package smoke を走らせます。
+ローカルに `policy/security.yml` がある場合、`test:ci` はまずそれを lint/build し、
+runtime / coverage テスト用には `policy/base.yml` fixture を再生成します。
+
+局所確認には以下を使えます。
 
 ```bash
 npm run test:runtime
@@ -158,18 +192,24 @@ npm run test:drift
 npm run test:security-baseline
 ```
 
-CI と同じ runtime / unit / drift / security-baseline チェックを実行します。
+`EDGE_ADMIN_TOKEN` は組み込み admin `static_token` gate を含む生成 artifact に必要です。
+`ORIGIN_SECRET` は origin-auth fixture policy を含む drift / release 系チェックで必要です。
 
 ### 4.5 環境診断（初回デプロイ前の任意実行、推奨）
 
 ```bash
 npx cdn-security doctor
+npx cdn-security capabilities --policy policy/security.yml --target aws
 npx cdn-security explain
 ```
 
 Node バージョン、ポリシーのパース/スキーマバージョン、認証ゲートが参照する全環境変数（`EDGE_ADMIN_TOKEN`・`JWT_SECRET`・`ORIGIN_SECRET` など）、`dist/edge/` の書き込み可否、`npm ls` の健全性を一括で pass/fail 判定します。CI でアーティファクト化できる `doctor-report.json` も書き出します。詳細は [CLI リファレンス](docs/cli.ja.md)。
+CloudFront Functions の static token gate は生成 artifact に焼き込まれるため、
+`doctor` も `build` と同じ環境変数を設定した状態で実行してください。
 
 `explain` はポリシーの姿勢を読み取り専用で要約し、レビューやオンボーディングに使えます。
+
+`capabilities` は target 対応 matrix を表示し、`--policy` 指定時は `aws` / `cloudflare` で partial、unsupported、warning-only になる設定済み control を報告します。automation では `--json` を使ってください。
 
 ### 5. デプロイ
 

@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-06-07
+
+### Security
+
+- Added HMAC origin authentication support for origin-bound request signing.
+- Added edge security primitives for JavaScript challenges, GraphQL depth/complexity guarding, and response DLP guard coverage.
+- Hardened JWT/JWKS behavior, including fail-closed HS256 secret handling, RS256 JWK `alg` handling, and JWKS resilience.
+- Added raw request anomaly checks for encoded traversal, CRLF indicators, header multi-values, query object values, and CloudFront cookie maps before normalization hides the original input shape.
+- Tightened CORS response behavior with `Vary: Origin` handling.
+
+### Added
+
+- Added guided `init` wizard support, deployment workflow templates, and production readiness reporting.
+- Added target capability reporting and policy recipe documentation for common deployment archetypes.
+- Added local CI/test helper coverage, CODEOWNERS wiring, and security baseline release checks.
+
+### Changed
+
+- Updated npm dependencies and documented local build/test secret prerequisites.
+- Clarified the source/generated artifact boundary for OSS consumers.
+
+### Fixed
+
+- Addressed post-merge review findings around body-hash handling and CloudFront request-anomaly event shapes.
+
 ## [1.3.0] - 2026-05-01
 
 ### Added
@@ -109,7 +134,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ---
 
-[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/albert-einshutoin/cdn-security-framework/compare/v1.0.0...v1.1.0

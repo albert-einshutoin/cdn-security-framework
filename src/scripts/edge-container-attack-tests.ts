@@ -46,7 +46,7 @@ function runNode(script: string, args: string[], env: Record<string, string> = {
 let awsArtifactsCompiled = false;
 function ensureAwsArtifactsCompiled() {
   if (awsArtifactsCompiled) return;
-  runNode('scripts/compile.js', []);
+  runNode('scripts/compile.js', ['--policy', 'policy/base.yml', '--out-dir', 'dist']);
   awsArtifactsCompiled = true;
 }
 

@@ -14,6 +14,7 @@
  */
 
 const crypto = require('crypto');
+const dns = require('dns');
 const https = require('https');
 
 const CFG = {
@@ -21,7 +22,7 @@ const CFG = {
   mode: "enforce",
   maxHeaderSize: 0,
   trustForwardedFor: false,
-  jwtGates: [{"name":"api","protectedPrefixes":["/api/"],"type":"jwt","algorithm":"RS256","allowed_algorithms":["RS256"],"clock_skew_sec":30,"jwks_url":"https://auth.example.com/.well-known/jwks.json","issuer":"https://auth.example.com/","audience":"api.example.com","secret_env":""}],
+  jwtGates: [{"name":"api","protectedPrefixes":["/api"],"type":"jwt","algorithm":"RS256","allowed_algorithms":["RS256"],"clock_skew_sec":30,"jwks_url":"https://auth.example.com/.well-known/jwks.json","issuer":"https://auth.example.com/","audience":"api.example.com","secret_env":""}],
   signedUrlGates: [],
   originAuth: null,
   jwksStaleIfErrorSec: 120,
@@ -36,6 +37,8 @@ const CFG = {
 let jwksCache = {};
 let jwksNegativeCache = {};
 const JWKS_CACHE_TTL = 600000; // 10 min fresh window (issue #41 default)
+const JWKS_MAX_BODY_BYTES = 256 * 1024;
+const JWKS_MAX_KEYS = 100;
 function jwksStaleIfErrorMs() {
   return (CFG && typeof CFG.jwksStaleIfErrorSec === 'number' ? CFG.jwksStaleIfErrorSec : 3600) * 1000;
 }
@@ -87,47 +90,106 @@ function isUnsafeJwksUrl(rawUrl) {
   if (u.username || u.password) return 'userinfo present';
   const host = (u.hostname || '').toLowerCase();
   if (!host || host === 'localhost') return 'loopback hostname';
-  if (/^127\./.test(host) || host === '::1' || host === '[::1]') return 'loopback literal';
-  if (/^10\./.test(host)) return 'rfc1918 10/8';
-  if (/^192\.168\./.test(host)) return 'rfc1918 192.168/16';
-  if (/^172\.(1[6-9]|2\d|3[01])\./.test(host)) return 'rfc1918 172.16/12';
-  if (/^169\.254\./.test(host)) return 'link-local / metadata';
-  if (/^0\./.test(host)) return 'reserved 0/8';
+  if (isUnsafeJwksAddress(host)) return 'private/loopback/link-local literal';
   return null;
+}
+
+function isUnsafeJwksAddress(address) {
+  const host = String(address || '').trim().toLowerCase().replace(/^\[|\]$/g, '');
+  if (!host) return true;
+  const ipv4 = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(host);
+  if (ipv4) {
+    const octets = ipv4.slice(1, 5).map(Number);
+    if (octets.some((o) => o < 0 || o > 255)) return true;
+    const [a, b] = octets;
+    if (a === 10) return true;
+    if (a === 127) return true;
+    if (a === 172 && b >= 16 && b <= 31) return true;
+    if (a === 192 && b === 168) return true;
+    if (a === 169 && b === 254) return true;
+    if (a === 100 && b >= 64 && b <= 127) return true;
+    if (a === 0) return true;
+    if (a >= 224) return true;
+  }
+  if (host === '::' || host === '::1' || host === '0:0:0:0:0:0:0:1') return true;
+  if (/^fe8|^fe9|^fea|^feb/.test(host)) return true;
+  if (/^fc|^fd/.test(host)) return true;
+  if (host.startsWith('::ffff:')) return true;
+  return false;
+}
+
+function jwksLookup(hostname, options, callback) {
+  dns.lookup(hostname, options, (err, address, family) => {
+    if (err) return callback(err);
+    const addresses = Array.isArray(address) ? address.map((entry) => entry && entry.address) : [address];
+    if (addresses.some((entry) => isUnsafeJwksAddress(entry))) {
+      return callback(new Error('JWKS hostname resolved to private/loopback/link-local range'));
+    }
+    return callback(null, address, family);
+  });
+}
+
+function validateJwksKeys(jwks) {
+  const keys = jwks && Array.isArray(jwks.keys) ? jwks.keys : [];
+  if (keys.length > JWKS_MAX_KEYS) {
+    throw new Error('JWKS key count exceeds limit');
+  }
+  return keys;
 }
 
 // Raw network fetch (no cache). Caller handles caching policy.
 function fetchJwksNetwork(url) {
   return new Promise((resolve, reject) => {
-    const req = https.get(url, (res) => {
+    let settled = false;
+    function rejectOnce(err) {
+      if (settled) return;
+      settled = true;
+      reject(err);
+    }
+
+    const req = https.get(url, { lookup: jwksLookup }, (res) => {
       // Refuse to follow cross-origin redirects (302 to 169.254.169.254,
       // to http://, etc.). Node's https.get does not follow redirects by
       // default, but be explicit in case that ever changes.
       if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400) {
         res.resume();
-        reject(new Error('JWKS fetch refused redirect: ' + res.statusCode));
+        rejectOnce(new Error('JWKS fetch refused redirect: ' + res.statusCode));
         return;
       }
       if (res.statusCode !== 200) {
         res.resume();
-        reject(new Error('JWKS fetch failed: ' + res.statusCode));
+        rejectOnce(new Error('JWKS fetch failed: ' + res.statusCode));
         return;
       }
       let data = '';
-      res.on('data', (chunk) => { data += chunk; });
+      let bytes = 0;
+      res.on('data', (chunk) => {
+        if (settled) return;
+        bytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+        if (bytes > JWKS_MAX_BODY_BYTES) {
+          res.resume();
+          rejectOnce(new Error('JWKS response too large'));
+          req.destroy();
+          return;
+        }
+        data += chunk;
+      });
       res.on('end', () => {
+        if (settled) return;
         try {
           const jwks = JSON.parse(data);
-          resolve(jwks.keys);
+          const keys = validateJwksKeys(jwks);
+          settled = true;
+          resolve(keys);
         } catch (e) {
-          reject(e);
+          rejectOnce(e);
         }
       });
     });
-    req.on('error', reject);
+    req.on('error', rejectOnce);
     req.setTimeout(5000, () => {
+      rejectOnce(new Error('JWKS fetch timeout'));
       req.destroy();
-      reject(new Error('JWKS fetch timeout'));
     });
   });
 }
@@ -203,6 +265,11 @@ function isAlgAllowed(headerAlg, gate, expected) {
   return allowed.indexOf(headerAlg) !== -1;
 }
 
+function isMatchingRs256Jwk(key, kid) {
+  if (!key || !kid || typeof kid !== 'string') return false;
+  return key.kid === kid && key.kty === 'RSA' && (!key.alg || key.alg === 'RS256');
+}
+
 // Verify JWT signature (RS256)
 async function verifyJwtRS256(token, gate) {
   const parts = token.split('.');
@@ -257,11 +324,11 @@ async function verifyJwtRS256(token, gate) {
 
     // Fetch JWKS and find matching key; retry once on kid miss (cache refresh)
     let keys = await fetchJwks(jwksUrl);
-    let key = keys.find(k => k.kid === header.kid && k.alg === 'RS256');
+    let key = keys.find(k => isMatchingRs256Jwk(k, header.kid));
     if (!key) {
       invalidateJwksCache(jwksUrl);
       keys = await fetchJwks(jwksUrl);
-      key = keys.find(k => k.kid === header.kid && k.alg === 'RS256');
+      key = keys.find(k => isMatchingRs256Jwk(k, header.kid));
       if (!key) {
         return { valid: false, error: 'Key not found' };
       }
@@ -292,6 +359,10 @@ async function verifyJwtRS256(token, gate) {
 
 // Verify JWT with HS256 (symmetric key)
 function verifyJwtHS256(token, secret, gate) {
+  if (!secret) {
+    return { valid: false, error: 'JWT secret not configured' };
+  }
+
   const parts = token.split('.');
   if (parts.length !== 3) return { valid: false, error: 'Invalid token format' };
 
@@ -442,6 +513,9 @@ async function checkJwtGates(request) {
       result = await verifyJwtRS256(jwt, gate);
     } else if (gate.algorithm === 'HS256' && gate.secret_env) {
       const secret = process.env[gate.secret_env] || '';
+      if (!secret) {
+        return resp(503, 'JWT gate misconfigured');
+      }
       result = verifyJwtHS256(jwt, secret, gate);
     } else {
       return resp(500, 'JWT gate misconfigured');
@@ -519,8 +593,81 @@ function checkSignedUrlGates(request) {
   return null;
 }
 
-// Add origin auth header. Refuses to forward when the env var is unset / empty
-// so origin cannot mistake a blank `X-Origin-Verify` for a valid edge handoff.
+function titleHeaderName(name) {
+  return String(name || '').toLowerCase().replace(/(^|-)([a-z])/g, (_, d, c) => d + c.toUpperCase());
+}
+
+function firstHeaderValue(headers, name) {
+  const values = headers && headers[String(name || '').toLowerCase()];
+  return Array.isArray(values) && values[0] && values[0].value != null
+    ? String(values[0].value)
+    : '';
+}
+
+function originAuthPayloadExpected(request) {
+  const contentLength = firstHeaderValue(request && request.headers, 'content-length').trim();
+  if (contentLength) {
+    const parsed = Number(contentLength);
+    return Number.isFinite(parsed) ? parsed > 0 : true;
+  }
+  return firstHeaderValue(request && request.headers, 'transfer-encoding').trim() !== '';
+}
+
+function canonicalOriginAuthQuery(querystring) {
+  const params = new URLSearchParams(querystring || '');
+  const pairs = [];
+  for (const [key, value] of params.entries()) pairs.push([key, value]);
+  pairs.sort((a, b) => {
+    if (a[0] === b[0]) return a[1] < b[1] ? -1 : (a[1] > b[1] ? 1 : 0);
+    return a[0] < b[0] ? -1 : 1;
+  });
+  return pairs
+    .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
+    .join('&');
+}
+
+function originAuthBodyHash(request, includeBodyHash) {
+  if (!includeBodyHash) return { ok: true, hash: '' };
+  const body = request && request.body;
+  if (!body || body.data == null) {
+    if (originAuthPayloadExpected(request)) {
+      return { ok: false, error: 'origin_auth_body_unavailable' };
+    }
+    return { ok: true, hash: crypto.createHash('sha256').update(Buffer.alloc(0)).digest('hex') };
+  }
+  if (body.inputTruncated === true) {
+    return { ok: false, error: 'origin_auth_body_truncated' };
+  }
+  const encoding = body.encoding === 'base64' ? 'base64' : 'utf8';
+  const data = Buffer.from(String(body.data || ''), encoding);
+  return { ok: true, hash: crypto.createHash('sha256').update(data).digest('hex') };
+}
+
+function originAuthSignedComponents(auth) {
+  return Array.isArray(auth.signed_components) && auth.signed_components.length > 0
+    ? auth.signed_components
+    : ['method', 'path', 'query', 'body', 'timestamp', 'nonce'];
+}
+
+function canonicalOriginAuthInput(request, auth, timestamp, nonce, bodyHash) {
+  const values = {
+    method: String((request && request.method) || '').toUpperCase(),
+    path: (request && request.uri) || '/',
+    query: canonicalOriginAuthQuery((request && request.querystring) || ''),
+    body: bodyHash || '',
+    timestamp,
+    nonce,
+  };
+  return originAuthSignedComponents(auth).map((component) => values[component] || '').join('\n');
+}
+
+function setOriginAuthHeader(request, headerName, value) {
+  const key = titleHeaderName(headerName);
+  request.headers[String(headerName).toLowerCase()] = [{ key, value: String(value) }];
+}
+
+// Add origin auth headers. Refuses to forward when the env var is unset / empty
+// so origin cannot mistake a blank proof for a valid edge handoff.
 function addOriginAuth(request) {
   if (!CFG.originAuth) return null;
 
@@ -535,11 +682,33 @@ function addOriginAuth(request) {
     });
     return resp(503, 'Origin auth misconfigured');
   }
-  const headerName = (CFG.originAuth.header || 'X-Origin-Verify').toLowerCase();
-  request.headers[headerName] = [{
-    key: CFG.originAuth.header || 'X-Origin-Verify',
-    value: secret,
-  }];
+  if (CFG.originAuth.type === 'hmac_signature') {
+    const body = originAuthBodyHash(request, CFG.originAuth.include_body_hash === true);
+    if (!body.ok) {
+      logEvent('error', {
+        block_reason: body.error || 'origin_auth_body_unavailable',
+        secret_env: envName,
+        uri: request.uri || '',
+        correlation_id: readCorrelation(request),
+      });
+      return resp(503, 'Origin auth misconfigured');
+    }
+    const prefix = CFG.originAuth.header_prefix || 'X-CDN-Auth';
+    const timestamp = String(Math.floor(Date.now() / 1000));
+    const nonce = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
+    const canonical = canonicalOriginAuthInput(request, CFG.originAuth, timestamp, nonce, body.hash);
+    const signature = crypto.createHmac('sha256', secret).update(canonical).digest('base64url');
+    setOriginAuthHeader(request, prefix + '-Timestamp', timestamp);
+    setOriginAuthHeader(request, prefix + '-Nonce', nonce);
+    if (CFG.originAuth.include_body_hash === true) {
+      setOriginAuthHeader(request, prefix + '-Body-SHA256', body.hash);
+    }
+    setOriginAuthHeader(request, prefix + '-Signature', signature);
+    return null;
+  }
+
+  const headerName = CFG.originAuth.header || 'X-Origin-Verify';
+  setOriginAuthHeader(request, headerName, secret);
   return null;
 }
 
@@ -554,8 +723,7 @@ function propagateCorrelation(request) {
   if (hasIncoming) return;
   // Lambda@Edge has crypto available — use randomUUID as a cheap ID.
   const id = crypto.randomUUID ? crypto.randomUUID() : crypto.randomBytes(16).toString('hex');
-  const canonical = headerName.replace(/(^|-)([a-z])/g, (_, d, c) => d + c.toUpperCase());
-  request.headers[headerName] = [{ key: canonical, value: id }];
+  request.headers[headerName] = [{ key: titleHeaderName(headerName), value: id }];
 }
 
 // Structured log emitter for Lambda@Edge. Same JSON shape as the CloudFront

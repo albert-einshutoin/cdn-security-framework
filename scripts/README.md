@@ -43,6 +43,9 @@ node scripts/policy-lint.js policy/profiles/balanced.yml
 ### Tests
 
 ```bash
+npm run test:ci
+
+# Focused checks
 npm run test:runtime
 npm run test:unit
 npm run test:drift
@@ -68,6 +71,11 @@ GitHub Actions workflow `.github/workflows/policy-lint.yml` runs the default qua
 5. unit tests (`npm run test:unit`)
 6. drift check (`npm run test:drift`)
 7. security baseline check (`npm run test:security-baseline`)
+8. coverage (`npm run test:coverage`)
+9. package smoke (`npm run test:package`)
+
+Use `npm run test:ci` for the local single-Node equivalent. The GitHub workflow
+also runs package smoke on the Node-version matrix.
 
 ---
 

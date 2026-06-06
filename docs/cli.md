@@ -14,6 +14,9 @@ npx cdn-security <subcommand> [options]
 | `build` | Validate policy, compile edge runtime + infra config. |
 | `emit-waf` | Emit infra config only (no edge code). For redeploying firewall rules without touching edge. |
 | `doctor` | One-shot environment diagnostics. Exits non-zero on any failing check. |
+| `readiness` | Production release gate that combines diagnostics and policy posture findings. |
+| `capabilities` | Print target support matrix and optionally evaluate policy controls against a target. |
+| `deploy-template` | Generate GitHub Actions workflow templates for AWS and Cloudflare artifact deployment. |
 | `explain` | Print a concise policy posture summary for review and onboarding. |
 | `diff` | Compare generated output against the current `dist/` tree and fail on drift. |
 | `migrate` | Migrate a policy file between schema versions (stub — v1 is the only shipped version today). |
@@ -26,9 +29,13 @@ npx cdn-security <subcommand> [options]
 npx cdn-security init                                      # interactive
 npx cdn-security init --platform aws --profile balanced    # non-interactive
 npx cdn-security init --platform aws --archetype rest-api  # archetype
+npx cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com
 ```
 
 - `--profile` and `--archetype` are mutually exclusive — a starter is either a security posture (profile) or an app shape (archetype).
+- `--guided` asks about app shape, CDN target, auth mode, protected paths, CORS origins, WAF posture, geo/IP constraints, and deployment intent.
+- Guided setup also has CI-friendly flags: `--app-shape`, `--auth`, `--admin-paths`, `--cors-origins`, `--waf`, `--geo-block`, `--ip-allowlist`, `--deployment`, and `--project`.
+- Generated guided policies include comments pointing to secret-management docs. Secret values are never written; only env var names such as `EDGE_ADMIN_TOKEN`, `BASIC_AUTH_CREDS`, `URL_SIGNING_SECRET`, or `WAF_LOG_DESTINATION_ARN` are referenced.
 - `--force` overwrites existing `policy/security.yml`.
 
 ## `build`
@@ -102,6 +109,46 @@ Exit code is `0` when no check has status `fail`, else `1`. With `--strict`, war
     name: doctor-report
     path: doctor-report.json
 ```
+
+## `readiness`
+
+```bash
+npx cdn-security readiness
+npx cdn-security readiness --target cloudflare
+npx cdn-security readiness --strict
+npx cdn-security readiness --json
+npx cdn-security readiness --report readiness-report.json
+```
+
+Runs a production-oriented release gate over the selected policy. It reuses environment diagnostics and policy validation, then adds production posture checks for risk level, enforce mode, method restrictions, response headers, WAF rate limits, managed-rule coverage, and target-specific unsupported controls.
+
+Exit code is `1` when any finding has severity `fail`. With `--strict`, warning findings also fail the command. Use `--json` for stdout JSON, or `--report <path>` to write the same machine-readable report while keeping the human summary on stdout/stderr.
+
+## `capabilities`
+
+```bash
+npx cdn-security capabilities
+npx cdn-security capabilities --json
+npx cdn-security capabilities --policy policy/security.yml --target aws
+npx cdn-security capabilities --policy policy/security.yml --target cloudflare --json
+```
+
+Prints the target support matrix for AWS CloudFront Functions, AWS Lambda@Edge, Cloudflare Workers, and Terraform-backed WAF controls. Status values are `supported`, `partial`, `unsupported`, and `warning-only`.
+
+When `--policy` is provided, the command detects configured controls and reports target-specific findings for controls that are partial, unsupported, or warning-only. The command is read-only and does not fail the process for findings; use `--json` and inspect `policyEvaluation.findings` in automation.
+
+## `deploy-template`
+
+```bash
+npx cdn-security deploy-template
+npx cdn-security deploy-template --target aws
+npx cdn-security deploy-template --target cloudflare
+npx cdn-security deploy-template --out-dir .github/workflows --force
+```
+
+Writes starter GitHub Actions workflows for generated edge and infra artifacts. The AWS template builds and uploads `dist/edge/` and `dist/infra/` for a downstream Terraform/CDK/CloudFront release. The Cloudflare template builds the Worker, passes configured runtime secrets through `wrangler deploy --secrets-file`, and uploads generated artifacts.
+
+The templates reference GitHub Secrets such as `EDGE_ADMIN_TOKEN`, `BASIC_AUTH_CREDS`, `URL_SIGNING_SECRET`, `JWT_SECRET`, `ORIGIN_SECRET`, `CHALLENGE_SECRET`, `CLOUDFLARE_API_TOKEN`, and `CLOUDFLARE_ACCOUNT_ID`; they never include secret values. For Cloudflare, extend `CDN_SECURITY_WORKER_SECRET_NAMES` when your policy uses additional `*_env` names. Existing files are not overwritten unless `--force` is provided.
 
 ## `explain`
 

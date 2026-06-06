@@ -13,6 +13,7 @@ node_modules/
 Thumbs.db
 
 # AI / internal docs (not for distribution)
+AGENTS.md
 CLAUDE.md
 docs/SELF-REVIEW.md
 

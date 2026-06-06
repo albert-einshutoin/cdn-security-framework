@@ -24,6 +24,10 @@ request:
     max_uri_length: 2048
     max_header_count: 48
 
+  anomaly_guards:
+    enabled: true
+    malformed_cookie: false
+
   block:
     path_patterns:
       contains:
@@ -40,7 +44,7 @@ request:
 routes:
   - name: api
     match:
-      path_prefixes: ["/api/"]
+      path_prefixes: ["/api"]
     auth_gate:
       type: "jwt"
       algorithm: "RS256"

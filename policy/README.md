@@ -63,6 +63,7 @@ node scripts/policy-lint.js policy/base.yml
 | `max_query_length` | 1024 | 512 | 2048 |
 | `max_query_params` | 30 | 20 | 50 |
 | `max_uri_length` | 2048 | 1024 | 4096 |
+| Request anomaly guards | CRLF + double-encoded traversal | CRLF + Cookie + double-encoded traversal | off |
 | UA block list | scanners | scanners + curl, wget, etc. | scanners only |
 | Block missing User-Agent | yes | yes | no |
 | Allowed methods (default) | GET, HEAD, POST | GET, HEAD, POST | + PUT, PATCH, DELETE, OPTIONS |
@@ -84,10 +85,18 @@ issue with the use case.
 | `request.limits.max_query_params` | 1 | 1,024 | Keys |
 | `request.limits.max_uri_length` | 1 | 8,192 | Bytes |
 | `request.limits.max_header_size` | 1 | 65,536 | Bytes |
+| `request.anomaly_guards.max_cookie_bytes` | 1 | 65,536 | Bytes |
+| `request.anomaly_guards.max_cookie_pairs` | 1 | 1,000 | Cookie pairs |
 | `routes[].auth_gate.clock_skew_sec` | 0 | 600 | Seconds |
 | `routes[].auth_gate.cache_ttl_sec` | 0 | 86,400 | Seconds (1 day) |
+| `request.graphql_guard.max_depth` | 1 | 64 | Cloudflare Workers only |
+| `request.graphql_guard.max_aliases` | 0 | 10,000 | Cloudflare Workers only |
+| `request.graphql_guard.max_fields` | 1 | 50,000 | Cloudflare Workers only |
+| `request.graphql_guard.max_body_bytes` | 1 | 1,048,576 | Bytes inspected from cloned POST body |
 | `response_headers.cors.max_age` | 0 | 86,400 | Seconds (browser CORS cap) |
 | `firewall.waf.rate_limit` | 100 | 2,000,000,000 | AWS WAFv2 rate-based window |
+| `firewall.challenge.difficulty` | 1 | 6 | Leading SHA-256 hex zeroes (Cloudflare Workers experimental) |
+| `firewall.challenge.ttl_sec` | 60 | 86,400 | Solved challenge cookie lifetime |
 | `origin.timeout.connect` | 1 | 10 | CloudFront cap |
 | `origin.timeout.read` | 1 | 60 | CloudFront cap |
 
@@ -108,7 +117,10 @@ See [docs/profiles.md](../docs/profiles.md) for the full profile comparison and 
 ## Related
 
 * [Profiles](../docs/profiles.md) — how to choose a profile and gate permissive in production CI.
+* [Edge JS Challenge](../docs/edge-js-challenge.md) — experimental Cloudflare Workers JS challenge / lightweight PoW primitive.
+* [Request Anomaly Guards](../docs/request-anomaly-guards.md) — CRLF, malformed Cookie, and double-encoded traversal checks.
 * [Policy and runtime sync](../docs/policy-runtime-sync.md) — how to keep policy and runtimes in sync.
+* [GraphQL Guard](../docs/graphql-guard.md) — Cloudflare Workers request body guard for GraphQL depth/complexity.
 * [Architecture](../docs/architecture.md) — policy-driven design.
 
 ---

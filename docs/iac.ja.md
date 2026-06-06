@@ -6,14 +6,14 @@
 
 ## 概要
 
-`npx cdn-security build`（および Infra 用に `npx cdn-security build --target aws`）のあと:
+`npx cdn-security build` のあと:
 
 | 出力 | 用途 |
 |------|------|
 | **dist/edge/viewer-request.js** | CloudFront Function (Viewer Request) |
 | **dist/edge/viewer-response.js** | CloudFront Function (Viewer Response) |
 | **dist/edge/cloudflare/index.ts** | Cloudflare Worker（`--target cloudflare` でビルドした場合）。出力は TypeScript。Wrangler がデプロイ時にコンパイルする。Wrangler を使わない場合は TypeScript ビルド環境が必要。 |
-| **dist/infra/waf-rules.tf.json** | Terraform JSON: `aws_wafv2_rule_group`（レートベースルール）。ポリシーに `firewall.waf` がある場合に生成。 |
+| **dist/infra/waf-rules.tf.json** | Terraform JSON: WAFv2 rule group / Web ACL resources。ポリシーに `firewall.waf` がある場合に生成。 |
 | **dist/infra/waf-cloudformation.json** | AWS CloudFormation: `AWS::WAFv2::*` リソース。`emit-waf --format cloudformation` で生成。 |
 
 ---
@@ -72,43 +72,38 @@ resource "aws_cloudfront_distribution" "main" {
 
 ## Terraform: WAF（Infra）
 
-ポリシーに **`firewall.waf`** セクションがあると、ビルドで **`dist/infra/waf-rules.tf.json`**（Terraform JSON）が出力されます。利用方法:
+ポリシーに **`firewall.waf`** セクションがあると、ビルドで **`dist/infra/waf-rules.tf.json`**（Terraform JSON）が出力されます。最も単純な production path は、このファイルを CloudFront distribution を管理している Terraform root にコピーまたは生成し、生成された Web ACL ARN を distribution から参照する形です。
 
-- **方法 A**: この JSON ファイルを Terraform のディレクトリに含め、`terraform plan` / `apply` でルールグループを管理する。
-- **方法 B**: 生成されたルールグループを Web ACL から参照する。
+### 推奨レイアウト
 
-### 生成 waf-rules.tf.json の利用
+```text
+infra/
+  main.tf
+  cdn-security.auto.tf.json   # dist/infra/waf-rules.tf.json からコピー
+```
 
-ファイルはそのまま Terraform JSON として有効です。
+ビルドしてコピー:
 
-1. **Terraform モジュールにコピー**: `waf-rules.tf.json` を Terraform のディレクトリに置き、そのディレクトリで `terraform plan` / `apply` を実行する。
-2. **別モジュールから参照**: このルールグループを Web ACL の `rule_group_reference_statement` で参照する。
+```bash
+EDGE_ADMIN_TOKEN=replace-with-a-deploy-secret npx cdn-security build
+cp dist/infra/waf-rules.tf.json infra/cdn-security.auto.tf.json
+```
 
-例: ビルド実行後、Terraform の設定ディレクトリで:
+その後、生成された Web ACL を CloudFront distribution にアタッチします。生成リソース名には policy の `project` を sanitize した値が入ります。`project: example-cdn-security` の場合、Web ACL resource name は `aws_wafv2_web_acl.example_cdn_security` です。
 
 ```hcl
-# 同一リポジトリ、または dist/infra/waf-rules.tf.json をこのディレクトリにコピー
-# Web ACL でルールグループを参照:
-resource "aws_wafv2_web_acl" "main" {
-  name  = "main"
-  scope = "REGIONAL"
-  default_action { allow {} }
-  rule {
-    name     = "rate-limit"
-    priority = 1
-    override_action { none {} }
-    statement {
-      rule_group_reference_statement {
-        arn = aws_wafv2_rule_group.example_cdn_security_rate_limit[0].arn
-      }
-    }
-    visibility_config { ... }
+resource "aws_cloudfront_distribution" "main" {
+  # ...
+
+  web_acl_id = aws_wafv2_web_acl.example_cdn_security.arn
+
+  default_cache_behavior {
+    # ...
   }
-  visibility_config { ... }
 }
 ```
 
-`dist/infra/` をそのまま使う場合は、リポジトリルートや `dist/infra/` を含むディレクトリで Terraform を実行すると、ルールグループが同じ state で定義されます。
+既存 Web ACL を別で管理している場合は、`npx cdn-security build --rule-group-only` を実行し、手書きの `aws_wafv2_web_acl` から生成 rule group を参照してください。生成 JSON は Web ACL と同じ Terraform state に置く必要があります。そうでないと Terraform から直接参照できません。
 
 ---
 
@@ -178,7 +173,7 @@ distribution.addBehavior('*', origin, {
 
 <a id="origin-auth"></a>
 
-`origin.auth.type: custom_header` を設定すると、エッジが共有シークレットを `X-Origin-Verify`（既定）などのヘッダとして付与し、オリジンはそれを検証して「エッジ経由のトラフィックのみ信頼」できます。値は環境変数から読み込みます。
+`origin.auth.type: custom_header` を設定すると、エッジが共有シークレットを `X-Origin-Verify`（既定）などのヘッダとして付与し、オリジンはそれを検証して「エッジ経由のトラフィックのみ信頼」できます。値は環境変数から読み込みます。replay に強いリクエスト署名が必要な場合は `origin.auth.type: hmac_signature` を使います。canonicalization と backend verification の例は [オリジン認証](origin-auth.ja.md) を参照してください。
 
 ```yaml
 origin:

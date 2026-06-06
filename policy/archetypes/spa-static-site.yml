@@ -24,6 +24,10 @@ request:
     max_query_params: 20
     max_uri_length: 1024
 
+  anomaly_guards:
+    enabled: true
+    malformed_cookie: false
+
   block:
     path_patterns:
       contains:

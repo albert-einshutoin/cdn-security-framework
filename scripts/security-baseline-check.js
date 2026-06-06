@@ -48,6 +48,28 @@ function main() {
         ensureIncludes(p.file, p.heading, 'parity doc heading');
         ensureIncludes(p.file, '--fail-on-waf-approximation', 'reference to the CI gate flag');
     }
+    // Copyable deployment recipes are a documented adoption surface. Keep both
+    // language variants present and ensure the core recipe set does not regress.
+    const recipeFiles = [
+        { file: 'docs/recipes.md', heading: '# Policy Recipes' },
+        { file: 'docs/recipes.ja.md', heading: '# ポリシーレシピ' },
+    ];
+    const recipeHeadings = [
+        '## Cognito JWT API',
+        '## Next.js or SPA Static Site',
+        '## Internal Admin Panel',
+        '## Signed Download URLs',
+        '## Cloudflare GraphQL API',
+    ];
+    for (const p of recipeFiles) {
+        if (!fs.existsSync(path.join(repoRoot, p.file))) {
+            fail(`${p.file} is missing — policy recipes (issue #132) require EN + JA docs`);
+        }
+        ensureIncludes(p.file, p.heading, 'recipe doc heading');
+        for (const heading of recipeHeadings) {
+            ensureIncludes(p.file, heading, 'core policy recipe heading');
+        }
+    }
     console.log('Security baseline check passed.');
 }
 main();

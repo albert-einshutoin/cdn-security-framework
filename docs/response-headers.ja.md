@@ -7,6 +7,7 @@
 | キー | 型 | 既定値 | 備考 |
 |---|---|---|---|
 | `force_vary_auth` | boolean | `true` | `true` のとき、いずれかの `auth_gate.match.path_prefixes` にヒットするパスへ `Cache-Control: no-store, no-cache, must-revalidate, private` と `Vary: Authorization, Cookie` を強制付与する。異なる利用者間での共有キャッシュ汚染を防ぐ。ダウンストリームがユーザー単位でキーを切っていることが明らかな場合のみ無効化する。 |
+| `cors` | object | 未設定 | allowlist ベースの CORS ヘッダーを発行する。runtime がリクエストの `Origin` を `Access-Control-Allow-Origin` に echo する場合、preflight を含め `Vary` に `Origin` もマージし、キャッシュの誤再利用を防ぐ。 |
 | `csp_public` / `csp_admin` | string | 安全な既定値 | 非 admin / admin パスに発行する CSP 文字列。`csp_nonce` 有効時、文字列中の `'nonce-PLACEHOLDER'` はレスポンス生成時に per-response nonce へ置換される。 |
 | `csp_nonce` | boolean | `false` | `true` のとき、per-response nonce を `csp_public`/`csp_admin`/`csp_report_only` の `'nonce-PLACEHOLDER'` に注入し、`X-CSP-Nonce` ヘッダーでオリジンへ共有する。AWS は `Math.random`（暗号学的 PRNG ではない。「制限」節参照）、Cloudflare は `crypto.getRandomValues` を使う。 |
 | `csp_report_only` | string | `""` | 設定すると、通常の CSP と並行して `Content-Security-Policy-Report-Only` を返す。新しい CSP を破綻なく試すのに使う。 |
@@ -31,6 +32,10 @@
    - `Cache-Control: no-store, no-cache, must-revalidate, private`
    - `Pragma: no-cache`
    - `Vary: Authorization, Cookie`（既存の `Vary` とマージ）
+
+### CORS のキャッシュ安全性
+
+`response_headers.cors.allow_origins` を設定し、受信した `Origin` が許可されている場合、AWS と Cloudflare はその値を `Access-Control-Allow-Origin` に echo する。同時に `Vary` へ `Origin` を重複なく追加するため、共有キャッシュが別の許可 Origin 向けレスポンスを誤って再利用しにくくなる。この挙動は CORS preflight レスポンスにも適用される。
 
 ### CSP nonce の導入
 
@@ -103,3 +108,4 @@ response_headers:
 - Issue #11 — per-response CSP nonce により `'unsafe-inline'` を不要にする。
 - Issue #13 — Cloudflare ターゲットが複数 `Set-Cookie` を壊さずに属性を書き換える。AWS ターゲットは単一 Cookie 前提を明示する。
 - Issue #19 — `csp_report_only` を強制 CSP と並行で返し、安全に反復できる。
+- Issue #144 — 動的 CORS Origin echo 時に `Vary: Origin` を加え、許可 Origin ごとのキャッシュキーを正しく分ける。

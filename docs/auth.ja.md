@@ -35,6 +35,18 @@ firewall:
     negative_cache_sec: 60
 ```
 
+Cloudflare Workers 向け build では、RS256 JWT ゲートがある場合
+`firewall.jwks.allowed_hosts` が必須。Workers は `fetch` 前に DNS
+解決先を検査できないため、コンパイラが JWKS ホストを build 時に固定する。
+Lambda@Edge も allowlist がある場合は利用し、さらにランタイムで JWKS
+ホストの DNS 解決先が loopback / private / link-local 範囲なら拒否する。
+
+JWKS レスポンスは parse / cache の前に 256 KiB、100 keys で上限をかける。
+RS256 では両 runtime とも `kid` 一致、`kty: RSA` 必須、かつ JWK の
+`alg` が省略または `RS256` の key を選択する。矛盾する `alg` を持つ
+JWK は無視する。受け入れる token algorithm の権威は JWT header の
+algorithm allowlist のまま。
+
 ### 挙動マトリクス
 
 | 状態 | ネットワーク呼び出し | 結果 |

@@ -99,12 +99,15 @@ This document organizes threats that this Edge Security Framework is designed to
 | Threat | Edge responsibility | WAF / Origin |
 |--------|---------------------|---------------|
 | Malicious or accidental `jwks_url` pointing at cloud metadata (`169.254.169.254`), loopback, RFC1918, or link-local ranges | Reject at build time and re-validate at runtime | — |
+| JWKS hostname resolves to cloud metadata, loopback, RFC1918, or link-local IPs | Lambda@Edge rejects the DNS result via a custom lookup; Cloudflare requires `firewall.jwks.allowed_hosts` for RS256 builds | — |
 | Attacker-controlled redirect from JWKS host to internal endpoint | Refuse 3xx responses (`redirect: 'error'` in Workers / explicit 3xx rejection in Lambda@Edge) | — |
-| Out-of-scope IdP host when policy has an explicit allowlist | Reject at build time via `firewall.jwks.allowed_hosts` | — |
+| Out-of-scope IdP host when policy has an explicit allowlist | Reject at build time via `firewall.jwks.allowed_hosts`; required for Cloudflare RS256 builds | — |
+| Oversized JWKS document or pathological key set | Reject before caching/parsing beyond bounded limits (256 KiB body, 100 keys) | — |
 
 **Framework**:
-- Build-time validator (`validateJwksUrl`) enforces `https://`, rejects userinfo, loopback, RFC1918, link-local, IPv4-mapped IPv6, and optional `firewall.jwks.allowed_hosts` membership.
-- Runtime `fetchJwks` re-checks the URL and refuses any 3xx response.
+- Build-time validator (`validateJwksUrl`) enforces `https://`, rejects userinfo, loopback, RFC1918, link-local, IPv4-mapped IPv6, and `firewall.jwks.allowed_hosts` membership when configured. Cloudflare RS256 builds require the allowlist.
+- Runtime `fetchJwks` re-checks the URL, refuses any 3xx response, and caps JWKS body and key count.
+- Lambda@Edge JWKS fetches use a custom DNS lookup and reject loopback, private, and link-local resolution targets.
 - Recommended operator practice: always set `firewall.jwks.allowed_hosts` in production to pin the exact IdP hostname(s).
 
 ---

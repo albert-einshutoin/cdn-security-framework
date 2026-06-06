@@ -22,7 +22,7 @@
 routes:
   - name: one-time-download
     match:
-      path_prefixes: ["/download/"]
+      path_prefixes: ["/download/report.pdf"]
     auth_gate:
       type: signed_url
       algorithm: HMAC-SHA256

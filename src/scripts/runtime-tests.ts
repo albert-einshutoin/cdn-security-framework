@@ -10,9 +10,10 @@
 const fs = require('fs');
 const path = require('path');
 const crypto = require('crypto');
+const { EventEmitter } = require('events');
 
 type HeaderMap = Record<string, string>;
-type CloudFrontHeaderMap = Record<string, { value: string }>;
+type CloudFrontHeaderMap = Record<string, { value: string; multiValue?: Array<{ value: string }> }>;
 type LambdaHeaderMap = Record<string, Array<{ key: string; value: string }>>;
 type ExpectedStatus = 'allow' | number | string;
 type RuntimeCase = [string, any, ExpectedStatus];
@@ -39,7 +40,7 @@ let originHandler: any;
 const DEFAULT_TOKEN = process.env.EDGE_ADMIN_TOKEN
   || 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
 
-function buildEvent(method: string, uri: string, headers: HeaderMap = {}, querystring: any = '') {
+function buildEvent(method: string, uri: string, headers: HeaderMap = {}, querystring: any = ''): any {
   const h = headers || {};
   const cfHeaders: CloudFrontHeaderMap = {};
   for (const [k, v] of Object.entries(h)) {
@@ -273,6 +274,87 @@ console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases
   }
 })();
 
+// Lightweight request anomaly guards (#117): opt-in checks for CRLF,
+// malformed Cookie headers, and one-pass double-encoded traversal indicators.
+(function runRequestAnomalyGuardTests() {
+  const cfgCode = [
+    'const CFG = {',
+    '  mode: "enforce",',
+    '  allowMethods: ["GET"],',
+    '  maxQueryLength: 1024,',
+    '  maxQueryParams: 30,',
+    '  maxUriLength: 2048,',
+    '  maxHeaderCount: 64,',
+    '  dropQueryKeys: new Set([]),',
+    '  uaDenyContains: [],',
+    '  blockPathContains: [],',
+    '  blockPathRegexes: [],',
+    '  normalizePath: { collapseSlashes: false, removeDotSegments: false },',
+    '  requiredHeaders: [],',
+    '  allowedHosts: [],',
+    '  trustForwardedFor: false,',
+    '  cors: null,',
+    '  anomalyGuards: { enabled: true, crlf: true, malformedCookie: true, doubleEncodedTraversal: true, maxCookieBytes: 32, maxCookiePairs: 2 },',
+    '  authGates: [],',
+    '};',
+  ].join('\n');
+  const h = compileViewerTemplate(cfgCode);
+  if (!h) { viewerFailed++; return; }
+
+  const cases: RuntimeCase[] = [
+    ['anomaly: raw CRLF in path rejected', buildEvent('GET', '/bad\r\npath', {}), 400],
+    ['anomaly: encoded CRLF in query rejected', buildEvent('GET', '/', {}, 'next=%0d%0aheader'), 400],
+    ['anomaly: encoded CRLF in CloudFront query object rejected',
+      buildEvent('GET', '/', {}, { next: { value: '%0d%0aheader' } }),
+      400],
+    ['anomaly: CRLF in header value rejected', buildEvent('GET', '/', { 'x-test': 'ok\nbad' }), 400],
+    ['anomaly: CRLF in header multiValue rejected',
+      (() => {
+        const event = buildEvent('GET', '/', {});
+        event.request.headers['x-test'] = {
+          value: 'ok',
+          multiValue: [{ value: 'ok' }, { value: 'bad%0d%0aheader' }],
+        };
+        return event;
+      })(),
+      400],
+    ['anomaly: malformed cookie delimiter rejected', buildEvent('GET', '/', { cookie: 'a=1;;b=2' }), 400],
+    ['anomaly: malformed CloudFront cookie map rejected',
+      (() => {
+        const event = buildEvent('GET', '/', {});
+        event.request.cookies = { session: { value: 'ok\nbad' } };
+        return event;
+      })(),
+      400],
+    ['anomaly: cookie pair count over limit rejected', buildEvent('GET', '/', { cookie: 'a=1; b=2; c=3' }), 400],
+    ['anomaly: CloudFront cookie map pair count over limit rejected',
+      (() => {
+        const event = buildEvent('GET', '/', {});
+        event.request.cookies = { a: { value: '1' }, b: { value: '2' }, c: { value: '3' } };
+        return event;
+      })(),
+      400],
+    ['anomaly: double-encoded traversal rejected', buildEvent('GET', '/%252e%252e%252fsecret', {}), 400],
+    ['anomaly: double-encoded traversal in CloudFront query object rejected',
+      buildEvent('GET', '/', {}, { next: { value: '%252e%252e%252fsecret' } }),
+      400],
+    ['anomaly: benign double-encoded space allowed', buildEvent('GET', '/download/%2520report', {}, 'name=hello%2520world'), 'allow'],
+  ];
+
+  for (const [name, event, expected] of cases) {
+    const result: any = h(event);
+    const allowed = result && !result.statusCode && result.uri !== undefined;
+    const got = allowed ? 'allow' : (result && result.statusCode);
+    const ok = (expected === 'allow' && allowed) || (typeof expected === 'number' && got === expected);
+    if (!ok) {
+      console.error('FAIL:', name, '| expected', expected, 'got', got);
+      viewerFailed++;
+    } else {
+      console.log('OK:', name);
+    }
+  }
+})();
+
 // =========================================================================
 // Section 1b: viewer-request.js monitor mode tests
 // =========================================================================
@@ -396,8 +478,22 @@ function createHS256Jwt(payload: unknown, secret: string) {
   return headerB64 + '.' + payloadB64 + '.' + sig;
 }
 
+function createRS256Jwt(payload: unknown, kid = 'test-key') {
+  const header = { alg: 'RS256', typ: 'JWT', kid };
+  const enc = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+  return enc(header) + '.' + enc(payload) + '.signature';
+}
+
+function createSignedRS256Jwt(payload: unknown, privateKey: any, kid = 'test-key') {
+  const header = { alg: 'RS256', typ: 'JWT', kid };
+  const enc = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base64url');
+  const data = enc(header) + '.' + enc(payload);
+  const signature = crypto.sign('sha256', Buffer.from(data), privateKey).toString('base64url');
+  return data + '.' + signature;
+}
+
 // Build Lambda@Edge event format
-function buildLambdaEdgeEvent(uri: string, headers: HeaderMap = {}, querystring = '') {
+function buildLambdaEdgeEvent(uri: string, headers: HeaderMap = {}, querystring = '', method = 'GET') {
   const h = headers || {};
   const cfHeaders: LambdaHeaderMap = {};
   for (const [k, v] of Object.entries(h)) {
@@ -407,6 +503,7 @@ function buildLambdaEdgeEvent(uri: string, headers: HeaderMap = {}, querystring 
     Records: [{
       cf: {
         request: {
+          method,
           uri: uri || '/',
           headers: cfHeaders,
           querystring: querystring || '',
@@ -433,7 +530,7 @@ async function runAsyncCase(name: string, event: any, expected: ExpectedStatus) 
 }
 
 // Helper: compile origin-request template with inline config
-function compileOriginTemplate(cfgCode: string): any {
+function compileOriginTemplate(cfgCode: string, deps: any = {}): any {
   const templatePath = path.join(__dirname, '..', 'templates', 'aws', 'origin-request.js');
   let originCode;
   try {
@@ -445,17 +542,19 @@ function compileOriginTemplate(cfgCode: string): any {
 
   originCode = originCode.replace('// {{INJECT_CONFIG}}', cfgCode);
 
-  const wrappedCode = '(function() {\n' +
-    'const crypto = require("crypto");\n' +
-    'const https = require("https");\n' +
+  const wrappedCode = '(function(deps) {\n' +
+    'const crypto = deps.crypto || require("crypto");\n' +
+    'const dns = deps.dns || require("dns");\n' +
+    'const https = deps.https || require("https");\n' +
     originCode
       .replace("const crypto = require('crypto');", '')
+      .replace("const dns = require('dns');", '')
       .replace("const https = require('https');", '') +
     '\nreturn exports.handler;\n' +
-    '})()';
+    '})';
 
   try {
-    return eval(wrappedCode);
+    return eval(wrappedCode)(deps);
   } catch (e: any) {
     console.error('Failed to eval origin-request template:', e.message);
     return null;
@@ -816,6 +915,281 @@ async function runOriginRequestTests() {
   return { failed: originFailed, total: originCases.length + extraAsserts };
 }
 
+async function runOriginJwtSecretFailClosedTests() {
+  delete process.env.__MISSING_JWT_SECRET_FOR_TEST__;
+  const cfgCode = [
+    'const CFG = {',
+    '  project: "test",',
+    '  mode: "enforce",',
+    '  maxHeaderSize: 0,',
+    '  jwtGates: [{',
+    '    name: "api",',
+    '    protectedPrefixes: ["/api"],',
+    '    type: "jwt",',
+    '    algorithm: "HS256",',
+    '    jwks_url: "",',
+    '    issuer: "test-issuer",',
+    '    audience: "test-audience",',
+    '    secret_env: "__MISSING_JWT_SECRET_FOR_TEST__"',
+    '  }],',
+    '  signedUrlGates: [],',
+    '  originAuth: null,',
+    '  trustForwardedFor: false,',
+    '  obs: { logFormat: "json", correlationHeader: "" }',
+    '};',
+  ].join('\n');
+
+  const jwtHandler = compileOriginTemplate(cfgCode);
+  if (!jwtHandler) return { failed: 1, total: 1 };
+
+  const previous = originHandler;
+  originHandler = jwtHandler;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const emptySecretToken = createHS256Jwt({
+    sub: 'user1',
+    iss: 'test-issuer',
+    aud: 'test-audience',
+    exp: nowSec + 3600,
+  }, '');
+  const ok = await runAsyncCase(
+    'origin: missing HS256 JWT secret rejects empty-secret token',
+    buildLambdaEdgeEvent('/api/data', {
+      Authorization: 'Bearer ' + emptySecretToken,
+    }),
+    '503',
+  );
+  originHandler = previous;
+
+  console.log('--- origin-request jwt secret fail-closed: ' + (ok ? 1 : 0) + '/1 passed ---');
+  return { failed: ok ? 0 : 1, total: 1 };
+}
+
+function makeDnsLookup(address: string) {
+  return {
+    lookup: (_hostname: string, _options: any, callback: any) => {
+      process.nextTick(() => callback(null, address, address.includes(':') ? 6 : 4));
+    },
+  };
+}
+
+function makeJwksHttps(body: string, calls: any[]) {
+  return {
+    get: (rawUrl: string, options: any, callback: any) => {
+      calls.push({ rawUrl });
+      const req = new EventEmitter();
+      req.setTimeout = () => req;
+      req.destroy = () => req;
+
+      process.nextTick(() => {
+        const lookup = options && options.lookup;
+        const host = new URL(rawUrl).hostname;
+        const sendResponse = () => {
+          const res = new EventEmitter();
+          res.statusCode = 200;
+          res.resume = () => undefined;
+          callback(res);
+          process.nextTick(() => {
+            res.emit('data', Buffer.from(body));
+            res.emit('end');
+          });
+        };
+        if (typeof lookup === 'function') {
+          lookup(host, {}, (err: Error | null) => {
+            if (err) {
+              req.emit('error', err);
+              return;
+            }
+            sendResponse();
+          });
+          return;
+        }
+        sendResponse();
+      });
+
+      return req;
+    },
+  };
+}
+
+async function runOriginJwksHardeningTests() {
+  const nowSec = Math.floor(Date.now() / 1000);
+  const token = createRS256Jwt({
+    sub: 'user1',
+    iss: 'test-issuer',
+    aud: 'test-audience',
+    exp: nowSec + 3600,
+  });
+  const cfgCode = [
+    'const CFG = {',
+    '  project: "test",',
+    '  mode: "enforce",',
+    '  maxHeaderSize: 0,',
+    '  jwtGates: [{',
+    '    name: "api",',
+    '    protectedPrefixes: ["/api"],',
+    '    type: "jwt",',
+    '    algorithm: "RS256",',
+    '    jwks_url: "https://idp.example.com/jwks.json",',
+    '    issuer: "test-issuer",',
+    '    audience: "test-audience",',
+    '    secret_env: ""',
+    '  }],',
+    '  signedUrlGates: [],',
+    '  originAuth: null,',
+    '  trustForwardedFor: false,',
+    '  obs: { logFormat: "json", correlationHeader: "" }',
+    '};',
+  ].join('\n');
+
+  const cases = [
+    {
+      name: 'origin: RS256 JWKS DNS resolving to metadata IP is rejected',
+      dns: makeDnsLookup('169.254.169.254'),
+      body: JSON.stringify({ keys: [] }),
+    },
+    {
+      name: 'origin: RS256 JWKS DNS resolving to CGNAT range is rejected',
+      dns: makeDnsLookup('100.64.0.1'),
+      body: JSON.stringify({ keys: [] }),
+    },
+    {
+      name: 'origin: RS256 JWKS DNS resolving to multicast/reserved range is rejected',
+      dns: makeDnsLookup('224.0.0.1'),
+      body: JSON.stringify({ keys: [] }),
+    },
+    {
+      name: 'origin: RS256 JWKS oversized response is rejected',
+      dns: makeDnsLookup('93.184.216.34'),
+      body: JSON.stringify({ keys: [], padding: 'a'.repeat((256 * 1024) + 1) }),
+    },
+    {
+      name: 'origin: RS256 JWKS with too many keys is rejected',
+      dns: makeDnsLookup('93.184.216.34'),
+      body: JSON.stringify({
+        keys: Array.from({ length: 101 }, (_value, i) => ({
+          kid: 'key-' + i,
+          kty: 'RSA',
+          alg: 'RS256',
+          n: 'sXch7EoJ89XcP_Gyo-t6fA',
+          e: 'AQAB',
+        })),
+      }),
+    },
+  ];
+
+  let failed = 0;
+  const previous = originHandler;
+  for (const c of cases) {
+    const calls: any[] = [];
+    const handlerForCase = compileOriginTemplate(cfgCode, {
+      dns: c.dns,
+      https: makeJwksHttps(c.body, calls),
+    });
+    if (!handlerForCase) {
+      console.error('FAIL:', c.name, '| failed to compile origin template');
+      failed++;
+      continue;
+    }
+    originHandler = handlerForCase;
+    const ok = await runAsyncCase(
+      c.name,
+      buildLambdaEdgeEvent('/api/data', { Authorization: 'Bearer ' + token }),
+      '401',
+    );
+    if (!ok || calls.length !== 1) {
+      if (ok) console.error('FAIL:', c.name, '| expected exactly one JWKS fetch, got', calls.length);
+      failed++;
+    }
+  }
+  originHandler = previous;
+
+  console.log('--- origin-request jwks hardening: ' + (cases.length - failed) + '/' + cases.length + ' passed ---');
+  return { failed, total: cases.length };
+}
+
+async function runOriginRs256JwkAlgSelectionTests() {
+  const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const nowSec = Math.floor(Date.now() / 1000);
+  const token = createSignedRS256Jwt({
+    sub: 'user1',
+    iss: 'test-issuer',
+    aud: 'test-audience',
+    exp: nowSec + 3600,
+  }, privateKey);
+  const publicJwk = publicKey.export({ format: 'jwk' });
+  const cfgCode = [
+    'const CFG = {',
+    '  project: "test",',
+    '  mode: "enforce",',
+    '  maxHeaderSize: 0,',
+    '  jwtGates: [{',
+    '    name: "api",',
+    '    protectedPrefixes: ["/api"],',
+    '    type: "jwt",',
+    '    algorithm: "RS256",',
+    '    jwks_url: "https://idp.example.com/jwks.json",',
+    '    issuer: "test-issuer",',
+    '    audience: "test-audience",',
+    '    secret_env: ""',
+    '  }],',
+    '  signedUrlGates: [],',
+    '  originAuth: null,',
+    '  trustForwardedFor: false,',
+    '  obs: { logFormat: "json", correlationHeader: "" }',
+    '};',
+  ].join('\n');
+
+  const cases = [
+    {
+      name: 'origin: RS256 accepts matching RSA JWK with omitted alg',
+      key: { ...publicJwk, kid: 'test-key' },
+      expected: 'allow',
+      fetches: 1,
+    },
+    {
+      name: 'origin: RS256 accepts matching RSA JWK with alg=RS256',
+      key: { ...publicJwk, kid: 'test-key', alg: 'RS256' },
+      expected: 'allow',
+      fetches: 1,
+    },
+    {
+      name: 'origin: RS256 rejects matching kid with conflicting JWK alg',
+      key: { ...publicJwk, kid: 'test-key', alg: 'HS256' },
+      expected: '401',
+      fetches: 2,
+    },
+  ];
+
+  let failed = 0;
+  const previous = originHandler;
+  for (const c of cases) {
+    const calls: any[] = [];
+    const handlerForCase = compileOriginTemplate(cfgCode, {
+      dns: makeDnsLookup('93.184.216.34'),
+      https: makeJwksHttps(JSON.stringify({ keys: [c.key] }), calls),
+    });
+    if (!handlerForCase) {
+      console.error('FAIL:', c.name, '| failed to compile origin template');
+      failed++;
+      continue;
+    }
+    originHandler = handlerForCase;
+    const ok = await runAsyncCase(
+      c.name,
+      buildLambdaEdgeEvent('/api/data', { Authorization: 'Bearer ' + token }),
+      c.expected,
+    );
+    if (!ok || calls.length !== c.fetches) {
+      if (ok) console.error('FAIL:', c.name, '| expected', c.fetches, 'JWKS fetch(es), got', calls.length);
+      failed++;
+    }
+  }
+  originHandler = previous;
+
+  console.log('--- origin-request rs256 jwk alg selection: ' + (cases.length - failed) + '/' + cases.length + ' passed ---');
+  return { failed, total: cases.length };
+}
+
 async function runOriginAuthFailClosedTests() {
   const cfgCode = [
     'const CFG = {',
@@ -844,6 +1218,145 @@ async function runOriginAuthFailClosedTests() {
 
   console.log('--- origin-auth fail-closed: ' + (ok ? '1/1' : '0/1') + ' passed ---');
   return { failed: ok ? 0 : 1, total: 1 };
+}
+
+async function runOriginAuthHmacTests() {
+  const secret = 'origin-hmac-secret-for-runtime-test';
+  process.env.ORIGIN_HMAC_TEST_SECRET = secret;
+  const cfgCode = [
+    'const CFG = {',
+    '  project: "test",',
+    '  mode: "enforce",',
+    '  maxHeaderSize: 0,',
+    '  jwtGates: [],',
+    '  signedUrlGates: [],',
+    '  originAuth: {',
+    '    type: "hmac_signature",',
+    '    secret_env: "ORIGIN_HMAC_TEST_SECRET",',
+    '    header_prefix: "X-CDN-Auth",',
+    '    timestamp_tolerance_seconds: 300,',
+    '    include_body_hash: false,',
+    '    signed_components: ["method", "path", "query", "body", "timestamp", "nonce"]',
+    '  },',
+    '  trustForwardedFor: false,',
+    '  obs: { logFormat: "json", correlationHeader: "" }',
+    '};',
+  ].join('\n');
+
+  const hmacHandler = compileOriginTemplate(cfgCode);
+  if (!hmacHandler) return { failed: 1, total: 1 };
+
+  const event = buildLambdaEdgeEvent('/origin/resource', {}, 'b=2&a=1', 'POST');
+  const result: any = await hmacHandler(event);
+  const headers = result && result.headers;
+  const ts = headers && headers['x-cdn-auth-timestamp'] && headers['x-cdn-auth-timestamp'][0].value;
+  const nonce = headers && headers['x-cdn-auth-nonce'] && headers['x-cdn-auth-nonce'][0].value;
+  const sig = headers && headers['x-cdn-auth-signature'] && headers['x-cdn-auth-signature'][0].value;
+  const canonical = ['POST', '/origin/resource', 'a=1&b=2', '', ts, nonce].join('\n');
+  const expected = crypto.createHmac('sha256', secret).update(canonical).digest('base64url');
+  const fresh = Math.abs(Math.floor(Date.now() / 1000) - Number(ts)) <= 5;
+  const ok = !!(result && result.uri === '/origin/resource' && ts && nonce && sig === expected && fresh && !headers['x-cdn-auth-body-sha256']);
+  if (!ok) {
+    console.error('FAIL: origin auth HMAC signs method/path/canonical query/timestamp/nonce');
+    console.error({ ts, nonce, sig, expected, headers });
+  } else {
+    console.log('OK: origin auth HMAC signs method/path/canonical query/timestamp/nonce');
+  }
+
+  const bodyHashCfgCode = [
+    'const CFG = {',
+    '  project: "test",',
+    '  mode: "enforce",',
+    '  maxHeaderSize: 0,',
+    '  jwtGates: [],',
+    '  signedUrlGates: [],',
+    '  originAuth: {',
+    '    type: "hmac_signature",',
+    '    secret_env: "ORIGIN_HMAC_TEST_SECRET",',
+    '    header_prefix: "X-CDN-Auth",',
+    '    timestamp_tolerance_seconds: 300,',
+    '    include_body_hash: true,',
+    '    signed_components: ["method", "path", "query", "body", "timestamp", "nonce"]',
+    '  },',
+    '  trustForwardedFor: false,',
+    '  obs: { logFormat: "json", correlationHeader: "" }',
+    '};',
+  ].join('\n');
+  const bodyHashHandler = compileOriginTemplate(bodyHashCfgCode);
+  let missingBodyOk = false;
+  let emptyBodyOk = false;
+  let bodyPresentOk = false;
+  if (!bodyHashHandler) {
+    console.error('FAIL: origin auth HMAC body hash template compiles');
+  } else {
+    const missingBodyResult: any = await bodyHashHandler(buildLambdaEdgeEvent(
+      '/origin/upload',
+      { 'Content-Length': '23' },
+      '',
+      'POST',
+    ));
+    missingBodyOk = !!(missingBodyResult && missingBodyResult.status === '503');
+    if (!missingBodyOk) {
+      console.error('FAIL: origin auth HMAC should fail closed when declared POST body is unavailable, got',
+        missingBodyResult && missingBodyResult.status);
+    } else {
+      console.log('OK: origin auth HMAC fails closed when declared POST body is unavailable');
+    }
+
+    const emptyBodyResult: any = await bodyHashHandler(buildLambdaEdgeEvent(
+      '/origin/empty',
+      { 'Content-Length': '0' },
+      '',
+      'POST',
+    ));
+    const emptyHeaders = emptyBodyResult && emptyBodyResult.headers;
+    const emptyTs = emptyHeaders && emptyHeaders['x-cdn-auth-timestamp'] && emptyHeaders['x-cdn-auth-timestamp'][0].value;
+    const emptyNonce = emptyHeaders && emptyHeaders['x-cdn-auth-nonce'] && emptyHeaders['x-cdn-auth-nonce'][0].value;
+    const emptySig = emptyHeaders && emptyHeaders['x-cdn-auth-signature'] && emptyHeaders['x-cdn-auth-signature'][0].value;
+    const emptyHash = emptyHeaders && emptyHeaders['x-cdn-auth-body-sha256'] && emptyHeaders['x-cdn-auth-body-sha256'][0].value;
+    const expectedEmptyHash = crypto.createHash('sha256').update(Buffer.alloc(0)).digest('hex');
+    const emptyCanonical = ['POST', '/origin/empty', '', expectedEmptyHash, emptyTs, emptyNonce].join('\n');
+    const expectedEmptySig = crypto.createHmac('sha256', secret).update(emptyCanonical).digest('base64url');
+    emptyBodyOk = !!(emptyBodyResult && emptyBodyResult.uri === '/origin/empty'
+      && emptyHash === expectedEmptyHash
+      && emptySig === expectedEmptySig);
+    if (!emptyBodyOk) {
+      console.error('FAIL: origin auth HMAC should sign legitimately empty POST bodies');
+      console.error({ emptyTs, emptyNonce, emptySig, expectedEmptySig, emptyHash, expectedEmptyHash, emptyHeaders });
+    } else {
+      console.log('OK: origin auth HMAC signs legitimately empty POST bodies');
+    }
+
+    const bodyEvent = buildLambdaEdgeEvent('/origin/upload', {}, '', 'POST');
+    const bodyData = Buffer.from('payload-for-origin-auth').toString('base64');
+    (bodyEvent.Records[0].cf.request as any).body = {
+      data: bodyData,
+      encoding: 'base64',
+      inputTruncated: false,
+    };
+    const bodyResult: any = await bodyHashHandler(bodyEvent);
+    const bodyHeaders = bodyResult && bodyResult.headers;
+    const bodyTs = bodyHeaders && bodyHeaders['x-cdn-auth-timestamp'] && bodyHeaders['x-cdn-auth-timestamp'][0].value;
+    const bodyNonce = bodyHeaders && bodyHeaders['x-cdn-auth-nonce'] && bodyHeaders['x-cdn-auth-nonce'][0].value;
+    const bodySig = bodyHeaders && bodyHeaders['x-cdn-auth-signature'] && bodyHeaders['x-cdn-auth-signature'][0].value;
+    const bodyHash = bodyHeaders && bodyHeaders['x-cdn-auth-body-sha256'] && bodyHeaders['x-cdn-auth-body-sha256'][0].value;
+    const expectedBodyHash = crypto.createHash('sha256').update(Buffer.from('payload-for-origin-auth')).digest('hex');
+    const bodyCanonical = ['POST', '/origin/upload', '', expectedBodyHash, bodyTs, bodyNonce].join('\n');
+    const expectedBodySig = crypto.createHmac('sha256', secret).update(bodyCanonical).digest('base64url');
+    bodyPresentOk = !!(bodyResult && bodyResult.uri === '/origin/upload'
+      && bodyHash === expectedBodyHash
+      && bodySig === expectedBodySig);
+    if (!bodyPresentOk) {
+      console.error('FAIL: origin auth HMAC should sign available request body');
+      console.error({ bodyTs, bodyNonce, bodySig, expectedBodySig, bodyHash, expectedBodyHash, bodyHeaders });
+    } else {
+      console.log('OK: origin auth HMAC signs available request body');
+    }
+  }
+  delete process.env.ORIGIN_HMAC_TEST_SECRET;
+  const passed = [ok, missingBodyOk, emptyBodyOk, bodyPresentOk].filter(Boolean).length;
+  console.log('--- origin-auth hmac: ' + passed + '/4 passed ---');
+  return { failed: 4 - passed, total: 4 };
 }
 
 // Monitor mode tests: blocking checks should pass through
@@ -947,9 +1460,25 @@ async function main() {
   totalFailed += enforceResult.failed;
   totalTests += enforceResult.total;
 
+  const jwtSecretResult = await runOriginJwtSecretFailClosedTests();
+  totalFailed += jwtSecretResult.failed;
+  totalTests += jwtSecretResult.total;
+
+  const jwksHardeningResult = await runOriginJwksHardeningTests();
+  totalFailed += jwksHardeningResult.failed;
+  totalTests += jwksHardeningResult.total;
+
+  const rs256JwkAlgResult = await runOriginRs256JwkAlgSelectionTests();
+  totalFailed += rs256JwkAlgResult.failed;
+  totalTests += rs256JwkAlgResult.total;
+
   const originAuthResult = await runOriginAuthFailClosedTests();
   totalFailed += originAuthResult.failed;
   totalTests += originAuthResult.total;
+
+  const originAuthHmacResult = await runOriginAuthHmacTests();
+  totalFailed += originAuthHmacResult.failed;
+  totalTests += originAuthHmacResult.total;
 
   const monitorResult = await runMonitorModeTests();
   totalFailed += monitorResult.failed;

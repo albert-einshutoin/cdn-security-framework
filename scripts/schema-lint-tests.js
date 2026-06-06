@@ -48,6 +48,7 @@ request:
     max_query_params: ${overrides.max_query_params ?? 30}
     max_uri_length: ${overrides.max_uri_length ?? 2048}
     max_header_size: ${overrides.max_header_size ?? 8192}
+${overrides.requestExtra || ''}
 response_headers:
   hsts: "max-age=31536000"
 ${overrides.extra || ''}
@@ -140,6 +141,105 @@ test('lint accepts firewall.waf.rate_limit at AWS WAF ceiling', () => {
         fs.rmSync(dir, { recursive: true, force: true });
     }
 });
+test('lint accepts firewall.challenge at configured bounds', () => {
+    const yaml = basePolicy({
+        extra: `firewall:
+  challenge:
+    enabled: true
+    mode: challenge
+    path_prefixes: ["/guarded"]
+    ua_contains: ["headless"]
+    difficulty: 6
+    ttl_sec: 86400
+    secret_env: CHALLENGE_SECRET
+    cookie_name: __cdn_challenge
+`,
+    });
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint accepts request anomaly guards at configured bounds', () => {
+    const yaml = basePolicy({
+        requestExtra: `  anomaly_guards:
+    enabled: true
+    crlf: true
+    malformed_cookie: true
+    double_encoded_traversal: true
+    max_cookie_bytes: 65536
+    max_cookie_pairs: 1000
+`,
+    });
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint rejects request anomaly guard cookie bounds outside schema limits', () => {
+    const yaml = basePolicy({
+        requestExtra: `  anomaly_guards:
+    enabled: true
+    max_cookie_bytes: 70000
+    max_cookie_pairs: 1001
+`,
+    });
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.notStrictEqual(result.status, 0);
+        assert.match(result.stderr + result.stdout, /anomaly_guards|max_cookie_bytes|max_cookie_pairs|maximum/i);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint rejects firewall.challenge difficulty above maximum', () => {
+    const yaml = basePolicy({
+        extra: `firewall:
+  challenge:
+    enabled: true
+    mode: challenge
+    difficulty: 7
+`,
+    });
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.notStrictEqual(result.status, 0);
+        assert.match(result.stderr + result.stdout, /challenge|difficulty|maximum|<=\s*6/i);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint rejects firewall.challenge ttl below minimum', () => {
+    const yaml = basePolicy({
+        extra: `firewall:
+  challenge:
+    enabled: true
+    mode: challenge
+    ttl_sec: 30
+`,
+    });
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.notStrictEqual(result.status, 0);
+        assert.match(result.stderr + result.stdout, /challenge|ttl_sec|minimum|>=\s*60/i);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
 test('lint rejects cors.max_age beyond 86400', () => {
     const yaml = basePolicy({
         extra: `response_headers:
@@ -180,6 +280,64 @@ response_headers:
         const result = runLint(file);
         assert.notStrictEqual(result.status, 0, 'expected lint to fail');
         assert.match(result.stderr + result.stdout, /allow_origins|allow_credentials|\*/i);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint accepts response_dlp configuration', () => {
+    const yaml = `
+version: 1
+project: schema-lint-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+response_dlp:
+  enabled: true
+  action: mask
+  mask: "[MASKED]"
+  block_status: 451
+  body:
+    enabled: true
+    max_bytes: 4096
+    content_types: ["text/plain", "application/json"]
+  headers:
+    enabled: true
+    names: ["set-cookie", "x-api-key"]
+  detectors:
+    built_in: ["api_key", "credit_card"]
+    custom_regex:
+      - name: ticket
+        pattern: "TICKET-[0-9]+"
+`;
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint rejects response_dlp body max_bytes above maximum', () => {
+    const yaml = `
+version: 1
+project: schema-lint-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+response_dlp:
+  enabled: true
+  body:
+    max_bytes: 999999
+`;
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+        assert.match(result.stderr + result.stdout, /response_dlp|max_bytes|maximum|<=\s*131072/i);
     }
     finally {
         fs.rmSync(dir, { recursive: true, force: true });
@@ -228,6 +386,53 @@ test('lint accepts Cloudflare override fields inside rate_limit_rules[]', () => 
     try {
         const result = runLint(file);
         assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint accepts request.graphql_guard configuration', () => {
+    const yaml = `
+version: 1
+project: schema-lint-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql", "/api/graphql"]
+    max_depth: 8
+    max_aliases: 20
+    max_fields: 200
+    max_body_bytes: 65536
+    mode: report
+response_headers:
+  hsts: "max-age=31536000"
+`;
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint rejects request.graphql_guard max_depth above maximum', () => {
+    const yaml = `
+version: 1
+project: schema-lint-test
+request:
+  allow_methods: ["POST"]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 100
+response_headers:
+  hsts: "max-age=31536000"
+`;
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+        assert.match(result.stderr + result.stdout, /graphql_guard|max_depth|maximum|<=\s*64/i);
     }
     finally {
         fs.rmSync(dir, { recursive: true, force: true });
@@ -429,6 +634,84 @@ test('lint accepts complete origin.auth.custom_header', () => {
     try {
         const result = runLint(file);
         assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint accepts origin.auth.hmac_signature with signing options', () => {
+    const yaml = basePolicy({
+        extra: `origin:
+  auth:
+    type: hmac_signature
+    secret_env: ORIGIN_AUTH_SECRET
+    header_prefix: X-CDN-Auth
+    timestamp_tolerance_seconds: 300
+    include_body_hash: false
+    signed_components: [method, path, query, body, timestamp, nonce]
+`,
+    });
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint rejects origin.auth.hmac_signature missing secret_env', () => {
+    const yaml = basePolicy({
+        extra: `origin:
+  auth:
+    type: hmac_signature
+    header_prefix: X-CDN-Auth
+`,
+    });
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+        assert.match(result.stderr + result.stdout, /secret_env|required/i);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint rejects origin.auth.hmac_signature invalid prefix and tolerance', () => {
+    const yaml = basePolicy({
+        extra: `origin:
+  auth:
+    type: hmac_signature
+    secret_env: ORIGIN_AUTH_SECRET
+    header_prefix: "bad header"
+    timestamp_tolerance_seconds: 9999
+`,
+    });
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+        assert.match(result.stderr + result.stdout, /header_prefix|timestamp_tolerance_seconds|pattern|maximum/i);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint rejects origin.auth.hmac_signature signed_components without replay fields', () => {
+    const yaml = basePolicy({
+        extra: `origin:
+  auth:
+    type: hmac_signature
+    secret_env: ORIGIN_AUTH_SECRET
+    signed_components: [method, path, query]
+`,
+    });
+    const { dir, file } = writeTempPolicy(yaml);
+    try {
+        const result = runLint(file);
+        assert.notStrictEqual(result.status, 0, 'expected lint to fail');
+        assert.match(result.stderr + result.stdout, /signed_components|timestamp|nonce|contains/i);
     }
     finally {
         fs.rmSync(dir, { recursive: true, force: true });

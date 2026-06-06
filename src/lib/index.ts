@@ -38,6 +38,7 @@ export interface CompileOptions {
   target?: CompileTarget;
   failOnPermissive?: boolean;
   failOnWafApproximation?: boolean;
+  allowPlaceholderToken?: boolean;
   outputMode?: 'full' | 'rule-group' | string;
   ruleGroupOnly?: boolean;
   cwd?: string;

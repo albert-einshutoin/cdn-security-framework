@@ -111,14 +111,14 @@ The static_token gate accepts a single value per build. If you need zero-downtim
 
 ---
 
-## 5. Rotate `ORIGIN_SECRET` (origin auth custom header)
+## 5. Rotate `ORIGIN_SECRET` (origin auth)
 
-The origin auth gate adds a shared-secret header (e.g. `X-Edge-Secret`) to every origin request. Rotation requires the origin (ALB, NGINX, CF Worker, or app) to accept both values during the window.
+The origin auth gate adds either a shared-secret header (`custom_header`) or HMAC signature headers (`hmac_signature`) to every origin request. Rotation requires the origin (ALB, NGINX, CF Worker, or app) to accept both values during the window.
 
 ### Procedure
 1. **Generate** `ORIGIN_SECRET_V2`.
 2. **Update the origin** to accept requests carrying either `V1` or `V2`.
-3. **Rebuild and deploy** the edge with `V2` (the edge forwards a single secret; the origin owns the dual-accept).
+3. **Rebuild and deploy** the edge with `V2` (the edge signs/forwards with a single secret; the origin owns the dual-accept).
 4. **Wait** deploy propagation + a conservative buffer (5–15 min).
 5. **Update the origin** to accept only `V2`.
 6. **Revoke** `V1`.

@@ -33,6 +33,7 @@
 | **WAF カスタムブロックレスポンス** | ✅ 対応 | `firewall.waf.block_response`（status_code, body, content_type）→ `custom_response_bodies` + `custom_response_body_key`。ベンダーリークを排除。 |
 | **WAF ロギング + レッダクション** | ✅ 対応 | `firewall.waf.logging.{enabled, destination_arn_env, redacted_fields[]}` → `aws_wafv2_logging_configuration`。CLOUDFRONT スコープでロギング無効時に lint 警告。 |
 | **TLS 指紋ルール（JA3/JA4）** | ✅ 対応 | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints` と `fingerprint_action: block|count` に対応。 |
+| **Edge JS challenge / lightweight PoW** | ⚠️ 部分対応 | `firewall.challenge` は Cloudflare Workers のみで適用。AWS ターゲットでは未対応警告を出します。詳細は [Edge JS Challenge](./edge-js-challenge.ja.md)。 |
 
 ---
 
@@ -57,8 +58,10 @@
 | **クエリパラム数制限** | ✅ 対応 | `request.limits.max_query_params` → 超過時 400。 |
 | **ヘッダーサイズ制限** | ✅ 対応 | `request.limits.max_header_size` → 超過時 431。Lambda@Edge / Cloudflare 限定。 |
 | **ヘッダー数制限** | ✅ 対応 | `request.limits.max_header_count`（既定 64、1..500 にクランプ）→ 超過時 431。CFF viewer-request と Cloudflare Worker の入口で適用。 |
+| **Request anomaly guards** | ✅ 対応 | `request.anomaly_guards` は CRLF indicator、不正な Cookie header、bounded な double-encoded traversal signal を CFF viewer-request / Cloudflare Workers でブロック。 |
 | **パス正規化** | ✅ 対応 | `request.normalize.path.collapse_slashes`, `remove_dot_segments` で URI をクリーンアップ。 |
 | **クエリ正規化** | ✅ 対応 | `request.normalize.drop_query_keys` でトラッキングパラメータ（utm_*、gclid 等）を除去。 |
+| **GraphQL depth/complexity guard** | Cloudflare Workers のみ | `request.graphql_guard` で POST GraphQL body を検査し、depth、alias 数、field 数、malformed document を検出。AWS target は CloudFront edge output が request body を読めないため未対応警告のみ。 |
 | **必須ヘッダー** | ✅ 対応 | `request.block.header_missing` で必須ヘッダーをチェック（UA 以外も対応）。 |
 | **Bot/スキャナ対策（User-Agent）** | ✅ 対応 | `request.block.ua_contains` で既知スキャナをブロック。 |
 | **指紋（JA3/JA4）** | ✅ 対応 | `firewall.waf.ja3_fingerprints` / `ja4_fingerprints` からルール生成。初期は `fingerprint_action: count`、検証後 `block` へ昇格。 |
@@ -79,7 +82,7 @@
 
 | 項目 | 対応 | 備考 |
 |------|------|------|
-| **オリジンへの認証（カスタムヘッダー）** | ✅ 対応 | `origin.auth.type: custom_header` と `header`, `secret_env`。Lambda@Edge で秘密ヘッダーを注入。 |
+| **オリジンへの認証（カスタムヘッダー / HMAC）** | ✅ 対応 | `origin.auth.type: custom_header` は共有 secret を注入。`hmac_signature` は AWS Lambda@Edge / Cloudflare Workers で method/path/query/body hash/timestamp/nonce を署名。 |
 | **タイムアウト設定** | ✅ 対応 | `origin.timeout.connect` / `read` → `dist/infra/cloudfront-origin.tf.json` |
 
 ---
@@ -89,9 +92,9 @@
 | カテゴリ | 対応済み | 部分対応 | 未対応 |
 |----------|----------|----------|--------|
 | **Transport** | HSTS, TLS 版, HTTP 版 | — | — |
-| **Firewall / Access** | レート制限（グローバル＋URI 単位）, Geo, IP, WAF マネージド, カスタムブロックレスポンス, ロギング, JA3/JA4 指紋ルール | — | — |
+| **Firewall / Access** | レート制限（グローバル＋URI 単位）, Geo, IP, WAF マネージド, カスタムブロックレスポンス, ロギング, JA3/JA4 指紋ルール | Edge JS challenge（Cloudflare Workers のみ） | — |
 | **Authentication** | トークン, Basic, JWT, 署名付き URL | — | — |
-| **Request Hygiene** | メソッド, URI/クエリ/ヘッダー制限, 正規化, UA ブロック, 必須ヘッダー, 指紋（JA3/JA4） | — | — |
+| **Request Hygiene** | メソッド, URI/クエリ/ヘッダー制限, Request anomaly guards, 正規化, UA ブロック, 必須ヘッダー, 指紋（JA3/JA4） | — | — |
 | **Response Security** | セキュリティヘッダー, CORS, Cookie 属性 | — | — |
 | **Origin Security** | オリジン認証, タイムアウト | — | — |
 
@@ -103,8 +106,10 @@
 |------|---------------------|-------------|-------------------|-----------|
 | URI/クエリ制限 | ✓ | — | ✓ | — |
 | パス正規化 | ✓ | — | ✓ | — |
+| Request anomaly guards | ✓ | — | ✓ | — |
 | 必須ヘッダー | ✓ | — | ✓ | — |
 | ヘッダーサイズ | — | ✓ | ✓ | — |
+| Edge JS challenge / PoW | — | — | ✓ | — |
 | CORS | ✓ | — | ✓ | — |
 | Basic 認証 | ✓ | — | ✓ | — |
 | Cookie 属性 | ✓ | — | ✓ | — |
@@ -118,6 +123,34 @@
 | オリジン認証 | — | ✓ | ✓ | — |
 | タイムアウト | — | — | — | ✓ |
 | モニターモード | ✓ | ✓ | ✓ | — |
+| レスポンス DLP マスク/ブロック | 未対応: body inspection 不可 | ヘッダー/body は可能だが既定生成なし | ✓ | — |
+
+同じ matrix は CLI からも確認できます。
+
+```bash
+npx cdn-security capabilities
+npx cdn-security capabilities --policy policy/security.yml --target aws --json
+```
+
+JSON 出力は automation 向けで、選択 target で `partial`、`unsupported`、`warning-only` になる設定済み control を `policyEvaluation.findings` に含めます。
+
+### レスポンス DLP
+
+`response_dlp` は optional で、現時点では Cloudflare Workers target が enforcement 対応です。設定したレスポンスヘッダーと、サイズ上限内のテキスト系レスポンスボディを検査し、`report_only`、`mask`、`block` を適用できます。
+
+built-in detector は API key prefix（`sk-live-`、`sk_test_`、`ghp_`）と、Luhn 検証に通った credit-card-like 値を高信頼として扱います。custom regex はビルド時に compile し、256 文字・10 件までに制限し、nested quantifier 系の ReDoS 形状は拒否します。
+
+body inspection は設定されたテキスト系 `Content-Type` と `body.max_bytes`（既定 32768、最大 131072）に限定します。上限超過または非テキストレスポンスは変更せず通します。CloudFront Functions はレスポンス body を検査できないため、`response_dlp.enabled: true` の AWS compile では unsupported warning を出します。
+
+policy shape、rollout guidance、target support、performance constraints は [レスポンス DLP](./response-dlp.ja.md) を参照してください。
+
+### Request Anomaly Guards
+
+`request.anomaly_guards` は optional で、CloudFront Functions viewer-request と
+Cloudflare Workers が enforcement 対応です。CRLF indicator、不正な Cookie header、
+double-encoded traversal signal を bounded な文字列 check で検出します。policy shape
+と rollout guidance は [Request Anomaly Guards](./request-anomaly-guards.ja.md)
+を参照してください。
 
 ---
 

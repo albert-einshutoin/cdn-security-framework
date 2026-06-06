@@ -5,7 +5,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { DEFAULT_CONTAINS, parsePathPatterns, hasCatastrophicBacktrackShape, regexesLiteralCode, getAuthGates, validateAuthGates, validateJwksUrl, build, PLACEHOLDER_TOKEN, hasFailOnPermissiveFlag, warnIfPermissive, warnWeakAwsCspNonce, warnSignedUrlReplay, validateOriginAuth, } = require('./lib/compile-core');
+const { DEFAULT_CONTAINS, parsePathPatterns, hasCatastrophicBacktrackShape, regexesLiteralCode, getAuthGates, validateAuthGates, validateJwksUrl, build, PLACEHOLDER_TOKEN, hasFailOnPermissiveFlag, warnIfPermissive, warnWeakAwsCspNonce, warnUnsupportedAwsResponseDlp, warnSignedUrlReplay, buildChallengeConfig, warnUnsupportedAwsChallenge, buildGraphqlGuardConfig, buildAnomalyGuardConfig, warnUnsupportedGraphqlGuard, validateOriginAuth, } = require('./lib/compile-core');
 const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
 function test(name, fn) {
     try {
@@ -126,6 +126,110 @@ test('parsePathPatterns lowercases contains entries so uppercase policy survives
     const fromLegacy = parsePathPatterns(['/INTERNAL/', '(?i)\\.{2}/']);
     assert.ok(fromLegacy.contains.includes('/internal/'), 'plain upper entry normalized');
     assert.ok(fromLegacy.contains.every((c) => c === c.toLowerCase()), 'mapped entries normalized');
+});
+test('buildGraphqlGuardConfig normalizes configured limits and defaults endpoint', () => {
+    const cfg = buildGraphqlGuardConfig({
+        request: {
+            graphql_guard: {
+                max_depth: 7,
+                max_aliases: 3,
+                max_fields: 50,
+                mode: 'report',
+            },
+        },
+    });
+    assert.deepStrictEqual(cfg, {
+        endpointPaths: ['/graphql'],
+        maxDepth: 7,
+        maxAliases: 3,
+        maxFields: 50,
+        maxBodyBytes: 65536,
+        mode: 'report',
+    });
+});
+test('buildAnomalyGuardConfig defaults disabled and normalizes enabled limits', () => {
+    assert.deepStrictEqual(buildAnomalyGuardConfig({ request: {} }), {
+        enabled: false,
+        crlf: false,
+        malformedCookie: false,
+        doubleEncodedTraversal: false,
+        maxCookieBytes: 4096,
+        maxCookiePairs: 80,
+    });
+    const cfg = buildAnomalyGuardConfig({
+        request: {
+            anomaly_guards: {
+                enabled: true,
+                crlf: false,
+                max_cookie_bytes: 999999,
+                max_cookie_pairs: 0,
+            },
+        },
+    });
+    assert.deepStrictEqual(cfg, {
+        enabled: true,
+        crlf: false,
+        malformedCookie: true,
+        doubleEncodedTraversal: true,
+        maxCookieBytes: 65536,
+        maxCookiePairs: 1,
+    });
+});
+test('warnUnsupportedGraphqlGuard warns for AWS body-unreadable target', () => {
+    const messages = [];
+    const result = warnUnsupportedGraphqlGuard({ request: { graphql_guard: { endpoint_paths: ['/graphql'] } } }, 'aws', { logger: { error: (msg) => messages.push(msg) } });
+    assert.strictEqual(result.warned, true);
+    assert.strictEqual(messages.length, 1);
+    assert.match(messages[0], /unsupported|cannot read request bodies|CloudFront/i);
+});
+test('warnUnsupportedGraphqlGuard stays silent for Cloudflare target', () => {
+    const messages = [];
+    const result = warnUnsupportedGraphqlGuard({ request: { graphql_guard: { endpoint_paths: ['/graphql'] } } }, 'cloudflare', { logger: { error: (msg) => messages.push(msg) } });
+    assert.strictEqual(result.warned, false);
+    assert.deepStrictEqual(messages, []);
+});
+test('warnUnsupportedAwsResponseDlp warns when response DLP is enabled for AWS', () => {
+    const messages = [];
+    const result = warnUnsupportedAwsResponseDlp({ response_dlp: { enabled: true, action: 'block' } }, { logger: { error: (msg) => messages.push(msg) } });
+    assert.strictEqual(result.warned, true);
+    assert.strictEqual(messages.length, 1);
+    assert.match(messages[0], /response_dlp|CloudFront Functions cannot inspect response bodies/);
+});
+test('warnUnsupportedAwsResponseDlp stays silent when response DLP is disabled', () => {
+    const messages = [];
+    const result = warnUnsupportedAwsResponseDlp({ response_dlp: { enabled: false } }, { logger: { error: (msg) => messages.push(msg) } });
+    assert.strictEqual(result.warned, false);
+    assert.deepStrictEqual(messages, []);
+});
+test('buildChallengeConfig normalizes experimental challenge defaults', () => {
+    const cfg = buildChallengeConfig({
+        firewall: {
+            challenge: {
+                enabled: true,
+                path_prefixes: ['/guarded'],
+                ua_contains: ['HeadlessChrome'],
+                difficulty: 99,
+                ttl_sec: 10,
+            },
+        },
+    });
+    assert.deepStrictEqual(cfg, {
+        enabled: true,
+        mode: 'challenge',
+        pathPrefixes: ['/guarded'],
+        uaContains: ['headlesschrome'],
+        difficulty: 6,
+        ttlSec: 60,
+        secretEnv: 'CHALLENGE_SECRET',
+        cookieName: '__cdn_challenge',
+    });
+});
+test('warnUnsupportedAwsChallenge warns for AWS target when challenge is enabled', () => {
+    const messages = [];
+    const result = warnUnsupportedAwsChallenge({ firewall: { challenge: { enabled: true, mode: 'challenge' } } }, { logger: { error: (msg) => messages.push(msg) } });
+    assert.strictEqual(result.warned, true);
+    assert.strictEqual(messages.length, 1);
+    assert.match(messages[0], /firewall\.challenge|CloudFront|unsupported/i);
 });
 test('regexesLiteralCode emits real RegExp literals with flags', () => {
     assert.strictEqual(regexesLiteralCode([]), '[]');
@@ -585,7 +689,9 @@ test('validateJwksUrl rejects loopback / private / link-local hostnames', () => 
         'https://172.16.0.1/jwks.json',
         'https://172.31.255.255/jwks.json',
         'https://169.254.169.254/latest/meta-data/',
+        'https://100.64.0.1/jwks.json',
         'https://0.0.0.0/jwks.json',
+        'https://224.0.0.1/jwks.json',
         'https://[::1]/jwks.json',
         'https://[fe80::1]/jwks.json',
         'https://[fc00::1]/jwks.json',
@@ -640,6 +746,38 @@ test('validateAuthGates accepts jwks_url on allowed_hosts (case-insensitive)', (
         ],
     };
     validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true });
+});
+test('validateAuthGates requires jwks allowed_hosts when target cannot inspect DNS', () => {
+    const policy = {
+        routes: [
+            {
+                name: 'cloudflare-rs256',
+                auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://idp.example.com/jwks.json' },
+            },
+        ],
+    };
+    assert.throws(() => validateAuthGates(policy, {
+        exitOnError: false,
+        allowPlaceholderToken: true,
+        requireJwksAllowedHosts: true,
+    }), (err) => Array.isArray(err.validationErrors)
+        && err.validationErrors.some((e) => /cloudflare-rs256/.test(e) && /allowed_hosts/.test(e)));
+});
+test('validateAuthGates accepts required jwks allowed_hosts for matching RS256 host', () => {
+    const policy = {
+        firewall: { jwks: { allowed_hosts: ['idp.example.com'] } },
+        routes: [
+            {
+                name: 'cloudflare-rs256',
+                auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://idp.example.com/jwks.json' },
+            },
+        ],
+    };
+    validateAuthGates(policy, {
+        exitOnError: false,
+        allowPlaceholderToken: true,
+        requireJwksAllowedHosts: true,
+    });
 });
 test('warnSignedUrlReplay flags write-like signed_url gates missing nonce_param', () => {
     const captured = [];
@@ -959,6 +1097,58 @@ test('response_headers: force_vary_auth=false disables Vary/no-store override', 
         fs.rmSync(tmpDir, { recursive: true, force: true });
     }
 });
+test('viewer-response CORS appends Vary Origin and preserves auth Vary tokens', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-cors-vary-response-'));
+    try {
+        process.env.ADMIN_TOKEN = 'test-token';
+        build({
+            version: 1,
+            request: { allow_methods: ['GET'] },
+            response_headers: {
+                cors: {
+                    allow_origins: ['https://app.example.com', 'https://admin.example.com'],
+                    allow_credentials: true,
+                    expose_headers: ['X-Request-Id'],
+                },
+            },
+            routes: [{
+                    name: 'api',
+                    match: { path_prefixes: ['/api'] },
+                    auth_gate: { type: 'static_token', header: 'x-admin-token', token_env: 'ADMIN_TOKEN' },
+                }],
+        }, { outDir: tmpDir });
+        const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
+        const handler = new Function(code + '\nreturn handler;')();
+        const merged = handler({
+            request: {
+                uri: '/api/data',
+                headers: { origin: { value: 'https://app.example.com' } },
+            },
+            response: {
+                statusCode: '200',
+                headers: { vary: { value: 'Accept-Language' } },
+            },
+        });
+        assert.strictEqual(merged.headers['access-control-allow-origin'].value, 'https://app.example.com');
+        assert.strictEqual(merged.headers['access-control-allow-credentials'].value, 'true');
+        assert.strictEqual(merged.headers.vary.value, 'Accept-Language, Authorization, Cookie, Origin');
+        const duplicate = handler({
+            request: {
+                uri: '/',
+                headers: { origin: { value: 'https://admin.example.com' } },
+            },
+            response: {
+                statusCode: '200',
+                headers: { vary: { value: 'Origin' } },
+            },
+        });
+        assert.strictEqual(duplicate.headers.vary.value, 'Origin');
+    }
+    finally {
+        delete process.env.ADMIN_TOKEN;
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
 test('response_headers: emits COOP/COEP/CORP/Reporting-Endpoints when configured', () => {
     const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-resp-iso-'));
     try {
@@ -1004,6 +1194,40 @@ test('response_headers: csp_nonce=true emits substitution hook and Report-Only c
         // Template must have nonce substitution hook + Report-Only emission path
         assert.match(resp, /'nonce-PLACEHOLDER'/);
         assert.match(resp, /Content-Security-Policy-Report-Only/);
+    }
+    finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+test('viewer-request CORS preflight includes Vary Origin', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-cors-vary-preflight-'));
+    try {
+        build({
+            version: 1,
+            request: { allow_methods: ['GET'] },
+            response_headers: {
+                cors: {
+                    allow_origins: ['https://app.example.com', 'https://admin.example.com'],
+                    allow_methods: ['GET', 'POST'],
+                    allow_headers: ['Authorization'],
+                    max_age: 600,
+                },
+            },
+            routes: [],
+        }, { outDir: tmpDir, allowPlaceholderToken: true });
+        const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+        const handler = new Function(code + '\nreturn handler;')();
+        const result = handler({
+            request: {
+                method: 'OPTIONS',
+                uri: '/api/data',
+                querystring: '',
+                headers: { origin: { value: 'https://app.example.com' } },
+            },
+        });
+        assert.strictEqual(result.statusCode, 204);
+        assert.strictEqual(result.headers['access-control-allow-origin'].value, 'https://app.example.com');
+        assert.strictEqual(result.headers.vary.value, 'Origin');
     }
     finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1064,6 +1288,44 @@ test('viewer-request enforces max_header_count with 431', () => {
         };
         const result = sandbox.handler(event);
         assert.strictEqual(result.statusCode, 431);
+    }
+    finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+test('viewer-request checks raw traversal before dot-segment normalization', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-raw-traversal-'));
+    try {
+        build({
+            version: 1,
+            request: {
+                allow_methods: ['GET'],
+                block: { path_patterns: { contains: ['/../'] } },
+                normalize: { path: { collapse_slashes: true, remove_dot_segments: true } },
+            },
+            response_headers: {},
+            routes: [],
+        }, { outDir: tmpDir, allowPlaceholderToken: true });
+        const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+        const handler = new Function(code + '\nreturn handler;')();
+        const blocked = handler({
+            request: {
+                method: 'GET',
+                uri: '/public/../private',
+                querystring: '',
+                headers: { 'user-agent': { value: 'Mozilla' } },
+            },
+        });
+        assert.strictEqual(blocked.statusCode, 400);
+        const benign = handler({
+            request: {
+                method: 'GET',
+                uri: '/public/./asset',
+                querystring: '',
+                headers: { 'user-agent': { value: 'Mozilla' } },
+            },
+        });
+        assert.strictEqual(benign.uri, '/public/asset');
     }
     finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });
@@ -1241,6 +1503,47 @@ test('validateOriginAuth passes when secret_env resolves to non-empty value', ()
     assert.strictEqual(result.errors.length, 0);
     assert.strictEqual(result.warnings.length, 0);
 });
+test('validateOriginAuth validates hmac_signature options', () => {
+    const validPolicy = {
+        origin: {
+            auth: {
+                type: 'hmac_signature',
+                secret_env: 'ORIGIN_AUTH_SECRET',
+                header_prefix: 'X-CDN-Auth',
+                timestamp_tolerance_seconds: 300,
+                signed_components: ['method', 'path', 'query', 'body', 'timestamp', 'nonce'],
+            },
+        },
+    };
+    const logger = { warn: () => { }, error: () => { } };
+    const result = validateOriginAuth(validPolicy, {
+        env: { ORIGIN_AUTH_SECRET: 's3cr3t' },
+        strict: true,
+        logger,
+    });
+    assert.strictEqual(result.errors.length, 0);
+    const invalidPolicy = {
+        origin: {
+            auth: {
+                type: 'hmac_signature',
+                secret_env: 'ORIGIN_AUTH_SECRET',
+                header_prefix: 'bad header',
+                timestamp_tolerance_seconds: 0,
+            },
+        },
+    };
+    assert.throws(() => validateOriginAuth(invalidPolicy, { env: { ORIGIN_AUTH_SECRET: 's3cr3t' }, strict: true, logger }), /origin-auth validation failed/);
+    const replayWeakPolicy = {
+        origin: {
+            auth: {
+                type: 'hmac_signature',
+                secret_env: 'ORIGIN_AUTH_SECRET',
+                signed_components: ['method', 'path', 'query'],
+            },
+        },
+    };
+    assert.throws(() => validateOriginAuth(replayWeakPolicy, { env: { ORIGIN_AUTH_SECRET: 's3cr3t' }, strict: true, logger }), /origin-auth validation failed/);
+});
 test('validateOriginAuth is a no-op when origin.auth is absent', () => {
     const logger = { warn: () => { }, error: () => { } };
     const result = validateOriginAuth({}, { env: {}, strict: true, logger });
@@ -1260,6 +1563,34 @@ test('origin-request refuses to forward origin-auth header when env is empty', (
         const code = fs.readFileSync(path.join(tmpDir, 'edge/origin-request.js'), 'utf8');
         // Ensure the runtime code guards against a blank env var before forwarding.
         assert.match(code, /origin_auth_secret_missing/);
+    }
+    finally {
+        fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+});
+test('build emits HMAC origin auth config for AWS origin-request', () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-test-origin-hmac-'));
+    try {
+        const policy = {
+            version: 1,
+            request: { allow_methods: ['GET'] },
+            response_headers: { hsts: 'max-age=1' },
+            origin: {
+                auth: {
+                    type: 'hmac_signature',
+                    secret_env: 'ORIGIN_AUTH_SECRET',
+                    header_prefix: 'X-CDN-Auth',
+                    timestamp_tolerance_seconds: 300,
+                    include_body_hash: false,
+                    signed_components: ['method', 'path', 'query', 'body', 'timestamp', 'nonce'],
+                },
+            },
+        };
+        build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
+        const code = fs.readFileSync(path.join(tmpDir, 'edge/origin-request.js'), 'utf8');
+        assert.match(code, /originAuth:\s*\{"type":"hmac_signature"/);
+        assert.match(code, /canonicalOriginAuthInput/);
+        assert.match(code, /X-CDN-Auth/);
     }
     finally {
         fs.rmSync(tmpDir, { recursive: true, force: true });

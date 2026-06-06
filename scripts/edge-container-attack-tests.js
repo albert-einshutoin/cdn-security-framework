@@ -39,7 +39,7 @@ let awsArtifactsCompiled = false;
 function ensureAwsArtifactsCompiled() {
     if (awsArtifactsCompiled)
         return;
-    runNode('scripts/compile.js', []);
+    runNode('scripts/compile.js', ['--policy', 'policy/base.yml', '--out-dir', 'dist']);
     awsArtifactsCompiled = true;
 }
 function loadAwsViewerHandler() {

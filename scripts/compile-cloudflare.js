@@ -8,7 +8,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');
-const { parsePathPatterns, regexesLiteralCode, validateAuthGates, hasAllowPlaceholderFlag, hasFailOnPermissiveFlag, warnIfPermissive, warnSignedUrlReplay, buildObsConfig, } = require('./lib/compile-core');
+const { parsePathPatterns, regexesLiteralCode, validateAuthGates, hasAllowPlaceholderFlag, hasFailOnPermissiveFlag, hasCatastrophicBacktrackShape, compileRegexOrThrow, warnIfPermissive, warnSignedUrlReplay, buildChallengeConfig, buildGraphqlGuardConfig, buildAnomalyGuardConfig, buildObsConfig, } = require('./lib/compile-core');
 const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
@@ -59,13 +59,75 @@ warnSignedUrlReplay(policy);
 // Cloudflare Workers reads env at runtime for static_token/basic_auth, so build
 // does not require the actual token value. Only structural gate fields matter.
 // We still validate jwt/signed_url required fields via the shared helper.
-validateAuthGates(policy, { allowPlaceholderToken: true });
+validateAuthGates(policy, { allowPlaceholderToken: true, requireJwksAllowedHosts: true });
 const defaults = policy.defaults || {};
 const request = policy.request || {};
 const limits = request.limits || {};
 const block = request.block || {};
 const normalize = request.normalize || {};
 const routes = policy.routes || [];
+function normalizeResponseDlp(policyObj) {
+    const raw = policyObj.response_dlp || {};
+    const enabled = raw.enabled === true;
+    const action = ['mask', 'block', 'report_only'].includes(raw.action) ? raw.action : 'report_only';
+    const body = raw.body || {};
+    const headers = raw.headers || {};
+    const detectors = raw.detectors || {};
+    const defaultContentTypes = ['text/', 'application/json', 'application/xml', 'text/xml', 'application/javascript'];
+    const builtIn = Array.isArray(detectors.built_in) && detectors.built_in.length > 0
+        ? detectors.built_in.filter((d) => d === 'api_key' || d === 'credit_card')
+        : ['api_key', 'credit_card'];
+    const customRegexes = Array.isArray(detectors.custom_regex) ? detectors.custom_regex : [];
+    const customRegexSources = [];
+    const customRegexNames = [];
+    if (customRegexes.length > 10) {
+        throw new Error('response_dlp.detectors.custom_regex supports at most 10 patterns');
+    }
+    for (const entry of customRegexes) {
+        const name = typeof entry?.name === 'string' && entry.name.trim() ? entry.name.trim() : 'custom';
+        const pattern = typeof entry?.pattern === 'string' ? entry.pattern.trim() : '';
+        if (!pattern)
+            continue;
+        if (pattern.length > 256) {
+            throw new Error(`response_dlp.detectors.custom_regex "${name}" exceeds 256 characters`);
+        }
+        compileRegexOrThrow(pattern, 'response_dlp.detectors.custom_regex.pattern');
+        if (hasCatastrophicBacktrackShape(pattern)) {
+            throw new Error(`response_dlp.detectors.custom_regex "${name}" rejected by ReDoS safety check ` +
+                `(nested-quantifier shape triggers catastrophic backtracking)`);
+        }
+        customRegexNames.push(name);
+        customRegexSources.push(pattern);
+    }
+    return {
+        config: {
+            enabled,
+            action,
+            mask: typeof raw.mask === 'string' && raw.mask ? raw.mask : '[REDACTED]',
+            blockStatus: Number.isFinite(Number(raw.block_status))
+                ? Math.max(400, Math.min(599, Number(raw.block_status)))
+                : 451,
+            blockBody: typeof raw.block_body === 'string' && raw.block_body ? raw.block_body : 'Response blocked by edge DLP',
+            body: {
+                enabled: enabled && body.enabled !== false,
+                maxBytes: Number.isFinite(Number(body.max_bytes))
+                    ? Math.max(1, Math.min(131072, Number(body.max_bytes)))
+                    : 32768,
+                contentTypes: Array.isArray(body.content_types) && body.content_types.length > 0
+                    ? body.content_types.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.toLowerCase())
+                    : defaultContentTypes,
+            },
+            headers: {
+                enabled: enabled && headers.enabled !== false,
+                names: Array.isArray(headers.names) && headers.names.length > 0
+                    ? headers.names.filter((s) => typeof s === 'string' && s.trim()).map((s) => s.toLowerCase())
+                    : ['set-cookie', 'authorization', 'x-api-key'],
+            },
+            detectors: { builtIn, customRegexNames },
+        },
+        customRegexSources,
+    };
+}
 function getWorkerAuthGates() {
     const gates = [];
     for (const route of routes) {
@@ -151,6 +213,7 @@ const geoBlockCountries = Array.isArray(fwGeo.block_countries)
 const geoAllowCountries = Array.isArray(fwGeo.allow_countries)
     ? fwGeo.allow_countries.map((c) => String(c || '').trim().toUpperCase()).filter(Boolean)
     : [];
+const challengeConfig = buildChallengeConfig(policy);
 const cfgCode = renderConstObject('CFG', {
     mode: defaults.mode || 'enforce',
     allowMethods: runtimeCode(`new Set(${JSON.stringify(allowMethods)})`),
@@ -179,6 +242,9 @@ const cfgCode = renderConstObject('CFG', {
     jwksNegativeCacheSec: jwksNegativeCache,
     geoBlockCountries: runtimeCode(`new Set(${JSON.stringify(geoBlockCountries)})`),
     geoAllowCountries: runtimeCode(`new Set(${JSON.stringify(geoAllowCountries)})`),
+    challenge: challengeConfig,
+    graphqlGuard: buildGraphqlGuardConfig(policy),
+    anomalyGuards: buildAnomalyGuardConfig(policy),
     obs: buildObsConfig(policy),
 });
 let adminPathPrefixes = ['/admin', '/docs', '/swagger'];
@@ -196,6 +262,7 @@ for (const route of routes) {
 }
 const authProtectedPrefixesForResp = Array.from(new Set((authGates || []).flatMap((g) => Array.isArray(g.protectedPrefixes) ? g.protectedPrefixes : [])));
 const forceVaryAuth = resHeaders.force_vary_auth !== false;
+const responseDlp = normalizeResponseDlp(policy);
 const responseCfgCode = renderConstObject('RESPONSE_CFG', {
     headers: {
         'strict-transport-security': resHeaders.hsts || 'max-age=31536000; includeSubDomains; preload',
@@ -224,6 +291,8 @@ const responseCfgCode = renderConstObject('RESPONSE_CFG', {
         : ['cache', 'cookies', 'storage'],
     cors: corsConfig,
     cookie_attributes: resHeaders.cookie_attributes || null,
+    responseDlp: responseDlp.config,
+    responseDlpCustomRegexes: runtimeCode(regexesLiteralCode(responseDlp.customRegexSources)),
 });
 const templatePath = path.join(repoRoot, 'templates', 'cloudflare', 'index.ts');
 let code;

@@ -274,6 +274,12 @@ function validateAuthGates(policy: any, options: any = {}) {
   const routes = policy.routes || [];
   const errors: string[] = [];
   const jwksAllowedHosts = ((policy.firewall || {}).jwks || {}).allowed_hosts;
+  const normalizedJwksAllowedHosts = Array.isArray(jwksAllowedHosts)
+    ? jwksAllowedHosts
+      .map((h: any) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
+      .filter(Boolean)
+    : [];
+  const requireJwksAllowedHosts = options.requireJwksAllowedHosts === true;
 
   for (const route of routes) {
     const gate = route.auth_gate;
@@ -285,6 +291,9 @@ function validateAuthGates(policy: any, options: any = {}) {
       const alg = gate.algorithm || 'RS256';
       if (alg === 'RS256' && !gate.jwks_url) {
         errors.push(`Route "${name}": JWT+RS256 requires "jwks_url"`);
+      }
+      if (alg === 'RS256' && requireJwksAllowedHosts && normalizedJwksAllowedHosts.length === 0) {
+        errors.push(`Route "${name}": JWT+RS256 requires firewall.jwks.allowed_hosts for this target`);
       }
       if (gate.jwks_url) {
         const v = validateJwksUrl(gate.jwks_url, jwksAllowedHosts);
@@ -424,23 +433,22 @@ function hasStrictOriginAuthFlag(argv: string[]) {
   return Array.isArray(argv) && argv.includes('--strict-origin-auth');
 }
 
-// Verify that when origin.auth.type=custom_header is configured, the env var
-// named by `secret_env` is present and non-empty in the build environment.
-// Called with { strict: true } under --strict-origin-auth and as a warning
-// otherwise, so dev builds keep working while CI can fail closed.
+// Verify that origin.auth secrets and runtime-shaping options are usable before
+// emitting code. Called with { strict: true } under --strict-origin-auth and as
+// a warning otherwise, so dev builds keep working while CI can fail closed.
 function validateOriginAuth(policy: any, options: any = {}) {
   const env = options.env || process.env;
   const strict = options.strict === true;
   const logger = options.logger || console;
 
   const auth = policy && policy.origin && policy.origin.auth;
-  if (!auth || auth.type !== 'custom_header') return { warnings: [], errors: [] };
+  if (!auth || !['custom_header', 'hmac_signature'].includes(auth.type)) return { warnings: [], errors: [] };
 
   const warnings: string[] = [];
   const errors: string[] = [];
   const envName = auth.secret_env || '';
   if (!envName) {
-    errors.push('origin.auth.secret_env is required when type=custom_header');
+    errors.push(`origin.auth.secret_env is required when type=${auth.type}`);
   } else {
     const v = env[envName];
     if (v === undefined) {
@@ -451,6 +459,31 @@ function validateOriginAuth(policy: any, options: any = {}) {
       (strict ? errors : warnings).push(
         `origin.auth.secret_env "${envName}" is set but empty. The edge will refuse to forward the origin-auth header, breaking origin trust.`
       );
+    }
+  }
+
+  if (auth.type === 'custom_header' && (!auth.header || typeof auth.header !== 'string')) {
+    errors.push('origin.auth.header is required when type=custom_header');
+  }
+
+  if (auth.type === 'hmac_signature') {
+    const prefix = auth.header_prefix || 'X-CDN-Auth';
+    if (typeof prefix !== 'string' || !/^[A-Za-z][A-Za-z0-9-]*$/.test(prefix)) {
+      errors.push('origin.auth.header_prefix must match ^[A-Za-z][A-Za-z0-9-]*$ when type=hmac_signature');
+    }
+    const tolerance = auth.timestamp_tolerance_seconds == null ? 300 : Number(auth.timestamp_tolerance_seconds);
+    if (!Number.isInteger(tolerance) || tolerance < 1 || tolerance > 3600) {
+      errors.push('origin.auth.timestamp_tolerance_seconds must be an integer from 1 to 3600 when type=hmac_signature');
+    }
+    if (auth.signed_components != null) {
+      const allowed = new Set(['method', 'path', 'query', 'body', 'timestamp', 'nonce']);
+      const components = Array.isArray(auth.signed_components) ? auth.signed_components : [];
+      if (components.length === 0 || components.some((c: any) => !allowed.has(c))) {
+        errors.push('origin.auth.signed_components must contain one or more of method, path, query, body, timestamp, nonce');
+      }
+      if (!components.includes('timestamp') || !components.includes('nonce')) {
+        errors.push('origin.auth.signed_components must include timestamp and nonce when type=hmac_signature');
+      }
     }
   }
 
@@ -524,6 +557,129 @@ function warnWeakAwsCspNonce(policy: any, options: any = {}) {
     '[WARN] response_headers.csp_nonce is enabled for the AWS CloudFront Functions target. ' +
     'CloudFront Functions do not expose a cryptographic RNG, so AWS viewer-response nonces use Math.random. ' +
     'Prefer Cloudflare Workers for nonce-based CSP, or disable csp_nonce on AWS and let the origin manage nonces.';
+  logger.error(msg);
+  return { warned: true, warnings: [msg] };
+}
+
+function warnUnsupportedAwsResponseDlp(policy: any, options: any = {}) {
+  const logger = options.logger || console;
+  if (!policy || !policy.response_dlp || policy.response_dlp.enabled !== true) {
+    return { warned: false, warnings: [] };
+  }
+  const msg =
+    '[WARN] response_dlp is enabled but AWS CloudFront Functions cannot inspect response bodies. ' +
+    'The AWS target does not enforce response DLP masking/blocking; use the Cloudflare Workers target for body/header response DLP or enforce DLP at the origin/Lambda@Edge.';
+  logger.error(msg);
+  return { warned: true, warnings: [msg] };
+}
+
+function buildChallengeConfig(policy: any) {
+  const raw = policy && policy.firewall && policy.firewall.challenge;
+  if (!raw || raw.enabled !== true) return null;
+
+  const pathPrefixes = Array.isArray(raw.path_prefixes)
+    ? raw.path_prefixes.map((p: any) => (typeof p === 'string' ? p.trim() : '')).filter(Boolean)
+    : [];
+  const uaContains = Array.isArray(raw.ua_contains)
+    ? raw.ua_contains.map((s: any) => (typeof s === 'string' ? s.trim().toLowerCase() : '')).filter(Boolean)
+    : [];
+
+  return {
+    enabled: true,
+    mode: raw.mode === 'report' || raw.mode === 'block' || raw.mode === 'challenge' ? raw.mode : 'challenge',
+    pathPrefixes,
+    uaContains,
+    difficulty: Number.isFinite(Number(raw.difficulty))
+      ? Math.max(1, Math.min(6, Number(raw.difficulty)))
+      : 3,
+    ttlSec: Number.isFinite(Number(raw.ttl_sec))
+      ? Math.max(60, Math.min(86400, Number(raw.ttl_sec)))
+      : 900,
+    secretEnv: typeof raw.secret_env === 'string' && raw.secret_env.trim()
+      ? raw.secret_env.trim()
+      : 'CHALLENGE_SECRET',
+    cookieName: typeof raw.cookie_name === 'string' && raw.cookie_name.trim()
+      ? raw.cookie_name.trim()
+      : '__cdn_challenge',
+  };
+}
+
+function warnUnsupportedAwsChallenge(policy: any, options: any = {}) {
+  const logger = options.logger || console;
+  const challenge = buildChallengeConfig(policy);
+  if (!challenge) return { warned: false, warnings: [] };
+
+  const msg =
+    '[WARN] firewall.challenge is enabled but the AWS / CloudFront targets do not support the experimental JS challenge primitive. ' +
+    'CloudFront Functions cannot reliably serve and verify the HTML proof-of-work flow in this framework; use --target cloudflare or disable firewall.challenge for AWS builds.';
+  logger.error(msg);
+  return { warned: true, warnings: [msg] };
+}
+
+function buildGraphqlGuardConfig(policy: any) {
+  const guard = policy && policy.request && policy.request.graphql_guard;
+  if (!guard || typeof guard !== 'object') return null;
+
+  const endpointPaths = Array.isArray(guard.endpoint_paths)
+    ? guard.endpoint_paths
+        .map((p: any) => (typeof p === 'string' ? p.trim() : ''))
+        .filter(Boolean)
+    : ['/graphql'];
+
+  return {
+    endpointPaths: endpointPaths.length > 0 ? endpointPaths : ['/graphql'],
+    maxDepth: Number.isFinite(Number(guard.max_depth))
+      ? Math.max(1, Math.min(64, Number(guard.max_depth)))
+      : 10,
+    maxAliases: Number.isFinite(Number(guard.max_aliases))
+      ? Math.max(0, Math.min(10000, Number(guard.max_aliases)))
+      : 20,
+    maxFields: Number.isFinite(Number(guard.max_fields))
+      ? Math.max(1, Math.min(50000, Number(guard.max_fields)))
+      : 200,
+    maxBodyBytes: Number.isFinite(Number(guard.max_body_bytes))
+      ? Math.max(1, Math.min(1048576, Number(guard.max_body_bytes)))
+      : 65536,
+    mode: guard.mode === 'report' ? 'report' : 'block',
+  };
+}
+
+function buildAnomalyGuardConfig(policy: any) {
+  const raw = policy && policy.request && policy.request.anomaly_guards;
+  if (!raw || raw.enabled !== true) {
+    return {
+      enabled: false,
+      crlf: false,
+      malformedCookie: false,
+      doubleEncodedTraversal: false,
+      maxCookieBytes: 4096,
+      maxCookiePairs: 80,
+    };
+  }
+
+  return {
+    enabled: true,
+    crlf: raw.crlf !== false,
+    malformedCookie: raw.malformed_cookie !== false,
+    doubleEncodedTraversal: raw.double_encoded_traversal !== false,
+    maxCookieBytes: Number.isFinite(Number(raw.max_cookie_bytes))
+      ? Math.max(1, Math.min(65536, Number(raw.max_cookie_bytes)))
+      : 4096,
+    maxCookiePairs: Number.isFinite(Number(raw.max_cookie_pairs))
+      ? Math.max(1, Math.min(1000, Number(raw.max_cookie_pairs)))
+      : 80,
+  };
+}
+
+function warnUnsupportedGraphqlGuard(policy: any, target: string, options: any = {}) {
+  const logger = options.logger || console;
+  const guard = buildGraphqlGuardConfig(policy);
+  if (!guard || target === 'cloudflare') return { warned: false, warnings: [] };
+
+  const msg =
+    `[WARN] request.graphql_guard is configured but target "${target}" cannot read request bodies at the edge. ` +
+    'GraphQL depth/complexity enforcement is unsupported for CloudFront Functions/Lambda@Edge output; ' +
+    'use the Cloudflare Workers target or enforce this guard at the origin.';
   logger.error(msg);
   return { warned: true, warnings: [msg] };
 }
@@ -602,6 +758,7 @@ function build(policy: any, options: any = {}) {
     trustForwardedFor,
     cors: corsConfig,
     authGates,
+    anomalyGuards: buildAnomalyGuardConfig(policy),
     obs: obsCfg,
   });
 
@@ -784,6 +941,9 @@ function main(argv: string[] = process.argv.slice(2)) {
   // Non-fatal advisory: signed_url protecting write-like paths without nonce_param.
   warnSignedUrlReplay(policy);
   warnWeakAwsCspNonce(policy);
+  warnUnsupportedAwsResponseDlp(policy);
+  warnUnsupportedAwsChallenge(policy);
+  warnUnsupportedGraphqlGuard(policy, 'aws');
 
   validateAuthGates(policy, { allowPlaceholderToken });
 
@@ -828,7 +988,13 @@ module.exports = {
   validateOriginAuth,
   warnIfPermissive,
   warnWeakAwsCspNonce,
+  warnUnsupportedAwsResponseDlp,
   warnSignedUrlReplay,
+  buildChallengeConfig,
+  warnUnsupportedAwsChallenge,
+  buildGraphqlGuardConfig,
+  buildAnomalyGuardConfig,
+  warnUnsupportedGraphqlGuard,
   validateJwksUrl,
   build,
   main,

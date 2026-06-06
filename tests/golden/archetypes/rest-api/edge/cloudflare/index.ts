@@ -22,12 +22,15 @@ const CFG = {
   allowedHosts: [],
   trustForwardedFor: false,
   cors: {"allow_origins":["https://app.example.com"],"allow_methods":["GET","POST","PUT","PATCH","DELETE","OPTIONS"],"allow_headers":["authorization","content-type","x-request-id"],"allow_credentials":true,"max_age":600},
-  authGates: [{"name":"api","protectedPrefixes":["/api/"],"type":"jwt","algorithm":"RS256","allowed_algorithms":["RS256"],"clock_skew_sec":30,"jwks_url":"https://auth.example.com/.well-known/jwks.json","issuer":"https://auth.example.com/","audience":"api.example.com","secret_env":"","cache_ttl_sec":3600}],
+  authGates: [{"name":"api","protectedPrefixes":["/api"],"type":"jwt","algorithm":"RS256","allowed_algorithms":["RS256"],"clock_skew_sec":30,"jwks_url":"https://auth.example.com/.well-known/jwks.json","issuer":"https://auth.example.com/","audience":"api.example.com","secret_env":"","cache_ttl_sec":3600}],
   originAuth: null,
   jwksStaleIfErrorSec: 120,
   jwksNegativeCacheSec: 30,
   geoBlockCountries: new Set([]),
   geoAllowCountries: new Set([]),
+  challenge: null,
+  graphqlGuard: null,
+  anomalyGuards: {"enabled":true,"crlf":true,"malformedCookie":false,"doubleEncodedTraversal":true,"maxCookieBytes":4096,"maxCookiePairs":80},
   obs: {"logFormat":"json","correlationHeader":"traceparent","sampleRate":0,"auditLogAuth":true,"auditHashSub":true},
 };
 
@@ -42,14 +45,16 @@ const RESPONSE_CFG = {
   coep: "",
   corp: "",
   reporting_endpoints: "",
-  adminPathPrefixes: ["/api/"],
+  adminPathPrefixes: ["/api"],
   adminCacheControl: "no-store",
-  authProtectedPrefixes: ["/api/"],
+  authProtectedPrefixes: ["/api"],
   forceVaryAuth: true,
   clearSiteDataPaths: [],
   clearSiteDataTypes: ["cache","cookies","storage"],
   cors: {"allow_origins":["https://app.example.com"],"allow_methods":["GET","POST","PUT","PATCH","DELETE","OPTIONS"],"allow_headers":["authorization","content-type","x-request-id"],"allow_credentials":true,"max_age":600},
   cookie_attributes: null,
+  responseDlp: {"enabled":false,"action":"report_only","mask":"[REDACTED]","blockStatus":451,"blockBody":"Response blocked by edge DLP","body":{"enabled":false,"maxBytes":32768,"contentTypes":["text/","application/json","application/xml","text/xml","application/javascript"]},"headers":{"enabled":false,"names":["set-cookie","authorization","x-api-key"]},"detectors":{"builtIn":["api_key","credit_card"],"customRegexNames":[]}},
+  responseDlpCustomRegexes: [],
 };
 
 type WorkerEnv = Record<string, string | undefined>;
@@ -63,6 +68,8 @@ const jwksCache = new Map<string, JwksCacheEntry>();
 
 type JwksNegativeEntry = { failedAt: number; reason: string };
 const jwksNegativeCache = new Map<string, JwksNegativeEntry>();
+const JWKS_MAX_BODY_BYTES = 256 * 1024;
+const JWKS_MAX_KEYS = 100;
 
 function deny(code: number, msg: string) {
   return new Response(msg, { status: code, headers: { 'cache-control': 'no-store' } });
@@ -140,6 +147,14 @@ function shouldBlockAuth(code: number, msg: string, ctx?: ReqCtx | null): Respon
   return deny(code, 'Denied');
 }
 
+type GraphqlScanResult = {
+  ok: boolean;
+  reason?: string;
+  depth: number;
+  aliases: number;
+  fields: number;
+};
+
 function normalizePath(pathname: string): string {
   let p = pathname;
   if (CFG.normalizePath.collapseSlashes) {
@@ -155,6 +170,325 @@ function normalizePath(pathname: string): string {
     p = out.join('/') || '/';
   }
   return p;
+}
+
+function rawPathnameFromRequestUrl(rawUrl: string): string {
+  const text = String(rawUrl || '');
+  const schemeIdx = text.indexOf('://');
+  let pathStart = -1;
+  if (schemeIdx !== -1) {
+    pathStart = text.indexOf('/', schemeIdx + 3);
+  } else if (text.startsWith('/')) {
+    pathStart = 0;
+  }
+  if (pathStart === -1) return '/';
+
+  let pathEnd = text.length;
+  const queryStart = text.indexOf('?', pathStart);
+  const hashStart = text.indexOf('#', pathStart);
+  if (queryStart !== -1 && queryStart < pathEnd) pathEnd = queryStart;
+  if (hashStart !== -1 && hashStart < pathEnd) pathEnd = hashStart;
+  return text.slice(pathStart, pathEnd) || '/';
+}
+
+function blockIfPathPattern(pathname: string, ctx: ReqCtx): Response | null {
+  const pathLower = pathname.toLowerCase();
+  for (const m of CFG.blockPathContains) {
+    if (pathLower.includes(m)) {
+      const r = shouldBlock(400, 'Bad Request', ctx);
+      if (r) return r;
+    }
+  }
+  for (const re of CFG.blockPathRegexes) {
+    if (re.test(pathname)) {
+      const r = shouldBlock(400, 'Bad Request', ctx);
+      if (r) return r;
+    }
+  }
+  return null;
+}
+
+function hasRawControlLineBreak(s: string): boolean {
+  return typeof s === 'string' && (s.indexOf('\r') !== -1 || s.indexOf('\n') !== -1);
+}
+
+function hasEncodedCrlfIndicator(s: string): boolean {
+  if (typeof s !== 'string' || s.length === 0) return false;
+  const lower = s.toLowerCase();
+  return lower.indexOf('%0d') !== -1 || lower.indexOf('%0a') !== -1;
+}
+
+function hasCrlfIndicator(s: string): boolean {
+  return hasRawControlLineBreak(s) || hasEncodedCrlfIndicator(s);
+}
+
+function decodeOnceWhenPercent25Present(s: string): string {
+  if (typeof s !== 'string' || s.length === 0) return '';
+  if (s.toLowerCase().indexOf('%25') === -1) return '';
+  try {
+    return decodeURIComponent(s);
+  } catch (_e) {
+    return '';
+  }
+}
+
+function hasDoubleEncodedTraversalIndicator(s: string): boolean {
+  const decoded = decodeOnceWhenPercent25Present(s);
+  if (!decoded) return false;
+  const lower = decoded.toLowerCase();
+  return lower.indexOf('%2e%2e') !== -1 ||
+    lower.indexOf('..%2f') !== -1 ||
+    lower.indexOf('..%5c') !== -1 ||
+    lower.indexOf('%2f..') !== -1 ||
+    lower.indexOf('%5c..') !== -1 ||
+    lower.indexOf('../') !== -1 ||
+    lower.indexOf('..\\') !== -1;
+}
+
+function hasCookieControlChar(cookie: string): boolean {
+  if (typeof cookie !== 'string') return false;
+  for (let i = 0; i < cookie.length; i++) {
+    const code = cookie.charCodeAt(i);
+    if (code < 32 || code === 127) return true;
+  }
+  return false;
+}
+
+function isMalformedCookie(cookie: string): boolean {
+  if (typeof cookie !== 'string' || cookie.length === 0) return false;
+  const guards = CFG.anomalyGuards || {};
+  if (guards.maxCookieBytes && cookie.length > guards.maxCookieBytes) return true;
+  if (hasCookieControlChar(cookie)) return true;
+
+  const parts = cookie.split(';');
+  let pairCount = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i].trim();
+    if (!part) {
+      if (i > 0 && i < parts.length - 1) return true;
+      continue;
+    }
+    const eq = part.indexOf('=');
+    if (eq <= 0) return true;
+    if (!part.slice(0, eq).trim()) return true;
+    pairCount++;
+    if (guards.maxCookiePairs && pairCount > guards.maxCookiePairs) return true;
+  }
+  return false;
+}
+
+function blockIfRequestAnomaly(request: Request, rawPathname: string, query: string, ctx: ReqCtx): Response | null {
+  const guards = CFG.anomalyGuards || {};
+  if (guards.enabled !== true) return null;
+
+  if (guards.crlf !== false && (hasCrlfIndicator(rawPathname) || hasCrlfIndicator(query))) {
+    return shouldBlock(400, 'Bad Request', ctx);
+  }
+  if (guards.doubleEncodedTraversal !== false &&
+    (hasDoubleEncodedTraversalIndicator(rawPathname) || hasDoubleEncodedTraversalIndicator(query))) {
+    return shouldBlock(400, 'Bad Request', ctx);
+  }
+
+  let headerBlock: Response | null = null;
+  request.headers.forEach((value) => {
+    if (!headerBlock && guards.crlf !== false && hasCrlfIndicator(value)) {
+      headerBlock = shouldBlock(400, 'Bad Request', ctx);
+    }
+  });
+  if (headerBlock) return headerBlock;
+
+  const cookie = request.headers.get('cookie') || '';
+  if (guards.malformedCookie !== false && isMalformedCookie(cookie)) {
+    return shouldBlock(400, 'Malformed Cookie', ctx);
+  }
+  return null;
+}
+
+function isGraphqlPath(pathname: string): boolean {
+  const guard = CFG.graphqlGuard;
+  if (!guard || !Array.isArray(guard.endpointPaths) || guard.endpointPaths.length === 0) return false;
+  return guard.endpointPaths.some((p: string) => pathname === p || pathname.startsWith(p + '/'));
+}
+
+async function readLimitedRequestText(request: Request, maxBytes: number): Promise<{ ok: boolean; text: string; reason?: string }> {
+  const body = request.clone().body;
+  if (!body) return { ok: true, text: '' };
+
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let total = 0;
+  let text = '';
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    total += chunk.value.byteLength;
+    if (total > maxBytes) {
+      try { await reader.cancel(); } catch (_e) { /* ignore */ }
+      return { ok: false, text: '', reason: 'GraphQL body too large' };
+    }
+    text += decoder.decode(chunk.value, { stream: true });
+  }
+  text += decoder.decode();
+  return { ok: true, text };
+}
+
+function extractGraphqlQuery(bodyText: string, contentType: string): { ok: boolean; query: string; reason?: string } {
+  if (/application\/graphql/i.test(contentType)) {
+    return { ok: true, query: bodyText };
+  }
+  try {
+    const parsed = JSON.parse(bodyText);
+    if (typeof parsed?.query !== 'string' || parsed.query.trim() === '') {
+      return { ok: false, query: '', reason: 'Malformed GraphQL query' };
+    }
+    return { ok: true, query: parsed.query };
+  } catch (_e) {
+    return { ok: false, query: '', reason: 'Malformed GraphQL body' };
+  }
+}
+
+function isGraphqlNameStart(ch: string): boolean {
+  return typeof ch === 'string' && ch.length === 1 && /[A-Za-z_]/.test(ch);
+}
+
+function isGraphqlNameChar(ch: string): boolean {
+  return typeof ch === 'string' && ch.length === 1 && /[A-Za-z0-9_]/.test(ch);
+}
+
+function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
+  const keywords = new Set(['query', 'mutation', 'subscription', 'fragment', 'on', 'true', 'false', 'null']);
+  let depth = 0;
+  let maxDepth = 0;
+  let aliases = 0;
+  let fields = 0;
+  let i = 0;
+  let selectionDepth = 0;
+  let prevToken = '';
+
+  while (i < query.length) {
+    const ch = query[i];
+
+    if (ch === '#') {
+      while (i < query.length && query[i] !== '\n' && query[i] !== '\r') i++;
+      continue;
+    }
+
+    if (ch === '"') {
+      if (query.slice(i, i + 3) === '"""') {
+        i += 3;
+        const end = query.indexOf('"""', i);
+        if (end === -1) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+        i = end + 3;
+        continue;
+      }
+      i++;
+      let closed = false;
+      while (i < query.length) {
+        if (query[i] === '\\') {
+          i += 2;
+          continue;
+        }
+        if (query[i] === '"') {
+          i++;
+          closed = true;
+          break;
+        }
+        i++;
+      }
+      if (!closed) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+      continue;
+    }
+
+    if (ch === '{') {
+      depth++;
+      selectionDepth++;
+      if (depth > maxDepth) maxDepth = depth;
+      if (maxDepth > guard.maxDepth) {
+        return { ok: false, reason: 'GraphQL depth limit exceeded', depth: maxDepth, aliases, fields };
+      }
+      prevToken = '{';
+      i++;
+      continue;
+    }
+
+    if (ch === '}') {
+      depth--;
+      selectionDepth = Math.max(0, selectionDepth - 1);
+      if (depth < 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+      prevToken = '}';
+      i++;
+      continue;
+    }
+
+    if (isGraphqlNameStart(ch)) {
+      const start = i;
+      i++;
+      while (i < query.length && isGraphqlNameChar(query[i])) i++;
+      const name = query.slice(start, i);
+      let j = i;
+      while (j < query.length && /\s/.test(query[j])) j++;
+
+      if (selectionDepth > 0 && !keywords.has(name) && prevToken !== '$' && prevToken !== '@') {
+        if (query[j] === ':') {
+          aliases++;
+          if (aliases > guard.maxAliases) {
+            return { ok: false, reason: 'GraphQL alias limit exceeded', depth: maxDepth, aliases, fields };
+          }
+        } else {
+          fields++;
+          if (fields > guard.maxFields) {
+            return { ok: false, reason: 'GraphQL field limit exceeded', depth: maxDepth, aliases, fields };
+          }
+        }
+      }
+      prevToken = name;
+      continue;
+    }
+
+    if (ch === '$' || ch === '@' || ch === ':' || ch === '(' || ch === ')' || ch === '[' || ch === ']') {
+      prevToken = ch;
+    }
+    i++;
+  }
+
+  if (depth !== 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+  if (maxDepth === 0) return { ok: false, reason: 'Malformed GraphQL query', depth: maxDepth, aliases, fields };
+  return { ok: true, depth: maxDepth, aliases, fields };
+}
+
+async function enforceGraphqlGuard(request: Request, pathname: string, ctx: ReqCtx): Promise<Response | null> {
+  const guard = CFG.graphqlGuard;
+  if (!guard || request.method !== 'POST' || !isGraphqlPath(pathname)) return null;
+
+  const body = await readLimitedRequestText(request, guard.maxBodyBytes || 65536);
+  let scan: GraphqlScanResult;
+  if (!body.ok) {
+    scan = { ok: false, reason: body.reason || 'GraphQL body too large', depth: 0, aliases: 0, fields: 0 };
+  } else {
+    const extracted = extractGraphqlQuery(body.text, request.headers.get('content-type') || '');
+    scan = extracted.ok
+      ? scanGraphqlQuery(extracted.query, guard)
+      : { ok: false, reason: extracted.reason || 'Malformed GraphQL query', depth: 0, aliases: 0, fields: 0 };
+  }
+
+  if (scan.ok) return null;
+
+  const fields = {
+    status: 400,
+    block_reason: scan.reason || 'GraphQL guard violation',
+    method: ctx.method,
+    uri: ctx.uri,
+    correlation_id: ctx.correlationId,
+    graphql_depth: scan.depth,
+    graphql_aliases: scan.aliases,
+    graphql_fields: scan.fields,
+  };
+  if (guard.mode === 'report') {
+    logEvent('monitor', fields);
+    return null;
+  }
+  return shouldBlock(400, fields.block_reason, ctx);
 }
 
 function base64UrlToBytes(input: string): Uint8Array {
@@ -221,6 +555,48 @@ function isUnsafeJwksUrl(rawUrl: string): string | null {
   return null;
 }
 
+async function readLimitedResponseText(res: Response, maxBytes: number): Promise<string> {
+  const body = res.body;
+  if (!body) {
+    const text = await res.text();
+    if (new TextEncoder().encode(text).byteLength > maxBytes) {
+      throw new Error('JWKS response too large');
+    }
+    return text;
+  }
+
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+
+  while (true) {
+    const chunk = await reader.read();
+    if (chunk.done) break;
+    total += chunk.value.byteLength;
+    if (total > maxBytes) {
+      try { await reader.cancel(); } catch (_e) { /* ignore */ }
+      throw new Error('JWKS response too large');
+    }
+    chunks.push(chunk.value);
+  }
+
+  const merged = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    merged.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(merged);
+}
+
+function validateJwksKeys(body: any): Array<Record<string, any>> {
+  const keys = Array.isArray(body?.keys) ? body.keys : [];
+  if (keys.length > JWKS_MAX_KEYS) {
+    throw new Error('JWKS key count exceeds limit');
+  }
+  return keys;
+}
+
 async function fetchJwks(jwksUrl: string, ttlSec: number): Promise<Array<Record<string, any>>> {
   const unsafe = isUnsafeJwksUrl(jwksUrl);
   if (unsafe) {
@@ -256,8 +632,8 @@ async function fetchJwks(jwksUrl: string, ttlSec: number): Promise<Array<Record<
     // cloud-metadata endpoint or a different tenant's IdP.
     const res = await fetch(jwksUrl, { method: 'GET', redirect: 'error' });
     if (!res.ok) throw new Error('Failed to fetch JWKS: ' + res.status);
-    const body = await res.json();
-    const keys = Array.isArray((body as any)?.keys) ? (body as any).keys : [];
+    const bodyText = await readLimitedResponseText(res, JWKS_MAX_BODY_BYTES);
+    const keys = validateJwksKeys(JSON.parse(bodyText));
     jwksCache.set(jwksUrl, { fetchedAt: now, keys });
     jwksNegativeCache.delete(jwksUrl);
     return keys;
@@ -280,6 +656,13 @@ function isJwtAlgAllowed(headerAlg: unknown, gate: any, expected: string): boole
     ? gate.allowed_algorithms
     : [expected];
   return allowed.includes(headerAlg);
+}
+
+function isMatchingRs256Jwk(key: any, kid: unknown): boolean {
+  return typeof kid === 'string' && kid.length > 0
+    && key?.kid === kid
+    && key?.kty === 'RSA'
+    && (!key.alg || key.alg === 'RS256');
 }
 
 async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ valid: boolean; error?: string; payload?: any }> {
@@ -327,32 +710,36 @@ async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ va
 
   if (gate.algorithm === 'RS256') {
     if (!gate.jwks_url) return { valid: false, error: 'JWKS URL missing' };
-    let keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
-    let jwk = keys.find((k) => k.kid === header.kid && k.kty === 'RSA');
-    // Key rotation: if `kid` is not in our cache, invalidate and refetch once
-    // — the IdP may have rotated keys since our last fetch. This prevents a
-    // "stuck isolate" 401 storm after rotation.
-    if (!jwk) {
-      jwksCache.delete(gate.jwks_url);
-      keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
-      jwk = keys.find((k) => k.kid === header.kid && k.kty === 'RSA');
-    }
-    if (!jwk) return { valid: false, error: 'JWK key not found' };
+    try {
+      let keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
+      let jwk = keys.find((k) => isMatchingRs256Jwk(k, header.kid));
+      // Key rotation: if `kid` is not in our cache, invalidate and refetch once
+      // — the IdP may have rotated keys since our last fetch. This prevents a
+      // "stuck isolate" 401 storm after rotation.
+      if (!jwk) {
+        jwksCache.delete(gate.jwks_url);
+        keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
+        jwk = keys.find((k) => isMatchingRs256Jwk(k, header.kid));
+      }
+      if (!jwk) return { valid: false, error: 'JWK key not found' };
 
-    const verifyKey = await crypto.subtle.importKey(
-      'jwk',
-      jwk,
-      { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-      false,
-      ['verify'],
-    );
-    const ok = await crypto.subtle.verify(
-      'RSASSA-PKCS1-v1_5',
-      verifyKey,
-      base64UrlToBytes(signatureB64),
-      new TextEncoder().encode(signData),
-    );
-    return ok ? { valid: true, payload } : { valid: false, error: 'Invalid signature' };
+      const verifyKey = await crypto.subtle.importKey(
+        'jwk',
+        jwk,
+        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
+        false,
+        ['verify'],
+      );
+      const ok = await crypto.subtle.verify(
+        'RSASSA-PKCS1-v1_5',
+        verifyKey,
+        base64UrlToBytes(signatureB64),
+        new TextEncoder().encode(signData),
+      );
+      return ok ? { valid: true, payload } : { valid: false, error: 'Invalid signature' };
+    } catch (err: any) {
+      return { valid: false, error: err?.message || 'JWKS verification failed' };
+    }
   }
 
   return { valid: false, error: 'Unsupported JWT algorithm' };
@@ -401,6 +788,50 @@ function canonicalSignedUrlPayload(pathname: string, params: URLSearchParams, si
   return query ? `${pathname}?${query}` : pathname;
 }
 
+function canonicalOriginAuthQuery(params: URLSearchParams): string {
+  const pairs: Array<[string, string]> = [];
+  params.forEach((value, key) => pairs.push([key, value]));
+  pairs.sort((a, b) => {
+    if (a[0] === b[0]) return a[1] < b[1] ? -1 : (a[1] > b[1] ? 1 : 0);
+    return a[0] < b[0] ? -1 : 1;
+  });
+  return pairs
+    .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
+    .join('&');
+}
+
+function originAuthSignedComponents(auth: any): string[] {
+  return Array.isArray(auth.signed_components) && auth.signed_components.length > 0
+    ? auth.signed_components
+    : ['method', 'path', 'query', 'body', 'timestamp', 'nonce'];
+}
+
+function canonicalOriginAuthInput(request: Request, url: URL, auth: any, timestamp: string, nonce: string, bodyHash: string): string {
+  const values: Record<string, string> = {
+    method: String(request.method || '').toUpperCase(),
+    path: url.pathname || '/',
+    query: canonicalOriginAuthQuery(url.searchParams),
+    body: bodyHash || '',
+    timestamp,
+    nonce,
+  };
+  return originAuthSignedComponents(auth).map((component) => values[component] || '').join('\n');
+}
+
+async function sha256HexBytes(input: ArrayBuffer): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', input);
+  const bytes = new Uint8Array(digest);
+  let hex = '';
+  for (const b of bytes) hex += b.toString(16).padStart(2, '0');
+  return hex;
+}
+
+function randomOriginAuthNonce(): string {
+  const buf = new Uint8Array(16);
+  crypto.getRandomValues(buf);
+  return Array.from(buf, (b: number) => b.toString(16).padStart(2, '0')).join('');
+}
+
 function isHostAllowed(hostHeader: string): boolean {
   const allowedHosts: string[] = Array.isArray(CFG.allowedHosts) ? CFG.allowedHosts : [];
   if (allowedHosts.length === 0) return true;
@@ -417,6 +848,14 @@ function isHostAllowed(hostHeader: string): boolean {
   return false;
 }
 
+function appendVary(headers: Headers, token: string): void {
+  const existing = headers.get('vary') || '';
+  const tokens = existing.split(',').map((s: string) => s.trim()).filter(Boolean);
+  const lower = tokens.map((s: string) => s.toLowerCase());
+  if (lower.indexOf(token.toLowerCase()) === -1) tokens.push(token);
+  headers.set('Vary', tokens.join(', '));
+}
+
 function handleCorsPreflight(request: Request): Response | null {
   if (request.method !== 'OPTIONS' || !CFG.cors) return null;
 
@@ -427,22 +866,365 @@ function handleCorsPreflight(request: Request): Response | null {
   const isAllowed = allowedOrigins.includes('*') || allowedOrigins.includes(origin);
   if (!isAllowed) return null;
 
-  const headers: Record<string, string> = {
+  const headers = new Headers({
     'Access-Control-Allow-Origin': origin,
     'Cache-Control': 'no-store',
-  };
+  });
+  appendVary(headers, 'Origin');
 
-  if (CFG.cors.allow_methods) headers['Access-Control-Allow-Methods'] = CFG.cors.allow_methods.join(', ');
-  if (CFG.cors.allow_headers) headers['Access-Control-Allow-Headers'] = CFG.cors.allow_headers.join(', ');
-  if (CFG.cors.allow_credentials) headers['Access-Control-Allow-Credentials'] = 'true';
-  if (CFG.cors.max_age) headers['Access-Control-Max-Age'] = String(CFG.cors.max_age);
+  if (CFG.cors.allow_methods) headers.set('Access-Control-Allow-Methods', CFG.cors.allow_methods.join(', '));
+  if (CFG.cors.allow_headers) headers.set('Access-Control-Allow-Headers', CFG.cors.allow_headers.join(', '));
+  if (CFG.cors.allow_credentials) headers.set('Access-Control-Allow-Credentials', 'true');
+  if (CFG.cors.max_age) headers.set('Access-Control-Max-Age', String(CFG.cors.max_age));
 
   return new Response(null, { status: 204, headers });
+}
+
+async function sha256Hex(input: string): Promise<string> {
+  const data = new TextEncoder().encode(input);
+  const digest = await crypto.subtle.digest('SHA-256', data);
+  const bytes = new Uint8Array(digest);
+  let hex = '';
+  for (const b of bytes) hex += b.toString(16).padStart(2, '0');
+  return hex;
+}
+
+function readCookie(request: Request, name: string): string {
+  const cookie = request.headers.get('cookie') || '';
+  const parts = cookie.split(';');
+  for (const part of parts) {
+    const i = part.indexOf('=');
+    if (i === -1) continue;
+    const key = part.slice(0, i).trim();
+    if (key === name) return part.slice(i + 1).trim();
+  }
+  return '';
+}
+
+function removeChallengeParams(url: URL): URL {
+  const clean = new URL(url.toString());
+  clean.searchParams.delete('__cdn_challenge_seed');
+  clean.searchParams.delete('__cdn_challenge_exp');
+  clean.searchParams.delete('__cdn_challenge_nonce');
+  clean.searchParams.delete('__cdn_challenge_sig');
+  return clean;
+}
+
+function challengeMatches(url: URL, uaLower: string): boolean {
+  const ch = CFG.challenge;
+  if (!ch || ch.enabled !== true) return false;
+  const prefixes: string[] = Array.isArray(ch.pathPrefixes) ? ch.pathPrefixes : [];
+  const uaContains: string[] = Array.isArray(ch.uaContains) ? ch.uaContains : [];
+  const pathHit = prefixes.some((p: string) => url.pathname === p || url.pathname.startsWith(p + '/'));
+  const uaHit = uaLower && uaContains.some((s: string) => s && uaLower.includes(s));
+  return pathHit || uaHit;
+}
+
+async function challengeUaBinding(ua: string): Promise<string> {
+  return (await sha256Hex(ua || '')).slice(0, 16);
+}
+
+async function verifyChallengeCookie(request: Request, env: WorkerEnv, ua: string): Promise<boolean> {
+  const ch = CFG.challenge;
+  if (!ch || ch.enabled !== true) return false;
+  const secret = env[ch.secretEnv || 'CHALLENGE_SECRET'] || '';
+  if (!secret) return false;
+  const raw = readCookie(request, ch.cookieName || '__cdn_challenge');
+  const parts = raw.split('.');
+  if (parts.length !== 2) return false;
+  const exp = Number(parts[0]);
+  const sig = parts[1];
+  if (!Number.isFinite(exp) || Math.floor(Date.now() / 1000) > exp) return false;
+  const uaHash = await challengeUaBinding(ua);
+  const expected = await hmacSha256Base64Url(secret, String(exp) + ':' + uaHash);
+  return timingSafeEqual(expected, sig);
+}
+
+async function verifyChallengeSolution(url: URL, env: WorkerEnv, ua: string): Promise<boolean> {
+  const ch = CFG.challenge;
+  if (!ch || ch.enabled !== true) return false;
+  const secret = env[ch.secretEnv || 'CHALLENGE_SECRET'] || '';
+  if (!secret) return false;
+  const seed = url.searchParams.get('__cdn_challenge_seed') || '';
+  const expRaw = url.searchParams.get('__cdn_challenge_exp') || '';
+  const nonce = url.searchParams.get('__cdn_challenge_nonce') || '';
+  const sig = url.searchParams.get('__cdn_challenge_sig') || '';
+  if (!seed || !expRaw || !nonce || !sig) return false;
+  if (!/^[A-Za-z0-9_-]{16,128}$/.test(seed)) return false;
+  if (!/^[0-9a-f]{1,16}$/i.test(nonce)) return false;
+  const exp = Number(expRaw);
+  if (!Number.isFinite(exp) || Math.floor(Date.now() / 1000) > exp) return false;
+  const uaHash = await challengeUaBinding(ua);
+  const expectedSig = await hmacSha256Base64Url(secret, seed + ':' + expRaw + ':' + uaHash);
+  if (!timingSafeEqual(expectedSig, sig)) return false;
+  const difficulty = Math.max(1, Math.min(6, Number(ch.difficulty) || 3));
+  const digest = await sha256Hex(seed + ':' + nonce);
+  return digest.startsWith('0'.repeat(difficulty));
+}
+
+function randomChallengeSeed(): string {
+  const buf = new Uint8Array(18);
+  crypto.getRandomValues(buf);
+  let binary = '';
+  for (const b of buf) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+async function challengeResponse(url: URL, env: WorkerEnv, ua: string, ctx: ReqCtx): Promise<Response> {
+  const ch = CFG.challenge;
+  const secret = ch ? (env[ch.secretEnv || 'CHALLENGE_SECRET'] || '') : '';
+  if (!secret) {
+    logEvent('block', {
+      status: 503,
+      block_reason: 'challenge_secret_missing',
+      method: ctx.method,
+      uri: ctx.uri,
+      correlation_id: ctx.correlationId,
+    });
+    return deny(503, 'Service Unavailable');
+  }
+  const seed = randomChallengeSeed();
+  const exp = String(Math.floor(Date.now() / 1000) + Math.min(300, Math.max(60, Number(ch.ttlSec) || 900)));
+  const uaHash = await challengeUaBinding(ua);
+  const sig = await hmacSha256Base64Url(secret, seed + ':' + exp + ':' + uaHash);
+  const target = removeChallengeParams(url).toString();
+  const difficulty = Math.max(1, Math.min(6, Number(ch.difficulty) || 3));
+  const payload = JSON.stringify({ seed, exp, sig, target, difficulty }).replace(/</g, '\\u003c');
+
+  logEvent('challenge', {
+    status: 403,
+    block_reason: 'js_challenge_required',
+    method: ctx.method,
+    uri: ctx.uri,
+    correlation_id: ctx.correlationId,
+  });
+
+  const html = `<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="robots" content="noindex,nofollow">
+<title>Security check</title>
+<style>body{font-family:system-ui,-apple-system,Segoe UI,sans-serif;margin:2rem;line-height:1.5;color:#172033}main{max-width:42rem;margin:auto}</style>
+</head>
+<body>
+<main>
+<h1>Security check</h1>
+<p>This site is running a lightweight browser verification. It should finish automatically.</p>
+<noscript><p>JavaScript is required to complete this experimental verification. Contact the site operator if you cannot enable it.</p></noscript>
+</main>
+<script>
+const c=${payload};
+async function hex(s){const b=await crypto.subtle.digest('SHA-256',new TextEncoder().encode(s));return Array.from(new Uint8Array(b),x=>x.toString(16).padStart(2,'0')).join('')}
+(async()=>{const prefix='0'.repeat(c.difficulty);for(let i=0;i<2000000;i++){const n=i.toString(16);if((await hex(c.seed+':'+n)).startsWith(prefix)){const u=new URL(c.target);u.searchParams.set('__cdn_challenge_seed',c.seed);u.searchParams.set('__cdn_challenge_exp',c.exp);u.searchParams.set('__cdn_challenge_nonce',n);u.searchParams.set('__cdn_challenge_sig',c.sig);location.replace(u.toString());return}}document.body.querySelector('main').insertAdjacentHTML('beforeend','<p>Verification took too long. Please reload.</p>')})().catch(()=>document.body.querySelector('main').insertAdjacentHTML('beforeend','<p>Verification failed. Please reload.</p>'));
+</script>
+</body>
+</html>`;
+  return new Response(html, {
+    status: 403,
+    headers: {
+      'content-type': 'text/html; charset=utf-8',
+      'cache-control': 'no-store',
+    },
+  });
+}
+
+async function handleChallenge(request: Request, url: URL, env: WorkerEnv, ua: string, uaLower: string, ctx: ReqCtx): Promise<Response | null> {
+  const ch = CFG.challenge;
+  if (!ch || ch.enabled !== true || !challengeMatches(url, uaLower)) return null;
+
+  if (ch.mode === 'report') {
+    logEvent('challenge_report', {
+      status: 200,
+      block_reason: 'js_challenge_report',
+      method: ctx.method,
+      uri: ctx.uri,
+      correlation_id: ctx.correlationId,
+    });
+    return null;
+  }
+  if (ch.mode === 'block') {
+    return shouldBlock(403, 'Forbidden', ctx);
+  }
+
+  if (await verifyChallengeCookie(request, env, ua)) return null;
+
+  const hasSolution = url.searchParams.has('__cdn_challenge_seed') ||
+    url.searchParams.has('__cdn_challenge_exp') ||
+    url.searchParams.has('__cdn_challenge_nonce') ||
+    url.searchParams.has('__cdn_challenge_sig');
+  if (hasSolution && await verifyChallengeSolution(url, env, ua)) {
+    const clean = removeChallengeParams(url);
+    const ttl = Math.max(60, Math.min(86400, Number(ch.ttlSec) || 900));
+    const exp = Math.floor(Date.now() / 1000) + ttl;
+    const uaHash = await challengeUaBinding(ua);
+    const secret = env[ch.secretEnv || 'CHALLENGE_SECRET'] || '';
+    const sig = await hmacSha256Base64Url(secret, String(exp) + ':' + uaHash);
+    return new Response(null, {
+      status: 302,
+      headers: {
+        location: clean.toString(),
+        'cache-control': 'no-store',
+        'set-cookie': `${ch.cookieName || '__cdn_challenge'}=${exp}.${sig}; Max-Age=${ttl}; Path=/; Secure; HttpOnly; SameSite=Lax`,
+      },
+    });
+  }
+
+  if (request.method !== 'GET' && request.method !== 'HEAD') {
+    return shouldBlock(403, 'Forbidden', ctx);
+  }
+  return challengeResponse(url, env, ua, ctx);
+}
+
+type DlpScanResult = { matched: boolean; detectors: string[]; masked: string };
+
+function isDlpEnabled(): boolean {
+  return Boolean(RESPONSE_CFG.responseDlp && RESPONSE_CFG.responseDlp.enabled);
+}
+
+function responseDlpLog(action: string, detectors: string[], ctx: ReqCtx, surface: string, status: number) {
+  logEvent(action === 'report_only' ? 'monitor' : 'block', {
+    status,
+    block_reason: 'response_dlp_' + action,
+    dlp_surface: surface,
+    dlp_detectors: detectors.join(','),
+    method: ctx.method,
+    uri: ctx.uri,
+    correlation_id: ctx.correlationId,
+  });
+}
+
+function luhnOk(value: string): boolean {
+  const digits = value.replace(/\D/g, '');
+  if (digits.length < 13 || digits.length > 19) return false;
+  let sum = 0;
+  let doubleIt = false;
+  for (let i = digits.length - 1; i >= 0; i--) {
+    let n = digits.charCodeAt(i) - 48;
+    if (n < 0 || n > 9) return false;
+    if (doubleIt) {
+      n *= 2;
+      if (n > 9) n -= 9;
+    }
+    sum += n;
+    doubleIt = !doubleIt;
+  }
+  return sum % 10 === 0;
+}
+
+function replaceAllWithDetector(input: string, re: RegExp, detector: string, mask: string, detectors: Set<string>): string {
+  const flags = re.flags.indexOf('g') === -1 ? re.flags + 'g' : re.flags;
+  const globalRe = new RegExp(re.source, flags);
+  return input.replace(globalRe, (match: string) => {
+    detectors.add(detector);
+    return mask;
+  });
+}
+
+function scanAndMaskDlp(input: string): DlpScanResult {
+  const dlp = RESPONSE_CFG.responseDlp || {};
+  const builtIn: string[] = dlp.detectors && Array.isArray(dlp.detectors.builtIn)
+    ? dlp.detectors.builtIn
+    : ['api_key', 'credit_card'];
+  const mask = typeof dlp.mask === 'string' ? dlp.mask : '[REDACTED]';
+  const detectors = new Set<string>();
+  let masked = input;
+
+  if (builtIn.indexOf('api_key') !== -1) {
+    masked = masked.replace(/\b(?:sk-live-|sk_test_|ghp_)[A-Za-z0-9_=-]{8,}\b/g, (match: string) => {
+      detectors.add('api_key');
+      return mask;
+    });
+  }
+
+  if (builtIn.indexOf('credit_card') !== -1) {
+    masked = masked.replace(/\b(?:\d[ -]?){13,19}\b/g, (match: string) => {
+      if (!luhnOk(match)) return match;
+      detectors.add('credit_card');
+      return mask;
+    });
+  }
+
+  const customRegexes: RegExp[] = Array.isArray(RESPONSE_CFG.responseDlpCustomRegexes)
+    ? RESPONSE_CFG.responseDlpCustomRegexes
+    : [];
+  const customNames: string[] = dlp.detectors && Array.isArray(dlp.detectors.customRegexNames)
+    ? dlp.detectors.customRegexNames
+    : [];
+  for (let i = 0; i < customRegexes.length; i++) {
+    masked = replaceAllWithDetector(masked, customRegexes[i], customNames[i] || 'custom', mask, detectors);
+  }
+
+  return { matched: detectors.size > 0, detectors: Array.from(detectors), masked };
+}
+
+function dlpCanInspectBody(out: Response): boolean {
+  const dlp = RESPONSE_CFG.responseDlp || {};
+  if (!dlp.body || !dlp.body.enabled) return false;
+  const contentType = (out.headers.get('content-type') || '').toLowerCase();
+  const allowed: string[] = Array.isArray(dlp.body.contentTypes) ? dlp.body.contentTypes : [];
+  if (allowed.length > 0 && !allowed.some((ct: string) => contentType.indexOf(ct) !== -1)) return false;
+  const len = Number(out.headers.get('content-length') || '0');
+  const maxBytes = Number(dlp.body.maxBytes) || 32768;
+  return !Number.isFinite(len) || len === 0 || len <= maxBytes;
+}
+
+async function applyResponseDlp(out: Response, ctx: ReqCtx): Promise<Response> {
+  if (!isDlpEnabled()) return out;
+  const dlp = RESPONSE_CFG.responseDlp;
+  const action = dlp.action || 'report_only';
+  const blockStatus = Number(dlp.blockStatus) || 451;
+
+  if (dlp.headers && dlp.headers.enabled) {
+    const names: string[] = Array.isArray(dlp.headers.names) ? dlp.headers.names : [];
+    for (const name of names) {
+      const value = out.headers.get(name);
+      if (!value) continue;
+      const scan = scanAndMaskDlp(value);
+      if (!scan.matched) continue;
+      responseDlpLog(action, scan.detectors, ctx, 'header:' + name, blockStatus);
+      out.headers.set('X-Edge-DLP', action);
+      if (action === 'block') {
+        return new Response(dlp.blockBody || 'Response blocked by edge DLP', {
+          status: blockStatus,
+          headers: { 'Cache-Control': 'no-store', 'X-Edge-DLP': 'block' },
+        });
+      }
+      if (action === 'mask') out.headers.set(name, scan.masked);
+    }
+  }
+
+  if (!dlpCanInspectBody(out)) return out;
+  const clone = out.clone();
+  const text = await clone.text();
+  const maxBytes = Number(dlp.body.maxBytes) || 32768;
+  if (new TextEncoder().encode(text).length > maxBytes) return out;
+  const scan = scanAndMaskDlp(text);
+  if (!scan.matched) return out;
+  responseDlpLog(action, scan.detectors, ctx, 'body', blockStatus);
+  out.headers.set('X-Edge-DLP', action);
+  if (action === 'block') {
+    return new Response(dlp.blockBody || 'Response blocked by edge DLP', {
+      status: blockStatus,
+      headers: { 'Cache-Control': 'no-store', 'X-Edge-DLP': 'block' },
+    });
+  }
+  if (action === 'report_only') return out;
+  const maskedHeaders = new Headers(out.headers);
+  maskedHeaders.delete('content-length');
+  maskedHeaders.set('X-Edge-DLP', 'mask');
+  return new Response(scan.masked, {
+    status: out.status,
+    statusText: out.statusText,
+    headers: maskedHeaders,
+  });
 }
 
 export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
+    const rawPathname = rawPathnameFromRequestUrl(request.url);
     const ctx = reqCtx(request);
 
     const preflight = handleCorsPreflight(request);
@@ -480,7 +1262,7 @@ export default {
       if (r) return r;
     }
 
-    if (url.pathname.length > CFG.maxUriLength) {
+    if (rawPathname.length > CFG.maxUriLength) {
       const r = shouldBlock(414, 'URI Too Long', ctx);
       if (r) return r;
     }
@@ -496,30 +1278,6 @@ export default {
       }
     }
 
-    url.pathname = normalizePath(url.pathname);
-
-    const pathLower = url.pathname.toLowerCase();
-    for (const m of CFG.blockPathContains) {
-      if (pathLower.includes(m)) {
-        const r = shouldBlock(400, 'Bad Request', ctx);
-        if (r) return r;
-      }
-    }
-    for (const re of CFG.blockPathRegexes) {
-      if (re.test(url.pathname)) {
-        const r = shouldBlock(400, 'Bad Request', ctx);
-        if (r) return r;
-      }
-    }
-
-    for (const h of CFG.requiredHeaders) {
-      const val = request.headers.get(h);
-      if (!val) {
-        const r = shouldBlock(400, 'Missing ' + h, ctx);
-        if (r) return r;
-      }
-    }
-
     if (CFG.maxHeaderSize > 0) {
       let totalSize = 0;
       request.headers.forEach((value, key) => {
@@ -527,19 +1285,6 @@ export default {
       });
       if (totalSize > CFG.maxHeaderSize) {
         const r = shouldBlock(431, 'Request Header Fields Too Large', ctx);
-        if (r) return r;
-      }
-    }
-
-    const ua = request.headers.get('user-agent') || '';
-    if (ua && ua.length > 512) {
-      const r = shouldBlock(400, 'User-Agent Too Long', ctx);
-      if (r) return r;
-    }
-    const uaLower = ua.toLowerCase();
-    for (const s of CFG.uaDenyContains) {
-      if (uaLower.includes(s)) {
-        const r = shouldBlock(403, 'Forbidden', ctx);
         if (r) return r;
       }
     }
@@ -555,7 +1300,45 @@ export default {
       if (r) return r;
     }
 
+    const anomalyBlock = blockIfRequestAnomaly(request, rawPathname, qs, ctx);
+    if (anomalyBlock) return anomalyBlock;
+
+    const rawPathBlock = blockIfPathPattern(rawPathname, ctx);
+    if (rawPathBlock) return rawPathBlock;
+
+    url.pathname = normalizePath(url.pathname);
+
+    const normalizedPathBlock = blockIfPathPattern(url.pathname, ctx);
+    if (normalizedPathBlock) return normalizedPathBlock;
+
+    for (const h of CFG.requiredHeaders) {
+      const val = request.headers.get(h);
+      if (!val) {
+        const r = shouldBlock(400, 'Missing ' + h, ctx);
+        if (r) return r;
+      }
+    }
+
+    const ua = request.headers.get('user-agent') || '';
+    if (ua && ua.length > 512) {
+      const r = shouldBlock(400, 'User-Agent Too Long', ctx);
+      if (r) return r;
+    }
+    const uaLower = ua.toLowerCase();
+    const challenge = await handleChallenge(request, url, env, ua, uaLower, ctx);
+    if (challenge) return challenge;
+
+    for (const s of CFG.uaDenyContains) {
+      if (uaLower.includes(s)) {
+        const r = shouldBlock(403, 'Forbidden', ctx);
+        if (r) return r;
+      }
+    }
+
     for (const k of CFG.dropQueryKeys) url.searchParams.delete(k);
+
+    const graphqlGuardResponse = await enforceGraphqlGuard(request, url.pathname, ctx);
+    if (graphqlGuardResponse) return graphqlGuardResponse;
 
     // Nonce to forward to origin after a successful signed_url verification.
     // Collected here and attached when we build the origin-facing Request.
@@ -676,12 +1459,30 @@ export default {
     for (const h of ['transfer-encoding', 'connection', 'keep-alive', 'te', 'upgrade', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'trailer']) {
       forwardHeaders.delete(h);
     }
-    if (CFG.originAuth && CFG.originAuth.type === 'custom_header') {
+    if (CFG.originAuth && (CFG.originAuth.type === 'custom_header' || CFG.originAuth.type === 'hmac_signature')) {
       const envName = CFG.originAuth.secret_env || '';
       const secret = envName ? (env[envName] || '') : '';
       if (secret) {
-        const headerName = CFG.originAuth.header || 'X-Origin-Verify';
-        forwardHeaders.set(headerName, secret);
+        if (CFG.originAuth.type === 'hmac_signature') {
+          const prefix = CFG.originAuth.header_prefix || 'X-CDN-Auth';
+          const timestamp = String(Math.floor(Date.now() / 1000));
+          const nonce = randomOriginAuthNonce();
+          let bodyHash = '';
+          if (CFG.originAuth.include_body_hash === true) {
+            bodyHash = await sha256HexBytes(await request.clone().arrayBuffer());
+          }
+          const canonical = canonicalOriginAuthInput(request, url, CFG.originAuth, timestamp, nonce, bodyHash);
+          const signature = await hmacSha256Base64Url(secret, canonical);
+          forwardHeaders.set(prefix + '-Timestamp', timestamp);
+          forwardHeaders.set(prefix + '-Nonce', nonce);
+          if (CFG.originAuth.include_body_hash === true) {
+            forwardHeaders.set(prefix + '-Body-SHA256', bodyHash);
+          }
+          forwardHeaders.set(prefix + '-Signature', signature);
+        } else {
+          const headerName = CFG.originAuth.header || 'X-Origin-Verify';
+          forwardHeaders.set(headerName, secret);
+        }
       } else {
         console.log(JSON.stringify({
           ts: new Date().toISOString(),
@@ -719,6 +1520,7 @@ export default {
       headers: forwardHeaders,
       body: request.body,
       redirect: request.redirect,
+      ...({ duplex: 'half' } as any),
     }));
 
     const out = new Response(res.body, res);
@@ -767,12 +1569,8 @@ export default {
     if (RESPONSE_CFG.forceVaryAuth && isAuthPath) {
       out.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
       out.headers.set('Pragma', 'no-cache');
-      const existingVary = out.headers.get('vary') || '';
-      const tokens = existingVary.split(',').map((s: string) => s.trim()).filter(Boolean);
-      const lower = tokens.map((t: string) => t.toLowerCase());
-      if (lower.indexOf('authorization') === -1) tokens.push('Authorization');
-      if (lower.indexOf('cookie') === -1) tokens.push('Cookie');
-      out.headers.set('Vary', tokens.join(', '));
+      appendVary(out.headers, 'Authorization');
+      appendVary(out.headers, 'Cookie');
     }
 
     // Clear-Site-Data on configured logout paths (issue #20). Only on 2xx/3xx.
@@ -833,11 +1631,12 @@ export default {
 
       if (origin && isAllowed) {
         out.headers.set('Access-Control-Allow-Origin', origin);
+        appendVary(out.headers, 'Origin');
         if (RESPONSE_CFG.cors.allow_credentials) out.headers.set('Access-Control-Allow-Credentials', 'true');
         if (RESPONSE_CFG.cors.expose_headers?.length > 0) out.headers.set('Access-Control-Expose-Headers', RESPONSE_CFG.cors.expose_headers.join(', '));
       }
     }
 
-    return out;
+    return await applyResponseDlp(out, ctx);
   },
 };

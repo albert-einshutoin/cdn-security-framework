@@ -50,6 +50,29 @@ firewall:
       - AWSManagedRulesCommonRuleSet
 `;
 
+const STATIC_TOKEN_POLICY = `
+version: 1
+project: token-test
+request:
+  allow_methods: [GET, POST]
+routes:
+  - name: admin
+    match:
+      path_prefixes: ["/admin"]
+    auth_gate:
+      type: static_token
+      header: x-edge-token
+      token_env: EDGE_ADMIN_TOKEN
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    rate_limit: 1000
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+`;
+
 const BROKEN_POLICY = `
 version: 1
 request:
@@ -57,6 +80,59 @@ request:
 response_headers:
   hsts: "max-age=1"
 unknown_top_level_key: true
+`;
+
+const READINESS_AWS_POLICY = `
+version: 1
+project: readiness-test
+metadata:
+  risk_level: balanced
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, HEAD]
+response_headers:
+  hsts: "max-age=31536000; includeSubDomains"
+  csp_public: "default-src 'self'; frame-ancestors 'none'"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    rate_limit: 1000
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+      - AWSManagedRulesIPReputationList
+    logging:
+      enabled: true
+      destination_arn_env: WAF_LOG_DESTINATION_ARN
+      redacted_fields: [authorization, cookie]
+`;
+
+const CAPABILITIES_POLICY = `
+version: 1
+project: capabilities-test
+metadata:
+  risk_level: balanced
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, POST]
+  graphql_guard:
+    endpoint_paths: ["/graphql"]
+    max_depth: 8
+response_headers:
+  hsts: "max-age=31536000"
+response_dlp:
+  enabled: true
+  action: report_only
+firewall:
+  challenge:
+    enabled: true
+    path_prefixes: ["/login"]
+  waf:
+    scope: CLOUDFRONT
+    rate_limit: 1000
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
 `;
 
 function tmpProject(yamlBody: string) {
@@ -179,6 +255,28 @@ test('compile: aws target writes edge + infra, returns file lists', () => {
     assert.ok(result.edgeFiles.every((f: string) => fs.existsSync(f)), 'all edge files must exist');
     assert.ok(result.infraFiles.length > 0, 'aws target emits infra files');
     assert.ok(result.infraFiles.every((f: string) => fs.existsSync(f)));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('compile: allowPlaceholderToken permits non-production build without auth env', () => {
+  const ctx = tmpProject(STATIC_TOKEN_POLICY);
+  try {
+    const result = api.compile({
+      policyPath: ctx.policyPath,
+      outDir: ctx.outDir,
+      target: 'aws',
+      allowPlaceholderToken: true,
+      env: Object.assign({}, process.env, {
+        EDGE_ADMIN_TOKEN: '',
+        ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+      }),
+    });
+    assert.strictEqual(result.ok, true, `compile failed: ${result.errors.join(' ')}`);
+    const viewer = fs.readFileSync(path.join(ctx.outDir, 'edge', 'viewer-request.js'), 'utf8');
+    assert.ok(viewer.includes('INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN'));
+    assert.ok(result.warnings.some((w: string) => /allow-placeholder-token/.test(w)));
   } finally {
     ctx.cleanup();
   }
@@ -372,6 +470,167 @@ test('CLI backwards-compat: `cdn-security build --target aws` still succeeds', (
   }
 });
 
+test('CLI authoring DX: build --allow-placeholder-token succeeds without auth env', () => {
+  const ctx = tmpProject(BASIC_AWS_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'build',
+      '-p', ctx.policyPath,
+      '-o', ctx.outDir,
+      '--target', 'aws',
+      '--allow-placeholder-token',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: Object.assign({}, process.env, {
+        EDGE_ADMIN_TOKEN: '',
+        ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+      }),
+    });
+    assert.strictEqual(result.status, 0, `CLI build failed: ${result.stderr}`);
+    assert.ok(result.stderr.includes('Generated artifacts are NOT safe for production'));
+    assert.ok(fs.existsSync(path.join(ctx.outDir, 'edge', 'viewer-request.js')));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: init --guided emits lintable policy with selected shape', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-init-'));
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'init',
+      '--guided',
+      '--platform', 'cloudflare',
+      '--app-shape', 'rest-api',
+      '--auth', 'jwt',
+      '--admin-paths', '/api/',
+      '--cors-origins', 'https://app.example.com',
+      '--waf', 'strict',
+      '--geo-block', 'RU,CN',
+      '--ip-allowlist', '203.0.113.0/24',
+      '--deployment', 'github-actions',
+      '--project', 'guided-api',
+      '--force',
+    ], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `guided init failed: ${result.stderr}`);
+    const policyPath = path.join(tmp, 'policy', 'security.yml');
+    const raw = fs.readFileSync(policyPath, 'utf8');
+    assert.ok(raw.includes('Secrets are referenced by environment variable name only'));
+    const policy = require('js-yaml').load(raw);
+    assert.strictEqual(policy.project, 'guided-api');
+    assert.strictEqual(policy.metadata.risk_level, 'strict');
+    assert.strictEqual(policy.routes[0].auth_gate.type, 'jwt');
+    assert.deepStrictEqual(policy.routes[0].match.path_prefixes, ['/api/']);
+    assert.deepStrictEqual(policy.response_headers.cors.allow_origins, ['https://app.example.com']);
+    assert.deepStrictEqual(policy.firewall.waf.managed_rules, ['AWSManagedRulesCommonRuleSet']);
+    assert.deepStrictEqual(policy.firewall.geo.block_countries, ['RU', 'CN']);
+    assert.deepStrictEqual(policy.firewall.ip.allowlist, ['203.0.113.0/24']);
+    const lint = api.lintPolicy({ policyPath });
+    assert.strictEqual(lint.ok, true, `guided policy lint failed: ${JSON.stringify(lint.errors)}`);
+    const readiness: any = spawnSync(process.execPath, [
+      cli, 'readiness',
+      '-p', policyPath,
+      '--target', 'cloudflare',
+      '--strict',
+    ], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(readiness.status, 0, `guided policy readiness failed: ${readiness.stderr}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('CLI backwards-compat: init --profile still scaffolds existing starter flow', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'profile-init-'));
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'init',
+      '--platform', 'aws',
+      '--profile', 'balanced',
+      '--force',
+    ], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `profile init failed: ${result.stderr}`);
+    assert.ok(fs.existsSync(path.join(tmp, 'policy', 'security.yml')));
+    assert.ok(fs.existsSync(path.join(tmp, 'policy', 'profiles', 'balanced.yml')));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('CLI authoring DX: init --guided non-interactive applies defaults without optional prompts', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-init-defaults-'));
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'init',
+      '--guided',
+      '--app-shape', 'rest-api',
+      '--auth', 'jwt',
+      '--waf', 'strict',
+      '--force',
+    ], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: process.env,
+      input: '',
+    });
+    assert.strictEqual(result.status, 0, `guided init defaults failed: ${result.stderr}`);
+    const raw = fs.readFileSync(path.join(tmp, 'policy', 'security.yml'), 'utf8');
+    const policy = require('js-yaml').load(raw);
+    assert.strictEqual(policy.project, 'guided-rest-api');
+    assert.strictEqual(policy.metadata.description, 'Guided setup: rest-api on aws, auth=jwt, deployment=build-only.');
+    assert.deepStrictEqual(policy.routes[0].match.path_prefixes, ['/api/']);
+    assert.deepStrictEqual(policy.response_headers.cors.allow_origins, ['https://app.example.com']);
+    assert.deepStrictEqual(policy.firewall.waf.managed_rules, [
+      'AWSManagedRulesCommonRuleSet',
+      'AWSManagedRulesKnownBadInputsRuleSet',
+      'AWSManagedRulesIPReputationList',
+      'AWSManagedRulesSQLiRuleSet',
+      'AWSManagedRulesAnonymousIpList',
+      'AWSManagedRulesBotControlRuleSet',
+    ]);
+    assert.deepStrictEqual(policy.firewall.waf.logging, {
+      enabled: true,
+      destination_arn_env: 'WAF_LOG_DESTINATION_ARN',
+      redacted_fields: ['authorization', 'cookie', 'x-api-key'],
+    });
+    assert.strictEqual(policy.firewall.geo, undefined);
+    assert.strictEqual(policy.firewall.ip, undefined);
+    const readiness: any = spawnSync(process.execPath, [
+      cli, 'readiness',
+      '-p', path.join(tmp, 'policy', 'security.yml'),
+      '--target', 'aws',
+      '--strict',
+    ], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(readiness.status, 0, `guided default policy readiness failed: ${readiness.stderr}`);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('CLI authoring DX: explain summarizes policy posture', () => {
   const ctx = tmpProject(BASIC_AWS_POLICY);
   try {
@@ -391,6 +650,282 @@ test('CLI authoring DX: explain summarizes policy posture', () => {
     assert.ok(/WAF:/.test(result.stdout));
   } finally {
     ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: capabilities prints target matrix', () => {
+  const { spawnSync } = require('child_process');
+  const cli = path.join(repoRoot, 'bin', 'cli.js');
+  const result: any = spawnSync(process.execPath, [
+    cli, 'capabilities',
+  ], {
+    cwd: repoRoot,
+    encoding: 'utf8',
+    env: process.env,
+  });
+  assert.strictEqual(result.status, 0, `capabilities failed: ${result.stderr}`);
+  assert.ok(/Target Capabilities Matrix/.test(result.stdout));
+  assert.ok(/AWS CloudFront Functions/.test(result.stdout));
+  assert.ok(/AWS Lambda@Edge/.test(result.stdout));
+  assert.ok(/Cloudflare Workers/.test(result.stdout));
+  assert.ok(/Terraform-backed WAF/.test(result.stdout));
+  assert.ok(/response\.response_dlp/.test(result.stdout));
+});
+
+test('CLI authoring DX: capabilities JSON evaluates unsupported target controls', () => {
+  const ctx = tmpProject(CAPABILITIES_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'capabilities',
+      '--policy', ctx.policyPath,
+      '--target', 'aws',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `capabilities JSON failed: ${result.stderr}`);
+    const report = JSON.parse(result.stdout);
+    assert.strictEqual(report.target, 'aws');
+    assert.ok(report.targets.some((target: any) => target.key === 'cloudfront_functions'));
+    assert.ok(report.capabilities.some((cap: any) => cap.id === 'request.graphql_guard'));
+    assert.ok(report.capabilities.some((cap: any) => cap.id === 'response.response_dlp'));
+    assert.ok(report.policyEvaluation);
+    assert.ok(report.policyEvaluation.configuredControls.some((cap: any) => cap.id === 'request.graphql_guard'));
+    assert.ok(report.policyEvaluation.configuredControls.some((cap: any) => cap.id === 'response.response_dlp'));
+    assert.ok(report.policyEvaluation.findings.some((finding: any) =>
+      finding.capabilityId === 'request.graphql_guard' && finding.status === 'warning-only'
+    ));
+    assert.ok(report.policyEvaluation.findings.some((finding: any) =>
+      finding.capabilityId === 'response.response_dlp' && finding.status === 'warning-only'
+    ));
+    assert.ok(report.policyEvaluation.findings.some((finding: any) =>
+      finding.capabilityId === 'firewall.challenge' && finding.status === 'warning-only'
+    ));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: capabilities ignores disabled challenge controls', () => {
+  const disabledChallengePolicy = CAPABILITIES_POLICY.replace(
+    '  challenge:\n    enabled: true',
+    '  challenge:\n    enabled: false',
+  );
+  const ctx = tmpProject(disabledChallengePolicy);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'capabilities',
+      '--policy', ctx.policyPath,
+      '--target', 'aws',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `capabilities JSON failed: ${result.stderr}`);
+    const report = JSON.parse(result.stdout);
+    assert.ok(report.policyEvaluation);
+    assert.ok(!report.policyEvaluation.configuredControls.some((cap: any) => cap.id === 'firewall.challenge'));
+    assert.ok(!report.policyEvaluation.findings.some((finding: any) => finding.capabilityId === 'firewall.challenge'));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: readiness passes production-shaped policy and writes report', () => {
+  const ctx = tmpProject(READINESS_AWS_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const reportPath = path.join(ctx.tmp, 'readiness-report.json');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'readiness',
+      '-p', ctx.policyPath,
+      '--target', 'aws',
+      '--report', reportPath,
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `readiness failed: ${result.stderr}`);
+    assert.ok(/Readiness: PASS/.test(result.stdout));
+    const report = JSON.parse(fs.readFileSync(reportPath, 'utf8'));
+    assert.strictEqual(report.status, 'pass');
+    assert.deepStrictEqual(report.summary, { fail: 0, warn: 0 });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: readiness ignores disabled challenge controls', () => {
+  const disabledChallengePolicy = READINESS_AWS_POLICY.replace(
+    'firewall:\n  waf:',
+    'firewall:\n  challenge:\n    enabled: false\n  waf:',
+  );
+  const ctx = tmpProject(disabledChallengePolicy);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'readiness',
+      '-p', ctx.policyPath,
+      '--target', 'aws',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `readiness failed: ${result.stderr}`);
+    assert.ok(/Readiness: PASS/.test(result.stdout));
+    assert.ok(!/target\.aws\.challenge\.unsupported/.test(result.stdout + result.stderr));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: readiness fails when referenced build secret is missing', () => {
+  const ctx = tmpProject(STATIC_TOKEN_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'readiness',
+      '-p', ctx.policyPath,
+      '--target', 'aws',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: Object.assign({}, process.env, { EDGE_ADMIN_TOKEN: '' }),
+    });
+    assert.strictEqual(result.status, 1);
+    assert.ok(/doctor\.env_vars_referenced_by_policy/.test(result.stderr));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: readiness strict mode fails on warnings', () => {
+  const ctx = tmpProject(BASIC_AWS_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'readiness',
+      '-p', ctx.policyPath,
+      '--target', 'aws',
+      '--strict',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 1);
+    assert.ok(/firewall\.waf\.managed_rules\.core_signal_missing/.test(result.stderr));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: deploy-template emits AWS and Cloudflare workflow templates', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-template-'));
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const outDir = path.join(tmp, '.github', 'workflows');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'deploy-template',
+      '--target', 'all',
+      '--out-dir', outDir,
+    ], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `deploy-template failed: ${result.stderr}`);
+    const aws = fs.readFileSync(path.join(outDir, 'cdn-security-aws.yml'), 'utf8');
+    const cloudflare = fs.readFileSync(path.join(outDir, 'cdn-security-cloudflare.yml'), 'utf8');
+    assert.ok(aws.includes('cdn-security readiness --target aws --strict'));
+    assert.ok(aws.includes('${{ secrets.EDGE_ADMIN_TOKEN }}'));
+    assert.ok(aws.includes('cdn-security build --target aws --out-dir dist'));
+    assert.ok(cloudflare.includes('cdn-security readiness --target cloudflare --strict'));
+    assert.ok(cloudflare.includes('CDN_SECURITY_WORKER_SECRET_NAMES'));
+    assert.ok(cloudflare.includes('CDN_SECURITY_WORKER_SECRETS_FILE'));
+    assert.ok(cloudflare.includes('npx wrangler deploy dist/edge/cloudflare/index.ts --secrets-file'));
+    assert.ok(cloudflare.includes('${{ secrets.CLOUDFLARE_API_TOKEN }}'));
+    assert.ok(cloudflare.includes("'wrangler.toml'"));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('CLI authoring DX: deploy-template refuses overwrite without --force', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-template-'));
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const outDir = path.join(tmp, '.github', 'workflows');
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(path.join(outDir, 'cdn-security-aws.yml'), 'existing\n', 'utf8');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'deploy-template',
+      '--target', 'aws',
+      '--out-dir', outDir,
+    ], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 1);
+    assert.ok(/already exists/.test(result.stderr));
+
+    const forced: any = spawnSync(process.execPath, [
+      cli, 'deploy-template',
+      '--target', 'aws',
+      '--out-dir', outDir,
+      '--force',
+    ], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(forced.status, 0, `forced deploy-template failed: ${forced.stderr}`);
+    assert.ok(fs.readFileSync(path.join(outDir, 'cdn-security-aws.yml'), 'utf8').includes('CDN Security AWS Build'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('CLI authoring DX: deploy-template does not partially write on overwrite refusal', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-template-'));
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const outDir = path.join(tmp, '.github', 'workflows');
+    fs.mkdirSync(outDir, { recursive: true });
+    fs.writeFileSync(path.join(outDir, 'cdn-security-cloudflare.yml'), 'existing\n', 'utf8');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'deploy-template',
+      '--target', 'all',
+      '--out-dir', outDir,
+    ], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 1);
+    assert.ok(/already exists/.test(result.stderr));
+    assert.ok(!fs.existsSync(path.join(outDir, 'cdn-security-aws.yml')));
+    assert.strictEqual(fs.readFileSync(path.join(outDir, 'cdn-security-cloudflare.yml'), 'utf8'), 'existing\n');
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 

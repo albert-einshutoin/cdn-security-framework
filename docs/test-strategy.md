@@ -19,9 +19,22 @@ Node scripts, while introducing Vitest for focused compiler contract tests.
 
 ## Local workflow
 
+- Export the CI-style fixture secrets before running generated-artifact or
+  release-gate checks:
+
+  ```bash
+  export EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy
+  export ORIGIN_SECRET=ci-origin-secret-not-for-deploy
+  ```
+
 - Run focused Vitest checks with `npm run test:vitest`.
 - Run legacy unit coverage with `npm run test:unit`.
 - Run the full release gate with `npm run test:all`.
+
+`EDGE_ADMIN_TOKEN` is baked into CloudFront Function artifacts for policies
+with `static_token` auth gates. `ORIGIN_SECRET` covers origin-auth fixtures used
+by drift and release-gate checks. These fixture values are for local/CI
+validation only; production builds must use deployment secrets.
 
 Vitest writes JUnit output to `reports/vitest-junit.xml` when `CI=true`.
 
