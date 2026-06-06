@@ -186,6 +186,8 @@ test('cloudflare template contains auth enforcement logic', () => {
     assert.ok(template.includes('async function handleChallenge'), 'challenge handler missing');
     assert.ok(template.includes('verifyChallengeCookie'), 'challenge cookie verifier missing');
     assert.ok(template.includes('verifyChallengeSolution'), 'challenge proof verifier missing');
+    assert.ok(template.includes('function blockIfRequestAnomaly'), 'request anomaly guard missing');
+    assert.ok(template.includes('hasDoubleEncodedTraversalIndicator'), 'double-encoded traversal helper missing');
     // Auth/crypto hardening fixtures
     assert.ok(template.includes('isJwtAlgAllowed'), 'JWT alg whitelist helper missing');
     assert.ok(template.includes('isHostAllowed'), 'Host allowlist helper missing');
@@ -227,6 +229,68 @@ response_headers:
     const { res, fetchCalls } = await runGeneratedWorkerRequest(generated, request);
     assert.strictEqual(res.status, 400);
     assert.strictEqual(fetchCalls.length, 0, 'raw traversal should block before origin fetch');
+});
+test('cloudflare request anomaly guards block CRLF, malformed cookies, and double-encoded traversal', async () => {
+    const generated = compileCloudflare(`
+version: 1
+project: cf-anomaly-guard-test
+request:
+  allow_methods: ["GET"]
+  limits:
+    max_query_length: 1024
+    max_query_params: 30
+    max_uri_length: 2048
+  anomaly_guards:
+    enabled: true
+    max_cookie_bytes: 32
+    max_cookie_pairs: 2
+response_headers:
+  hsts: "max-age=31536000"
+`);
+    const encodedCrlf = await runGeneratedWorkerRequest(generated, new Request('https://edge.example.com/?next=%0d%0aheader', {
+        method: 'GET',
+        headers: { 'user-agent': 'runtime-test' },
+    }));
+    assert.strictEqual(encodedCrlf.res.status, 400);
+    assert.strictEqual(encodedCrlf.fetchCalls.length, 0);
+    const rawHeaderRequest = {
+        url: 'https://edge.example.com/',
+        method: 'GET',
+        headers: {
+            get(name) {
+                if (name.toLowerCase() === 'user-agent')
+                    return 'runtime-test';
+                if (name.toLowerCase() === 'x-test')
+                    return 'ok\nbad';
+                return '';
+            },
+            forEach(fn) {
+                fn('runtime-test', 'user-agent');
+                fn('ok\nbad', 'x-test');
+            },
+        },
+    };
+    const rawHeader = await runGeneratedWorkerRequest(generated, rawHeaderRequest);
+    assert.strictEqual(rawHeader.res.status, 400);
+    assert.strictEqual(rawHeader.fetchCalls.length, 0);
+    const malformedCookie = await runGeneratedWorkerRequest(generated, new Request('https://edge.example.com/', {
+        method: 'GET',
+        headers: { 'user-agent': 'runtime-test', cookie: 'a=1;;b=2' },
+    }));
+    assert.strictEqual(malformedCookie.res.status, 400);
+    assert.strictEqual(malformedCookie.fetchCalls.length, 0);
+    const doubleEncodedTraversal = await runGeneratedWorkerRequest(generated, new Request('https://edge.example.com/%252e%252e%252fsecret', {
+        method: 'GET',
+        headers: { 'user-agent': 'runtime-test' },
+    }));
+    assert.strictEqual(doubleEncodedTraversal.res.status, 400);
+    assert.strictEqual(doubleEncodedTraversal.fetchCalls.length, 0);
+    const benign = await runGeneratedWorkerRequest(generated, new Request('https://edge.example.com/download/%2520report?name=hello%2520world', {
+        method: 'GET',
+        headers: { 'user-agent': 'runtime-test' },
+    }));
+    assert.strictEqual(benign.res.status, 200);
+    assert.strictEqual(benign.fetchCalls.length, 1);
 });
 test('cloudflare compile emits experimental challenge config', () => {
     const generated = compileCloudflare(`

@@ -22,6 +22,11 @@ request:
     max_query_params: 20
     max_uri_length: 1024
 
+  anomaly_guards:
+    enabled: true
+    max_cookie_bytes: 4096
+    max_cookie_pairs: 80
+
   block:
     path_patterns:
       contains:

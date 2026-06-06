@@ -202,6 +202,175 @@
     return null;
   }
 
+  function hasRawControlLineBreak(s) {
+    return typeof s === 'string' && (s.indexOf('\r') !== -1 || s.indexOf('\n') !== -1);
+  }
+
+  function hasEncodedCrlfIndicator(s) {
+    if (typeof s !== 'string' || s.length === 0) return false;
+    var lower = s.toLowerCase();
+    return lower.indexOf('%0d') !== -1 || lower.indexOf('%0a') !== -1;
+  }
+
+  function hasCrlfIndicator(s) {
+    return hasRawControlLineBreak(s) || hasEncodedCrlfIndicator(s);
+  }
+
+  function decodeOnceWhenPercent25Present(s) {
+    if (typeof s !== 'string' || s.length === 0) return '';
+    if (s.toLowerCase().indexOf('%25') === -1) return '';
+    try {
+      return decodeURIComponent(s);
+    } catch (_e) {
+      return '';
+    }
+  }
+
+  function hasDoubleEncodedTraversalIndicator(s) {
+    const decoded = decodeOnceWhenPercent25Present(s);
+    if (!decoded) return false;
+    const lower = decoded.toLowerCase();
+    return lower.indexOf('%2e%2e') !== -1 ||
+      lower.indexOf('..%2f') !== -1 ||
+      lower.indexOf('..%5c') !== -1 ||
+      lower.indexOf('%2f..') !== -1 ||
+      lower.indexOf('%5c..') !== -1 ||
+      lower.indexOf('../') !== -1 ||
+      lower.indexOf('..\\') !== -1;
+  }
+
+  function hasCookieControlChar(cookie) {
+    if (typeof cookie !== 'string') return false;
+    for (var i = 0; i < cookie.length; i++) {
+      var code = cookie.charCodeAt(i);
+      if (code < 32 || code === 127) return true;
+    }
+    return false;
+  }
+
+  function isMalformedCookie(cookie) {
+    if (typeof cookie !== 'string' || cookie.length === 0) return false;
+    const guards = CFG.anomalyGuards || {};
+    if (guards.maxCookieBytes && cookie.length > guards.maxCookieBytes) return true;
+    if (hasCookieControlChar(cookie)) return true;
+
+    const parts = cookie.split(';');
+    let pairCount = 0;
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i].trim();
+      // A leading/trailing semicolon is tolerated, but an empty middle segment
+      // (`a=1;;b=2`) is a clear delimiter anomaly.
+      if (!part) {
+        if (i > 0 && i < parts.length - 1) return true;
+        continue;
+      }
+      const eq = part.indexOf('=');
+      if (eq <= 0) return true;
+      if (!part.slice(0, eq).trim()) return true;
+      pairCount++;
+      if (guards.maxCookiePairs && pairCount > guards.maxCookiePairs) return true;
+    }
+    return false;
+  }
+
+  function querystringMatches(qs, predicate) {
+    if (!qs) return false;
+    if (typeof qs === 'string') return predicate(qs);
+    if (typeof qs !== 'object') return false;
+    for (const k in qs) {
+      if (!Object.prototype.hasOwnProperty.call(qs, k)) continue;
+      if (predicate(k)) return true;
+      const entry = qs[k];
+      if (!entry || typeof entry !== 'object') {
+        if (predicate(String(entry))) return true;
+        continue;
+      }
+      if (predicate(entry.value)) return true;
+      if (Array.isArray(entry.multiValue)) {
+        for (const mv of entry.multiValue) {
+          if (predicate(mv && mv.value)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function headerEntryMatches(entry, predicate) {
+    if (!entry || typeof entry !== 'object') return false;
+    if (predicate(entry.value)) return true;
+    if (Array.isArray(entry.multiValue)) {
+      for (const mv of entry.multiValue) {
+        if (predicate(mv && mv.value)) return true;
+      }
+    }
+    return false;
+  }
+
+  function serializeCookieMap(cookies) {
+    if (!cookies || typeof cookies !== 'object') return '';
+    const parts = [];
+    for (const name in cookies) {
+      if (!Object.prototype.hasOwnProperty.call(cookies, name)) continue;
+      const entry = cookies[name];
+      if (!entry || typeof entry !== 'object') {
+        parts.push(name + '=' + String(entry));
+        continue;
+      }
+      if (Array.isArray(entry.multiValue) && entry.multiValue.length > 0) {
+        for (const mv of entry.multiValue) {
+          parts.push(name + '=' + String((mv && mv.value) || ''));
+        }
+      } else {
+        parts.push(name + '=' + String(entry.value || ''));
+      }
+    }
+    return parts.join('; ');
+  }
+
+  function cookieStringFromRequest(req, headers) {
+    const cookieMap = serializeCookieMap(req.cookies);
+    if (cookieMap) return cookieMap;
+    const entry = headers['cookie'];
+    if (!entry || typeof entry !== 'object') return '';
+    if (Array.isArray(entry.multiValue) && entry.multiValue.length > 0) {
+      const parts = [];
+      for (const mv of entry.multiValue) {
+        parts.push((mv && mv.value) || '');
+      }
+      return parts.join('; ');
+    }
+    return entry.value || '';
+  }
+
+  function blockIfRequestAnomaly(req) {
+    const guards = CFG.anomalyGuards || {};
+    if (guards.enabled !== true) return null;
+
+    const uri = req.uri || '';
+
+    if (guards.crlf !== false && (hasCrlfIndicator(uri) || querystringMatches(req.querystring, hasCrlfIndicator))) {
+      return resp(400, 'Bad Request');
+    }
+    if (guards.doubleEncodedTraversal !== false &&
+      (hasDoubleEncodedTraversalIndicator(uri) || querystringMatches(req.querystring, hasDoubleEncodedTraversalIndicator))) {
+      return resp(400, 'Bad Request');
+    }
+
+    const headers = req.headers || {};
+    for (const name in headers) {
+      if (!Object.prototype.hasOwnProperty.call(headers, name)) continue;
+      if (guards.crlf !== false && headerEntryMatches(headers[name], hasCrlfIndicator)) {
+        return resp(400, 'Bad Request');
+      }
+    }
+
+    const cookie = cookieStringFromRequest(req, headers);
+    if (guards.malformedCookie !== false && isMalformedCookie(cookie)) {
+      return resp(400, 'Malformed Cookie');
+    }
+    return null;
+  }
+
   function normalizePath(req) {
     let p = req.uri || '/';
     if (CFG.normalizePath.collapseSlashes) {
@@ -253,6 +422,13 @@
   }
 
   function guardAndNormalizeQuery(req) {
+    const limited = blockIfQueryLimits(req);
+    if (limited) return limited;
+    normalizeQuery(req);
+    return null;
+  }
+
+  function blockIfQueryLimits(req) {
     const originalQuerystring = req.querystring;
     const qs = serializeQuerystring(originalQuerystring);
 
@@ -260,6 +436,13 @@
 
     const parts = qs ? qs.split("&") : [];
     if (parts.length > CFG.maxQueryParams) return resp(400, "Too many query params");
+    return null;
+  }
+
+  function normalizeQuery(req) {
+    const originalQuerystring = req.querystring;
+    const qs = serializeQuerystring(originalQuerystring);
+    const parts = qs ? qs.split("&") : [];
 
     const kept = [];
     for (const p of parts) {
@@ -404,33 +587,41 @@
     const hc = shouldBlock(blockIfTooManyHeaders(req), req);
     if (hc) return hc;
 
-    // 3) Raw path traversal (coarse). Run before dot-segment normalization so
+    // 3) Query length / count caps before any query anomaly scan.
+    const qLimit = shouldBlock(blockIfQueryLimits(req), req);
+    if (qLimit) return qLimit;
+
+    // 4) Lightweight anomaly guards. Run after cheap caps, before path
+    // normalization and origin/auth forwarding.
+    const anomaly = shouldBlock(blockIfRequestAnomaly(req), req);
+    if (anomaly) return anomaly;
+
+    // 5) Raw path traversal (coarse). Run before dot-segment normalization so
     // suspicious input like /public/../private cannot be rewritten to /private
     // before the block patterns see it.
     const rawTraversal = shouldBlock(blockIfTraversal(req), req);
     if (rawTraversal) return rawTraversal;
 
-    // 4) Path normalization
+    // 6) Path normalization
     normalizePath(req);
 
-    // 4b) Path traversal after normalization. Preserves existing behavior for
+    // 6b) Path traversal after normalization. Preserves existing behavior for
     // block rules that intentionally match canonicalized paths.
     const t = shouldBlock(blockIfTraversal(req), req);
     if (t) return t;
 
-    // 5) Required headers check
+    // 7) Required headers check
     const hm = shouldBlock(blockIfHeaderMissing(req), req);
     if (hm) return hm;
 
-    // 6) UA sanity (deny list)
+    // 8) UA sanity (deny list)
     const u = shouldBlock(blockIfBadUA(req), req);
     if (u) return u;
 
-    // 7) Query guard + normalize
-    const q = shouldBlock(guardAndNormalizeQuery(req), req);
-    if (q) return q;
+    // 9) Query normalize after anomaly checks have seen the raw query.
+    normalizeQuery(req);
 
-    // 8) Auth gates (static token, basic auth)
+    // 10) Auth gates (static token, basic auth)
     const auth = shouldBlockAuth(checkAuthGates(req), req);
     if (auth) return auth;
 

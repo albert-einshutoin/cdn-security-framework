@@ -22,6 +22,7 @@ const {
   buildChallengeConfig,
   warnUnsupportedAwsChallenge,
   buildGraphqlGuardConfig,
+  buildAnomalyGuardConfig,
   warnUnsupportedGraphqlGuard,
   validateOriginAuth,
 } = require('./lib/compile-core');
@@ -222,6 +223,37 @@ test('buildGraphqlGuardConfig normalizes configured limits and defaults endpoint
     maxFields: 50,
     maxBodyBytes: 65536,
     mode: 'report',
+  });
+});
+
+test('buildAnomalyGuardConfig defaults disabled and normalizes enabled limits', () => {
+  assert.deepStrictEqual(buildAnomalyGuardConfig({ request: {} }), {
+    enabled: false,
+    crlf: false,
+    malformedCookie: false,
+    doubleEncodedTraversal: false,
+    maxCookieBytes: 4096,
+    maxCookiePairs: 80,
+  });
+
+  const cfg = buildAnomalyGuardConfig({
+    request: {
+      anomaly_guards: {
+        enabled: true,
+        crlf: false,
+        max_cookie_bytes: 999999,
+        max_cookie_pairs: 0,
+      },
+    },
+  });
+
+  assert.deepStrictEqual(cfg, {
+    enabled: true,
+    crlf: false,
+    malformedCookie: true,
+    doubleEncodedTraversal: true,
+    maxCookieBytes: 65536,
+    maxCookiePairs: 1,
   });
 });
 

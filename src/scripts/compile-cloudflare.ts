@@ -19,6 +19,7 @@ const {
   warnSignedUrlReplay,
   buildChallengeConfig,
   buildGraphqlGuardConfig,
+  buildAnomalyGuardConfig,
   buildObsConfig,
 } = require('./lib/compile-core');
 const {
@@ -259,6 +260,7 @@ const cfgCode = renderConstObject('CFG', {
   geoAllowCountries: runtimeCode(`new Set(${JSON.stringify(geoAllowCountries)})`),
   challenge: challengeConfig,
   graphqlGuard: buildGraphqlGuardConfig(policy),
+  anomalyGuards: buildAnomalyGuardConfig(policy),
   obs: buildObsConfig(policy),
 });
 

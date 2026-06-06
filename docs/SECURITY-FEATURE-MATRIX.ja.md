@@ -58,6 +58,7 @@
 | **クエリパラム数制限** | ✅ 対応 | `request.limits.max_query_params` → 超過時 400。 |
 | **ヘッダーサイズ制限** | ✅ 対応 | `request.limits.max_header_size` → 超過時 431。Lambda@Edge / Cloudflare 限定。 |
 | **ヘッダー数制限** | ✅ 対応 | `request.limits.max_header_count`（既定 64、1..500 にクランプ）→ 超過時 431。CFF viewer-request と Cloudflare Worker の入口で適用。 |
+| **Request anomaly guards** | ✅ 対応 | `request.anomaly_guards` は CRLF indicator、不正な Cookie header、bounded な double-encoded traversal signal を CFF viewer-request / Cloudflare Workers でブロック。 |
 | **パス正規化** | ✅ 対応 | `request.normalize.path.collapse_slashes`, `remove_dot_segments` で URI をクリーンアップ。 |
 | **クエリ正規化** | ✅ 対応 | `request.normalize.drop_query_keys` でトラッキングパラメータ（utm_*、gclid 等）を除去。 |
 | **GraphQL depth/complexity guard** | Cloudflare Workers のみ | `request.graphql_guard` で POST GraphQL body を検査し、depth、alias 数、field 数、malformed document を検出。AWS target は CloudFront edge output が request body を読めないため未対応警告のみ。 |
@@ -93,7 +94,7 @@
 | **Transport** | HSTS, TLS 版, HTTP 版 | — | — |
 | **Firewall / Access** | レート制限（グローバル＋URI 単位）, Geo, IP, WAF マネージド, カスタムブロックレスポンス, ロギング, JA3/JA4 指紋ルール | Edge JS challenge（Cloudflare Workers のみ） | — |
 | **Authentication** | トークン, Basic, JWT, 署名付き URL | — | — |
-| **Request Hygiene** | メソッド, URI/クエリ/ヘッダー制限, 正規化, UA ブロック, 必須ヘッダー, 指紋（JA3/JA4） | — | — |
+| **Request Hygiene** | メソッド, URI/クエリ/ヘッダー制限, Request anomaly guards, 正規化, UA ブロック, 必須ヘッダー, 指紋（JA3/JA4） | — | — |
 | **Response Security** | セキュリティヘッダー, CORS, Cookie 属性 | — | — |
 | **Origin Security** | オリジン認証, タイムアウト | — | — |
 
@@ -105,6 +106,7 @@
 |------|---------------------|-------------|-------------------|-----------|
 | URI/クエリ制限 | ✓ | — | ✓ | — |
 | パス正規化 | ✓ | — | ✓ | — |
+| Request anomaly guards | ✓ | — | ✓ | — |
 | 必須ヘッダー | ✓ | — | ✓ | — |
 | ヘッダーサイズ | — | ✓ | ✓ | — |
 | Edge JS challenge / PoW | — | — | ✓ | — |
@@ -141,6 +143,14 @@ built-in detector は API key prefix（`sk-live-`、`sk_test_`、`ghp_`）と、
 body inspection は設定されたテキスト系 `Content-Type` と `body.max_bytes`（既定 32768、最大 131072）に限定します。上限超過または非テキストレスポンスは変更せず通します。CloudFront Functions はレスポンス body を検査できないため、`response_dlp.enabled: true` の AWS compile では unsupported warning を出します。
 
 policy shape、rollout guidance、target support、performance constraints は [レスポンス DLP](./response-dlp.ja.md) を参照してください。
+
+### Request Anomaly Guards
+
+`request.anomaly_guards` は optional で、CloudFront Functions viewer-request と
+Cloudflare Workers が enforcement 対応です。CRLF indicator、不正な Cookie header、
+double-encoded traversal signal を bounded な文字列 check で検出します。policy shape
+と rollout guidance は [Request Anomaly Guards](./request-anomaly-guards.ja.md)
+を参照してください。
 
 ---
 

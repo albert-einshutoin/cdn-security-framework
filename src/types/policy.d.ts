@@ -60,6 +60,35 @@ export interface CDNSecurityFrameworkPolicy {
        */
       max_header_count?: number;
     };
+    /**
+     * Optional lightweight request anomaly guards. When enabled, supported edge targets reject CRLF indicators in URI/query/header values, malformed Cookie headers, and bounded double-encoded traversal indicators before origin forwarding.
+     */
+    anomaly_guards?: {
+      /**
+       * Enable request anomaly guards. Individual checks default to enabled unless explicitly set to false.
+       */
+      enabled?: boolean;
+      /**
+       * Reject raw CR/LF characters and encoded %0d/%0a indicators in request URI, query, or header values.
+       */
+      crlf?: boolean;
+      /**
+       * Reject Cookie headers with control characters, empty delimiter segments, missing name/value delimiters, or configured size/pair-count overages.
+       */
+      malformed_cookie?: boolean;
+      /**
+       * Reject double-encoded traversal indicators such as %252e%252e, %252f, and %255c using at most one extra decode pass when %25 is present.
+       */
+      double_encoded_traversal?: boolean;
+      /**
+       * Maximum Cookie header length accepted by the malformed-cookie guard. Default 4096.
+       */
+      max_cookie_bytes?: number;
+      /**
+       * Maximum number of semicolon-delimited Cookie pairs accepted by the malformed-cookie guard. Default 80.
+       */
+      max_cookie_pairs?: number;
+    };
     block?: {
       path_patterns?:
         | string[]

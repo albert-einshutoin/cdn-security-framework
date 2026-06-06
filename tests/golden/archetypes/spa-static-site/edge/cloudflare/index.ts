@@ -30,6 +30,7 @@ const CFG = {
   geoAllowCountries: new Set([]),
   challenge: null,
   graphqlGuard: null,
+  anomalyGuards: {"enabled":true,"crlf":true,"malformedCookie":false,"doubleEncodedTraversal":true,"maxCookieBytes":4096,"maxCookiePairs":80},
   obs: {"logFormat":"json","correlationHeader":"","sampleRate":0,"auditLogAuth":false,"auditHashSub":false},
 };
 
@@ -203,6 +204,102 @@ function blockIfPathPattern(pathname: string, ctx: ReqCtx): Response | null {
       const r = shouldBlock(400, 'Bad Request', ctx);
       if (r) return r;
     }
+  }
+  return null;
+}
+
+function hasRawControlLineBreak(s: string): boolean {
+  return typeof s === 'string' && (s.indexOf('\r') !== -1 || s.indexOf('\n') !== -1);
+}
+
+function hasEncodedCrlfIndicator(s: string): boolean {
+  if (typeof s !== 'string' || s.length === 0) return false;
+  const lower = s.toLowerCase();
+  return lower.indexOf('%0d') !== -1 || lower.indexOf('%0a') !== -1;
+}
+
+function hasCrlfIndicator(s: string): boolean {
+  return hasRawControlLineBreak(s) || hasEncodedCrlfIndicator(s);
+}
+
+function decodeOnceWhenPercent25Present(s: string): string {
+  if (typeof s !== 'string' || s.length === 0) return '';
+  if (s.toLowerCase().indexOf('%25') === -1) return '';
+  try {
+    return decodeURIComponent(s);
+  } catch (_e) {
+    return '';
+  }
+}
+
+function hasDoubleEncodedTraversalIndicator(s: string): boolean {
+  const decoded = decodeOnceWhenPercent25Present(s);
+  if (!decoded) return false;
+  const lower = decoded.toLowerCase();
+  return lower.indexOf('%2e%2e') !== -1 ||
+    lower.indexOf('..%2f') !== -1 ||
+    lower.indexOf('..%5c') !== -1 ||
+    lower.indexOf('%2f..') !== -1 ||
+    lower.indexOf('%5c..') !== -1 ||
+    lower.indexOf('../') !== -1 ||
+    lower.indexOf('..\\') !== -1;
+}
+
+function hasCookieControlChar(cookie: string): boolean {
+  if (typeof cookie !== 'string') return false;
+  for (let i = 0; i < cookie.length; i++) {
+    const code = cookie.charCodeAt(i);
+    if (code < 32 || code === 127) return true;
+  }
+  return false;
+}
+
+function isMalformedCookie(cookie: string): boolean {
+  if (typeof cookie !== 'string' || cookie.length === 0) return false;
+  const guards = CFG.anomalyGuards || {};
+  if (guards.maxCookieBytes && cookie.length > guards.maxCookieBytes) return true;
+  if (hasCookieControlChar(cookie)) return true;
+
+  const parts = cookie.split(';');
+  let pairCount = 0;
+  for (let i = 0; i < parts.length; i++) {
+    const part = parts[i].trim();
+    if (!part) {
+      if (i > 0 && i < parts.length - 1) return true;
+      continue;
+    }
+    const eq = part.indexOf('=');
+    if (eq <= 0) return true;
+    if (!part.slice(0, eq).trim()) return true;
+    pairCount++;
+    if (guards.maxCookiePairs && pairCount > guards.maxCookiePairs) return true;
+  }
+  return false;
+}
+
+function blockIfRequestAnomaly(request: Request, rawPathname: string, query: string, ctx: ReqCtx): Response | null {
+  const guards = CFG.anomalyGuards || {};
+  if (guards.enabled !== true) return null;
+
+  if (guards.crlf !== false && (hasCrlfIndicator(rawPathname) || hasCrlfIndicator(query))) {
+    return shouldBlock(400, 'Bad Request', ctx);
+  }
+  if (guards.doubleEncodedTraversal !== false &&
+    (hasDoubleEncodedTraversalIndicator(rawPathname) || hasDoubleEncodedTraversalIndicator(query))) {
+    return shouldBlock(400, 'Bad Request', ctx);
+  }
+
+  let headerBlock: Response | null = null;
+  request.headers.forEach((value) => {
+    if (!headerBlock && guards.crlf !== false && hasCrlfIndicator(value)) {
+      headerBlock = shouldBlock(400, 'Bad Request', ctx);
+    }
+  });
+  if (headerBlock) return headerBlock;
+
+  const cookie = request.headers.get('cookie') || '';
+  if (guards.malformedCookie !== false && isMalformedCookie(cookie)) {
+    return shouldBlock(400, 'Malformed Cookie', ctx);
   }
   return null;
 }
@@ -1181,6 +1278,31 @@ export default {
       }
     }
 
+    if (CFG.maxHeaderSize > 0) {
+      let totalSize = 0;
+      request.headers.forEach((value, key) => {
+        totalSize += key.length + value.length;
+      });
+      if (totalSize > CFG.maxHeaderSize) {
+        const r = shouldBlock(431, 'Request Header Fields Too Large', ctx);
+        if (r) return r;
+      }
+    }
+
+    const qs = url.search.slice(1);
+    if (qs.length > CFG.maxQueryLength) {
+      const r = shouldBlock(414, 'URI Too Long', ctx);
+      if (r) return r;
+    }
+    const parts = qs ? qs.split('&') : [];
+    if (parts.length > CFG.maxQueryParams) {
+      const r = shouldBlock(400, 'Too many query params', ctx);
+      if (r) return r;
+    }
+
+    const anomalyBlock = blockIfRequestAnomaly(request, rawPathname, qs, ctx);
+    if (anomalyBlock) return anomalyBlock;
+
     const rawPathBlock = blockIfPathPattern(rawPathname, ctx);
     if (rawPathBlock) return rawPathBlock;
 
@@ -1193,17 +1315,6 @@ export default {
       const val = request.headers.get(h);
       if (!val) {
         const r = shouldBlock(400, 'Missing ' + h, ctx);
-        if (r) return r;
-      }
-    }
-
-    if (CFG.maxHeaderSize > 0) {
-      let totalSize = 0;
-      request.headers.forEach((value, key) => {
-        totalSize += key.length + value.length;
-      });
-      if (totalSize > CFG.maxHeaderSize) {
-        const r = shouldBlock(431, 'Request Header Fields Too Large', ctx);
         if (r) return r;
       }
     }
@@ -1222,17 +1333,6 @@ export default {
         const r = shouldBlock(403, 'Forbidden', ctx);
         if (r) return r;
       }
-    }
-
-    const qs = url.search.slice(1);
-    if (qs.length > CFG.maxQueryLength) {
-      const r = shouldBlock(414, 'URI Too Long', ctx);
-      if (r) return r;
-    }
-    const parts = qs ? qs.split('&') : [];
-    if (parts.length > CFG.maxQueryParams) {
-      const r = shouldBlock(400, 'Too many query params', ctx);
-      if (r) return r;
     }
 
     for (const k of CFG.dropQueryKeys) url.searchParams.delete(k);

@@ -13,7 +13,7 @@ const crypto = require('crypto');
 const { EventEmitter } = require('events');
 
 type HeaderMap = Record<string, string>;
-type CloudFrontHeaderMap = Record<string, { value: string }>;
+type CloudFrontHeaderMap = Record<string, { value: string; multiValue?: Array<{ value: string }> }>;
 type LambdaHeaderMap = Record<string, Array<{ key: string; value: string }>>;
 type ExpectedStatus = 'allow' | number | string;
 type RuntimeCase = [string, any, ExpectedStatus];
@@ -40,7 +40,7 @@ let originHandler: any;
 const DEFAULT_TOKEN = process.env.EDGE_ADMIN_TOKEN
   || 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
 
-function buildEvent(method: string, uri: string, headers: HeaderMap = {}, querystring: any = '') {
+function buildEvent(method: string, uri: string, headers: HeaderMap = {}, querystring: any = ''): any {
   const h = headers || {};
   const cfHeaders: CloudFrontHeaderMap = {};
   for (const [k, v] of Object.entries(h)) {
@@ -260,6 +260,87 @@ console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases
     ['host-allow: rejects missing host', buildEvent('GET', '/', {}), 400],
     ['host-allow: wildcard does not match parent domain', buildEvent('GET', '/', { host: 'cdn.example.com' }), 400],
   ];
+  for (const [name, event, expected] of cases) {
+    const result: any = h(event);
+    const allowed = result && !result.statusCode && result.uri !== undefined;
+    const got = allowed ? 'allow' : (result && result.statusCode);
+    const ok = (expected === 'allow' && allowed) || (typeof expected === 'number' && got === expected);
+    if (!ok) {
+      console.error('FAIL:', name, '| expected', expected, 'got', got);
+      viewerFailed++;
+    } else {
+      console.log('OK:', name);
+    }
+  }
+})();
+
+// Lightweight request anomaly guards (#117): opt-in checks for CRLF,
+// malformed Cookie headers, and one-pass double-encoded traversal indicators.
+(function runRequestAnomalyGuardTests() {
+  const cfgCode = [
+    'const CFG = {',
+    '  mode: "enforce",',
+    '  allowMethods: ["GET"],',
+    '  maxQueryLength: 1024,',
+    '  maxQueryParams: 30,',
+    '  maxUriLength: 2048,',
+    '  maxHeaderCount: 64,',
+    '  dropQueryKeys: new Set([]),',
+    '  uaDenyContains: [],',
+    '  blockPathContains: [],',
+    '  blockPathRegexes: [],',
+    '  normalizePath: { collapseSlashes: false, removeDotSegments: false },',
+    '  requiredHeaders: [],',
+    '  allowedHosts: [],',
+    '  trustForwardedFor: false,',
+    '  cors: null,',
+    '  anomalyGuards: { enabled: true, crlf: true, malformedCookie: true, doubleEncodedTraversal: true, maxCookieBytes: 32, maxCookiePairs: 2 },',
+    '  authGates: [],',
+    '};',
+  ].join('\n');
+  const h = compileViewerTemplate(cfgCode);
+  if (!h) { viewerFailed++; return; }
+
+  const cases: RuntimeCase[] = [
+    ['anomaly: raw CRLF in path rejected', buildEvent('GET', '/bad\r\npath', {}), 400],
+    ['anomaly: encoded CRLF in query rejected', buildEvent('GET', '/', {}, 'next=%0d%0aheader'), 400],
+    ['anomaly: encoded CRLF in CloudFront query object rejected',
+      buildEvent('GET', '/', {}, { next: { value: '%0d%0aheader' } }),
+      400],
+    ['anomaly: CRLF in header value rejected', buildEvent('GET', '/', { 'x-test': 'ok\nbad' }), 400],
+    ['anomaly: CRLF in header multiValue rejected',
+      (() => {
+        const event = buildEvent('GET', '/', {});
+        event.request.headers['x-test'] = {
+          value: 'ok',
+          multiValue: [{ value: 'ok' }, { value: 'bad%0d%0aheader' }],
+        };
+        return event;
+      })(),
+      400],
+    ['anomaly: malformed cookie delimiter rejected', buildEvent('GET', '/', { cookie: 'a=1;;b=2' }), 400],
+    ['anomaly: malformed CloudFront cookie map rejected',
+      (() => {
+        const event = buildEvent('GET', '/', {});
+        event.request.cookies = { session: { value: 'ok\nbad' } };
+        return event;
+      })(),
+      400],
+    ['anomaly: cookie pair count over limit rejected', buildEvent('GET', '/', { cookie: 'a=1; b=2; c=3' }), 400],
+    ['anomaly: CloudFront cookie map pair count over limit rejected',
+      (() => {
+        const event = buildEvent('GET', '/', {});
+        event.request.cookies = { a: { value: '1' }, b: { value: '2' }, c: { value: '3' } };
+        return event;
+      })(),
+      400],
+    ['anomaly: double-encoded traversal rejected', buildEvent('GET', '/%252e%252e%252fsecret', {}), 400],
+    ['anomaly: double-encoded traversal in CloudFront query object rejected',
+      buildEvent('GET', '/', {}, { next: { value: '%252e%252e%252fsecret' } }),
+      400],
+    ['anomaly: benign double-encoded space allowed', buildEvent('GET', '/download/%2520report', {}, 'name=hello%2520world'), 'allow'],
+  ];
+
   for (const [name, event, expected] of cases) {
     const result: any = h(event);
     const allowed = result && !result.statusCode && result.uri !== undefined;
