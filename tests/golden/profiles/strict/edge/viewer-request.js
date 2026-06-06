@@ -292,31 +292,98 @@ const CFG = {
     return false;
   }
 
+  function querystringMatches(qs, predicate) {
+    if (!qs) return false;
+    if (typeof qs === 'string') return predicate(qs);
+    if (typeof qs !== 'object') return false;
+    for (const k in qs) {
+      if (!Object.prototype.hasOwnProperty.call(qs, k)) continue;
+      if (predicate(k)) return true;
+      const entry = qs[k];
+      if (!entry || typeof entry !== 'object') {
+        if (predicate(String(entry))) return true;
+        continue;
+      }
+      if (predicate(entry.value)) return true;
+      if (Array.isArray(entry.multiValue)) {
+        for (const mv of entry.multiValue) {
+          if (predicate(mv && mv.value)) return true;
+        }
+      }
+    }
+    return false;
+  }
+
+  function headerEntryMatches(entry, predicate) {
+    if (!entry || typeof entry !== 'object') return false;
+    if (predicate(entry.value)) return true;
+    if (Array.isArray(entry.multiValue)) {
+      for (const mv of entry.multiValue) {
+        if (predicate(mv && mv.value)) return true;
+      }
+    }
+    return false;
+  }
+
+  function serializeCookieMap(cookies) {
+    if (!cookies || typeof cookies !== 'object') return '';
+    const parts = [];
+    for (const name in cookies) {
+      if (!Object.prototype.hasOwnProperty.call(cookies, name)) continue;
+      const entry = cookies[name];
+      if (!entry || typeof entry !== 'object') {
+        parts.push(name + '=' + String(entry));
+        continue;
+      }
+      if (Array.isArray(entry.multiValue) && entry.multiValue.length > 0) {
+        for (const mv of entry.multiValue) {
+          parts.push(name + '=' + String((mv && mv.value) || ''));
+        }
+      } else {
+        parts.push(name + '=' + String(entry.value || ''));
+      }
+    }
+    return parts.join('; ');
+  }
+
+  function cookieStringFromRequest(req, headers) {
+    const cookieMap = serializeCookieMap(req.cookies);
+    if (cookieMap) return cookieMap;
+    const entry = headers['cookie'];
+    if (!entry || typeof entry !== 'object') return '';
+    if (Array.isArray(entry.multiValue) && entry.multiValue.length > 0) {
+      const parts = [];
+      for (const mv of entry.multiValue) {
+        parts.push((mv && mv.value) || '');
+      }
+      return parts.join('; ');
+    }
+    return entry.value || '';
+  }
+
   function blockIfRequestAnomaly(req) {
     const guards = CFG.anomalyGuards || {};
     if (guards.enabled !== true) return null;
 
     const uri = req.uri || '';
-    const qs = serializeQuerystring(req.querystring);
 
-    if (guards.crlf !== false && (hasCrlfIndicator(uri) || hasCrlfIndicator(qs))) {
+    if (guards.crlf !== false && (hasCrlfIndicator(uri) || querystringMatches(req.querystring, hasCrlfIndicator))) {
       return resp(400, 'Bad Request');
     }
     if (guards.doubleEncodedTraversal !== false &&
-      (hasDoubleEncodedTraversalIndicator(uri) || hasDoubleEncodedTraversalIndicator(qs))) {
+      (hasDoubleEncodedTraversalIndicator(uri) || querystringMatches(req.querystring, hasDoubleEncodedTraversalIndicator))) {
       return resp(400, 'Bad Request');
     }
 
     const headers = req.headers || {};
     for (const name in headers) {
       if (!Object.prototype.hasOwnProperty.call(headers, name)) continue;
-      const value = headers[name] && headers[name].value;
-      if (guards.crlf !== false && hasCrlfIndicator(value)) {
+      if (guards.crlf !== false && headerEntryMatches(headers[name], hasCrlfIndicator)) {
         return resp(400, 'Bad Request');
       }
     }
 
-    const cookie = (headers['cookie'] && headers['cookie'].value) || '';
+    const cookie = cookieStringFromRequest(req, headers);
     if (guards.malformedCookie !== false && isMalformedCookie(cookie)) {
       return resp(400, 'Malformed Cookie');
     }

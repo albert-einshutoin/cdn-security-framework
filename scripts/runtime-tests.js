@@ -287,10 +287,40 @@ console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases
     const cases = [
         ['anomaly: raw CRLF in path rejected', buildEvent('GET', '/bad\r\npath', {}), 400],
         ['anomaly: encoded CRLF in query rejected', buildEvent('GET', '/', {}, 'next=%0d%0aheader'), 400],
+        ['anomaly: encoded CRLF in CloudFront query object rejected',
+            buildEvent('GET', '/', {}, { next: { value: '%0d%0aheader' } }),
+            400],
         ['anomaly: CRLF in header value rejected', buildEvent('GET', '/', { 'x-test': 'ok\nbad' }), 400],
+        ['anomaly: CRLF in header multiValue rejected',
+            (() => {
+                const event = buildEvent('GET', '/', {});
+                event.request.headers['x-test'] = {
+                    value: 'ok',
+                    multiValue: [{ value: 'ok' }, { value: 'bad%0d%0aheader' }],
+                };
+                return event;
+            })(),
+            400],
         ['anomaly: malformed cookie delimiter rejected', buildEvent('GET', '/', { cookie: 'a=1;;b=2' }), 400],
+        ['anomaly: malformed CloudFront cookie map rejected',
+            (() => {
+                const event = buildEvent('GET', '/', {});
+                event.request.cookies = { session: { value: 'ok\nbad' } };
+                return event;
+            })(),
+            400],
         ['anomaly: cookie pair count over limit rejected', buildEvent('GET', '/', { cookie: 'a=1; b=2; c=3' }), 400],
+        ['anomaly: CloudFront cookie map pair count over limit rejected',
+            (() => {
+                const event = buildEvent('GET', '/', {});
+                event.request.cookies = { a: { value: '1' }, b: { value: '2' }, c: { value: '3' } };
+                return event;
+            })(),
+            400],
         ['anomaly: double-encoded traversal rejected', buildEvent('GET', '/%252e%252e%252fsecret', {}), 400],
+        ['anomaly: double-encoded traversal in CloudFront query object rejected',
+            buildEvent('GET', '/', {}, { next: { value: '%252e%252e%252fsecret' } }),
+            400],
         ['anomaly: benign double-encoded space allowed', buildEvent('GET', '/download/%2520report', {}, 'name=hello%2520world'), 'allow'],
     ];
     for (const [name, event, expected] of cases) {
