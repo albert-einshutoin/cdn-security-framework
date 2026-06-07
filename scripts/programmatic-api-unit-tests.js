@@ -128,6 +128,57 @@ firewall:
     managed_rules:
       - AWSManagedRulesCommonRuleSet
 `;
+const REST_RECOMMENDATION_POLICY = `
+version: 1
+project: recommendation-rest-api
+metadata:
+  risk_level: balanced
+  description: "REST API protected by CDN security framework."
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, POST, OPTIONS]
+response_headers:
+  hsts: "max-age=31536000"
+  csp_public: "default-src 'none'; frame-ancestors 'none'"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    rate_limit: 1000
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+    logging:
+      enabled: true
+      destination_arn_env: WAF_LOG_DESTINATION_ARN
+      redacted_fields: [authorization, cookie]
+`;
+const MALFORMED_PREFIX_RECOMMENDATION_POLICY = `
+version: 1
+project: malformed-admin-prefix
+metadata:
+  risk_level: balanced
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, POST]
+routes:
+  - name: admin
+    match:
+      path_prefixes: ["/admin", 7]
+    auth_gate:
+      type: static_token
+      header: x-edge-token
+      token_env: EDGE_ADMIN_TOKEN
+response_headers:
+  hsts: "max-age=31536000"
+  csp_public: "default-src 'self'"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    rate_limit: 1000
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+`;
 function tmpProject(yamlBody) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'api-'));
     const policyDir = path.join(tmp, 'policy');
@@ -946,6 +997,111 @@ test('CLI authoring DX: readiness reports target-specific unsupported controls',
         assert.strictEqual(cloudflare.status, 0, cloudflare.stderr);
         const cloudflareReport = JSON.parse(cloudflare.stdout);
         assert.ok(!cloudflareReport.findings.some((finding) => finding.id.startsWith('target.aws.')));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: readiness emits read-only WAF recommendations with rationale', () => {
+    const ctx = tmpProject(REST_RECOMMENDATION_POLICY);
+    try {
+        const before = fs.readFileSync(ctx.policyPath, 'utf8');
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'aws',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `readiness failed: ${result.stderr}`);
+        assert.strictEqual(fs.readFileSync(ctx.policyPath, 'utf8'), before, 'readiness must not mutate policy files');
+        const report = JSON.parse(result.stdout);
+        assert.strictEqual(report.wafRecommendations.readOnly, true);
+        assert.strictEqual(report.wafRecommendations.inferredAppShape, 'rest-api');
+        const rec = report.wafRecommendations.recommendations[0];
+        assert.strictEqual(rec.id, 'waf.recommendation.rest_api');
+        assert.strictEqual(rec.targetSupport.aws, 'supported');
+        assert.strictEqual(rec.targetSupport.cloudflare, 'partial');
+        assert.ok(rec.missingRules.includes('AWSManagedRulesKnownBadInputsRuleSet'));
+        assert.ok(rec.missingRules.includes('AWSManagedRulesSQLiRuleSet'));
+        assert.ok(rec.missingRules.includes('AWSManagedRulesIPReputationList'));
+        assert.ok(rec.settings.some((setting) => setting.includes('rate_limit_rules')));
+        assert.ok(/JSON APIs/.test(rec.rationale));
+        assert.ok(/costs/i.test(rec.cost));
+        assert.ok(/SQLi/.test(rec.falsePositiveRisk));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: WAF recommendations infer all built-in archetype shapes', () => {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const archetypes = [
+        'spa-static-site',
+        'rest-api',
+        'admin-panel',
+        'microservice-origin',
+    ];
+    for (const shape of archetypes) {
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', path.join(repoRoot, 'policy', 'archetypes', `${shape}.yml`),
+            '--target', 'aws',
+            '--json',
+        ], {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            env: Object.assign({}, process.env, {
+                EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy',
+                ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+            }),
+        });
+        assert.strictEqual(result.status, 0, `${shape} readiness failed: ${result.stderr}`);
+        const report = JSON.parse(result.stdout);
+        assert.strictEqual(report.wafRecommendations.inferredAppShape, shape);
+        assert.strictEqual(report.wafRecommendations.recommendations.length, 1);
+        const rec = report.wafRecommendations.recommendations[0];
+        assert.strictEqual(rec.appShape, shape);
+        assert.ok(rec.rationale);
+        assert.ok(rec.cost);
+        assert.ok(rec.falsePositiveRisk);
+        if (shape === 'admin-panel') {
+            assert.strictEqual(rec.targetSupport.cloudflare, 'unsupported');
+            assert.ok(/paid/.test(rec.cost));
+            assert.ok(rec.rules.includes('AWSManagedRulesBotControlRuleSet'));
+            assert.ok(rec.rules.includes('AWSManagedRulesATPRuleSet'));
+        }
+    }
+});
+test('CLI authoring DX: WAF recommendation inference does not mask lint errors', () => {
+    const ctx = tmpProject(MALFORMED_PREFIX_RECOMMENDATION_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'aws',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: Object.assign({}, process.env, {
+                EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy',
+            }),
+        });
+        assert.strictEqual(result.status, 1);
+        assert.doesNotThrow(() => JSON.parse(result.stdout));
+        const report = JSON.parse(result.stdout);
+        assert.ok(report.findings.some((finding) => finding.id === 'policy.lint.error' &&
+            /path_prefixes/.test(finding.detail)));
+        assert.strictEqual(report.wafRecommendations.inferredAppShape, 'admin-panel');
     }
     finally {
         ctx.cleanup();

@@ -957,6 +957,29 @@ type ReadinessEvaluationOptions = {
   failOnWeakWafBaseline?: boolean;
 };
 
+type WafAppShape = 'spa-static-site' | 'rest-api' | 'admin-panel' | 'microservice-origin' | 'unknown';
+type WafTargetSupport = 'supported' | 'partial' | 'unsupported';
+type WafRecommendationTemplate = {
+  id: string;
+  appShape: Exclude<WafAppShape, 'unknown'>;
+  title: string;
+  rules: string[];
+  settings: string[];
+  rationale: string;
+  cost: string;
+  falsePositiveRisk: string;
+};
+type WafRecommendation = WafRecommendationTemplate & {
+  targetSupport: {
+    aws: WafTargetSupport;
+    cloudflare: WafTargetSupport;
+  };
+  configuredRules: string[];
+  missingRules: string[];
+  alreadySatisfied: boolean;
+  notes: string[];
+};
+
 function readinessFinding(
   severity: ReadinessSeverity,
   id: string,
@@ -964,6 +987,194 @@ function readinessFinding(
   recommendation: string
 ): ReadinessFinding {
   return { severity, id, detail, recommendation };
+}
+
+const WAF_RECOMMENDATION_TEMPLATES: Record<Exclude<WafAppShape, 'unknown'>, WafRecommendationTemplate> = {
+  'spa-static-site': {
+    id: 'waf.recommendation.spa_static_site',
+    appShape: 'spa-static-site',
+    title: 'SPA/static site managed-rule baseline',
+    rules: [
+      'AWSManagedRulesCommonRuleSet',
+      'AWSManagedRulesKnownBadInputsRuleSet',
+      'AWSManagedRulesIPReputationList',
+    ],
+    settings: [
+      'Keep request.allow_methods to GET/HEAD for static assets.',
+      'Use a global WAF rate limit around 2000 requests per 5 minutes per IP, then tune from logs.',
+      'Enable WAF logging when scope=CLOUDFRONT before production release.',
+    ],
+    rationale: 'Static sites mostly need traversal, scanner, XSS/cache-poisoning, and known-bad source coverage without heavy auth-specific managed rules.',
+    cost: 'Standard AWS WAF request/WCU costs; no BotControl or ATP paid add-on in this baseline.',
+    falsePositiveRisk: 'Low to medium. KnownBadInputs/OWASP-style rules can catch unusual asset paths, so monitor before enforcing on legacy static content.',
+  },
+  'rest-api': {
+    id: 'waf.recommendation.rest_api',
+    appShape: 'rest-api',
+    title: 'REST API managed-rule baseline',
+    rules: [
+      'AWSManagedRulesCommonRuleSet',
+      'AWSManagedRulesKnownBadInputsRuleSet',
+      'AWSManagedRulesSQLiRuleSet',
+      'AWSManagedRulesIPReputationList',
+    ],
+    settings: [
+      'Add scoped rate_limit_rules for auth, write-heavy, or expensive API paths.',
+      'Keep CORS origins explicit; do not rely on WAF rules to compensate for wildcard credentials.',
+      'Enable WAF logging for CloudFront-scoped APIs before production release.',
+    ],
+    rationale: 'JSON APIs need injection and scanner coverage plus SQLi signatures and reputation filtering, especially on write/query endpoints.',
+    cost: 'Standard AWS WAF request/WCU costs; SQLi adds WCU pressure but avoids BotControl/ATP paid add-ons.',
+    falsePositiveRisk: 'Medium. SQLi signatures can flag unusual query DSLs or search syntax; start in count/monitor mode for affected routes.',
+  },
+  'admin-panel': {
+    id: 'waf.recommendation.admin_panel',
+    appShape: 'admin-panel',
+    title: 'Admin panel managed-rule baseline',
+    rules: [
+      'AWSManagedRulesCommonRuleSet',
+      'AWSManagedRulesKnownBadInputsRuleSet',
+      'AWSManagedRulesIPReputationList',
+      'AWSManagedRulesAnonymousIpList',
+      'AWSManagedRulesBotControlRuleSet',
+      'AWSManagedRulesATPRuleSet',
+    ],
+    settings: [
+      'Use a low global WAF rate limit and a stricter scoped login/admin rate_limit_rule.',
+      'Require WAF logging and redaction for authorization, cookie, and x-api-key fields.',
+      'Combine managed rules with route auth, IP allowlists, VPN, or SSO where possible.',
+    ],
+    rationale: 'Admin panels are high-value targets for credential stuffing, bot traffic, anonymizers, and exploit probes, so stronger managed signals are justified.',
+    cost: 'Higher. BotControl and ATP are paid AWS managed protections and add operational tuning cost.',
+    falsePositiveRisk: 'Medium to high. Bot and ATP controls can challenge or block automation; allowlist known internal tooling before enforce mode.',
+  },
+  'microservice-origin': {
+    id: 'waf.recommendation.microservice_origin',
+    appShape: 'microservice-origin',
+    title: 'Microservice origin managed-rule baseline',
+    rules: [
+      'AWSManagedRulesCommonRuleSet',
+      'AWSManagedRulesKnownBadInputsRuleSet',
+      'AWSManagedRulesIPReputationList',
+    ],
+    settings: [
+      'Prefer signed origin authentication or an IP allowlist so direct-origin bypasses fail closed.',
+      'Add scoped rate_limit_rules for expensive service endpoints instead of only a global limit.',
+      'Enable WAF logging for CloudFront-scoped origins and correlate logs with origin auth failures.',
+    ],
+    rationale: 'Service origins need exploit-probe and reputation coverage, but broad bot or ATP controls may interfere with legitimate service clients.',
+    cost: 'Standard AWS WAF request/WCU costs; avoids paid bot/account-takeover add-ons by default.',
+    falsePositiveRisk: 'Low to medium. Reputation lists can block shared egress ranges used by partners; validate known service clients before enforce mode.',
+  },
+};
+
+function includesAny(text: string, tokens: string[]): boolean {
+  return tokens.some((token) => text.includes(token));
+}
+
+function inferWafAppShape(policy: any): WafAppShape {
+  const metadata = (policy && policy.metadata) || {};
+  const text = [
+    policy && policy.project,
+    metadata.description,
+    metadata.app_shape,
+    metadata.appShape,
+  ].filter(Boolean).join(' ').toLowerCase();
+  if (includesAny(text, ['spa-static-site', 'spa / static', 'static site', 'single-page', 'spa'])) {
+    return 'spa-static-site';
+  }
+  if (includesAny(text, ['rest-api', 'rest api', 'json api'])) {
+    return 'rest-api';
+  }
+  if (includesAny(text, ['admin-panel', 'admin panel', 'back-office', 'ops dashboard'])) {
+    return 'admin-panel';
+  }
+  if (includesAny(text, ['microservice-origin', 'microservice origin', 'service-to-service'])) {
+    return 'microservice-origin';
+  }
+
+  const routes = Array.isArray(policy && policy.routes) ? policy.routes : [];
+  const originAuth = policy && policy.origin && policy.origin.auth;
+  if (originAuth) return 'microservice-origin';
+  if (routes.some((route: any) => route && route.auth_gate && route.auth_gate.type === 'jwt')) {
+    return 'rest-api';
+  }
+  if (routes.some((route: any) => {
+    const gateType = route && route.auth_gate && route.auth_gate.type;
+    const prefixes = route && route.match && Array.isArray(route.match.path_prefixes)
+      ? route.match.path_prefixes
+      : [];
+    return (gateType === 'static_token' || gateType === 'basic_auth') &&
+      prefixes.some((prefix: unknown) => typeof prefix === 'string' && (prefix === '/' || prefix.includes('admin')));
+  })) {
+    return 'admin-panel';
+  }
+
+  const methods = Array.isArray(policy && policy.request && policy.request.allow_methods)
+    ? policy.request.allow_methods.map((m: string) => String(m).toUpperCase()).sort()
+    : [];
+  if (methods.length > 0 && methods.every((method: string) => method === 'GET' || method === 'HEAD')) {
+    return 'spa-static-site';
+  }
+  if (methods.includes('OPTIONS') || (policy && policy.response_headers && policy.response_headers.cors)) {
+    return 'rest-api';
+  }
+  return 'unknown';
+}
+
+function cloudflareSupportForRules(rules: string[]): { support: WafTargetSupport; notes: string[] } {
+  const { classifyManagedRule } = require(path.join(pkgRoot, 'scripts', 'lib', 'cloudflare-waf-parity.js'));
+  const notes: string[] = [];
+  let support: WafTargetSupport = 'supported';
+  for (const rule of rules) {
+    const entry = classifyManagedRule(rule);
+    if (entry.status === 'unsupported') {
+      support = 'unsupported';
+    } else if (entry.status === 'approximate' && support !== 'unsupported') {
+      support = 'partial';
+    }
+    if (entry.status !== 'equivalent') {
+      const target = entry.cloudflare && entry.cloudflare.rulesetName
+        ? entry.cloudflare.rulesetName
+        : 'no direct Cloudflare ruleset target';
+      notes.push(`${rule}: ${entry.status} on Cloudflare (${target}).`);
+    }
+  }
+  return { support, notes };
+}
+
+function buildWafRecommendation(template: WafRecommendationTemplate, policy: any): WafRecommendation {
+  const managed = policy && policy.firewall && policy.firewall.waf && Array.isArray(policy.firewall.waf.managed_rules)
+    ? policy.firewall.waf.managed_rules
+    : [];
+  const configuredRules = template.rules.filter((rule) => managed.includes(rule));
+  const missingRules = template.rules.filter((rule) => !managed.includes(rule));
+  const cloudflare = cloudflareSupportForRules(template.rules);
+  return Object.assign({}, template, {
+    targetSupport: {
+      aws: 'supported' as WafTargetSupport,
+      cloudflare: cloudflare.support,
+    },
+    configuredRules,
+    missingRules,
+    alreadySatisfied: missingRules.length === 0,
+    notes: cloudflare.notes,
+  });
+}
+
+function buildWafRecommendations(policy: any, policyPath: string, target: string) {
+  const inferredAppShape = inferWafAppShape(policy);
+  const templates = inferredAppShape === 'unknown'
+    ? Object.values(WAF_RECOMMENDATION_TEMPLATES)
+    : [WAF_RECOMMENDATION_TEMPLATES[inferredAppShape]];
+  const recommendations = templates.map((template) => buildWafRecommendation(template, policy));
+  return {
+    policyPath,
+    target,
+    inferredAppShape,
+    readOnly: true,
+    recommendations,
+  };
 }
 
 function weakWafSeverity(options: ReadinessEvaluationOptions): ReadinessSeverity {
@@ -1157,13 +1368,29 @@ function printReadinessReport(report: any): void {
   console.log(`Readiness: ${report.status.toUpperCase()} (target=${report.target}, policy=${report.policyPath})`);
   if (report.findings.length === 0) {
     console.log('[OK] No production readiness findings.');
-    return;
+  } else {
+    for (const finding of report.findings) {
+      const marker = finding.severity === 'fail' ? 'FAIL' : 'WARN';
+      const stream = finding.severity === 'fail' ? console.error : console.warn;
+      stream(`[${marker}] ${finding.id}: ${finding.detail}`);
+      stream(`       ${finding.recommendation}`);
+    }
   }
-  for (const finding of report.findings) {
-    const marker = finding.severity === 'fail' ? 'FAIL' : 'WARN';
-    const stream = finding.severity === 'fail' ? console.error : console.warn;
-    stream(`[${marker}] ${finding.id}: ${finding.detail}`);
-    stream(`       ${finding.recommendation}`);
+  const waf = report.wafRecommendations;
+  if (waf && Array.isArray(waf.recommendations) && waf.recommendations.length > 0) {
+    console.log('');
+    console.log(`WAF recommendations: inferred_app_shape=${waf.inferredAppShape}, read_only=${waf.readOnly}`);
+    for (const rec of waf.recommendations) {
+      console.log(`- ${rec.id}: ${rec.title}`);
+      console.log(`  Target support: aws=${rec.targetSupport.aws}, cloudflare=${rec.targetSupport.cloudflare}`);
+      console.log(`  Recommended managed rules: ${rec.rules.join(', ')}`);
+      console.log(`  Missing managed rules: ${rec.missingRules.length > 0 ? rec.missingRules.join(', ') : 'none'}`);
+      console.log(`  Related settings: ${rec.settings.join('; ')}`);
+      console.log(`  Rationale: ${rec.rationale}`);
+      console.log(`  Cost: ${rec.cost}`);
+      console.log(`  False-positive risk: ${rec.falsePositiveRisk}`);
+      if (rec.notes.length > 0) console.log(`  Target notes: ${rec.notes.join(' ')}`);
+    }
   }
 }
 
@@ -1772,6 +1999,7 @@ program
     }
 
     let policy = null;
+    let wafRecommendations = null;
     const lint = lintPolicy({ policyPath, pkgRoot, env: process.env });
     lint.errors.forEach((error: string) => findings.push(readinessFinding(
       'fail',
@@ -1784,6 +2012,7 @@ program
       findings.push(...evaluateReadiness(policy, target, lint.warnings, {
         failOnWeakWafBaseline: Boolean(opts.failOnWeakWafBaseline),
       }));
+      wafRecommendations = buildWafRecommendations(policy, policyPath, target);
     }
 
     const failCount = findings.filter((f) => f.severity === 'fail').length;
@@ -1802,6 +2031,7 @@ program
       exitCode,
       summary: { fail: failCount, warn: warnCount },
       findings,
+      wafRecommendations,
     };
 
     if (opts.report) {

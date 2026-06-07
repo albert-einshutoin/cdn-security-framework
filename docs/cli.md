@@ -127,6 +127,8 @@ Exit code is `1` when any finding has severity `fail`. With `--strict`, warning 
 
 Use `--fail-on-weak-waf-baseline` for production CI when starter policies should remain usable locally but weak WAF posture must stop a release. The flag promotes WAF baseline findings to `fail`, including missing WAF config, missing rate limits, missing AWS managed-rule signal coverage, and missing CloudFront WAF logging when `firewall.waf.scope: CLOUDFRONT`.
 
+Readiness reports also include read-only `wafRecommendations`. The engine infers `spa-static-site`, `rest-api`, `admin-panel`, or `microservice-origin` posture from the policy and suggests managed WAF rule groups plus related settings with rationale, cost notes, false-positive notes, and AWS/Cloudflare target support. It never mutates the policy; apply recommendations manually in a follow-up change.
+
 ## `capabilities`
 
 ```bash
