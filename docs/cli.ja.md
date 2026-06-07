@@ -127,6 +127,8 @@ npx cdn-security readiness --report readiness-report.json
 
 starter policy はローカルで使えるままにしつつ、本番 CI では弱い WAF posture を止めたい場合は `--fail-on-weak-waf-baseline` を使います。この flag は WAF baseline finding を `fail` に昇格します。対象は WAF 設定なし、rate limit なし、AWS managed rule の signal coverage 不足、`firewall.waf.scope: CLOUDFRONT` で CloudFront WAF logging が無効な場合です。
 
+readiness report には read-only の `wafRecommendations` も含まれます。この engine は policy から `spa-static-site`、`rest-api`、`admin-panel`、`microservice-origin` の posture を推定し、managed WAF rule group と関連設定を、rationale、cost notes、false-positive notes、AWS / Cloudflare target support 付きで提案します。policy は変更しません。推奨の適用は別 change として手動で行ってください。
+
 ## `capabilities`
 
 ```bash
