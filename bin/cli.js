@@ -719,7 +719,10 @@ function printCapabilitiesReport(report) {
 function readinessFinding(severity, id, detail, recommendation) {
     return { severity, id, detail, recommendation };
 }
-function evaluateReadiness(policy, target, lintWarnings) {
+function weakWafSeverity(options) {
+    return options.failOnWeakWafBaseline ? 'fail' : 'warn';
+}
+function evaluateReadiness(policy, target, lintWarnings, options = {}) {
     const findings = [];
     const metadata = (policy && policy.metadata) || {};
     const defaults = (policy && policy.defaults) || {};
@@ -751,11 +754,11 @@ function evaluateReadiness(policy, target, lintWarnings) {
         findings.push(readinessFinding('warn', 'response_headers.csp.missing', 'No CSP policy is configured.', 'Add csp_public and, if needed, csp_admin before production rollout.'));
     }
     if (!firewall.waf) {
-        findings.push(readinessFinding('warn', 'firewall.waf.missing', 'firewall.waf is not configured.', 'Add WAF rate limits and managed rules for production traffic.'));
+        findings.push(readinessFinding(weakWafSeverity(options), 'firewall.waf.missing', 'firewall.waf is not configured.', 'Add WAF rate limits and managed rules for production traffic.'));
     }
     else {
         if (!waf.rate_limit && !Array.isArray(waf.rate_limit_rules)) {
-            findings.push(readinessFinding('warn', 'firewall.waf.rate_limit.missing', 'No global or scoped WAF rate limit is configured.', 'Set firewall.waf.rate_limit or firewall.waf.rate_limit_rules for production.'));
+            findings.push(readinessFinding(weakWafSeverity(options), 'firewall.waf.rate_limit.missing', 'No global or scoped WAF rate limit is configured.', 'Set firewall.waf.rate_limit or firewall.waf.rate_limit_rules for production.'));
         }
         const managed = Array.isArray(waf.managed_rules) ? waf.managed_rules : [];
         const hasCoreSignal = managed.some((r) => r === 'AWSManagedRulesBotControlRuleSet' ||
@@ -763,7 +766,11 @@ function evaluateReadiness(policy, target, lintWarnings) {
             r === 'AWSManagedRulesIPReputationList' ||
             r === 'AWSManagedRulesAnonymousIpList');
         if (target === 'aws' && !hasCoreSignal) {
-            findings.push(readinessFinding('warn', 'firewall.waf.managed_rules.core_signal_missing', 'Managed WAF rules omit BotControl, ATP, IPReputation, and AnonymousIp.', 'Consider at least AWSManagedRulesIPReputationList and AWSManagedRulesAnonymousIpList for production enforce mode.'));
+            findings.push(readinessFinding(weakWafSeverity(options), 'firewall.waf.managed_rules.core_signal_missing', 'Managed WAF rules omit BotControl, ATP, IPReputation, and AnonymousIp.', 'Consider at least AWSManagedRulesIPReputationList and AWSManagedRulesAnonymousIpList for production enforce mode.'));
+        }
+        const loggingEnabled = waf.logging && waf.logging.enabled === true;
+        if (target === 'aws' && waf.scope === 'CLOUDFRONT' && !loggingEnabled) {
+            findings.push(readinessFinding(weakWafSeverity(options), 'firewall.waf.logging.missing', 'WAF logging is not enabled while scope=CLOUDFRONT.', 'Set firewall.waf.logging.enabled: true and supply destination_arn_env for production WAF log retention.'));
         }
         if (target === 'cloudflare') {
             const { classifyManagedRule } = require(path.join(pkgRoot, 'scripts', 'lib', 'cloudflare-waf-parity.js'));
@@ -791,6 +798,9 @@ function evaluateReadiness(policy, target, lintWarnings) {
     }
     for (const warning of lintWarnings) {
         if (warning.includes('managed_rules does not include any of BotControl')) {
+            continue;
+        }
+        if (target === 'aws' && warning.includes('firewall.waf.logging is not enabled while scope=CLOUDFRONT')) {
             continue;
         }
         findings.push(readinessFinding('warn', 'policy.lint.warning', warning, 'Review the policy lint warning before promoting this artifact.'));
@@ -1360,6 +1370,7 @@ program
     .option('--report <path>', 'Write machine-readable JSON report to this path', null)
     .option('--json', 'Print machine-readable JSON instead of a human report')
     .option('--strict', 'Exit non-zero on warnings as well as failures')
+    .option('--fail-on-weak-waf-baseline', 'Promote weak WAF baseline findings to failures for production CI')
     .action((opts) => {
     const cwd = process.cwd();
     const policyPath = resolvePolicyPath(cwd, opts.policy);
@@ -1388,11 +1399,14 @@ program
     lint.errors.forEach((error) => findings.push(readinessFinding('fail', 'policy.lint.error', error, 'Fix policy validation before production release.')));
     if (lint.policy && typeof lint.policy === 'object') {
         policy = lint.policy;
-        findings.push(...evaluateReadiness(policy, target, lint.warnings));
+        findings.push(...evaluateReadiness(policy, target, lint.warnings, {
+            failOnWeakWafBaseline: Boolean(opts.failOnWeakWafBaseline),
+        }));
     }
     const failCount = findings.filter((f) => f.severity === 'fail').length;
     const warnCount = findings.filter((f) => f.severity === 'warn').length;
     const strict = Boolean(opts.strict);
+    const failOnWeakWafBaseline = Boolean(opts.failOnWeakWafBaseline);
     const exitCode = failCount > 0 || (strict && warnCount > 0) ? 1 : 0;
     const status = failCount > 0 ? 'fail' : warnCount > 0 ? 'warn' : 'pass';
     const report = {
@@ -1400,6 +1414,7 @@ program
         policyPath,
         target,
         strict,
+        failOnWeakWafBaseline,
         status,
         exitCode,
         summary: { fail: failCount, warn: warnCount },

@@ -834,6 +834,180 @@ test('CLI authoring DX: readiness strict mode fails on warnings', () => {
   }
 });
 
+test('CLI authoring DX: readiness keeps weak WAF baseline as warning by default', () => {
+  const ctx = tmpProject(BASIC_AWS_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'readiness',
+      '-p', ctx.policyPath,
+      '--target', 'aws',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `readiness failed: ${result.stderr}`);
+    const report = JSON.parse(result.stdout);
+    assert.strictEqual(report.status, 'warn');
+    assert.strictEqual(report.failOnWeakWafBaseline, false);
+    assert.ok(report.findings.some((finding: any) =>
+      finding.id === 'firewall.waf.managed_rules.core_signal_missing' &&
+      finding.severity === 'warn'
+    ));
+    assert.ok(report.findings.some((finding: any) =>
+      finding.id === 'firewall.waf.logging.missing' &&
+      finding.severity === 'warn'
+    ));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: readiness can fail weak WAF baseline without strict mode', () => {
+  const ctx = tmpProject(BASIC_AWS_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'readiness',
+      '-p', ctx.policyPath,
+      '--target', 'aws',
+      '--fail-on-weak-waf-baseline',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 1);
+    const report = JSON.parse(result.stdout);
+    assert.strictEqual(report.status, 'fail');
+    assert.strictEqual(report.failOnWeakWafBaseline, true);
+    assert.ok(report.findings.some((finding: any) =>
+      finding.id === 'firewall.waf.managed_rules.core_signal_missing' &&
+      finding.severity === 'fail'
+    ));
+    assert.ok(report.findings.some((finding: any) =>
+      finding.id === 'firewall.waf.logging.missing' &&
+      finding.severity === 'fail'
+    ));
+    assert.ok(report.findings.some((finding: any) =>
+      finding.id === 'policy.risk_level.missing' &&
+      finding.severity === 'warn'
+    ));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: readiness weak WAF baseline gate passes production-shaped policy', () => {
+  const ctx = tmpProject(READINESS_AWS_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'readiness',
+      '-p', ctx.policyPath,
+      '--target', 'aws',
+      '--fail-on-weak-waf-baseline',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `readiness failed: ${result.stderr}`);
+    const report = JSON.parse(result.stdout);
+    assert.strictEqual(report.status, 'pass');
+    assert.strictEqual(report.failOnWeakWafBaseline, true);
+    assert.deepStrictEqual(report.summary, { fail: 0, warn: 0 });
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: readiness has stable outcomes for built-in profiles', () => {
+  const { spawnSync } = require('child_process');
+  const cli = path.join(repoRoot, 'bin', 'cli.js');
+  const runProfile = (name: string) => {
+    const result: any = spawnSync(process.execPath, [
+      cli, 'readiness',
+      '-p', path.join(repoRoot, 'policy', 'profiles', `${name}.yml`),
+      '--target', 'aws',
+      '--json',
+    ], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+      env: Object.assign({}, process.env, {
+        EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy',
+      }),
+    });
+    return { result, report: JSON.parse(result.stdout) };
+  };
+
+  const balanced = runProfile('balanced');
+  assert.strictEqual(balanced.result.status, 0, balanced.result.stderr);
+  assert.strictEqual(balanced.report.status, 'pass');
+
+  const strict = runProfile('strict');
+  assert.strictEqual(strict.result.status, 0, strict.result.stderr);
+  assert.strictEqual(strict.report.status, 'warn');
+  assert.ok(strict.report.findings.some((finding: any) =>
+    finding.id === 'firewall.waf.logging.missing' &&
+    finding.severity === 'warn'
+  ));
+
+  const permissive = runProfile('permissive');
+  assert.strictEqual(permissive.result.status, 1);
+  assert.strictEqual(permissive.report.status, 'fail');
+  assert.ok(permissive.report.findings.some((finding: any) =>
+    finding.id === 'policy.risk_level.permissive' &&
+    finding.severity === 'fail'
+  ));
+});
+
+test('CLI authoring DX: readiness reports target-specific unsupported controls', () => {
+  const ctx = tmpProject(CAPABILITIES_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const aws: any = spawnSync(process.execPath, [
+      cli, 'readiness',
+      '-p', ctx.policyPath,
+      '--target', 'aws',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(aws.status, 1);
+    const awsReport = JSON.parse(aws.stdout);
+    assert.ok(awsReport.findings.some((finding: any) => finding.id === 'target.aws.graphql_guard.unsupported'));
+    assert.ok(awsReport.findings.some((finding: any) => finding.id === 'target.aws.challenge.unsupported'));
+    assert.ok(awsReport.findings.some((finding: any) => finding.id === 'target.aws.response_dlp.unsupported'));
+
+    const cloudflare: any = spawnSync(process.execPath, [
+      cli, 'readiness',
+      '-p', ctx.policyPath,
+      '--target', 'cloudflare',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(cloudflare.status, 0, cloudflare.stderr);
+    const cloudflareReport = JSON.parse(cloudflare.stdout);
+    assert.ok(!cloudflareReport.findings.some((finding: any) => finding.id.startsWith('target.aws.')));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test('CLI authoring DX: deploy-template emits AWS and Cloudflare workflow templates', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-template-'));
   try {

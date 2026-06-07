@@ -116,6 +116,7 @@ Exit code is `0` when no check has status `fail`, else `1`. With `--strict`, war
 npx cdn-security readiness
 npx cdn-security readiness --target cloudflare
 npx cdn-security readiness --strict
+npx cdn-security readiness --fail-on-weak-waf-baseline
 npx cdn-security readiness --json
 npx cdn-security readiness --report readiness-report.json
 ```
@@ -123,6 +124,8 @@ npx cdn-security readiness --report readiness-report.json
 Runs a production-oriented release gate over the selected policy. It reuses environment diagnostics and policy validation, then adds production posture checks for risk level, enforce mode, method restrictions, response headers, WAF rate limits, managed-rule coverage, and target-specific unsupported controls.
 
 Exit code is `1` when any finding has severity `fail`. With `--strict`, warning findings also fail the command. Use `--json` for stdout JSON, or `--report <path>` to write the same machine-readable report while keeping the human summary on stdout/stderr.
+
+Use `--fail-on-weak-waf-baseline` for production CI when starter policies should remain usable locally but weak WAF posture must stop a release. The flag promotes WAF baseline findings to `fail`, including missing WAF config, missing rate limits, missing AWS managed-rule signal coverage, and missing CloudFront WAF logging when `firewall.waf.scope: CLOUDFRONT`.
 
 ## `capabilities`
 
