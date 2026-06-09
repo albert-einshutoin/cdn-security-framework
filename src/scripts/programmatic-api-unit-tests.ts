@@ -706,6 +706,59 @@ test('CLI authoring DX: explain summarizes policy posture', () => {
   }
 });
 
+test('CLI authoring DX: visualize emits mermaid with control coverage', () => {
+  const ctx = tmpProject(CAPABILITIES_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'visualize',
+      '--policy', ctx.policyPath,
+      '--target', 'aws',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `visualize failed: ${result.stderr}`);
+    assert.ok(result.stdout.includes('flowchart LR'));
+    assert.ok(result.stdout.includes('Policy: capabilities-test (v1)'));
+    assert.ok(result.stdout.includes('request.graphql_guard'));
+    assert.ok(result.stdout.includes('response_dlp'));
+    assert.ok(result.stdout.includes('(monitor)'));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: visualize --format html writes file artifact', () => {
+  const ctx = tmpProject(CAPABILITIES_POLICY);
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const outputPath = path.join(ctx.tmp, 'policy-coverage.html');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'visualize',
+      '--policy', ctx.policyPath,
+      '--target', 'all',
+      '--format', 'html',
+      '--out', outputPath,
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `visualize html failed: ${result.stderr}`);
+    assert.ok(result.stdout.includes('[SUCCESS] Wrote visualization to'));
+    const html = fs.readFileSync(outputPath, 'utf8');
+    assert.ok(html.includes('<pre class="mermaid">'));
+    assert.ok(html.includes('Policy: capabilities-test'));
+    assert.ok(html.includes('mermaid.min.js'));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
 test('CLI authoring DX: capabilities prints target matrix', () => {
   const { spawnSync } = require('child_process');
   const cli = path.join(repoRoot, 'bin', 'cli.js');
