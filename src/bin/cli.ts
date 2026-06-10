@@ -93,6 +93,69 @@ type DiffOptions = {
   target: string;
 };
 
+type PlaygroundTarget = 'aws' | 'cloudflare' | 'all';
+
+type PlaygroundOptions = {
+  policy?: string | null;
+  target: PlaygroundTarget;
+  fixture?: string | null;
+  json?: boolean;
+  allowPlaceholderToken?: boolean;
+};
+
+type PlaygroundRequest = {
+  method?: string;
+  path?: string;
+  uri?: string;
+  query?: string | Record<string, string | number | boolean | object> | null;
+  headers?: Record<string, string | number | boolean | null>;
+  body?: unknown;
+};
+
+type RawFixtureEntry = {
+  name?: string;
+  request?: PlaygroundRequest;
+};
+
+type PlaygroundFixture = {
+  name: string;
+  request: {
+    method: string;
+    path: string;
+    query: string;
+    headers: Record<string, string>;
+    body: unknown;
+    raw?: Record<string, unknown>;
+  };
+};
+
+type PlaygroundCaseResult = {
+  name: string;
+  decision: PlaygroundDecision;
+  status: number;
+  block_reason: string;
+  path: string;
+  method: string;
+  query: string;
+};
+
+type PlaygroundDecision = 'pass' | 'block';
+
+function isBlockedStatus(status: unknown): boolean {
+  const numericStatus = Number(status);
+  return Number.isFinite(numericStatus) && numericStatus >= 400;
+}
+
+type PlaygroundTargetResult = {
+  target: PlaygroundTarget | 'aws' | 'cloudflare';
+  fixtures: PlaygroundCaseResult[];
+};
+
+type PlaygroundReport = {
+  policyPath: string | null;
+  targets: PlaygroundTargetResult[];
+};
+
 type StarterAnswers = {
   platform?: string;
   starterKind?: 'profile' | 'archetype' | 'guided';
@@ -108,6 +171,37 @@ type StarterAnswers = {
   deployment?: string;
   project?: string;
 };
+
+async function withMutedOutput<T>(fn: () => T | Promise<T>, condition: boolean): Promise<T> {
+  if (!condition) {
+    return await fn();
+  }
+
+  const stdoutWrite = process.stdout.write.bind(process.stdout);
+  const stderrWrite = process.stderr.write.bind(process.stderr);
+  const consoleLog = console.log;
+  const consoleWarn = console.warn;
+  const consoleError = console.error;
+
+  const mutedWrite = () => true as unknown as void;
+  const mutedConsole = () => undefined;
+
+  process.stdout.write = mutedWrite as never;
+  process.stderr.write = mutedWrite as never;
+  console.log = mutedConsole;
+  console.warn = mutedConsole;
+  console.error = mutedConsole;
+
+  try {
+    return await fn();
+  } finally {
+    process.stdout.write = stdoutWrite as never;
+    process.stderr.write = stderrWrite as never;
+    console.log = consoleLog;
+    console.warn = consoleWarn;
+    console.error = consoleError;
+  }
+}
 
 async function promptQuestions(questions: any[]) {
   // inquirer v13+ is ESM-only. Keep it lazy so simple commands like
@@ -469,6 +563,330 @@ const CAPABILITY_TARGETS: { key: CapabilityTargetKey; label: string }[] = [
 ];
 
 const CAPABILITY_STATUSES: CapabilityStatus[] = ['supported', 'partial', 'unsupported', 'warning-only'];
+const PLAYGROUND_PLACEHOLDER_TOKEN = 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
+
+function normalizeFixtureHeader(raw: Record<string, string | number | boolean | null> | undefined | null): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (!raw) return headers;
+  for (const [key, value] of Object.entries(raw)) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'object') continue;
+    headers[key] = String(value);
+  }
+  return headers;
+}
+
+function normalizeFixtureQuery(raw: PlaygroundRequest['query']): string {
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return '';
+  const pairs: string[] = [];
+  for (const [key, value] of Object.entries(raw)) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === 'object') {
+      const obj = value as Record<string, any>;
+      if (obj.value !== undefined && obj.value !== null) {
+        pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(obj.value))}`);
+      }
+      if (Array.isArray(obj.multiValue)) {
+        for (const item of obj.multiValue) {
+          if (item && item.value !== undefined && item.value !== null) {
+            pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(item.value))}`);
+          }
+        }
+      }
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item === undefined || item === null) continue;
+        pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`);
+      }
+      continue;
+    }
+    pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+  }
+  return pairs.join('&');
+}
+
+function buildDefaultPlaygroundFixtures(): PlaygroundFixture[] {
+  return [
+    {
+      name: 'GET / with explicit user-agent',
+      request: {
+        method: 'GET',
+        path: '/',
+        query: '',
+        headers: {
+          'user-agent': 'cdn-security-framework-playground',
+          accept: 'text/plain',
+        },
+        body: null,
+      },
+    },
+    {
+      name: 'PATCH / is blocked by method rule',
+      request: {
+        method: 'PATCH',
+        path: '/',
+        query: '',
+        headers: {
+          'user-agent': 'cdn-security-framework-playground',
+        },
+        body: null,
+      },
+    },
+    {
+      name: 'Path traversal is blocked',
+      request: {
+        method: 'GET',
+        path: '/foo/../bar',
+        query: '',
+        headers: {
+          'user-agent': 'cdn-security-framework-playground',
+        },
+        body: null,
+      },
+    },
+    {
+      name: 'Query string strip example',
+      request: {
+        method: 'GET',
+        path: '/search',
+        query: 'utm_source=google&q=abc',
+        headers: {
+          'user-agent': 'cdn-security-framework-playground',
+        },
+        body: null,
+      },
+    },
+    {
+      name: 'Auth missing on admin route',
+      request: {
+        method: 'GET',
+        path: '/admin',
+        query: '',
+        headers: {
+          'user-agent': 'cdn-security-framework-playground',
+        },
+        body: null,
+      },
+    },
+    {
+      name: 'Auth with placeholder token on admin route',
+      request: {
+        method: 'GET',
+        path: '/admin',
+        query: '',
+        headers: {
+          'user-agent': 'cdn-security-framework-playground',
+          'x-edge-token': PLAYGROUND_PLACEHOLDER_TOKEN,
+        },
+        body: null,
+      },
+    },
+  ];
+}
+
+function loadPlaygroundFixtures(fixturePath: string | null | undefined): PlaygroundFixture[] {
+  if (!fixturePath) {
+    return buildDefaultPlaygroundFixtures();
+  }
+  const raw = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+  let list: RawFixtureEntry[] = [];
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (raw && Array.isArray((raw as any).fixtures)) {
+    list = (raw as any).fixtures;
+  } else if (raw && (raw as any).request) {
+    list = [raw as RawFixtureEntry];
+  } else {
+    throw new Error('Invalid fixture format. Use array, {fixtures: [...]}, or {request: {...}}.');
+  }
+  return list.map((entry, index: number) => {
+    const payload: any = (entry && entry.request && typeof entry.request === 'object') ? entry.request : entry;
+    if (!payload || typeof payload !== 'object') {
+      throw new Error(`Fixture entry #${index + 1} is invalid.`);
+    }
+    const req = payload as PlaygroundRequest;
+    return {
+      name: String((entry as any).name || `request-${index + 1}`),
+      request: {
+        method: String(req.method || 'GET').toUpperCase(),
+        path: String(req.path || req.uri || '/'),
+        query: normalizeFixtureQuery(req.query),
+        headers: normalizeFixtureHeader(req.headers),
+        body: req.body,
+        raw: req.body as Record<string, unknown> | undefined,
+      },
+    };
+  });
+}
+
+function buildAwsEvent(fixture: PlaygroundFixture['request']): any {
+  const headers: Record<string, { value: string }> = {};
+  for (const [name, value] of Object.entries(fixture.headers)) {
+    headers[name.toLowerCase()] = { value: String(value) };
+  }
+  return {
+    request: {
+      method: fixture.method,
+      uri: fixture.path,
+      headers,
+      querystring: fixture.query,
+    },
+  };
+}
+
+function buildCloudflareRequest(fixture: PlaygroundFixture['request']): Request {
+  const basePath = fixture.path || '/';
+  const [pathOnly, rawQuery] = basePath.split('?');
+  const normalizedQuery = fixture.query || (rawQuery || '');
+  const queryString = normalizedQuery ? (normalizedQuery.startsWith('?') ? normalizedQuery.slice(1) : normalizedQuery) : '';
+  const url = new URL(pathOnly + (queryString ? `?${queryString}` : ''), 'https://edge.example.com');
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(fixture.headers)) {
+    headers.set(name, value);
+  }
+  const body = (fixture.body === undefined || fixture.body === null)
+    ? undefined
+    : typeof fixture.body === 'string' ? fixture.body : JSON.stringify(fixture.body);
+  return new Request(url.toString(), {
+    method: fixture.method,
+    headers,
+    body: ['GET', 'HEAD'].includes(fixture.method) ? undefined : body as any,
+  });
+}
+
+function runAwsPlayground(outDir: string, fixtures: PlaygroundFixture[]): PlaygroundTargetResult {
+  const viewerRequestPath = path.join(outDir, 'edge', 'viewer-request.js');
+  const code = fs.readFileSync(viewerRequestPath, 'utf8');
+  const handler = Function(`${code}\nreturn handler;`)();
+  if (typeof handler !== 'function') {
+    throw new Error('AWS compiled artifact is malformed: handler missing.');
+  }
+  const result: PlaygroundTargetResult = { target: 'aws', fixtures: [] };
+  for (const fixture of fixtures) {
+    const response = handler(buildAwsEvent(fixture.request));
+    const status = response && response.statusCode != null ? Number(response.statusCode) : 200;
+    const blocked = isBlockedStatus(response && response.statusCode);
+    result.fixtures.push({
+      name: fixture.name,
+      decision: blocked ? 'block' : 'pass',
+      status,
+      block_reason: blocked ? String(response.body || 'blocked') : '',
+      path: fixture.request.path,
+      method: fixture.request.method,
+      query: fixture.request.query,
+    });
+  }
+  return result;
+}
+
+async function runCloudflarePlayground(outDir: string, fixtures: PlaygroundFixture[]): Promise<PlaygroundTargetResult> {
+  const esbuild = require('esbuild');
+  const workerSourcePath = path.join(outDir, 'edge', 'cloudflare', 'index.ts');
+  const generated = fs.readFileSync(workerSourcePath, 'utf8');
+  const compiled = esbuild.transformSync(generated, {
+    loader: 'ts',
+    format: 'cjs',
+    target: 'es2022',
+  }).code;
+  const tmpDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cdn-security-playground-cf-'));
+  const modPath = path.join(tmpDir, 'worker.cjs');
+  const env: Record<string, string> = {
+    EDGE_ADMIN_TOKEN: PLAYGROUND_PLACEHOLDER_TOKEN,
+    BASIC_AUTH_CREDS: 'basic:cred',
+    URL_SIGNING_SECRET: 'url-signing-secret',
+    JWT_SECRET: 'jwt-secret',
+    ORIGIN_SECRET: 'origin-secret',
+    CHALLENGE_SECRET: 'challenge-secret',
+  };
+  const previousFetch = (globalThis as any).fetch;
+  (globalThis as any).fetch = async () => new Response('origin-ok', { status: 200, headers: {} });
+  const result: PlaygroundTargetResult = { target: 'cloudflare', fixtures: [] };
+  try {
+    fs.writeFileSync(modPath, compiled, 'utf8');
+    delete require.cache[modPath];
+    const mod = require(modPath);
+    const fetchHandler = mod && mod.default && typeof mod.default.fetch === 'function'
+      ? mod.default.fetch
+      : null;
+    if (typeof fetchHandler !== 'function') {
+      throw new Error('Cloudflare compiled artifact is malformed: default.fetch missing.');
+    }
+    for (const fixture of fixtures) {
+      const request = buildCloudflareRequest(fixture.request);
+      const response = await fetchHandler(request, env, {});
+      const status = Number(response.status) || 0;
+      const blocked = isBlockedStatus(status);
+      const body = blocked ? await response.text() : '';
+      result.fixtures.push({
+        name: fixture.name,
+        decision: blocked ? 'block' : 'pass',
+        status,
+        block_reason: blocked ? body : '',
+        path: fixture.request.path,
+        method: fixture.request.method,
+        query: fixture.request.query,
+      });
+    }
+    return result;
+  } finally {
+    (globalThis as any).fetch = previousFetch;
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+async function runPlayground(opts: PlaygroundOptions): Promise<PlaygroundReport> {
+  const cwd = process.cwd();
+  const policyPath = resolvePolicyPath(cwd, opts.policy);
+  const fixtures = loadPlaygroundFixtures(opts.fixture ? path.isAbsolute(opts.fixture)
+    ? opts.fixture
+    : path.join(cwd, opts.fixture) : null);
+  const tmpRoot = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cdn-security-playground-'));
+  const allowPlaceholderToken = opts.allowPlaceholderToken !== false;
+  const target = opts.target || 'all';
+  const { compile } = require(path.join(pkgRoot, 'lib'));
+  const results: PlaygroundTargetResult[] = [];
+  const isAws = target === 'aws' || target === 'all';
+  const isCloudflare = target === 'cloudflare' || target === 'all';
+  try {
+    if (isAws) {
+      const outDir = path.join(tmpRoot, 'aws');
+      const compileResult = compile({
+        policyPath,
+        outDir,
+        target: 'aws',
+        allowPlaceholderToken,
+        cwd,
+        pkgRoot,
+      });
+      if (!compileResult.ok) {
+        throw new Error(`playground: aws compile failed: ${compileResult.errors.join(' | ')}`);
+      }
+      results.push(runAwsPlayground(outDir, fixtures));
+    }
+    if (isCloudflare) {
+      const outDir = path.join(tmpRoot, 'cloudflare');
+      const compileResult = compile({
+        policyPath,
+        outDir,
+        target: 'cloudflare',
+        allowPlaceholderToken,
+        cwd,
+        pkgRoot,
+      });
+      if (!compileResult.ok) {
+        throw new Error(`playground: cloudflare compile failed: ${compileResult.errors.join(' | ')}`);
+      }
+      results.push(await runCloudflarePlayground(outDir, fixtures));
+    }
+    return { policyPath, targets: results };
+  } finally {
+    if (fs.existsSync(tmpRoot)) fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
 
 function routeAuthConfigured(policy: any, types: string[]): boolean {
   const routes = Array.isArray(policy && policy.routes) ? policy.routes : [];
@@ -2172,6 +2590,40 @@ program
       process.exit(1);
     } finally {
       fs.rmSync(tmpRoot, { recursive: true, force: true });
+    }
+  });
+
+program
+  .command('playground')
+  .description('Run sample requests against locally compiled AWS/Cloudflare runtime artifacts')
+  .option('-p, --policy <path>', 'Policy file path (default: policy/security.yml or policy/base.yml)', null)
+  .option('-t, --target <platform>', 'Target platform: aws | cloudflare | all', 'all')
+  .option('-f, --fixture <path>', 'JSON fixture with request cases (array, {fixtures: [...]}, or {request: {...}})')
+  .option('--json', 'Emit machine-readable output')
+  .option('--allow-placeholder-token', 'Allow non-production placeholder credentials for local policy checks')
+  .action(async (opts: PlaygroundOptions) => {
+    if (opts.target !== 'aws' && opts.target !== 'cloudflare' && opts.target !== 'all') {
+      console.error('[ERROR] --target must be aws, cloudflare, or all.');
+      process.exit(1);
+    }
+    try {
+      const report = await withMutedOutput(() => runPlayground(opts), !!opts.json);
+      if (opts.json) {
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
+
+      for (const targetResult of report.targets) {
+        console.log(`[${targetResult.target}]`);
+        for (const item of targetResult.fixtures) {
+          const querySuffix = item.query ? `?${item.query}` : '';
+          const reason = item.block_reason ? ` reason=${item.block_reason}` : '';
+          console.log(`- ${item.name}: ${item.method} ${item.path}${querySuffix} => ${item.decision.toUpperCase()} (status=${item.status})${reason}`);
+        }
+      }
+    } catch (e: any) {
+      console.error('[ERROR]', e.message || String(e));
+      process.exit(1);
     }
   });
 

@@ -188,6 +188,71 @@ firewall:
       - AWSManagedRulesCommonRuleSet
 `;
 
+const PLAYGROUND_FIXTURES = [
+  {
+    name: 'allow GET /',
+    request: {
+      method: 'GET',
+      path: '/',
+      headers: {
+        'user-agent': 'cli-test-client',
+      },
+    },
+  },
+  {
+    name: 'block PATCH',
+    request: {
+      method: 'PATCH',
+      path: '/',
+      headers: {
+        'user-agent': 'cli-test-client',
+      },
+    },
+  },
+  {
+    name: 'path traversal is blocked',
+    request: {
+      method: 'GET',
+      path: '/foo/../bar',
+      headers: {
+        'user-agent': 'cli-test-client',
+      },
+    },
+  },
+  {
+    name: 'auth missing on admin',
+    request: {
+      method: 'GET',
+      path: '/admin',
+      headers: {
+        'user-agent': 'cli-test-client',
+      },
+    },
+  },
+  {
+    name: 'auth placeholder passes',
+    request: {
+      method: 'GET',
+      path: '/admin',
+      headers: {
+        'user-agent': 'cli-test-client',
+        'x-edge-token': 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN',
+      },
+    },
+  },
+  {
+    name: 'query is visible in output',
+    request: {
+      method: 'GET',
+      path: '/search',
+      query: { q: 'hello', utm_source: 'cli' },
+      headers: {
+        'user-agent': 'cli-test-client',
+      },
+    },
+  },
+];
+
 function tmpProject(yamlBody: string) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'api-'));
   const policyDir = path.join(tmp, 'policy');
@@ -545,6 +610,74 @@ test('CLI authoring DX: build --allow-placeholder-token succeeds without auth en
     assert.strictEqual(result.status, 0, `CLI build failed: ${result.stderr}`);
     assert.ok(result.stderr.includes('Generated artifacts are NOT safe for production'));
     assert.ok(fs.existsSync(path.join(ctx.outDir, 'edge', 'viewer-request.js')));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: playground emits AWS + Cloudflare fixture decisions', () => {
+  const ctx = tmpProject(STATIC_TOKEN_POLICY);
+  try {
+    const fixturePath = path.join(ctx.tmp, 'playground.fixture.json');
+    fs.writeFileSync(fixturePath, JSON.stringify({ fixtures: PLAYGROUND_FIXTURES }, null, 2), 'utf8');
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'playground',
+      '-p', ctx.policyPath,
+      '-f', fixturePath,
+      '--target', 'all',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: Object.assign({}, process.env, {
+        // playground defaults allow placeholder replacement, no runtime secrets required
+        EDGE_ADMIN_TOKEN: '',
+        ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+      }),
+    });
+    assert.strictEqual(result.status, 0, `playground failed: ${result.stderr}`);
+    const report = JSON.parse(result.stdout);
+    assert.strictEqual(report.policyPath, ctx.policyPath);
+    assert.strictEqual(report.targets.length, 2, 'expected aws + cloudflare results');
+    const byTarget = Object.fromEntries(report.targets.map((r: any) => [r.target, r.fixtures]));
+    assert.ok(Array.isArray(byTarget.aws), 'aws target missing');
+    assert.ok(Array.isArray(byTarget.cloudflare), 'cloudflare target missing');
+
+    const awsAllow = byTarget.aws.find((f: any) => f.name === 'allow GET /');
+    const awsPatch = byTarget.aws.find((f: any) => f.name === 'block PATCH');
+    const awsAuthMissing = byTarget.aws.find((f: any) => f.name === 'auth missing on admin');
+    const awsAuthPass = byTarget.aws.find((f: any) => f.name === 'auth placeholder passes');
+    const awsTraversal = byTarget.aws.find((f: any) => f.name === 'path traversal is blocked');
+    const awsQuery = byTarget.aws.find((f: any) => f.name === 'query is visible in output');
+
+    assert.ok(awsAllow);
+    assert.ok(awsPatch);
+    assert.ok(awsAuthMissing);
+    assert.ok(awsAuthPass);
+    assert.ok(awsTraversal);
+    assert.ok(awsQuery);
+
+    assert.strictEqual(awsAllow.decision, 'pass');
+    assert.strictEqual(awsPatch.decision, 'block');
+    assert.strictEqual(awsTraversal.decision, 'block');
+    assert.strictEqual(awsAuthMissing.decision, 'block');
+    assert.strictEqual(awsAuthPass.decision, 'pass');
+    assert.ok(awsPatch.status >= 400);
+    assert.ok(awsTraversal.status >= 400);
+    assert.ok(awsAuthMissing.status >= 400);
+    assert.strictEqual(awsAllow.status, 200);
+    assert.strictEqual(awsAuthPass.status, 200);
+    assert.strictEqual(awsQuery.query, 'q=hello&utm_source=cli');
+    assert.ok(awsQuery.path === '/search');
+
+    const cloudAllow = byTarget.cloudflare.find((f: any) => f.name === 'allow GET /');
+    const cloudPatch = byTarget.cloudflare.find((f: any) => f.name === 'block PATCH');
+    assert.ok(cloudAllow);
+    assert.ok(cloudPatch);
+    assert.strictEqual(cloudAllow.decision, 'pass');
+    assert.strictEqual(cloudPatch.decision, 'block');
   } finally {
     ctx.cleanup();
   }
