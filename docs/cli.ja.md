@@ -13,6 +13,7 @@ npx cdn-security <subcommand> [options]
 | `init` | プロファイル / アーキタイプから `policy/security.yml` をスキャフォールド。 |
 | `build` | ポリシー検証 + エッジランタイム + インフラ設定の生成。 |
 | `playground` | ポリシーをローカルでコンパイルし、サンプルリクエストを AWS/Cloudflare ランタイムで再生して pass/block を確認。 |
+| `analyze` | 監視モード JSONL を集約し、低頻度ブロック候補を抽出。 |
 | `emit-waf` | インフラ設定のみ生成（エッジは生成しない）。エッジはそのままで WAF ルールだけ再デプロイしたいとき。 |
 | `doctor` | 環境診断をワンショット実行。失敗チェックがあれば非ゼロ終了。 |
 | `readiness` | 環境診断と policy posture を統合する本番リリースゲート。 |
@@ -113,6 +114,29 @@ fixture 例:
   ]
 }
 ```
+
+## `analyze`
+
+```bash
+npx cdn-security analyze --input /path/to/monitor.jsonl
+npx cdn-security analyze --input /path/to/monitor.jsonl --min-count 3 --top 10 --json
+```
+
+`analyze` は監視モードの構造化ログ（JSONL）を受け取り、`block` / `monitor` / `pass` を集約して低頻度な block の候補を抽出し、監視から enforce への移行判断を支援します。
+
+対応オプション:
+
+- `--input`: `JSONL` のログファイルパス（必須）
+- `--min-count`: `block` 判定の低頻度しきい値（デフォルト `5`）
+- `--top`: ルート/サンプルの最大表示件数（デフォルト `20`）
+- `--json`: 機械可読 JSON を標準出力
+
+出力:
+
+- 全体サマリ（総行数 / パース可能行 / ブロック / monitor）
+- `block_reason` ごとの集計（対象 target / route）
+- `policy route` ごとの集計（`block_reason` / target）
+- `count <= --min-count` の低頻度 block候補（サンプルイベント付き）
 
 ## `emit-waf`
 

@@ -13,6 +13,7 @@ npx cdn-security <subcommand> [options]
 | `init` | Scaffold `policy/security.yml` from a profile or archetype. |
 | `build` | Validate policy, compile edge runtime + infra config. |
 | `playground` | Compile policy locally and run sample request fixtures against edge runtimes (AWS + Cloudflare). |
+| `analyze` | Aggregate block/monitor JSONL logs and surface low-frequency candidates. |
 | `emit-waf` | Emit infra config only (no edge code). For redeploying firewall rules without touching edge. |
 | `doctor` | One-shot environment diagnostics. Exits non-zero on any failing check. |
 | `readiness` | Production release gate that combines diagnostics and policy posture findings. |
@@ -113,6 +114,27 @@ When `--json` is set, output is:
   ]
 }
 ```
+
+## `analyze`
+
+```bash
+npx cdn-security analyze --input /path/to/monitor.jsonl
+npx cdn-security analyze --input /path/to/monitor.jsonl --min-count 3 --top 10 --json
+```
+
+`analyze` accepts monitor logs in JSON Lines format and aggregates by route/reason to support migration from monitor mode to enforce.
+
+- `--input` required: log file path (JSONL)
+- `--min-count` minimum event count for low-frequency candidates (default `5`)
+- `--top` max number of printed/exported per-group samples (default `20`)
+- `--json` prints machine-readable report
+
+It reports:
+
+- summary lines (parsed/unparsed/analyzed)
+- by block reason (event count + route counts)
+- by policy route (reason and target distribution)
+- low-frequency candidates (`count <= --min-count`) for `block` events
 
 ## `emit-waf`
 

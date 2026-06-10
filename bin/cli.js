@@ -614,6 +614,287 @@ async function runPlayground(opts) {
             fs.rmSync(tmpRoot, { recursive: true, force: true });
     }
 }
+function asString(value) {
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        return trimmed.length > 0 ? trimmed : null;
+    }
+    return null;
+}
+function asNumber(value) {
+    if (typeof value === 'number' && Number.isFinite(value)) {
+        return value;
+    }
+    if (typeof value === 'string') {
+        const parsed = Number(value);
+        return Number.isFinite(parsed) ? parsed : null;
+    }
+    return null;
+}
+function normalizePolicyRoute(value) {
+    if (!value) {
+        return 'unknown';
+    }
+    const trimmed = value.trim();
+    if (!trimmed) {
+        return 'unknown';
+    }
+    return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+function normalizeEvent(value) {
+    const raw = asString(value);
+    if (!raw) {
+        return 'other';
+    }
+    const lower = raw.toLowerCase();
+    if (lower === 'allow' || lower === 'pass' || lower === 'passed') {
+        return 'pass';
+    }
+    if (lower === 'block' || lower === 'blocked') {
+        return 'block';
+    }
+    if (lower === 'monitor' || lower === 'monitoring' || lower === 'logged') {
+        return 'monitor';
+    }
+    return lower;
+}
+function parseAnalyzeRecord(row) {
+    if (!row || typeof row !== 'object') {
+        return null;
+    }
+    const record = row;
+    const method = asString(record.method)
+        || asString(record.httpRequest?.method)
+        || asString(record.request?.method)
+        || 'UNKNOWN';
+    const event = normalizeEvent(record.event)
+        || normalizeEvent(record.eventName)
+        || normalizeEvent(record.outcome);
+    const blockReason = asString(record.block_reason)
+        || asString(record.blockReason)
+        || asString(record.reason)
+        || 'unclassified';
+    const uri = normalizePolicyRoute(asString(record.uri)
+        || asString(record.path)
+        || asString(record.request?.uri)
+        || asString(record.request?.path)
+        || asString(record.httpRequest?.uri)
+        || asString(record.httpRequest?.path));
+    const policyRoute = normalizePolicyRoute(asString(record.policy_route)
+        || asString(record.policyRoute)
+        || asString(record.route)
+        || asString(record.request?.route)
+        || uri);
+    const target = asString(record.target)
+        || asString(record.platform)
+        || asString(record.provider)
+        || asString(record.runtime)
+        || 'unknown';
+    const status = asNumber(record.status) || asNumber(record.statusCode) || 0;
+    if (status < 0 || status > 999999) {
+        return null;
+    }
+    return {
+        target,
+        policyRoute,
+        method,
+        uri,
+        status,
+        event: event === 'other' && isBlockedStatus(status) ? 'block' : event,
+        blockReason,
+    };
+}
+function buildEmptyAnalyzeReport(input, minCount, top) {
+    return {
+        summary: {
+            input,
+            totalLines: 0,
+            parsedLines: 0,
+            unparseableLines: 0,
+            analyzedEvents: 0,
+            blockEvents: 0,
+            monitorEvents: 0,
+            lowFrequencyThreshold: minCount,
+            top,
+        },
+        byBlockReason: {},
+        byPolicyRoute: {},
+        candidates: [],
+    };
+}
+function incrementCounter(map, key) {
+    map[key] = (map[key] || 0) + 1;
+}
+function parseAnalyzeLine(line) {
+    if (!line.trim()) {
+        return null;
+    }
+    let row;
+    try {
+        row = JSON.parse(line);
+    }
+    catch (_e) {
+        return null;
+    }
+    if (!row || typeof row !== 'object') {
+        return null;
+    }
+    const nested = row.message;
+    if (asString(nested) && typeof nested === 'string') {
+        try {
+            const parsed = JSON.parse(nested);
+            return parseAnalyzeRecord(parsed);
+        }
+        catch (_e) {
+            // fall through
+        }
+    }
+    return parseAnalyzeRecord(row);
+}
+function runAnalyze(opts) {
+    const cwd = process.cwd();
+    const inputPath = opts.input
+        ? path.isAbsolute(opts.input) ? opts.input : path.join(cwd, opts.input)
+        : '';
+    if (!inputPath) {
+        throw new Error('analyze: --input is required');
+    }
+    if (!fs.existsSync(inputPath)) {
+        throw new Error(`analyze: input file not found: ${inputPath}`);
+    }
+    const minCount = Number(opts.minCount);
+    const top = Number(opts.top);
+    if (!Number.isFinite(minCount) || minCount < 1) {
+        throw new Error('analyze: --min-count must be a positive integer');
+    }
+    if (!Number.isFinite(top) || top < 1) {
+        throw new Error('analyze: --top must be a positive integer');
+    }
+    const report = buildEmptyAnalyzeReport(inputPath, Math.floor(minCount), Math.floor(top));
+    const text = fs.readFileSync(inputPath, 'utf8');
+    const lines = text.split(/\r?\n/);
+    const candidateMap = {};
+    for (const rawLine of lines) {
+        if (!rawLine.trim()) {
+            continue;
+        }
+        report.summary.totalLines += 1;
+        const event = parseAnalyzeLine(rawLine);
+        if (!event) {
+            report.summary.unparseableLines += 1;
+            continue;
+        }
+        report.summary.parsedLines += 1;
+        report.summary.analyzedEvents += 1;
+        const byReason = report.byBlockReason[event.blockReason] || {
+            count: 0,
+            targets: {},
+            policyRoutes: {},
+        };
+        incrementCounter(byReason.targets, event.target);
+        incrementCounter(byReason.policyRoutes, event.policyRoute);
+        byReason.count += 1;
+        report.byBlockReason[event.blockReason] = byReason;
+        const byRoute = report.byPolicyRoute[event.policyRoute] || {
+            count: 0,
+            blockReasons: {},
+            targets: {},
+        };
+        byRoute.count += 1;
+        incrementCounter(byRoute.blockReasons, event.blockReason);
+        incrementCounter(byRoute.targets, event.target);
+        report.byPolicyRoute[event.policyRoute] = byRoute;
+        const evt = event.event || 'other';
+        if (evt === 'block') {
+            report.summary.blockEvents += 1;
+            const key = `${event.blockReason}|${event.policyRoute}`;
+            const bucket = candidateMap[key] || {
+                policyRoute: event.policyRoute,
+                blockReason: event.blockReason,
+                count: 0,
+                targets: {},
+                events: [],
+            };
+            bucket.count += 1;
+            bucket.targets[event.target] = true;
+            if (bucket.events.length < report.summary.top) {
+                bucket.events.push({
+                    method: event.method,
+                    status: event.status,
+                    uri: event.uri,
+                    target: event.target,
+                });
+            }
+            candidateMap[key] = bucket;
+        }
+        if (evt === 'monitor') {
+            report.summary.monitorEvents += 1;
+        }
+    }
+    const candidateKeys = Object.keys(candidateMap);
+    report.candidates = candidateKeys
+        .map((key) => {
+        const bucket = candidateMap[key];
+        return {
+            policyRoute: bucket.policyRoute,
+            blockReason: bucket.blockReason,
+            count: bucket.count,
+            targets: Object.keys(bucket.targets),
+            events: bucket.events
+                .slice(0, report.summary.top)
+                .map((event) => ({
+                method: event.method,
+                status: event.status,
+                uri: event.uri,
+                target: event.target,
+            })),
+        };
+    })
+        .filter((entry) => entry.count <= report.summary.lowFrequencyThreshold)
+        .sort((a, b) => a.count - b.count || a.policyRoute.localeCompare(b.policyRoute))
+        .slice(0, report.summary.top);
+    return report;
+}
+function printAnalyzeReport(report) {
+    console.log(`[analyze] input=${report.summary.input}`);
+    console.log(`[analyze] total_lines=${report.summary.totalLines} parsed_lines=${report.summary.parsedLines} unparseable=${report.summary.unparseableLines}`);
+    console.log(`[analyze] analyzed_events=${report.summary.analyzedEvents} block=${report.summary.blockEvents} monitor=${report.summary.monitorEvents}`);
+    console.log('');
+    const reasonEntries = Object.entries(report.byBlockReason)
+        .map(([reason, value]) => ({ reason, count: value.count, routes: Object.entries(value.policyRoutes).length }))
+        .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
+    const routeEntries = Object.entries(report.byPolicyRoute)
+        .map(([policyRoute, value]) => ({ policyRoute, count: value.count, reasons: Object.entries(value.blockReasons).length }))
+        .sort((a, b) => b.count - a.count || a.policyRoute.localeCompare(b.policyRoute));
+    console.log('[analyze] Block reasons:');
+    for (const item of reasonEntries) {
+        console.log(`- ${item.reason}: ${item.count} events across ${item.routes} policy route(s)`);
+    }
+    if (reasonEntries.length === 0) {
+        console.log('- none');
+    }
+    console.log('');
+    console.log('[analyze] Top policy routes:');
+    for (const item of routeEntries.slice(0, 20)) {
+        console.log(`- ${item.policyRoute}: ${item.count} events (${item.reasons} block reason(s))`);
+    }
+    if (routeEntries.length === 0) {
+        console.log('- none');
+    }
+    console.log('');
+    if (report.candidates.length > 0) {
+        console.log('[analyze] Low-frequency candidates:');
+        for (const candidate of report.candidates) {
+            console.log(`- route=${candidate.policyRoute} reason=${candidate.blockReason} count=${candidate.count} targets=${candidate.targets.join(',')}`);
+            for (const evt of candidate.events) {
+                console.log(`  sample: ${evt.method} ${evt.uri} status=${evt.status} target=${evt.target}`);
+            }
+        }
+    }
+    else {
+        console.log('[analyze] Low-frequency candidates: none');
+    }
+}
 function routeAuthConfigured(policy, types) {
     const routes = Array.isArray(policy && policy.routes) ? policy.routes : [];
     return routes.some((route) => types.includes(route && route.auth_gate && route.auth_gate.type));
@@ -2149,6 +2430,34 @@ program
                 const reason = item.block_reason ? ` reason=${item.block_reason}` : '';
                 console.log(`- ${item.name}: ${item.method} ${item.path}${querySuffix} => ${item.decision.toUpperCase()} (status=${item.status})${reason}`);
             }
+        }
+    }
+    catch (e) {
+        console.error('[ERROR]', e.message || String(e));
+        process.exit(1);
+    }
+});
+program
+    .command('analyze')
+    .description('Aggregate monitor-mode JSON logs and flag low-frequency blocking candidates')
+    .requiredOption('-i, --input <path>', 'Path to JSONL log input')
+    .option('--min-count <n>', 'Candidate threshold for suspicious low-frequency blocks', '5')
+    .option('--top <n>', 'Maximum route candidates to print/export', '20')
+    .option('--json', 'Emit machine-readable output')
+    .action((opts) => {
+    try {
+        const minCount = Number(opts.minCount);
+        const top = Number(opts.top);
+        const report = runAnalyze({
+            input: opts.input,
+            minCount,
+            top,
+        });
+        if (opts.json) {
+            console.log(JSON.stringify(report, null, 2));
+        }
+        else {
+            printAnalyzeReport(report);
         }
     }
     catch (e) {
