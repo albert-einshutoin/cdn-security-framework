@@ -12,6 +12,7 @@ npx cdn-security <subcommand> [options]
 | --- | --- |
 | `init` | Scaffold `policy/security.yml` from a profile or archetype. |
 | `build` | Validate policy, compile edge runtime + infra config. |
+| `playground` | Compile policy locally and run sample request fixtures against edge runtimes (AWS + Cloudflare). |
 | `emit-waf` | Emit infra config only (no edge code). For redeploying firewall rules without touching edge. |
 | `doctor` | One-shot environment diagnostics. Exits non-zero on any failing check. |
 | `readiness` | Production release gate that combines diagnostics and policy posture findings. |
@@ -52,6 +53,66 @@ Outputs:
 - `dist/edge/viewer-request.js`, `dist/edge/viewer-response.js`, `dist/edge/origin-request.js` (AWS)
 - `dist/edge/cloudflare/index.ts` (Cloudflare)
 - `dist/infra/*.tf.json` — WAF, geo, IP sets, CloudFront settings, origin timeouts
+
+## `playground`
+
+```bash
+npx cdn-security playground                                      # local fixtures against built-in examples (AWS + Cloudflare)
+npx cdn-security playground --target aws --json                   # machine-readable output
+npx cdn-security playground --policy policy/security.yml -f cases.json
+npx cdn-security playground --allow-placeholder-token --target all  # allow INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN
+```
+
+`playground` builds the selected policy to a temporary directory and executes synthetic requests through the generated runtime. It reports `pass|block`, HTTP `status`, and `block_reason` for each fixture and includes the runtime target (`aws` or `cloudflare`).
+
+Input format options:
+
+- `--fixture <path>` accepts one of:
+  - `{ "fixtures": [ ... ] }`
+  - `[ ... ]`
+  - `{ "request": { ... } }`
+- each fixture item accepts:
+  - `method`
+  - `path`
+  - `query` (string or object map)
+  - `headers`
+  - `body`
+
+Example fixture:
+
+```json
+{
+  "fixtures": [
+    { "name": "GET /", "request": { "method": "GET", "path": "/" } },
+    { "name": "PATCH blocked", "request": { "method": "PATCH", "path": "/" } },
+    { "name": "admin missing auth", "request": { "method": "GET", "path": "/admin", "headers": { "x-edge-token": "INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN" } } }
+  ]
+}
+```
+
+When `--json` is set, output is:
+
+```json
+{
+  "policyPath": "/path/to/policy/security.yml",
+  "targets": [
+    {
+      "target": "aws",
+      "fixtures": [
+        {
+          "name": "GET /",
+          "decision": "pass",
+          "status": 200,
+          "block_reason": "",
+          "path": "/",
+          "method": "GET",
+          "query": ""
+        }
+      ]
+    }
+  ]
+}
+```
 
 ## `emit-waf`
 

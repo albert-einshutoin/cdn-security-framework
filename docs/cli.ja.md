@@ -12,6 +12,7 @@ npx cdn-security <subcommand> [options]
 | --- | --- |
 | `init` | プロファイル / アーキタイプから `policy/security.yml` をスキャフォールド。 |
 | `build` | ポリシー検証 + エッジランタイム + インフラ設定の生成。 |
+| `playground` | ポリシーをローカルでコンパイルし、サンプルリクエストを AWS/Cloudflare ランタイムで再生して pass/block を確認。 |
 | `emit-waf` | インフラ設定のみ生成（エッジは生成しない）。エッジはそのままで WAF ルールだけ再デプロイしたいとき。 |
 | `doctor` | 環境診断をワンショット実行。失敗チェックがあれば非ゼロ終了。 |
 | `readiness` | 環境診断と policy posture を統合する本番リリースゲート。 |
@@ -52,6 +53,66 @@ npx cdn-security build --fail-on-permissive   # metadata.risk_level == permissiv
 - `dist/edge/viewer-request.js`, `dist/edge/viewer-response.js`, `dist/edge/origin-request.js`（AWS）
 - `dist/edge/cloudflare/index.ts`（Cloudflare）
 - `dist/infra/*.tf.json` — WAF / geo / IP / CloudFront 設定 / origin タイムアウト
+
+## `playground`
+
+```bash
+npx cdn-security playground                                      # 組み込みのサンプルケースを AWS+Cloudflare で実行
+npx cdn-security playground --target aws --json                   # JSON 形式で結果を取得
+npx cdn-security playground --policy policy/security.yml -f cases.json
+npx cdn-security playground --allow-placeholder-token --target all  # INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN を許可
+```
+
+`playground` は指定ポリシーを一時ディレクトリへコンパイルし、生成された runtime で fixture を実行します。各 fixture ごとに `pass|block`、HTTP `status`、`block_reason`、対象 target（`aws` / `cloudflare`）を出力します。
+
+入力形式:
+
+- `--fixture <path>` は以下のいずれかを受け取れます。
+  - `{ "fixtures": [ ... ] }`
+  - `[ ... ]`
+  - `{ "request": { ... } }`
+- 各 fixture は以下を受け取れます。
+  - `method`
+  - `path`
+  - `query`（文字列またはオブジェクト）
+  - `headers`
+  - `body`
+
+fixture 例:
+
+```json
+{
+  "fixtures": [
+    { "name": "GET /", "request": { "method": "GET", "path": "/" } },
+    { "name": "PATCH blocked", "request": { "method": "PATCH", "path": "/" } },
+    { "name": "admin missing auth", "request": { "method": "GET", "path": "/admin", "headers": { "x-edge-token": "INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN" } } }
+  ]
+}
+```
+
+`--json` を指定すると、次のような machine-readable 出力になります。
+
+```json
+{
+  "policyPath": "/path/to/policy/security.yml",
+  "targets": [
+    {
+      "target": "aws",
+      "fixtures": [
+        {
+          "name": "GET /",
+          "decision": "pass",
+          "status": 200,
+          "block_reason": "",
+          "path": "/",
+          "method": "GET",
+          "query": ""
+        }
+      ]
+    }
+  ]
+}
+```
 
 ## `emit-waf`
 
