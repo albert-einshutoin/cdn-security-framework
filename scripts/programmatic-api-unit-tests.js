@@ -243,6 +243,39 @@ const PLAYGROUND_FIXTURES = [
         },
     },
 ];
+const DIFF_SEMANTIC_BASELINE = `
+version: 1
+project: diff-test
+request:
+  allow_methods: [GET, POST]
+  limits:
+    max_query_length: 1024
+response_headers:
+  csp_public: "default-src 'self'; frame-ancestors 'none'"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+      - AWSManagedRulesIPReputationList
+`;
+const DIFF_SEMANTIC_CANDIDATE = `
+version: 1
+project: diff-test
+request:
+  allow_methods: [GET, POST, TRACE]
+  limits:
+    max_query_length: 4096
+defaults:
+  mode: monitor
+response_headers:
+  csp_public: "default-src *"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+`;
 function tmpProject(yamlBody) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'api-'));
     const policyDir = path.join(tmp, 'policy');
@@ -1362,6 +1395,60 @@ test('CLI authoring DX: diff detects generated output drift', () => {
         ], { cwd: ctx.tmp, encoding: 'utf8', env });
         assert.strictEqual(dirtyDiff.status, 1);
         assert.ok(/CHANGED edge\/viewer-request\.js/.test(dirtyDiff.stdout));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: diff --semantic surfaces posture drift', () => {
+    const ctx = tmpProject(DIFF_SEMANTIC_BASELINE);
+    const baselinePath = path.join(ctx.tmp, 'policy', 'baseline.yml');
+    fs.writeFileSync(baselinePath, DIFF_SEMANTIC_BASELINE, 'utf8');
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const env = Object.assign({}, process.env, {
+        EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy',
+        ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+    });
+    try {
+        const cleanSemantic = spawnSync(process.execPath, [
+            cli, 'diff',
+            '--semantic',
+            '--baseline', baselinePath,
+            '--policy', ctx.policyPath,
+            '--target', 'aws',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env,
+        });
+        assert.strictEqual(cleanSemantic.status, 0, `semantic diff baseline compare should be clean: ${cleanSemantic.stderr}`);
+        const noChangeReport = JSON.parse(cleanSemantic.stdout);
+        assert.strictEqual(noChangeReport.mode, 'semantic');
+        assert.ok(noChangeReport.findings.length >= 0);
+        assert.strictEqual(noChangeReport.summary.total, 0);
+        fs.writeFileSync(ctx.policyPath, DIFF_SEMANTIC_CANDIDATE, 'utf8');
+        const semanticDrift = spawnSync(process.execPath, [
+            cli, 'diff',
+            '--semantic',
+            '--baseline', baselinePath,
+            '--policy', ctx.policyPath,
+            '--target', 'aws',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env,
+        });
+        assert.strictEqual(semanticDrift.status, 1, `semantic diff should detect posture regression: ${semanticDrift.stderr}`);
+        const report = JSON.parse(semanticDrift.stdout);
+        assert.strictEqual(report.mode, 'semantic');
+        assert.strictEqual(report.target, 'aws');
+        assert.ok(report.summary.regressions >= 1);
+        assert.ok(Array.isArray(report.findings));
+        assert.ok(report.findings.some((finding) => finding.id === 'request.allow_methods.added.TRACE'));
+        assert.ok(report.findings.some((finding) => finding.id === 'firewall.waf.managed_rules.removed.awsmanagedrulesipreputationlist'));
     }
     finally {
         ctx.cleanup();

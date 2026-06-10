@@ -19,7 +19,7 @@ npx cdn-security <subcommand> [options]
 | `capabilities` | target 対応状況の matrix を表示し、任意で policy control を target 別に評価。 |
 | `deploy-template` | AWS / Cloudflare の artifact deployment 用 GitHub Actions workflow template を生成。 |
 | `explain` | レビューやオンボーディング向けにポリシーの要点を表示。 |
-| `diff` | 現在の `dist/` と再生成結果を比較し、drift があれば失敗。 |
+| `diff` | 生成物の drift または policy posture の差分を比較。 |
 | `migrate` | スキーマのバージョン間マイグレーション（現状 v1 のみの stub）。 |
 
 ---
@@ -231,9 +231,18 @@ npx cdn-security explain --policy policy/security.yml
 npx cdn-security diff
 npx cdn-security diff --target cloudflare
 npx cdn-security diff --out-dir dist
+npx cdn-security diff --semantic --baseline policy/security.previous.yml --policy policy/security.yml --target aws
 ```
 
 選択したポリシーを一時ディレクトリへコンパイルし、現在の出力ツリーと比較します。`MISSING`、`EXTRA`、`CHANGED` を表示し、生成物が古い場合は exit `1` で失敗します。
+
+`--semantic` を付けると、2 つの policy ファイルを比較して posture 変更を表示します。PR レビュー向けに、認証ゲート削除、許可メソッド追加、CSP 弱体化、WAF ルール変更、ターゲット別の capability 差分を検知できます。
+
+- `--policy` は比較対象（候補）policy のパスです。省略時は `policy/security.yml`（無ければ `policy/base.yml`）。
+- `--baseline` は比較元 policy のパスです。省略時は `policy/base.yml` を使用します。
+- `--target` は `aws` / `cloudflare` / `all` を指定し、ターゲット別の capability 変化を表示します。
+- `--json` は posture diff を JSON 出力します。
+- `--semantic` を付けると drift 比較ではなく posture 比較になります。
 
 ## `migrate`
 
