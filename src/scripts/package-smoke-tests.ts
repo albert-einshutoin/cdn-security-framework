@@ -41,6 +41,45 @@ function assertExecutable(files: Map<string, PackedFile>, filePath: string) {
   assert.ok((file.mode & 0o111) !== 0, `${filePath} must be executable in the npm package`);
 }
 
+type SchemaHintExpectation = { path: string; schemaPath: string; required: boolean };
+
+const schemaHintExpectedFiles: SchemaHintExpectation[] = [
+  { path: 'policy/base.yml', schemaPath: './schema.json', required: true },
+  { path: 'policy/profiles/balanced.yml', schemaPath: '../schema.json', required: true },
+  { path: 'policy/profiles/strict.yml', schemaPath: '../schema.json', required: true },
+  { path: 'policy/profiles/permissive.yml', schemaPath: '../schema.json', required: true },
+  { path: 'policy/archetypes/spa-static-site.yml', schemaPath: '../schema.json', required: true },
+  { path: 'policy/archetypes/rest-api.yml', schemaPath: '../schema.json', required: true },
+  { path: 'policy/archetypes/admin-panel.yml', schemaPath: '../schema.json', required: true },
+  { path: 'policy/archetypes/microservice-origin.yml', schemaPath: '../schema.json', required: true },
+  { path: 'examples/aws-cloudfront/policy/security.yml', schemaPath: '../../policy/schema.json', required: false },
+  { path: 'examples/cloudflare/policy/security.yml', schemaPath: '../../policy/schema.json', required: false },
+  { path: 'examples/aws-cloudfront/policy/profiles/balanced.yml', schemaPath: '../../policy/schema.json', required: false },
+  { path: 'examples/cloudflare/policy/profiles/balanced.yml', schemaPath: '../../policy/schema.json', required: false },
+];
+
+function assertYamlSchemaHint(filePath: string, content: string, schemaPath: string) {
+  const expectedLine = `# yaml-language-server: $schema=${schemaPath}`;
+  assert.ok(
+    content.includes(expectedLine),
+    `expected ${filePath} to include ${expectedLine}`,
+  );
+}
+
+function assertSchemaHints(installRoot: string) {
+  schemaHintExpectedFiles.forEach((entry) => {
+    const absolutePath = path.join(installRoot, entry.path);
+    if (!fs.existsSync(absolutePath)) {
+      if (entry.required) {
+        assert.ok(false, `installed package must include ${entry.path}`);
+      }
+      return;
+    }
+    const content = fs.readFileSync(absolutePath, 'utf8');
+    assertYamlSchemaHint(entry.path, content, entry.schemaPath);
+  });
+}
+
 function withTempDir(prefix: string, fn: (tmpDir: string) => void) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   try {
@@ -127,6 +166,7 @@ function smokeInstalledPackage(tarballPath: string) {
     const cliPath = path.join(installDir, 'node_modules', '.bin', 'cdn-security');
     const version = run(cliPath, ['--version'], { cwd: installDir }).trim();
     assert.strictEqual(version, require(path.join(repoRoot, 'package.json')).version);
+    assertSchemaHints(installedRoot);
 
     run(cliPath, ['build', '--policy', installedBasePolicy, '--out-dir', 'dist'], {
       cwd: installDir,
