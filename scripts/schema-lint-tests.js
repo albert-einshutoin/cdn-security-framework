@@ -64,6 +64,51 @@ test('lint accepts in-range request.limits', () => {
         fs.rmSync(dir, { recursive: true, force: true });
     }
 });
+test('lint accepts policy inherited via extends', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-lint-'));
+    const basePath = path.join(dir, 'base.yml');
+    const childPath = path.join(dir, 'prod.yml');
+    fs.writeFileSync(basePath, basePolicy({}), 'utf8');
+    fs.writeFileSync(childPath, `
+extends: ./base.yml
+defaults:
+  mode: enforce
+`, 'utf8');
+    try {
+        const result = runLint(childPath);
+        assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
+test('lint accepts transitive inheritance', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'schema-lint-'));
+    const basePath = path.join(dir, 'base.yml');
+    const midPath = path.join(dir, 'mid.yml');
+    const childPath = path.join(dir, 'prod.yml');
+    fs.writeFileSync(basePath, basePolicy({}), 'utf8');
+    fs.writeFileSync(midPath, `
+extends: ./base.yml
+project: schema-lint-test
+request:
+  limits:
+    max_query_params: 40
+`, 'utf8');
+    fs.writeFileSync(childPath, `
+extends: ./mid.yml
+request:
+  limits:
+    max_uri_length: 4096
+`, 'utf8');
+    try {
+        const result = runLint(childPath);
+        assert.strictEqual(result.status, 0, `stderr:\n${result.stderr}\nstdout:\n${result.stdout}`);
+    }
+    finally {
+        fs.rmSync(dir, { recursive: true, force: true });
+    }
+});
 test('lint rejects max_query_length below minimum', () => {
     const { dir, file } = writeTempPolicy(basePolicy({ max_query_length: 0 }));
     try {

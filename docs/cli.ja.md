@@ -54,6 +54,13 @@ npx cdn-security build --fail-on-permissive   # metadata.risk_level == permissiv
 - `dist/edge/cloudflare/index.ts`（Cloudflare）
 - `dist/infra/*.tf.json` — WAF / geo / IP / CloudFront 設定 / origin タイムアウト
 
+`build` では top-level の `extends` をサポートします。
+
+- 選択したポリシーが別ポリシーを継承し、共通設定を再利用できます。
+- `extends` は子ポリシーからの相対パスで解決されます。
+- マージはオブジェクトは深い階層で子優先、配列は親→子の順で append です。
+- スカラー置換は親サブツリーを上書きし、inheritance は `child` → `parent` → `grandparent` のような連鎖も有効です。
+
 ## `playground`
 
 ```bash

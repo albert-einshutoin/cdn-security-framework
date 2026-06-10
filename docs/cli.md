@@ -54,6 +54,16 @@ Outputs:
 - `dist/edge/cloudflare/index.ts` (Cloudflare)
 - `dist/infra/*.tf.json` — WAF, geo, IP sets, CloudFront settings, origin timeouts
 
+Build supports inheritance via top-level `extends`:
+
+- `policy` can point to another policy file and reuse defaults across services.
+- `extends` path is resolved relative to the selected policy file.
+- Merge behavior is deep-merge for objects and append for arrays:
+  - object key collisions are resolved by child
+  - arrays from parent then child
+  - scalar replacement replaces the parent subtree
+- Inheritance is transitive (supports `child` -> `parent` -> `grandparent`).
+
 ## `playground`
 
 ```bash

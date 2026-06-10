@@ -12,7 +12,7 @@
 
 const fs = require('fs');
 const path = require('path');
-const yaml = require('js-yaml');
+const { parsePolicyFile } = require('../parser');
 
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
@@ -36,10 +36,32 @@ if (!['full', 'rule-group'].includes(outputMode)) {
   process.exit(1);
 }
 
+function reportPolicyWarnings(warnings: string[]) {
+  if (warnings.length === 0) return;
+  console.warn('Policy parse warnings:', policyPath);
+  for (const warning of warnings) {
+    console.warn('  - ' + warning);
+  }
+}
+
+function loadPolicyWithWarnings(policyPath: string) {
+  const parsed = parsePolicyFile({ policyPath });
+  if (!parsed.ok) {
+    const message = parsed.errors.join('; ') || 'failed to parse policy';
+    const e: any = new Error(message);
+    if (message.startsWith('policy file not found:')) {
+      e.code = 'ENOENT';
+    }
+    throw e;
+  }
+  return parsed;
+}
+
 let policy;
 try {
-  const content = fs.readFileSync(policyPath, 'utf8');
-  policy = yaml.load(content);
+  const parsed = loadPolicyWithWarnings(policyPath);
+  reportPolicyWarnings(parsed.warnings || []);
+  policy = parsed.policy;
 } catch (e: any) {
   if (e.code === 'ENOENT') {
     console.error('Error: policy file not found:', policyPath);

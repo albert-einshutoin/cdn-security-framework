@@ -5,6 +5,7 @@ export type ParsePolicyOptions = {
 export type ParsePolicyResult = {
     ok: boolean;
     errors: string[];
+    warnings: string[];
     policy: Partial<CDNSecurityFrameworkPolicy> | null;
 };
 export declare function parsePolicyFile(opts?: ParsePolicyOptions): ParsePolicyResult;

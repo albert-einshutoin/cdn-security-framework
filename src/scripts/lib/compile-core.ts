@@ -1,6 +1,6 @@
 const fs = require('fs');
 const path = require('path');
-const yaml = require('js-yaml');
+const { parsePolicyFile } = require('../../parser');
 const {
   assertInjectedConstDeclarations,
   injectTemplateCode,
@@ -40,8 +40,30 @@ function parseArgs(argv: string[], rootDir = repoRoot) {
 }
 
 function loadPolicy(policyPath: string) {
-  const content = fs.readFileSync(policyPath, 'utf8');
-  return yaml.load(content);
+  return loadPolicyWithWarnings(policyPath).policy;
+}
+
+function loadPolicyWithWarnings(policyPath: string) {
+  const parsed = parsePolicyFile({ policyPath });
+  if (!parsed.ok) {
+    const message = parsed.errors.join('; ') || 'failed to parse policy';
+    const err: any = new Error(message);
+    if (message.startsWith('policy file not found:')) {
+      err.code = 'ENOENT';
+    }
+    throw err;
+  }
+  return { policy: parsed.policy, warnings: parsed.warnings };
+}
+
+function reportPolicyWarnings(warnings: string[]) {
+  if (warnings.length === 0) {
+    return;
+  }
+  console.warn('Policy parse warnings:');
+  for (const warning of warnings) {
+    console.warn('  - ' + warning);
+  }
 }
 
 function extractRegex(source: string) {
@@ -920,9 +942,12 @@ function main(argv: string[] = process.argv.slice(2)) {
   const failOnPermissive = hasFailOnPermissiveFlag(argv);
   const strictOriginAuth = hasStrictOriginAuthFlag(argv);
   let policy;
+  let policyWarnings: string[] = [];
 
   try {
-    policy = loadPolicy(policyPath);
+    const parsed = loadPolicyWithWarnings(policyPath);
+    policy = parsed.policy;
+    policyWarnings = parsed.warnings;
   } catch (e: any) {
     if (e.code === 'ENOENT') {
       console.error('Error: policy file not found:', policyPath);
@@ -931,6 +956,7 @@ function main(argv: string[] = process.argv.slice(2)) {
     console.error('Error: failed to parse policy YAML:', e.message);
     process.exit(1);
   }
+  reportPolicyWarnings(policyWarnings);
 
   // Surface permissive-profile warning before wasting build time.
   const permissive = warnIfPermissive(policy, { failOnPermissive });
