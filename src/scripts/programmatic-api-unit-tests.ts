@@ -731,8 +731,12 @@ test('CLI authoring DX: visualize emits mermaid with control coverage', () => {
   }
 });
 
-test('CLI authoring DX: visualize --format html writes file artifact', () => {
-  const ctx = tmpProject(CAPABILITIES_POLICY);
+test('CLI authoring DX: visualize --format html writes escaped file artifact', () => {
+  const maliciousPolicy = CAPABILITIES_POLICY.replace(
+    'project: capabilities-test',
+    'project: "</pre><script>alert(1)</script><pre>"',
+  );
+  const ctx = tmpProject(maliciousPolicy);
   try {
     const { spawnSync } = require('child_process');
     const cli = path.join(repoRoot, 'bin', 'cli.js');
@@ -752,7 +756,8 @@ test('CLI authoring DX: visualize --format html writes file artifact', () => {
     assert.ok(result.stdout.includes('[SUCCESS] Wrote visualization to'));
     const html = fs.readFileSync(outputPath, 'utf8');
     assert.ok(html.includes('<pre class="mermaid">'));
-    assert.ok(html.includes('Policy: capabilities-test'));
+    assert.ok(!html.includes('</pre><script>alert(1)</script><pre>'));
+    assert.ok(html.includes('&lt;/pre&gt;&lt;script&gt;alert(1)&lt;/script&gt;&lt;pre&gt;'));
     assert.ok(html.includes('mermaid.min.js'));
   } finally {
     ctx.cleanup();

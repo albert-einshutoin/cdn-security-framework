@@ -164,6 +164,15 @@ function escapeMermaidLabel(value: string): string {
     .trim();
 }
 
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 type VisualizedStatus = 'enforce' | 'monitor' | 'unsupported' | 'target_specific';
 
 type VisualizedControl = {
@@ -317,12 +326,14 @@ function renderPolicyVisualization(policyPath: string, target: CapabilityDeployT
   const mermaid = lines.join('\n') + '\n';
 
   if (options?.format === 'html') {
+    const htmlTitle = escapeHtml(policyName);
+    const htmlMermaid = escapeHtml(mermaid);
     return `<!doctype html>
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Policy visualization - ${escapeMermaidLabel(policyName)}</title>
+  <title>Policy visualization - ${htmlTitle}</title>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <style>
     body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; }
@@ -330,7 +341,7 @@ function renderPolicyVisualization(policyPath: string, target: CapabilityDeployT
 </head>
 <body>
 <pre class="mermaid">
-${mermaid}</pre>
+${htmlMermaid}</pre>
 <script>mermaid.initialize({ startOnLoad: true });</script>
 </body>
 </html>`;
