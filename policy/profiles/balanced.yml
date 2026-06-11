@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=../schema.json
+
 # Balanced profile: default security vs compatibility.
 # Copy to policy/base.yml: cp policy/profiles/balanced.yml policy/base.yml
 

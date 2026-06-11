@@ -188,6 +188,136 @@ firewall:
       - AWSManagedRulesCommonRuleSet
 `;
 
+const DIFF_SEMANTIC_BASELINE = `
+version: 1
+project: diff-test
+request:
+  allow_methods: [GET, POST]
+  limits:
+    max_query_length: 1024
+routes:
+  - name: account
+    match:
+      path_prefixes: ["/account"]
+    request:
+      allow_methods: [GET]
+    auth_gate:
+      type: static_token
+      header: x-edge-token
+      token_env: EDGE_ADMIN_TOKEN
+  - name: account
+    match:
+      path_prefixes: ["/account"]
+    request:
+      allow_methods: [POST]
+response_headers:
+  csp_public: "default-src 'self'; frame-ancestors 'none'"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+      - AWSManagedRulesIPReputationList
+`;
+
+const DIFF_SEMANTIC_CANDIDATE = `
+version: 1
+project: diff-test
+request:
+  allow_methods: [GET, POST, TRACE]
+  limits:
+    max_query_length: 4096
+  graphql_guard:
+    enabled: true
+    endpoint_paths: ["/graphql"]
+    max_depth: 8
+defaults:
+  mode: monitor
+routes:
+  - name: account
+    match:
+      path_prefixes: ["/account"]
+    request:
+      allow_methods: [GET]
+  - name: account
+    match:
+      path_prefixes: ["/account"]
+    request:
+      allow_methods: [POST]
+response_headers:
+  csp_public: "default-src *"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+`;
+
+const PLAYGROUND_FIXTURES = [
+  {
+    name: 'allow GET /',
+    request: {
+      method: 'GET',
+      path: '/',
+      headers: {
+        'user-agent': 'cli-test-client',
+      },
+    },
+  },
+  {
+    name: 'block PATCH',
+    request: {
+      method: 'PATCH',
+      path: '/',
+      headers: {
+        'user-agent': 'cli-test-client',
+      },
+    },
+  },
+  {
+    name: 'path traversal is blocked',
+    request: {
+      method: 'GET',
+      path: '/foo/../bar',
+      headers: {
+        'user-agent': 'cli-test-client',
+      },
+    },
+  },
+  {
+    name: 'auth missing on admin',
+    request: {
+      method: 'GET',
+      path: '/admin',
+      headers: {
+        'user-agent': 'cli-test-client',
+      },
+    },
+  },
+  {
+    name: 'auth placeholder passes',
+    request: {
+      method: 'GET',
+      path: '/admin',
+      headers: {
+        'user-agent': 'cli-test-client',
+        'x-edge-token': 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN',
+      },
+    },
+  },
+  {
+    name: 'query is visible in output',
+    request: {
+      method: 'GET',
+      path: '/search',
+      query: { q: 'hello', utm_source: 'cli' },
+      headers: {
+        'user-agent': 'cli-test-client',
+      },
+    },
+  },
+];
+
 function tmpProject(yamlBody: string) {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'api-'));
   const policyDir = path.join(tmp, 'policy');
@@ -550,6 +680,126 @@ test('CLI authoring DX: build --allow-placeholder-token succeeds without auth en
   }
 });
 
+test('CLI authoring DX: playground emits AWS + Cloudflare fixture decisions', () => {
+  const ctx = tmpProject(STATIC_TOKEN_POLICY);
+  try {
+    const fixturePath = path.join(ctx.tmp, 'playground.fixture.json');
+    fs.writeFileSync(fixturePath, JSON.stringify({ fixtures: PLAYGROUND_FIXTURES }, null, 2), 'utf8');
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'playground',
+      '-p', ctx.policyPath,
+      '-f', fixturePath,
+      '--target', 'all',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env: Object.assign({}, process.env, {
+        // playground defaults allow placeholder replacement, no runtime secrets required
+        EDGE_ADMIN_TOKEN: '',
+        ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+      }),
+    });
+    assert.strictEqual(result.status, 0, `playground failed: ${result.stderr}`);
+    const report = JSON.parse(result.stdout);
+    assert.strictEqual(report.policyPath, ctx.policyPath);
+    assert.strictEqual(report.targets.length, 2, 'expected aws + cloudflare results');
+    const byTarget = Object.fromEntries(report.targets.map((r: any) => [r.target, r.fixtures]));
+    assert.ok(Array.isArray(byTarget.aws), 'aws target missing');
+    assert.ok(Array.isArray(byTarget.cloudflare), 'cloudflare target missing');
+
+    const awsAllow = byTarget.aws.find((f: any) => f.name === 'allow GET /');
+    const awsPatch = byTarget.aws.find((f: any) => f.name === 'block PATCH');
+    const awsAuthMissing = byTarget.aws.find((f: any) => f.name === 'auth missing on admin');
+    const awsAuthPass = byTarget.aws.find((f: any) => f.name === 'auth placeholder passes');
+    const awsTraversal = byTarget.aws.find((f: any) => f.name === 'path traversal is blocked');
+    const awsQuery = byTarget.aws.find((f: any) => f.name === 'query is visible in output');
+
+    assert.ok(awsAllow);
+    assert.ok(awsPatch);
+    assert.ok(awsAuthMissing);
+    assert.ok(awsAuthPass);
+    assert.ok(awsTraversal);
+    assert.ok(awsQuery);
+
+    assert.strictEqual(awsAllow.decision, 'pass');
+    assert.strictEqual(awsPatch.decision, 'block');
+    assert.strictEqual(awsTraversal.decision, 'block');
+    assert.strictEqual(awsAuthMissing.decision, 'block');
+    assert.strictEqual(awsAuthPass.decision, 'pass');
+    assert.ok(awsPatch.status >= 400);
+    assert.ok(awsTraversal.status >= 400);
+    assert.ok(awsAuthMissing.status >= 400);
+    assert.strictEqual(awsAllow.status, 200);
+    assert.strictEqual(awsAuthPass.status, 200);
+    assert.strictEqual(awsQuery.query, 'q=hello&utm_source=cli');
+    assert.ok(awsQuery.path === '/search');
+
+    const cloudAllow = byTarget.cloudflare.find((f: any) => f.name === 'allow GET /');
+    const cloudPatch = byTarget.cloudflare.find((f: any) => f.name === 'block PATCH');
+    assert.ok(cloudAllow);
+    assert.ok(cloudPatch);
+    assert.strictEqual(cloudAllow.decision, 'pass');
+    assert.strictEqual(cloudPatch.decision, 'block');
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: analyze surfaces low-frequency block candidates', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'analyze-'));
+  const logPath = path.join(tmp, 'monitor.jsonl');
+  const lines = [
+    { event: 'block', block_reason: 'bad_method', method: 'POST', status: 405, uri: '/api/data', target: 'aws', policy_route: '/api/data' },
+    { event: 'block', block_reason: 'bad_method', method: 'PUT', status: 405, uri: '/api/data', target: 'aws', policy_route: '/api/data' },
+    { event: 'block', block_reason: 'path_traversal', method: 'GET', status: 404, uri: '/assets/../etc/passwd', target: 'cloudflare', policy_route: '/assets' },
+    { event: 'monitor', block_reason: 'path_traversal', method: 'GET', status: 200, uri: '/assets/favicon.ico', target: 'aws', policy_route: '/assets' },
+    { eventName: 'blocked', block_reason: 'token_replay', method: 'POST', status: 200, uri: '/api/login', target: 'aws', policy_route: '/api/login' },
+    { outcome: 'monitoring', reason: 'slow_path_probe', method: 'GET', status: 200, uri: '/search', target: 'cloudflare', policy_route: '/search' },
+  ];
+  fs.writeFileSync(logPath, lines.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
+
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'analyze',
+      '--input', logPath,
+      '--min-count', '2',
+      '--top', '10',
+      '--json',
+    ], {
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `analyze failed: ${result.stderr}`);
+    const report = JSON.parse(result.stdout);
+    assert.strictEqual(report.summary.totalLines, 6);
+    assert.strictEqual(report.summary.parsedLines, 6);
+    assert.strictEqual(report.summary.unparseableLines, 0);
+    assert.strictEqual(report.summary.analyzedEvents, 6);
+    assert.strictEqual(report.summary.blockEvents, 4);
+    assert.strictEqual(report.summary.monitorEvents, 2);
+    assert.strictEqual(report.byBlockReason['bad_method']?.count, 2);
+    assert.strictEqual(report.byPolicyRoute['/api/data']?.count, 2);
+
+    const badMethod = report.candidates.find((x: any) => x.blockReason === 'bad_method' && x.policyRoute === '/api/data');
+    assert.ok(badMethod, 'missing bad_method candidate');
+    assert.strictEqual(badMethod.count, 2);
+    assert.strictEqual(Array.isArray(badMethod.targets), true);
+    assert.ok(badMethod.targets.includes('aws'));
+    assert.strictEqual(Array.isArray(badMethod.events), true);
+    assert.ok(badMethod.events.length >= 1);
+    const tokenReplay = report.candidates.find((x: any) => x.blockReason === 'token_replay' && x.policyRoute === '/api/login');
+    assert.ok(tokenReplay, 'missing eventName fallback candidate');
+    assert.strictEqual(report.byBlockReason['slow_path_probe']?.count, 1);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 test('CLI authoring DX: init --guided emits lintable policy with selected shape', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-init-'));
   try {
@@ -621,8 +871,18 @@ test('CLI backwards-compat: init --profile still scaffolds existing starter flow
       env: process.env,
     });
     assert.strictEqual(result.status, 0, `profile init failed: ${result.stderr}`);
-    assert.ok(fs.existsSync(path.join(tmp, 'policy', 'security.yml')));
-    assert.ok(fs.existsSync(path.join(tmp, 'policy', 'profiles', 'balanced.yml')));
+    const securityPath = path.join(tmp, 'policy', 'security.yml');
+    const starterPath = path.join(tmp, 'policy', 'profiles', 'balanced.yml');
+    assert.ok(fs.existsSync(securityPath));
+    assert.ok(fs.existsSync(starterPath));
+    assert.strictEqual(
+      fs.readFileSync(securityPath, 'utf8').split(/\r?\n/, 1)[0],
+      '# yaml-language-server: $schema=./schema.json',
+    );
+    assert.strictEqual(
+      fs.readFileSync(starterPath, 'utf8').split(/\r?\n/, 1)[0],
+      '# yaml-language-server: $schema=../schema.json',
+    );
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -1357,6 +1617,79 @@ test('CLI authoring DX: diff detects generated output drift', () => {
     ], { cwd: ctx.tmp, encoding: 'utf8', env });
     assert.strictEqual(dirtyDiff.status, 1);
     assert.ok(/CHANGED edge\/viewer-request\.js/.test(dirtyDiff.stdout));
+  } finally {
+    ctx.cleanup();
+  }
+});
+
+test('CLI authoring DX: diff --semantic surfaces posture drift', () => {
+  const ctx = tmpProject(DIFF_SEMANTIC_BASELINE);
+  const baselinePath = path.join(ctx.tmp, 'policy', 'baseline.yml');
+  fs.writeFileSync(baselinePath, DIFF_SEMANTIC_BASELINE, 'utf8');
+  const { spawnSync } = require('child_process');
+  const cli = path.join(repoRoot, 'bin', 'cli.js');
+  const env = Object.assign({}, process.env, {
+    EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy',
+    ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+  });
+  try {
+    const cleanSemantic: any = spawnSync(process.execPath, [
+      cli, 'diff',
+      '--semantic',
+      '--baseline', baselinePath,
+      '--policy', ctx.policyPath,
+      '--target', 'aws',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env,
+    });
+    assert.strictEqual(cleanSemantic.status, 0, `semantic diff baseline compare should be clean: ${cleanSemantic.stderr}`);
+    const noChangeReport = JSON.parse(cleanSemantic.stdout);
+    assert.strictEqual(noChangeReport.mode, 'semantic');
+    assert.ok(noChangeReport.findings.length >= 0);
+    assert.strictEqual(noChangeReport.summary.total, 0);
+
+    const invalidTarget: any = spawnSync(process.execPath, [
+      cli, 'diff',
+      '--semantic',
+      '--baseline', baselinePath,
+      '--policy', ctx.policyPath,
+      '--target', 'clouflare',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env,
+    });
+    assert.strictEqual(invalidTarget.status, 1);
+    assert.ok(/Invalid --target/.test(invalidTarget.stderr));
+
+    fs.writeFileSync(ctx.policyPath, DIFF_SEMANTIC_CANDIDATE, 'utf8');
+    const semanticDrift: any = spawnSync(process.execPath, [
+      cli, 'diff',
+      '--semantic',
+      '--baseline', baselinePath,
+      '--policy', ctx.policyPath,
+      '--target', 'aws',
+      '--json',
+    ], {
+      cwd: ctx.tmp,
+      encoding: 'utf8',
+      env,
+    });
+    assert.strictEqual(semanticDrift.status, 1, `semantic diff should detect posture regression: ${semanticDrift.stderr}`);
+    const report = JSON.parse(semanticDrift.stdout);
+    assert.strictEqual(report.mode, 'semantic');
+    assert.strictEqual(report.target, 'aws');
+    assert.ok(report.summary.regressions >= 1);
+    assert.ok(Array.isArray(report.findings));
+    assert.ok(report.findings.some((finding: any) => finding.id === 'request.allow_methods.added.TRACE'));
+    assert.ok(report.findings.some((finding: any) => finding.id === 'response_headers.csp_public.weakened'));
+    assert.ok(report.findings.some((finding: any) => finding.id === 'firewall.waf.managed_rules.removed.awsmanagedrulesipreputationlist'));
+    assert.ok(report.findings.some((finding: any) => finding.id === 'capability.aws.request.graphql_guard.added'));
+    assert.ok(report.findings.some((finding: any) => finding.id === 'routes.auth_gate.changed.account|/account|GET'));
   } finally {
     ctx.cleanup();
   }

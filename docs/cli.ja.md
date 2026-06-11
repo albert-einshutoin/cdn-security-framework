@@ -12,6 +12,8 @@ npx cdn-security <subcommand> [options]
 | --- | --- |
 | `init` | プロファイル / アーキタイプから `policy/security.yml` をスキャフォールド。 |
 | `build` | ポリシー検証 + エッジランタイム + インフラ設定の生成。 |
+| `playground` | ポリシーをローカルでコンパイルし、サンプルリクエストを AWS/Cloudflare ランタイムで再生して pass/block を確認。 |
+| `analyze` | 監視モード JSONL を集約し、低頻度ブロック候補を抽出。 |
 | `emit-waf` | インフラ設定のみ生成（エッジは生成しない）。エッジはそのままで WAF ルールだけ再デプロイしたいとき。 |
 | `doctor` | 環境診断をワンショット実行。失敗チェックがあれば非ゼロ終了。 |
 | `readiness` | 環境診断と policy posture を統合する本番リリースゲート。 |
@@ -19,7 +21,7 @@ npx cdn-security <subcommand> [options]
 | `deploy-template` | AWS / Cloudflare の artifact deployment 用 GitHub Actions workflow template を生成。 |
 | `explain` | レビューやオンボーディング向けにポリシーの要点を表示。 |
 | `visualize` | Mermaid/HTML のポリシー可視化を生成し、実装・監視・未対応・target別制御を明示。 |
-| `diff` | 現在の `dist/` と再生成結果を比較し、drift があれば失敗。 |
+| `diff` | 生成物の drift または policy posture の差分を比較。 |
 | `migrate` | スキーマのバージョン間マイグレーション（現状 v1 のみの stub）。 |
 
 ---
@@ -53,6 +55,89 @@ npx cdn-security build --fail-on-permissive   # metadata.risk_level == permissiv
 - `dist/edge/viewer-request.js`, `dist/edge/viewer-response.js`, `dist/edge/origin-request.js`（AWS）
 - `dist/edge/cloudflare/index.ts`（Cloudflare）
 - `dist/infra/*.tf.json` — WAF / geo / IP / CloudFront 設定 / origin タイムアウト
+
+## `playground`
+
+```bash
+npx cdn-security playground                                      # 組み込みのサンプルケースを AWS+Cloudflare で実行
+npx cdn-security playground --target aws --json                   # JSON 形式で結果を取得
+npx cdn-security playground --policy policy/security.yml -f cases.json
+npx cdn-security playground --allow-placeholder-token --target all  # INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN を許可
+```
+
+`playground` は指定ポリシーを一時ディレクトリへコンパイルし、生成された runtime で fixture を実行します。各 fixture ごとに `pass|block`、HTTP `status`、`block_reason`、対象 target（`aws` / `cloudflare`）を出力します。
+
+入力形式:
+
+- `--fixture <path>` は以下のいずれかを受け取れます。
+  - `{ "fixtures": [ ... ] }`
+  - `[ ... ]`
+  - `{ "request": { ... } }`
+- 各 fixture は以下を受け取れます。
+  - `method`
+  - `path`
+  - `query`（文字列またはオブジェクト）
+  - `headers`
+  - `body`
+
+fixture 例:
+
+```json
+{
+  "fixtures": [
+    { "name": "GET /", "request": { "method": "GET", "path": "/" } },
+    { "name": "PATCH blocked", "request": { "method": "PATCH", "path": "/" } },
+    { "name": "admin missing auth", "request": { "method": "GET", "path": "/admin", "headers": { "x-edge-token": "INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN" } } }
+  ]
+}
+```
+
+`--json` を指定すると、次のような machine-readable 出力になります。
+
+```json
+{
+  "policyPath": "/path/to/policy/security.yml",
+  "targets": [
+    {
+      "target": "aws",
+      "fixtures": [
+        {
+          "name": "GET /",
+          "decision": "pass",
+          "status": 200,
+          "block_reason": "",
+          "path": "/",
+          "method": "GET",
+          "query": ""
+        }
+      ]
+    }
+  ]
+}
+```
+
+## `analyze`
+
+```bash
+npx cdn-security analyze --input /path/to/monitor.jsonl
+npx cdn-security analyze --input /path/to/monitor.jsonl --min-count 3 --top 10 --json
+```
+
+`analyze` は監視モードの構造化ログ（JSONL）を受け取り、`block` / `monitor` / `pass` を集約して低頻度な block の候補を抽出し、監視から enforce への移行判断を支援します。
+
+対応オプション:
+
+- `--input`: `JSONL` のログファイルパス（必須）
+- `--min-count`: `block` 判定の低頻度しきい値（デフォルト `5`）
+- `--top`: ルート/サンプルの最大表示件数（デフォルト `20`）
+- `--json`: 機械可読 JSON を標準出力
+
+出力:
+
+- 全体サマリ（総行数 / パース可能行 / ブロック / monitor）
+- `block_reason` ごとの集計（対象 target / route）
+- `policy route` ごとの集計（`block_reason` / target）
+- `count <= --min-count` の低頻度 block候補（サンプルイベント付き）
 
 ## `emit-waf`
 
@@ -188,9 +273,18 @@ npx cdn-security visualize --policy policy/security.yml --target cloudflare --fo
 npx cdn-security diff
 npx cdn-security diff --target cloudflare
 npx cdn-security diff --out-dir dist
+npx cdn-security diff --semantic --baseline policy/security.previous.yml --policy policy/security.yml --target aws
 ```
 
 選択したポリシーを一時ディレクトリへコンパイルし、現在の出力ツリーと比較します。`MISSING`、`EXTRA`、`CHANGED` を表示し、生成物が古い場合は exit `1` で失敗します。
+
+`--semantic` を付けると、2 つの policy ファイルを比較して posture 変更を表示します。PR レビュー向けに、認証ゲート削除、許可メソッド追加、CSP 弱体化、WAF ルール変更、ターゲット別の capability 差分を検知できます。
+
+- `--policy` は比較対象（候補）policy のパスです。省略時は `policy/security.yml`（無ければ `policy/base.yml`）。
+- `--baseline` は比較元 policy のパスです。省略時は `policy/base.yml` を使用します。
+- `--target` は `aws` / `cloudflare` / `all` を指定し、ターゲット別の capability 変化を表示します。
+- `--json` は posture diff を JSON 出力します。
+- `--semantic` を付けると drift 比較ではなく posture 比較になります。
 
 ## `migrate`
 
