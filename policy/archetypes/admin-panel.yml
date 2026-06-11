@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=../schema.json
+
 # Archetype: internal admin panel.
 # Use when: internal tooling, back-office, ops dashboards.
 # Threat focus: credential theft, session hijack, CSRF, lateral movement.

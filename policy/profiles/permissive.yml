@@ -1,3 +1,5 @@
+# yaml-language-server: $schema=../schema.json
+
 # Permissive profile: fewer blocks for compatibility (APIs, scripts, legacy clients).
 # Copy to policy/base.yml: cp policy/profiles/permissive.yml policy/base.yml
 # See policy/README.md (en) or policy/README.ja.md (ja) for profile comparison.
