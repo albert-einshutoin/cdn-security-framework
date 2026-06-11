@@ -1002,9 +1002,12 @@ function parseAnalyzeRecord(row: unknown): AnalyzeEvent | null {
     || asString((record as any).httpRequest?.method)
     || asString((record as any).request?.method)
     || 'UNKNOWN';
-  const event = normalizeEvent((record as any).event)
-    || normalizeEvent((record as any).eventName)
-    || normalizeEvent((record as any).outcome);
+  const rawEvent = asString((record as any).event) !== null
+    ? (record as any).event
+    : asString((record as any).eventName) !== null
+      ? (record as any).eventName
+      : (record as any).outcome;
+  const event = normalizeEvent(rawEvent);
   const blockReason = asString((record as any).block_reason)
     || asString((record as any).blockReason)
     || asString((record as any).reason)
