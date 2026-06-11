@@ -20,7 +20,7 @@ npx cdn-security <subcommand> [options]
 | `capabilities` | Print target support matrix and optionally evaluate policy controls against a target. |
 | `deploy-template` | Generate GitHub Actions workflow templates for AWS and Cloudflare artifact deployment. |
 | `explain` | Print a concise policy posture summary for review and onboarding. |
-| `diff` | Compare generated output against the current `dist/` tree and fail on drift. |
+| `diff` | Compare generated output drift or semantic policy posture changes between policies. |
 | `migrate` | Migrate a policy file between schema versions (stub — v1 is the only shipped version today). |
 
 ---
@@ -253,9 +253,18 @@ Prints the policy's schema, mode, allowed methods, request limits, host and rout
 npx cdn-security diff
 npx cdn-security diff --target cloudflare
 npx cdn-security diff --out-dir dist
+npx cdn-security diff --semantic --baseline policy/security.previous.yml --policy policy/security.yml --target aws
 ```
 
 Compiles the selected policy to a temporary directory and compares it with the current output tree. It prints `MISSING`, `EXTRA`, and `CHANGED` entries and exits `1` when generated artifacts are out of date.
+
+With `--semantic`, `diff` compares two policy files and reports posture changes instead of file-level drift. The command is useful for PR review: it can detect removed auth gates, added permissive methods, CSP risk changes, WAF rule changes, and target-specific capability support shifts.
+
+- `--policy` sets the candidate policy path (default: `policy/security.yml` or fallback `policy/base.yml`).
+- `--baseline` sets the baseline policy path. If omitted, `policy/base.yml` is used.
+- `--target` accepts `aws`, `cloudflare`, or `all` to check target-specific capability support.
+- `--json` emits semantic findings as machine-readable JSON.
+- `--semantic` switches from drift mode to security-posture mode.
 
 ## `migrate`
 
