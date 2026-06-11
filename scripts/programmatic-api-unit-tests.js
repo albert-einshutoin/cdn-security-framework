@@ -651,6 +651,56 @@ test('CLI authoring DX: playground emits AWS + Cloudflare fixture decisions', ()
         ctx.cleanup();
     }
 });
+test('CLI authoring DX: analyze surfaces low-frequency block candidates', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'analyze-'));
+    const logPath = path.join(tmp, 'monitor.jsonl');
+    const lines = [
+        { event: 'block', block_reason: 'bad_method', method: 'POST', status: 405, uri: '/api/data', target: 'aws', policy_route: '/api/data' },
+        { event: 'block', block_reason: 'bad_method', method: 'PUT', status: 405, uri: '/api/data', target: 'aws', policy_route: '/api/data' },
+        { event: 'block', block_reason: 'path_traversal', method: 'GET', status: 404, uri: '/assets/../etc/passwd', target: 'cloudflare', policy_route: '/assets' },
+        { event: 'monitor', block_reason: 'path_traversal', method: 'GET', status: 200, uri: '/assets/favicon.ico', target: 'aws', policy_route: '/assets' },
+        { eventName: 'blocked', block_reason: 'token_replay', method: 'POST', status: 200, uri: '/api/login', target: 'aws', policy_route: '/api/login' },
+        { outcome: 'monitoring', reason: 'slow_path_probe', method: 'GET', status: 200, uri: '/search', target: 'cloudflare', policy_route: '/search' },
+    ];
+    fs.writeFileSync(logPath, lines.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'analyze',
+            '--input', logPath,
+            '--min-count', '2',
+            '--top', '10',
+            '--json',
+        ], {
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `analyze failed: ${result.stderr}`);
+        const report = JSON.parse(result.stdout);
+        assert.strictEqual(report.summary.totalLines, 6);
+        assert.strictEqual(report.summary.parsedLines, 6);
+        assert.strictEqual(report.summary.unparseableLines, 0);
+        assert.strictEqual(report.summary.analyzedEvents, 6);
+        assert.strictEqual(report.summary.blockEvents, 4);
+        assert.strictEqual(report.summary.monitorEvents, 2);
+        assert.strictEqual(report.byBlockReason['bad_method']?.count, 2);
+        assert.strictEqual(report.byPolicyRoute['/api/data']?.count, 2);
+        const badMethod = report.candidates.find((x) => x.blockReason === 'bad_method' && x.policyRoute === '/api/data');
+        assert.ok(badMethod, 'missing bad_method candidate');
+        assert.strictEqual(badMethod.count, 2);
+        assert.strictEqual(Array.isArray(badMethod.targets), true);
+        assert.ok(badMethod.targets.includes('aws'));
+        assert.strictEqual(Array.isArray(badMethod.events), true);
+        assert.ok(badMethod.events.length >= 1);
+        const tokenReplay = report.candidates.find((x) => x.blockReason === 'token_replay' && x.policyRoute === '/api/login');
+        assert.ok(tokenReplay, 'missing eventName fallback candidate');
+        assert.strictEqual(report.byBlockReason['slow_path_probe']?.count, 1);
+    }
+    finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+});
 test('CLI authoring DX: init --guided emits lintable policy with selected shape', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-init-'));
     try {
