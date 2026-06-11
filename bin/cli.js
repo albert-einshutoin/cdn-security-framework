@@ -74,10 +74,8 @@ function yamlInlineArray(values) {
 function withYamlLanguageServerHint(content, schemaPath) {
     const schemaDirectivePrefix = '# yaml-language-server: $schema=';
     const normalizedContent = content.replace(/^\uFEFF/, '');
-    if (normalizedContent.includes(schemaDirectivePrefix)) {
-        return normalizedContent;
-    }
-    return `${schemaDirectivePrefix}${schemaPath}\n\n${normalizedContent}`;
+    const contentWithoutDirective = normalizedContent.replace(/^# yaml-language-server: \$schema=.*\r?\n(?:\r?\n)?/, '');
+    return `${schemaDirectivePrefix}${schemaPath}\n\n${contentWithoutDirective}`;
 }
 function appendYamlList(lines, indent, key, values) {
     if (values.length === 0)

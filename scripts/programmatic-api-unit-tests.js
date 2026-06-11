@@ -722,8 +722,12 @@ test('CLI backwards-compat: init --profile still scaffolds existing starter flow
             env: process.env,
         });
         assert.strictEqual(result.status, 0, `profile init failed: ${result.stderr}`);
-        assert.ok(fs.existsSync(path.join(tmp, 'policy', 'security.yml')));
-        assert.ok(fs.existsSync(path.join(tmp, 'policy', 'profiles', 'balanced.yml')));
+        const securityPath = path.join(tmp, 'policy', 'security.yml');
+        const starterPath = path.join(tmp, 'policy', 'profiles', 'balanced.yml');
+        assert.ok(fs.existsSync(securityPath));
+        assert.ok(fs.existsSync(starterPath));
+        assert.strictEqual(fs.readFileSync(securityPath, 'utf8').split(/\r?\n/, 1)[0], '# yaml-language-server: $schema=./schema.json');
+        assert.strictEqual(fs.readFileSync(starterPath, 'utf8').split(/\r?\n/, 1)[0], '# yaml-language-server: $schema=../schema.json');
     }
     finally {
         fs.rmSync(tmp, { recursive: true, force: true });

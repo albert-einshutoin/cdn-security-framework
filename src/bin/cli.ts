@@ -240,10 +240,11 @@ function yamlInlineArray(values: string[]): string {
 function withYamlLanguageServerHint(content: string, schemaPath: string): string {
   const schemaDirectivePrefix = '# yaml-language-server: $schema=';
   const normalizedContent = content.replace(/^\uFEFF/, '');
-  if (normalizedContent.includes(schemaDirectivePrefix)) {
-    return normalizedContent;
-  }
-  return `${schemaDirectivePrefix}${schemaPath}\n\n${normalizedContent}`;
+  const contentWithoutDirective = normalizedContent.replace(
+    /^# yaml-language-server: \$schema=.*\r?\n(?:\r?\n)?/,
+    '',
+  );
+  return `${schemaDirectivePrefix}${schemaPath}\n\n${contentWithoutDirective}`;
 }
 
 function appendYamlList(lines: string[], indent: string, key: string, values: string[]): void {
