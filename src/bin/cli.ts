@@ -619,7 +619,7 @@ function cspRiskScore(csp: string): number {
   let score = 0;
   if (normalized.includes("'unsafe-inline'")) score += 3;
   if (normalized.includes("'unsafe-eval'")) score += 3;
-  if (/\s'\*'/.test(normalized)) score += 2;
+  if (/(^|[;\s])(?:default-src|script-src|connect-src|img-src)[^;]*\*/.test(normalized)) score += 2;
   if (!/default-src/.test(normalized)) score += 1;
   return score;
 }
@@ -629,7 +629,7 @@ type RouteAuthMap = Map<string, string>;
 function routeSignature(route: any, index: number): string {
   const routeName = typeof route?.name === 'string' ? route.name : `route-${index}`;
   const prefixes = asStringArray(route?.match?.path_prefixes).join('|') || '<no-path-prefixes>';
-  const methods = asStringArray(route?.match?.methods).join('|') || '<all-methods>';
+  const methods = asStringArray(route?.request?.allow_methods).join('|') || '<all-methods>';
   return `${routeName}|${prefixes}|${methods}`;
 }
 
@@ -679,7 +679,37 @@ function compareCapabilitySupportFindings(
     for (const id of policyIds) {
       const before = baselineMap.get(id);
       const after = candidateMap.get(id);
-      if (!before || !after || before === after) continue;
+      if (!before && !after) continue;
+      if (!before && after) {
+        buildPolicyFinding(findings, {
+          id: `capability.${deployTarget}.${id}.added`,
+          category: 'Capability support',
+          severity: after === 'supported' ? 'low' : 'medium',
+          summary: `Configured control ${id} was added with ${after} support on ${deployTarget}.`,
+          before: '(not configured)',
+          after,
+          impact: after === 'supported'
+            ? 'Added target-supported control can improve enforcement posture.'
+            : 'Added control may not fully enforce on this deploy target.',
+        });
+        continue;
+      }
+      if (before && !after) {
+        buildPolicyFinding(findings, {
+          id: `capability.${deployTarget}.${id}.removed`,
+          category: 'Capability support',
+          severity: before === 'supported' ? 'medium' : 'low',
+          summary: `Configured control ${id} was removed from ${deployTarget} evaluation.`,
+          before,
+          after: '(not configured)',
+          impact: before === 'supported'
+            ? 'Removing a target-supported control can weaken deploy-time enforcement.'
+            : 'Removing a non-fully-supported control may reduce target-specific surprises.',
+        });
+        continue;
+      }
+      if (!before || !after) continue;
+      if (before === after) continue;
       const beforeScore = statusRank[before];
       const afterScore = statusRank[after];
       buildPolicyFinding(findings, {
@@ -3052,9 +3082,13 @@ program
   .action((opts: DiffOptions) => {
     const cwd = process.cwd();
     const policyPath = resolvePolicyPath(cwd, opts.policy);
-    const target = opts.target === 'all' || opts.target === 'aws' || opts.target === 'cloudflare'
-      ? opts.target
-      : 'aws';
+    let target: CapabilityDeployTarget;
+    try {
+      target = normalizeCapabilityTarget(opts.target);
+    } catch (e: any) {
+      console.error('[ERROR]', e.message || String(e));
+      process.exit(1);
+    }
 
     if (opts.semantic) {
       const baselinePolicyPath = opts.baseline

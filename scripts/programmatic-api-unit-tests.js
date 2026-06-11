@@ -179,6 +179,69 @@ firewall:
     managed_rules:
       - AWSManagedRulesCommonRuleSet
 `;
+const DIFF_SEMANTIC_BASELINE = `
+version: 1
+project: diff-test
+request:
+  allow_methods: [GET, POST]
+  limits:
+    max_query_length: 1024
+routes:
+  - name: account
+    match:
+      path_prefixes: ["/account"]
+    request:
+      allow_methods: [GET]
+    auth_gate:
+      type: static_token
+      header: x-edge-token
+      token_env: EDGE_ADMIN_TOKEN
+  - name: account
+    match:
+      path_prefixes: ["/account"]
+    request:
+      allow_methods: [POST]
+response_headers:
+  csp_public: "default-src 'self'; frame-ancestors 'none'"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+      - AWSManagedRulesIPReputationList
+`;
+const DIFF_SEMANTIC_CANDIDATE = `
+version: 1
+project: diff-test
+request:
+  allow_methods: [GET, POST, TRACE]
+  limits:
+    max_query_length: 4096
+  graphql_guard:
+    enabled: true
+    endpoint_paths: ["/graphql"]
+    max_depth: 8
+defaults:
+  mode: monitor
+routes:
+  - name: account
+    match:
+      path_prefixes: ["/account"]
+    request:
+      allow_methods: [GET]
+  - name: account
+    match:
+      path_prefixes: ["/account"]
+    request:
+      allow_methods: [POST]
+response_headers:
+  csp_public: "default-src *"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+`;
 const PLAYGROUND_FIXTURES = [
     {
         name: 'allow GET /',
@@ -243,39 +306,6 @@ const PLAYGROUND_FIXTURES = [
         },
     },
 ];
-const DIFF_SEMANTIC_BASELINE = `
-version: 1
-project: diff-test
-request:
-  allow_methods: [GET, POST]
-  limits:
-    max_query_length: 1024
-response_headers:
-  csp_public: "default-src 'self'; frame-ancestors 'none'"
-firewall:
-  waf:
-    scope: CLOUDFRONT
-    managed_rules:
-      - AWSManagedRulesCommonRuleSet
-      - AWSManagedRulesIPReputationList
-`;
-const DIFF_SEMANTIC_CANDIDATE = `
-version: 1
-project: diff-test
-request:
-  allow_methods: [GET, POST, TRACE]
-  limits:
-    max_query_length: 4096
-defaults:
-  mode: monitor
-response_headers:
-  csp_public: "default-src *"
-firewall:
-  waf:
-    scope: CLOUDFRONT
-    managed_rules:
-      - AWSManagedRulesCommonRuleSet
-`;
 function tmpProject(yamlBody) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'api-'));
     const policyDir = path.join(tmp, 'policy');
@@ -1428,6 +1458,20 @@ test('CLI authoring DX: diff --semantic surfaces posture drift', () => {
         assert.strictEqual(noChangeReport.mode, 'semantic');
         assert.ok(noChangeReport.findings.length >= 0);
         assert.strictEqual(noChangeReport.summary.total, 0);
+        const invalidTarget = spawnSync(process.execPath, [
+            cli, 'diff',
+            '--semantic',
+            '--baseline', baselinePath,
+            '--policy', ctx.policyPath,
+            '--target', 'clouflare',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env,
+        });
+        assert.strictEqual(invalidTarget.status, 1);
+        assert.ok(/Invalid --target/.test(invalidTarget.stderr));
         fs.writeFileSync(ctx.policyPath, DIFF_SEMANTIC_CANDIDATE, 'utf8');
         const semanticDrift = spawnSync(process.execPath, [
             cli, 'diff',
@@ -1448,7 +1492,10 @@ test('CLI authoring DX: diff --semantic surfaces posture drift', () => {
         assert.ok(report.summary.regressions >= 1);
         assert.ok(Array.isArray(report.findings));
         assert.ok(report.findings.some((finding) => finding.id === 'request.allow_methods.added.TRACE'));
+        assert.ok(report.findings.some((finding) => finding.id === 'response_headers.csp_public.weakened'));
         assert.ok(report.findings.some((finding) => finding.id === 'firewall.waf.managed_rules.removed.awsmanagedrulesipreputationlist'));
+        assert.ok(report.findings.some((finding) => finding.id === 'capability.aws.request.graphql_guard.added'));
+        assert.ok(report.findings.some((finding) => finding.id === 'routes.auth_gate.changed.account|/account|GET'));
     }
     finally {
         ctx.cleanup();
