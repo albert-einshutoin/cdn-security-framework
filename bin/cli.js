@@ -83,6 +83,177 @@ function appendYamlList(lines, indent, key, values) {
     lines.push(`${indent}${key}:`);
     values.forEach((value) => lines.push(`${indent}  - ${yamlString(value)}`));
 }
+function escapeMermaidLabel(value) {
+    return value
+        .replace(/\\/g, '\\\\')
+        .replace(/"/g, '\\"')
+        .replace(/\n/g, '\\n')
+        .trim();
+}
+function escapeHtml(value) {
+    return value
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#39;');
+}
+function visualStatusFromTargets(targets, statusByTarget) {
+    const selectedStatuses = targets.map((target) => statusByTarget[target]);
+    const unique = new Set(selectedStatuses);
+    if (targets.length > 1 && unique.size > 1)
+        return 'target_specific';
+    if (selectedStatuses[0] === 'unsupported')
+        return 'unsupported';
+    if (selectedStatuses[0] === 'partial' || selectedStatuses[0] === 'warning-only' || selectedStatuses.includes('partial') || selectedStatuses.includes('warning-only'))
+        return 'monitor';
+    return 'enforce';
+}
+function summaryForTargets(targets, statusByTarget) {
+    return targets.map((target) => `${target}:${statusByTarget[target]}`).join(', ');
+}
+function collectVisualizedCapabilities(policy, target) {
+    const configured = CAPABILITY_MATRIX.filter((entry) => {
+        if (entry.configured)
+            return entry.configured(policy);
+        return anyPolicyPath(policy, entry.policyPaths);
+    });
+    if (configured.length === 0)
+        return [];
+    const targets = target === 'all' ? ['aws', 'cloudflare'] : [target];
+    const ordered = configured
+        .map((entry) => {
+        const statusByTarget = {
+            aws: entry.deploySupport.aws,
+            cloudflare: entry.deploySupport.cloudflare,
+        };
+        return {
+            category: entry.category,
+            label: entry.label,
+            id: entry.id,
+            notes: entry.notes,
+            statusByTarget,
+            summary: summaryForTargets(targets, statusByTarget),
+            visualStatus: visualStatusFromTargets(targets, statusByTarget),
+        };
+    })
+        .sort((a, b) => `${a.category}\0${a.label}`.localeCompare(`${b.category}\0${b.label}`));
+    return ordered;
+}
+function routePrefixSummary(route) {
+    const match = route && route.match ? route.match : {};
+    return Array.isArray(match.path_prefixes) ? match.path_prefixes : ['/'];
+}
+function routeMethodsSummary(route) {
+    const request = route && route.request ? route.request : {};
+    if (Array.isArray(request.allow_methods) && request.allow_methods.length > 0)
+        return request.allow_methods;
+    return [];
+}
+function routeAuthSummary(route) {
+    const authGate = route && route.auth_gate ? route.auth_gate : {};
+    return authGate && authGate.type ? authGate.type : 'none';
+}
+function renderPolicyVisualization(policyPath, target, options) {
+    const policy = loadPolicyDocument(policyPath);
+    const policyName = policy && policy.project ? String(policy.project) : 'unnamed-policy';
+    const version = policy && Number(policy.version) ? String(policy.version) : '1';
+    const routes = Array.isArray(policy && policy.routes) ? policy.routes : [];
+    const controls = collectVisualizedCapabilities(policy, target);
+    const requestedTargets = target === 'all' ? ['aws', 'cloudflare'] : [target];
+    const lines = [];
+    lines.push('flowchart LR');
+    lines.push(`  policy["Policy: ${escapeMermaidLabel(`${policyName} (v${version})`)}"]`);
+    lines.push('  edge["Edge / Request Intake"]');
+    lines.push('  waf["WAF and Edge Control Coverage"]');
+    lines.push('  origin["Origin / Upstream"]');
+    lines.push('  response["Response / Output"]');
+    lines.push('  policy --> edge');
+    lines.push('  policy --> waf');
+    lines.push('  waf --> origin');
+    lines.push('  origin --> response');
+    if (routes.length > 0) {
+        lines.push('');
+        lines.push('  subgraph Routes');
+        routes.forEach((route, index) => {
+            const idx = String(index + 1).padStart(2, '0');
+            const routeNode = `route_${idx}`;
+            const routeName = route && route.name ? route.name : `route-${idx}`;
+            const prefixes = routePrefixSummary(route).map((value) => `"${escapeMermaidLabel(String(value))}"`).join(', ');
+            const methods = routeMethodsSummary(route).map((value) => `"${escapeMermaidLabel(String(value))}"`).join(', ');
+            const authType = routeAuthSummary(route);
+            const methodSuffix = methods ? ` methods=${methods}` : '';
+            lines.push(`    ${routeNode}[\"${escapeMermaidLabel(`${routeName}${methodSuffix} | auth=${authType} | paths=${prefixes}`)}\"]`);
+            lines.push(`    edge --> ${routeNode}`);
+        });
+        lines.push('  end');
+    }
+    if (controls.length === 0) {
+        lines.push('  note_no_controls["No configured control blocks were detected"]');
+        lines.push('  waf --> note_no_controls');
+        lines.push('  class note_no_controls monitor');
+    }
+    else {
+        lines.push('');
+        lines.push('  subgraph Controls');
+        const groupedByCategory = {};
+        controls.forEach((control) => {
+            if (!groupedByCategory[control.category])
+                groupedByCategory[control.category] = [];
+            groupedByCategory[control.category].push(control);
+        });
+        for (const category of Object.keys(groupedByCategory).sort()) {
+            lines.push(`    subgraph ${category.replace(/[^a-z0-9_]/gi, '_')}`);
+            for (const control of groupedByCategory[category]) {
+                const nodeId = `control_${escapeMermaidLabel(control.id).replace(/[^a-z0-9_]/gi, '_')}`;
+                const targetSuffix = requestedTargets.length > 1 ? `targets=${control.summary}` : control.summary;
+                const title = `${control.id} (${control.visualStatus})`;
+                const detail = `${title}\\n${targetSuffix}\\n${control.notes}`;
+                lines.push(`      ${nodeId}["${escapeMermaidLabel(detail)}"]`);
+                lines.push(`      waf --> ${nodeId}`);
+                lines.push(`      class ${nodeId} ${control.visualStatus}`);
+            }
+            lines.push('    end');
+        }
+        lines.push('  end');
+    }
+    lines.push('');
+    lines.push('  classDef enforce fill:#dcfce7,stroke:#16a34a,color:#052e16');
+    lines.push('  classDef monitor fill:#fff7ed,stroke:#ea580c,color:#7c2d12');
+    lines.push('  classDef unsupported fill:#fee2e2,stroke:#dc2626,color:#7f1d1d');
+    lines.push('  classDef target_specific fill:#fef9c3,stroke:#ca8a04,color:#713f12');
+    lines.push(`  class policy,edge,waf,origin,response enforce`);
+    if (controls.length === 0) {
+        lines.push('  class policy,edge,waf,origin,response enforce');
+    }
+    else {
+        lines.push('  class policy,edge,waf,origin,response enforce');
+    }
+    lines.push(`  %% target: ${requestedTargets.join(', ')}`);
+    const mermaid = lines.join('\n') + '\n';
+    if (options?.format === 'html') {
+        const htmlTitle = escapeHtml(policyName);
+        const htmlMermaid = escapeHtml(mermaid);
+        return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Policy visualization - ${htmlTitle}</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; }
+  </style>
+</head>
+<body>
+<pre class="mermaid">
+${htmlMermaid}</pre>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>`;
+    }
+    return mermaid;
+}
 function defaultAuthForShape(appShape) {
     if (appShape === 'rest-api')
         return 'jwt';
@@ -1739,6 +1910,11 @@ function normalizeCapabilityTarget(raw) {
         return raw;
     throw new Error('Invalid --target. Use aws, cloudflare, or all.');
 }
+function normalizeVisualFormat(raw) {
+    if (raw === 'mermaid' || raw === 'html')
+        return raw;
+    throw new Error('Invalid --format. Use mermaid or html.');
+}
 function capabilityFinding(entry, target, status) {
     const severity = status === 'unsupported' ? 'fail' : 'warn';
     const recommendations = {
@@ -2822,6 +2998,47 @@ program
         process.exit(1);
     }
     explainPolicy(policy).forEach((line) => console.log(line));
+});
+program
+    .command('visualize')
+    .description('Render a deterministic policy control visualizer as Mermaid or static HTML')
+    .option('-p, --policy <path>', 'Policy file path (default: policy/security.yml or policy/base.yml)', null)
+    .option('-t, --target <platform>', 'Target platform for control behavior: aws | cloudflare | all', 'all')
+    .option('--format <mode>', 'Artifact format: mermaid | html', 'mermaid')
+    .option('-o, --out <path>', 'Write rendered output to file')
+    .action((opts) => {
+    let target;
+    let format;
+    try {
+        target = normalizeCapabilityTarget(opts.target || 'all');
+        format = normalizeVisualFormat(opts.format || 'mermaid');
+    }
+    catch (e) {
+        console.error('[ERROR]', e.message);
+        process.exit(1);
+    }
+    const cwd = process.cwd();
+    const policyPath = resolvePolicyPath(cwd, opts.policy);
+    if (!fs.existsSync(policyPath)) {
+        console.error('[ERROR] Policy file not found:', policyPath);
+        process.exit(1);
+    }
+    let artifact;
+    try {
+        artifact = renderPolicyVisualization(policyPath, target, { format });
+    }
+    catch (e) {
+        console.error('[ERROR] Failed to render policy visualization:', e.message);
+        process.exit(1);
+        return;
+    }
+    const resolvedOut = opts.out ? (path.isAbsolute(opts.out) ? opts.out : path.join(cwd, opts.out)) : null;
+    if (resolvedOut) {
+        fs.writeFileSync(resolvedOut, artifact, 'utf8');
+        console.log('[SUCCESS] Wrote visualization to', resolvedOut);
+        return;
+    }
+    console.log(artifact);
 });
 program
     .command('diff')

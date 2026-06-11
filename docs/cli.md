@@ -20,6 +20,7 @@ npx cdn-security <subcommand> [options]
 | `capabilities` | Print target support matrix and optionally evaluate policy controls against a target. |
 | `deploy-template` | Generate GitHub Actions workflow templates for AWS and Cloudflare artifact deployment. |
 | `explain` | Print a concise policy posture summary for review and onboarding. |
+| `visualize` | Render a deterministic policy control map in Mermaid or static HTML, including supported/monitor/unsupported/target-specific status. |
 | `diff` | Compare generated output drift or semantic policy posture changes between policies. |
 | `migrate` | Migrate a policy file between schema versions (stub — v1 is the only shipped version today). |
 
@@ -246,6 +247,23 @@ npx cdn-security explain --policy policy/security.yml
 ```
 
 Prints the policy's schema, mode, allowed methods, request limits, host and route posture, auth gates, WAF settings, and response headers. It is read-only and intended for code review, runbooks, and issue triage.
+
+## `visualize`
+
+```bash
+npx cdn-security visualize
+npx cdn-security visualize --policy policy/security.yml --target aws
+npx cdn-security visualize --policy policy/security.yml --target all --format mermaid
+npx cdn-security visualize --policy policy/security.yml --target cloudflare --format html --out policy-coverage.html
+```
+
+Generates a deterministic policy control visualization by policy section and control matrix, grouped by policy layer:
+
+- Layer nodes for Edge, WAF, Origin, and Response
+- Route coverage and auth gate summaries
+- Control coverage status at the selected target(s): enforce / monitor / target-specific / unsupported
+
+`--format mermaid` prints Mermaid flowchart text to stdout, which is CI-friendly because it requires no browser runtime. Use `--format html` to generate a static HTML artifact that renders the same Mermaid diagram when opened in a browser.
 
 ## `diff`
 

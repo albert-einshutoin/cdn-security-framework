@@ -20,6 +20,7 @@ npx cdn-security <subcommand> [options]
 | `capabilities` | target 対応状況の matrix を表示し、任意で policy control を target 別に評価。 |
 | `deploy-template` | AWS / Cloudflare の artifact deployment 用 GitHub Actions workflow template を生成。 |
 | `explain` | レビューやオンボーディング向けにポリシーの要点を表示。 |
+| `visualize` | Mermaid/HTML のポリシー可視化を生成し、実装・監視・未対応・target別制御を明示。 |
 | `diff` | 生成物の drift または policy posture の差分を比較。 |
 | `migrate` | スキーマのバージョン間マイグレーション（現状 v1 のみの stub）。 |
 
@@ -248,6 +249,23 @@ npx cdn-security explain --policy policy/security.yml
 ```
 
 ポリシーのスキーマ、モード、許可メソッド、リクエスト制限、host / route の姿勢、認証ゲート、WAF 設定、レスポンスヘッダーを要約表示します。読み取り専用なので、コードレビュー、運用 Runbook、Issue 調査に使えます。
+
+## `visualize`
+
+```bash
+npx cdn-security visualize
+npx cdn-security visualize --policy policy/security.yml --target aws
+npx cdn-security visualize --policy policy/security.yml --target all --format mermaid
+npx cdn-security visualize --policy policy/security.yml --target cloudflare --format html --out policy-coverage.html
+```
+
+ポリシーの層、ルート、認証ゲート、WAF 対応、レスポンス設定を deterministic なフロー図として出力します。
+
+- Edge / WAF / Origin / Response のレイヤーを可視化
+- ルートと auth gate の要約
+- target ごとの制御状態（enforce / monitor / target-specific / unsupported）
+
+`--format mermaid` は標準出力へ Mermaid テキストを出すため、CI でブラウザランタイム不要です。`--format html` は同じ図を静的 HTML にし、ブラウザ閲覧時に mermaid を描画します。
 
 ## `diff`
 
