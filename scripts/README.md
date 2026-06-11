@@ -18,6 +18,7 @@ Helper scripts for the CDN Security Framework.
 | `infra-unit-tests.js` | Unit tests for infra compiler outputs (including JA3/JA4 rules). |
 | `check-drift.js` | Drift check: compares generated artifacts with committed golden fixtures. |
 | `fingerprint-candidates.js` | Extracts JA3/JA4 candidates from WAF JSONL logs for staged rollout. |
+| `benchmark-compiler.js` | Measures baseline compiler runtime and optional package-install timings. |
 | `security-baseline-check.js` | Verifies OWASP baseline references and mandatory CI guardrails. |
 
 ---
@@ -56,6 +57,13 @@ npm run test:security-baseline
 
 ```bash
 npm run fingerprints:candidates -- --input waf-logs.jsonl --min-count 20 --top 50
+```
+
+### Compiler benchmarking
+
+```bash
+npm run benchmark:compiler -- --iterations 8 --warmup 1 --policy policy/base.yml
+npm run benchmark:compiler -- --measure-install --iterations 5 --policy policy/base.yml
 ```
 
 ---
