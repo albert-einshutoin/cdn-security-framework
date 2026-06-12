@@ -34,7 +34,9 @@ function injectTemplateCode(template: string, marker: string, code: string): str
   if (count !== 1) {
     throw new Error(`Template marker ${marker} must appear exactly once, found ${count}`);
   }
-  return template.replace(marker, code);
+  // Use function replacement to avoid String.prototype.replace expanding $-replacement sequences
+  // that can corrupt injected JS when `code` contains $&/$`/$' and similar patterns.
+  return template.replace(marker, () => code);
 }
 
 function parseForConstInspection(code: string, loader: 'js' | 'ts') {
