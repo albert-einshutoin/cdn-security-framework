@@ -986,6 +986,9 @@ test('CLI authoring DX: visualize emits mermaid with control coverage', () => {
     assert.ok(result.stdout.includes('request.graphql_guard'));
     assert.ok(result.stdout.includes('response_dlp'));
     assert.ok(result.stdout.includes('(monitor)'));
+    const baseClassDirective = 'class policy,edge,waf,origin,response enforce';
+    const baseClassDirectiveCount = result.stdout.split(baseClassDirective).length - 1;
+    assert.strictEqual(baseClassDirectiveCount, 1);
   } finally {
     ctx.cleanup();
   }
