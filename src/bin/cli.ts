@@ -480,11 +480,6 @@ function renderPolicyVisualization(policyPath: string, target: CapabilityDeployT
   lines.push('  classDef target_specific fill:#fef9c3,stroke:#ca8a04,color:#713f12');
 
   lines.push(`  class policy,edge,waf,origin,response enforce`);
-  if (controls.length === 0) {
-    lines.push('  class policy,edge,waf,origin,response enforce');
-  } else {
-    lines.push('  class policy,edge,waf,origin,response enforce');
-  }
   lines.push(`  %% target: ${requestedTargets.join(', ')}`);
 
   const mermaid = lines.join('\n') + '\n';
