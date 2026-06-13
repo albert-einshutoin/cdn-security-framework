@@ -1,0 +1,44 @@
+{
+  "generatedAt": "2026-06-11T18:03:33.633Z",
+  "environment": {
+    "node": "v24.2.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "cwd": "/Users/shutoide/.codex/worktrees/3e19/cdn-security-framework"
+  },
+  "benchmarkInput": {
+    "policyPath": "policy/base.yml",
+    "iterations": 5,
+    "warmup": 1,
+    "measureInstall": false,
+    "installIterations": 0
+  },
+  "compile": {
+    "coldStartMs": 50.01625,
+    "warm": {
+      "count": 4,
+      "min": 46.338333000000006,
+      "max": 53.055417000000006,
+      "mean": 48.5900935,
+      "p50": 48.048582999999994,
+      "p95": 53.055417000000006
+    },
+    "all": {
+      "count": 5,
+      "min": 46.338333000000006,
+      "max": 53.055417000000006,
+      "mean": 48.8753248,
+      "p50": 48.048582999999994,
+      "p95": 53.055417000000006
+    },
+    "memoryBytes": {
+      "count": 5,
+      "min": 58982400,
+      "max": 59523072,
+      "mean": 59234713.6,
+      "p50": 59260928,
+      "p95": 59523072
+    }
+  },
+  "install": null
+}
