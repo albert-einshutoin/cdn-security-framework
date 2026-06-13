@@ -10,6 +10,10 @@
  */
 export interface CDNSecurityFrameworkPolicy {
   version: 1;
+  /**
+   * Optional base policy path to extend. Path is resolved relative to the current policy file.
+   */
+  extends?: string;
   project?: string;
   /**
    * Optional profile / policy metadata. `risk_level` hints the intended security posture — `permissive` triggers a build-time warning so operators do not accidentally ship a loose policy to production.
