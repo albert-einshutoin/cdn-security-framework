@@ -109,18 +109,18 @@ function detectTimeCommand() {
 function parseMaxRssBytes(raw) {
   if (!raw) return null;
   const candidates = [
-    /\s*([0-9]+(?:\.[0-9]+)?)\s+maximum resident set size/i,
-    /maximum resident set size\s*:\s*([0-9]+(?:\.[0-9]+)?)\s+bytes/i,
-    /Maximum resident set size[^:]*:\s*([0-9]+(?:\.[0-9]+)?)\s*kbytes?/i,
-    /maximum resident set size[^:]*:\s*([0-9]+(?:\.[0-9]+)?)/i,
+    { regex: /\s*([0-9]+(?:\.[0-9]+)?)\s+maximum resident set size/i, scale: 1 },
+    { regex: /maximum resident set size\s*:\s*([0-9]+(?:\.[0-9]+)?)\s+bytes/i, scale: 1 },
+    { regex: /maximum resident set size\s*\(\s*kbytes?\s*\)\s*:\s*([0-9]+(?:\.[0-9]+)?)/i, scale: 1024 },
+    { regex: /maximum resident set size[^:]*:\s*([0-9]+(?:\.[0-9]+)?)\s*kbytes?/i, scale: 1024 },
+    { regex: /maximum resident set size[^:]*:\s*([0-9]+(?:\.[0-9]+)?)/i, scale: 1 },
   ];
-  for (const regex of candidates) {
+  for (const { regex, scale } of candidates) {
     const match = raw.match(regex);
     if (match) {
       const value = Number.parseFloat(match[1]);
       if (!Number.isFinite(value)) break;
-      const isKbytes = /kbytes?/i.test(regex.source);
-      return isKbytes ? Math.round(value * 1024) : Math.round(value);
+      return Math.round(value * scale);
     }
   }
   return null;
@@ -316,4 +316,10 @@ function main() {
   }
 }
 
-main();
+if (require.main === module) {
+  main();
+}
+
+module.exports = {
+  parseMaxRssBytes,
+};

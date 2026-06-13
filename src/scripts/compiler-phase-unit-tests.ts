@@ -9,6 +9,7 @@ const repoRoot = path.join(__dirname, '..');
 const { parsePolicyFile } = require('../parser');
 const { validatePolicy } = require('../validator');
 const { listInfraArtifacts, resolveAbsolute } = require('../emitter');
+const { parseMaxRssBytes } = require('./benchmark-compiler');
 
 function test(name: string, fn: () => void) {
   try {
@@ -70,6 +71,18 @@ test('emitter phase helpers: resolve paths and list infra artifacts without pars
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('benchmark compiler parses max RSS units from time output', () => {
+  assert.strictEqual(
+    parseMaxRssBytes('Maximum resident set size (kbytes): 1234\n'),
+    1234 * 1024,
+  );
+  assert.strictEqual(
+    parseMaxRssBytes('maximum resident set size: 2048 kbytes\n'),
+    2048 * 1024,
+  );
+  assert.strictEqual(parseMaxRssBytes('987654  maximum resident set size\n'), 987654);
 });
 
 if (process.exitCode) {
