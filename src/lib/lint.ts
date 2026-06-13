@@ -49,7 +49,7 @@ function lintPolicy(opts: LintPolicyOptions = {}): LintPolicyResult {
     return {
       ok: false,
       errors: parsed.errors,
-      warnings: [],
+      warnings: parsed.warnings,
       policy: parsed.policy,
     };
   }

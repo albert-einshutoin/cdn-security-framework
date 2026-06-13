@@ -7,6 +7,10 @@
   "required": ["version", "request", "response_headers"],
   "properties": {
     "version": { "type": "integer", "const": 1 },
+    "extends": {
+      "type": "string",
+      "description": "Optional base policy path to extend. Path is resolved relative to the current policy file."
+    },
     "project": { "type": "string" },
     "metadata": {
       "description": "Optional profile / policy metadata. `risk_level` hints the intended security posture — `permissive` triggers a build-time warning so operators do not accidentally ship a loose policy to production.",

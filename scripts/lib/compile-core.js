@@ -2,7 +2,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
-const yaml = require('js-yaml');
+const { parsePolicyFile } = require('../../parser');
 const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./template-inject');
 const repoRoot = path.join(__dirname, '..', '..');
 const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
@@ -31,8 +31,28 @@ function parseArgs(argv, rootDir = repoRoot) {
     return { policyPath, outDir };
 }
 function loadPolicy(policyPath) {
-    const content = fs.readFileSync(policyPath, 'utf8');
-    return yaml.load(content);
+    return loadPolicyWithWarnings(policyPath).policy;
+}
+function loadPolicyWithWarnings(policyPath) {
+    const parsed = parsePolicyFile({ policyPath });
+    if (!parsed.ok) {
+        const message = parsed.errors.join('; ') || 'failed to parse policy';
+        const err = new Error(message);
+        if (message.startsWith('policy file not found:')) {
+            err.code = 'ENOENT';
+        }
+        throw err;
+    }
+    return { policy: parsed.policy, warnings: parsed.warnings };
+}
+function reportPolicyWarnings(warnings) {
+    if (warnings.length === 0) {
+        return;
+    }
+    console.warn('Policy parse warnings:');
+    for (const warning of warnings) {
+        console.warn('  - ' + warning);
+    }
 }
 function extractRegex(source) {
     // Convert `(?i)...` to { pattern: '...', flags: 'i' }; else use the source as pattern.
@@ -852,8 +872,11 @@ function main(argv = process.argv.slice(2)) {
     const failOnPermissive = hasFailOnPermissiveFlag(argv);
     const strictOriginAuth = hasStrictOriginAuthFlag(argv);
     let policy;
+    let policyWarnings = [];
     try {
-        policy = loadPolicy(policyPath);
+        const parsed = loadPolicyWithWarnings(policyPath);
+        policy = parsed.policy;
+        policyWarnings = parsed.warnings;
     }
     catch (e) {
         if (e.code === 'ENOENT') {
@@ -863,6 +886,7 @@ function main(argv = process.argv.slice(2)) {
         console.error('Error: failed to parse policy YAML:', e.message);
         process.exit(1);
     }
+    reportPolicyWarnings(policyWarnings);
     // Surface permissive-profile warning before wasting build time.
     const permissive = warnIfPermissive(policy, { failOnPermissive });
     if (permissive.failed) {

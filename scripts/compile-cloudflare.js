@@ -7,7 +7,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
-const yaml = require('js-yaml');
+const { parsePolicyFile } = require('../parser');
 const { parsePathPatterns, regexesLiteralCode, validateAuthGates, hasAllowPlaceholderFlag, hasFailOnPermissiveFlag, hasCatastrophicBacktrackShape, compileRegexOrThrow, warnIfPermissive, warnSignedUrlReplay, buildChallengeConfig, buildGraphqlGuardConfig, buildAnomalyGuardConfig, buildObsConfig, } = require('./lib/compile-core');
 const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
 const repoRoot = path.join(__dirname, '..');
@@ -37,10 +37,31 @@ for (let i = 0; i < argv.length; i++) {
 }
 const allowPlaceholderToken = hasAllowPlaceholderFlag(argv);
 const failOnPermissive = hasFailOnPermissiveFlag(argv);
+function reportPolicyWarnings(warnings) {
+    if (warnings.length === 0)
+        return;
+    console.warn('Policy parse warnings:', policyPath);
+    for (const warning of warnings) {
+        console.warn('  - ' + warning);
+    }
+}
+function loadPolicyWithWarnings(policyPath) {
+    const parsed = parsePolicyFile({ policyPath });
+    if (!parsed.ok) {
+        const message = parsed.errors.join('; ') || 'failed to parse policy';
+        const e = new Error(message);
+        if (message.startsWith('policy file not found:')) {
+            e.code = 'ENOENT';
+        }
+        throw e;
+    }
+    return parsed;
+}
 let policy;
 try {
-    const content = fs.readFileSync(policyPath, 'utf8');
-    policy = yaml.load(content);
+    const parsed = loadPolicyWithWarnings(policyPath);
+    reportPolicyWarnings(parsed.warnings || []);
+    policy = parsed.policy;
 }
 catch (e) {
     if (e.code === 'ENOENT') {

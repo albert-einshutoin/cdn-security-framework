@@ -18,7 +18,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
-const yaml = require('js-yaml');
+const { parsePolicyFile } = require('../parser');
 const parity = require('./lib/cloudflare-waf-parity');
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
@@ -55,9 +55,31 @@ function recordParity(entry) {
     parityWarnings.push(msg);
     sawApproximationOrUnsupported = true;
 }
+function reportPolicyWarnings(warnings) {
+    if (warnings.length === 0)
+        return;
+    console.warn('Policy parse warnings:', policyPath);
+    for (const warning of warnings) {
+        console.warn('  - ' + warning);
+    }
+}
+function loadPolicyWithWarnings(policyPath) {
+    const parsed = parsePolicyFile({ policyPath });
+    if (!parsed.ok) {
+        const message = parsed.errors.join('; ') || 'failed to parse policy';
+        const e = new Error(message);
+        if (message.startsWith('policy file not found:')) {
+            e.code = 'ENOENT';
+        }
+        throw e;
+    }
+    return parsed;
+}
 let policy;
 try {
-    policy = yaml.load(fs.readFileSync(policyPath, 'utf8'));
+    const parsed = loadPolicyWithWarnings(policyPath);
+    reportPolicyWarnings(parsed.warnings || []);
+    policy = parsed.policy;
 }
 catch (e) {
     if (e.code === 'ENOENT') {
