@@ -18,7 +18,9 @@
     "strictNullChecks": true,
     "useUnknownInCatchVariables": true,
     "skipLibCheck": true,
-    "forceConsistentCasingInFileNames": true
+    "forceConsistentCasingInFileNames": true,
+    "incremental": true,
+    "tsBuildInfoFile": "./.tsbuildinfo"
   },
   "include": ["src/**/*.ts"],
   "exclude": [

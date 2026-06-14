@@ -21,6 +21,10 @@ function ensureIncludes(file: string, pattern: string, desc: string) {
   }
 }
 
+function readJson(file: string) {
+  return JSON.parse(read(file));
+}
+
 function main() {
   // OWASP references should be documented.
   ensureIncludes('docs/threat-model.md', 'OWASP Top 10:2025', 'OWASP Top 10:2025 mapping');
@@ -39,6 +43,39 @@ function main() {
   if (!schema.includes('ja3_fingerprints') || !schema.includes('ja4_fingerprints')) {
     fail('policy/schema.json must include ja3_fingerprints and ja4_fingerprints');
   }
+
+  // Keep the TypeScript quality gate single-sourced. The scoped strict
+  // typecheck scripts duplicated tsconfig.json and made test:all run the same
+  // project-wide check repeatedly.
+  const packageJson = readJson('package.json');
+  const scripts = packageJson.scripts || {};
+  const redundantTypecheckScripts = [
+    'typecheck:lib-strict',
+    'typecheck:scripts-lib-strict',
+    'typecheck:unit-tests-strict',
+    'typecheck:cli-strict',
+    'typecheck:compiler-strict',
+  ];
+  for (const scriptName of redundantTypecheckScripts) {
+    if (Object.prototype.hasOwnProperty.call(scripts, scriptName)) {
+      fail(`package.json must not define redundant ${scriptName}; use npm run typecheck`);
+    }
+    if (String(scripts['test:all'] || '').includes(scriptName)) {
+      fail(`package.json test:all must not invoke redundant ${scriptName}`);
+    }
+  }
+  if (!String(scripts['test:all'] || '').includes('npm run typecheck')) {
+    fail('package.json test:all must invoke npm run typecheck as the single project-wide type gate');
+  }
+
+  const tsconfig = readJson('tsconfig.json');
+  if (tsconfig.compilerOptions?.incremental !== true) {
+    fail('tsconfig.json must enable compilerOptions.incremental for repeated build:ts prefixes');
+  }
+  if (tsconfig.compilerOptions?.tsBuildInfoFile !== './.tsbuildinfo') {
+    fail('tsconfig.json must write incremental state to ./.tsbuildinfo');
+  }
+  ensureIncludes('.gitignore', '.tsbuildinfo', 'TypeScript incremental cache ignore');
 
   // Cloudflare WAF parity docs must exist and reference the fail flag, so the
   // dual-target transparency promise is not silently deleted. The drift test
