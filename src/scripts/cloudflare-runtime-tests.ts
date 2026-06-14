@@ -772,6 +772,25 @@ response_dlp:
   assert.ok(body.includes('[MASKED]'), body);
 });
 
+test('cloudflare response DLP preserves whitespace-padded match lists for compatibility', () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-dlp-whitespace-compat-test
+request:
+  allow_methods: ["GET"]
+response_dlp:
+  enabled: true
+  action: block
+  body:
+    content_types: [" application/json "]
+  headers:
+    names: [" x-api-key "]
+`);
+
+  assert.match(generated, /"contentTypes":\[" application\/json "\]/);
+  assert.match(generated, /"names":\[" x-api-key "\]/);
+});
+
 test('cloudflare response DLP blocks response body findings', async () => {
   const generated = compileCloudflare(`
 version: 1

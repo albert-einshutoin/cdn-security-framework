@@ -815,7 +815,7 @@ function build(policy: any, options: any = {}) {
     adminCacheControl,
     authProtectedPrefixes,
     forceVaryAuth,
-    clearSiteDataPaths: normalizeStringList(resHeaders.clear_site_data_paths),
+    clearSiteDataPaths: normalizeStringList(resHeaders.clear_site_data_paths, 'preserve', { trim: false }),
     clearSiteDataTypes: Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
       ? resHeaders.clear_site_data_types
       : ['cache', 'cookies', 'storage'],

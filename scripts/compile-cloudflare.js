@@ -98,8 +98,8 @@ function normalizeResponseDlp(policyObj) {
     const defaultContentTypes = ['text/', 'application/json', 'application/xml', 'text/xml', 'application/javascript'];
     const hasContentTypes = Array.isArray(body.content_types) && body.content_types.length > 0;
     const hasHeaderNames = Array.isArray(headers.names) && headers.names.length > 0;
-    const contentTypes = normalizeStringList(body.content_types, 'lower');
-    const headerNames = normalizeStringList(headers.names, 'lower');
+    const contentTypes = normalizeStringList(body.content_types, 'lower', { trim: false });
+    const headerNames = normalizeStringList(headers.names, 'lower', { trim: false });
     const builtIn = Array.isArray(detectors.built_in) && detectors.built_in.length > 0
         ? detectors.built_in.filter((d) => d === 'api_key' || d === 'credit_card')
         : ['api_key', 'credit_card'];
@@ -291,7 +291,7 @@ const responseCfgCode = renderConstObject('RESPONSE_CFG', {
     adminCacheControl,
     authProtectedPrefixes: authProtectedPrefixesForResp,
     forceVaryAuth,
-    clearSiteDataPaths: normalizeStringList(resHeaders.clear_site_data_paths),
+    clearSiteDataPaths: normalizeStringList(resHeaders.clear_site_data_paths, 'preserve', { trim: false }),
     clearSiteDataTypes: Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
         ? resHeaders.clear_site_data_types
         : ['cache', 'cookies', 'storage'],

@@ -40,3 +40,7 @@ test('normalizeStringList trims strings, drops non-strings and empties, and appl
     assert.deepStrictEqual(normalizeStringList([' us ', 'Jp', false], 'upper'), ['US', 'JP']);
     assert.deepStrictEqual(normalizeStringList([' /Admin ', 'Docs ']), ['/Admin', 'Docs']);
 });
+test('normalizeStringList can preserve legacy emitted whitespace while filtering by trim', () => {
+    assert.deepStrictEqual(normalizeStringList([' Text/HTML ', '   ', 'APPLICATION/JSON '], 'lower', { trim: false }), [' text/html ', 'application/json ']);
+    assert.deepStrictEqual(normalizeStringList([' /logout ', '', ' /admin'], 'preserve', { trim: false }), [' /logout ', ' /admin']);
+});

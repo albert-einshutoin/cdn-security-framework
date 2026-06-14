@@ -1338,12 +1338,12 @@ test('response_headers.clear_site_data_paths emits directive + no-store on 2xx',
             version: 1,
             request: { allow_methods: ['GET'] },
             response_headers: {
-                clear_site_data_paths: ['/logout', '/session/end'],
+                clear_site_data_paths: [' /logout ', '/session/end'],
             },
             routes: [],
         }, { outDir: tmpDir, allowPlaceholderToken: true });
         const resp = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
-        assert.match(resp, /clearSiteDataPaths: \["\/logout","\/session\/end"\]/);
+        assert.match(resp, /clearSiteDataPaths: \[" \/logout ","\/session\/end"\]/);
         assert.match(resp, /clearSiteDataTypes: \["cache","cookies","storage"\]/);
         assert.match(resp, /Clear-Site-Data/);
     }

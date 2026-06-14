@@ -20,11 +20,21 @@ export function numberOr(raw: unknown, fallback: number): number {
   return Number(raw) || fallback;
 }
 
-export function normalizeStringList(raw: unknown, casing: StringCase = 'preserve'): string[] {
+export interface NormalizeStringListOptions {
+  trim?: boolean;
+}
+
+export function normalizeStringList(
+  raw: unknown,
+  casing: StringCase = 'preserve',
+  options: NormalizeStringListOptions = {},
+): string[] {
   if (!Array.isArray(raw)) return [];
+  const trimOutput = options.trim !== false;
 
   return raw
-    .map((s) => (typeof s === 'string' ? s.trim() : ''))
+    .filter((s): s is string => typeof s === 'string' && !!s.trim())
+    .map((s) => (trimOutput ? s.trim() : s))
     .map((s) => applyStringCase(s, casing))
     .filter(Boolean);
 }

@@ -21,11 +21,13 @@ function clampNumber(raw, min, max, fallback) {
 function numberOr(raw, fallback) {
     return Number(raw) || fallback;
 }
-function normalizeStringList(raw, casing = 'preserve') {
+function normalizeStringList(raw, casing = 'preserve', options = {}) {
     if (!Array.isArray(raw))
         return [];
+    const trimOutput = options.trim !== false;
     return raw
-        .map((s) => (typeof s === 'string' ? s.trim() : ''))
+        .filter((s) => typeof s === 'string' && !!s.trim())
+        .map((s) => (trimOutput ? s.trim() : s))
         .map((s) => applyStringCase(s, casing))
         .filter(Boolean);
 }
