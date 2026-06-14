@@ -30,6 +30,8 @@ const path = require('path');
 const { spawnSync } = require('child_process');
 
 const { lintPolicy } = require('./lint');
+const { resolveAbsolute, listInfraArtifacts } = require('../emitter');
+const { buildWafRules } = require('../scripts/lib/waf-rule-builder');
 
 const DEFAULT_PKG_ROOT = path.join(__dirname, '..');
 
@@ -57,20 +59,6 @@ interface EmitWafResultBase {
   target: string;
   format: string;
   formatNotImplemented: boolean;
-}
-
-function resolveAbsolute(inputPath: string, cwd: string): string {
-  return path.isAbsolute(inputPath) ? inputPath : path.join(cwd, inputPath);
-}
-
-function listInfraArtifacts(outDir: string, sinceMs = 0): string[] {
-  const infraDir = path.join(outDir, 'infra');
-  if (!fs.existsSync(infraDir)) return [];
-  return fs
-    .readdirSync(infraDir)
-    .filter((name: string) => name.endsWith('.tf.json'))
-    .map((name: string) => path.join(infraDir, name))
-    .filter((filePath: string) => sinceMs <= 0 || fs.statSync(filePath).mtimeMs >= sinceMs);
 }
 
 function logicalId(input: string): string {
@@ -171,95 +159,9 @@ function buildCloudFormation(policy: any, options: { outputMode: string; ruleGro
   const outputMode = options.ruleGroupOnly ? 'rule-group' : (options.outputMode || 'full');
   const resources: any = {};
 
-  const wafRules: any[] = [];
-  let priority = 1;
-  const fingerprintActionType = waf.fingerprint_action === 'count' ? 'count' : 'block';
-  const blockResponse = waf.block_response || null;
-  const blockResponseKey = blockResponse ? 'cdn_sec_block' : null;
-  const blockAction = () => blockResponseKey
-    ? { block: { custom_response: { response_code: Number(blockResponse.status_code) || 403, custom_response_body_key: blockResponseKey } } }
-    : { block: {} };
-  const actionFor = (actionName: string) => {
-    if (actionName === 'count') return { count: {} };
-    if (actionName === 'captcha') return { captcha: {} };
-    return blockAction();
-  };
-
-  if (waf.rate_limit) {
-    wafRules.push({
-      name: 'rate-based-rule',
-      priority: priority++,
-      action: blockAction(),
-      statement: {
-        rate_based_statement: {
-          limit: Number(waf.rate_limit) || 2000,
-          aggregate_key_type: 'IP',
-        },
-      },
-      visibility_config: {
-        cloudwatch_metrics_enabled: true,
-        metric_name: projectName + '-rate-limit',
-        sampled_requests_enabled: true,
-      },
-    });
-  }
-
-  if (Array.isArray(waf.rate_limit_rules)) {
-    for (const rule of waf.rate_limit_rules) {
-      if (!rule || !rule.name || !rule.limit) continue;
-      const aggregateKeyType = rule.aggregate_key_type || 'IP';
-      const rateStmt: any = {
-        limit: Number(rule.limit),
-        aggregate_key_type: aggregateKeyType,
-      };
-      if (aggregateKeyType === 'CUSTOM_KEYS' && Array.isArray(rule.custom_keys)) {
-        rateStmt.custom_key = rule.custom_keys;
-      }
-      if (rule.scope_down_statement && typeof rule.scope_down_statement === 'object') {
-        rateStmt.scope_down_statement = rule.scope_down_statement;
-      }
-      wafRules.push({
-        name: rule.name,
-        priority: Number(rule.priority) || priority++,
-        action: actionFor(rule.action),
-        statement: { rate_based_statement: rateStmt },
-        visibility_config: {
-          cloudwatch_metrics_enabled: true,
-          metric_name: projectName + '-' + rule.name,
-          sampled_requests_enabled: true,
-        },
-      });
-    }
-  }
-
-  const addFingerprintRules = (fieldName: string, fingerprints: unknown[], rulePrefix: string, metricPrefix: string) => {
-    if (!Array.isArray(fingerprints) || fingerprints.length === 0) return;
-    for (const fp of fingerprints) {
-      if (!fp) continue;
-      const fpStr = String(fp);
-      const slug = fpStr.slice(0, 12).toLowerCase();
-      wafRules.push({
-        name: `${rulePrefix}-${fingerprintActionType}-${slug}`,
-        priority: priority++,
-        action: { [fingerprintActionType]: {} },
-        statement: {
-          byte_match_statement: {
-            field_to_match: { [fieldName]: {} },
-            positional_constraint: 'EXACTLY',
-            search_string: fpStr,
-            text_transformation: [{ priority: 0, type: 'NONE' }],
-          },
-        },
-        visibility_config: {
-          cloudwatch_metrics_enabled: true,
-          metric_name: `${projectName}-${metricPrefix}-${slug}`,
-          sampled_requests_enabled: true,
-        },
-      });
-    }
-  };
-  addFingerprintRules('ja3_fingerprint', waf.ja3_fingerprints, 'ja3', 'ja3');
-  addFingerprintRules('ja4_fingerprint', waf.ja4_fingerprints, 'ja4', 'ja4');
+  const builtWafRules = buildWafRules(waf, projectName);
+  const wafRules = builtWafRules.rules;
+  const blockResponse = builtWafRules.blockResponse;
 
   const ruleGroupLogicalId = logicalId(projectName + '-rate-limit-rule-group');
   const ruleGroup: any = {
@@ -267,7 +169,7 @@ function buildCloudFormation(policy: any, options: { outputMode: string; ruleGro
     Properties: {
       Name: projectName + '-rate-limit',
       Scope: scope,
-      Capacity: Math.max(2, wafRules.length * 2 || 2),
+      Capacity: builtWafRules.capacity,
       Rules: cfnRules(wafRules),
       VisibilityConfig: {
         CloudWatchMetricsEnabled: true,
