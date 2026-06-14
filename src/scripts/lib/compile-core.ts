@@ -7,6 +7,11 @@ const {
   renderConstObject,
   runtimeCode,
 } = require('./template-inject');
+const {
+  clampNumber,
+  normalizeStringList,
+  numberOr,
+} = require('./value-normalize');
 
 const repoRoot = path.join(__dirname, '..', '..');
 const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
@@ -599,24 +604,16 @@ function buildChallengeConfig(policy: any) {
   const raw = policy && policy.firewall && policy.firewall.challenge;
   if (!raw || raw.enabled !== true) return null;
 
-  const pathPrefixes = Array.isArray(raw.path_prefixes)
-    ? raw.path_prefixes.map((p: any) => (typeof p === 'string' ? p.trim() : '')).filter(Boolean)
-    : [];
-  const uaContains = Array.isArray(raw.ua_contains)
-    ? raw.ua_contains.map((s: any) => (typeof s === 'string' ? s.trim().toLowerCase() : '')).filter(Boolean)
-    : [];
+  const pathPrefixes = normalizeStringList(raw.path_prefixes);
+  const uaContains = normalizeStringList(raw.ua_contains, 'lower');
 
   return {
     enabled: true,
     mode: raw.mode === 'report' || raw.mode === 'block' || raw.mode === 'challenge' ? raw.mode : 'challenge',
     pathPrefixes,
     uaContains,
-    difficulty: Number.isFinite(Number(raw.difficulty))
-      ? Math.max(1, Math.min(6, Number(raw.difficulty)))
-      : 3,
-    ttlSec: Number.isFinite(Number(raw.ttl_sec))
-      ? Math.max(60, Math.min(86400, Number(raw.ttl_sec)))
-      : 900,
+    difficulty: clampNumber(raw.difficulty, 1, 6, 3),
+    ttlSec: clampNumber(raw.ttl_sec, 60, 86400, 900),
     secretEnv: typeof raw.secret_env === 'string' && raw.secret_env.trim()
       ? raw.secret_env.trim()
       : 'CHALLENGE_SECRET',
@@ -643,25 +640,15 @@ function buildGraphqlGuardConfig(policy: any) {
   if (!guard || typeof guard !== 'object') return null;
 
   const endpointPaths = Array.isArray(guard.endpoint_paths)
-    ? guard.endpoint_paths
-        .map((p: any) => (typeof p === 'string' ? p.trim() : ''))
-        .filter(Boolean)
+    ? normalizeStringList(guard.endpoint_paths)
     : ['/graphql'];
 
   return {
     endpointPaths: endpointPaths.length > 0 ? endpointPaths : ['/graphql'],
-    maxDepth: Number.isFinite(Number(guard.max_depth))
-      ? Math.max(1, Math.min(64, Number(guard.max_depth)))
-      : 10,
-    maxAliases: Number.isFinite(Number(guard.max_aliases))
-      ? Math.max(0, Math.min(10000, Number(guard.max_aliases)))
-      : 20,
-    maxFields: Number.isFinite(Number(guard.max_fields))
-      ? Math.max(1, Math.min(50000, Number(guard.max_fields)))
-      : 200,
-    maxBodyBytes: Number.isFinite(Number(guard.max_body_bytes))
-      ? Math.max(1, Math.min(1048576, Number(guard.max_body_bytes)))
-      : 65536,
+    maxDepth: clampNumber(guard.max_depth, 1, 64, 10),
+    maxAliases: clampNumber(guard.max_aliases, 0, 10000, 20),
+    maxFields: clampNumber(guard.max_fields, 1, 50000, 200),
+    maxBodyBytes: clampNumber(guard.max_body_bytes, 1, 1048576, 65536),
     mode: guard.mode === 'report' ? 'report' : 'block',
   };
 }
@@ -684,12 +671,8 @@ function buildAnomalyGuardConfig(policy: any) {
     crlf: raw.crlf !== false,
     malformedCookie: raw.malformed_cookie !== false,
     doubleEncodedTraversal: raw.double_encoded_traversal !== false,
-    maxCookieBytes: Number.isFinite(Number(raw.max_cookie_bytes))
-      ? Math.max(1, Math.min(65536, Number(raw.max_cookie_bytes)))
-      : 4096,
-    maxCookiePairs: Number.isFinite(Number(raw.max_cookie_pairs))
-      ? Math.max(1, Math.min(1000, Number(raw.max_cookie_pairs)))
-      : 80,
+    maxCookieBytes: clampNumber(raw.max_cookie_bytes, 1, 65536, 4096),
+    maxCookiePairs: clampNumber(raw.max_cookie_pairs, 1, 1000, 80),
   };
 }
 
@@ -750,10 +733,7 @@ function build(policy: any, options: any = {}) {
   const corsConfig = (policy.response_headers || {}).cors || null;
   // Host allowlist: lowercase entries so we can compare against the lowercase
   // Host header value without per-request normalization.
-  const rawAllowedHosts = Array.isArray(request.allowed_hosts) ? request.allowed_hosts : [];
-  const allowedHosts = rawAllowedHosts
-    .map((h: any) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
-    .filter(Boolean);
+  const allowedHosts = normalizeStringList(request.allowed_hosts, 'lower');
   const trustForwardedFor = request.trust_forwarded_for === true;
 
   const obsCfg = buildObsConfig(policy);
@@ -761,12 +741,10 @@ function build(policy: any, options: any = {}) {
   const cfgCode = renderConstObject('CFG', {
     mode: defaults.mode || 'enforce',
     allowMethods: request.allow_methods || ['GET', 'HEAD', 'POST'],
-    maxQueryLength: Number(limits.max_query_length) || 1024,
-    maxQueryParams: Number(limits.max_query_params) || 30,
-    maxUriLength: Number(limits.max_uri_length) || 2048,
-    maxHeaderCount: Number.isFinite(Number(limits.max_header_count))
-      ? Math.max(1, Math.min(500, Number(limits.max_header_count)))
-      : 64,
+    maxQueryLength: numberOr(limits.max_query_length, 1024),
+    maxQueryParams: numberOr(limits.max_query_params, 30),
+    maxUriLength: numberOr(limits.max_uri_length, 2048),
+    maxHeaderCount: clampNumber(limits.max_header_count, 1, 500, 64),
     dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(dropQueryKeysArray)})`),
     uaDenyContains: block.ua_contains || ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests'],
     blockPathContains,
@@ -837,9 +815,7 @@ function build(policy: any, options: any = {}) {
     adminCacheControl,
     authProtectedPrefixes,
     forceVaryAuth,
-    clearSiteDataPaths: Array.isArray(resHeaders.clear_site_data_paths)
-      ? resHeaders.clear_site_data_paths.filter((s: any) => typeof s === 'string' && s.trim())
-      : [],
+    clearSiteDataPaths: normalizeStringList(resHeaders.clear_site_data_paths),
     clearSiteDataTypes: Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
       ? resHeaders.clear_site_data_types
       : ['cache', 'cookies', 'storage'],
@@ -867,9 +843,7 @@ function build(policy: any, options: any = {}) {
       ? gate.allowed_algorithms.filter((a: any) => typeof a === 'string' && a !== 'none' && a === algorithm)
       : null;
     const allowedAlgorithms = userAllowed && userAllowed.length > 0 ? userAllowed : [algorithm];
-    const clockSkewSec = Number.isFinite(Number(gate.clock_skew_sec))
-      ? Math.max(0, Math.min(600, Number(gate.clock_skew_sec)))
-      : 30;
+    const clockSkewSec = clampNumber(gate.clock_skew_sec, 0, 600, 30);
     return {
       name: g.name,
       protectedPrefixes: g.protectedPrefixes,
@@ -904,19 +878,15 @@ function build(policy: any, options: any = {}) {
 
   const originAuth = (policy.origin || {}).auth || null;
   const jwksGlobal = (policy.firewall || {}).jwks || {};
-  const jwksStaleIfError = Number.isFinite(Number(jwksGlobal.stale_if_error_sec))
-    ? Math.max(0, Math.min(86400, Number(jwksGlobal.stale_if_error_sec)))
-    : 3600;
-  const jwksNegativeCache = Number.isFinite(Number(jwksGlobal.negative_cache_sec))
-    ? Math.max(0, Math.min(600, Number(jwksGlobal.negative_cache_sec)))
-    : 60;
+  const jwksStaleIfError = clampNumber(jwksGlobal.stale_if_error_sec, 0, 86400, 3600);
+  const jwksNegativeCache = clampNumber(jwksGlobal.negative_cache_sec, 0, 600, 60);
 
   const obsCfgOrigin = buildObsConfig(policy);
 
   const originCfgCode = renderConstObject('CFG', {
     project: policy.project || 'cdn-security',
     mode: defaults.mode || 'enforce',
-    maxHeaderSize: Number(limits.max_header_size) || 0,
+    maxHeaderSize: numberOr(limits.max_header_size, 0),
     trustForwardedFor,
     jwtGates,
     signedUrlGates,

@@ -14,6 +14,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
 const { parsePolicyFile } = require('../parser');
+const { numberOr } = require('./lib/value-normalize');
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
 const securityPath = path.join(repoRoot, 'policy', 'security.yml');
@@ -105,7 +106,7 @@ function blockAction() {
         return {
             block: {
                 custom_response: {
-                    response_code: Number(blockResponse.status_code) || 403,
+                    response_code: numberOr(blockResponse.status_code, 403),
                     custom_response_body_key: blockResponseKey,
                 },
             },
@@ -128,7 +129,7 @@ if (waf.rate_limit) {
         action: blockAction(),
         statement: {
             rate_based_statement: {
-                limit: Number(waf.rate_limit) || 2000,
+                limit: numberOr(waf.rate_limit, 2000),
                 aggregate_key_type: 'IP',
             },
         },
@@ -155,9 +156,10 @@ if (Array.isArray(waf.rate_limit_rules)) {
         if (rule.scope_down_statement && typeof rule.scope_down_statement === 'object') {
             rateStmt.scope_down_statement = rule.scope_down_statement;
         }
+        const rulePriority = numberOr(rule.priority, 0) || priority++;
         wafRules.push({
             name: rule.name,
-            priority: Number(rule.priority) || priority++,
+            priority: rulePriority,
             action: actionFor(rule.action),
             statement: { rate_based_statement: rateStmt },
             visibility_config: {
