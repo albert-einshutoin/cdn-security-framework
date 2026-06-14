@@ -19,6 +19,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
 const { parsePolicyFile } = require('../parser');
+const { numberOr } = require('./lib/value-normalize');
 const parity = require('./lib/cloudflare-waf-parity');
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
@@ -150,7 +151,7 @@ function makeBlockAction() {
             action: 'block',
             action_parameters: {
                 response: {
-                    status_code: Number(br.status_code) || 403,
+                    status_code: numberOr(br.status_code, 403),
                     content: String(br.body || 'blocked'),
                     content_type: (br.content_type === 'TEXT_HTML' ? 'text/html'
                         : br.content_type === 'APPLICATION_JSON' ? 'application/json'
@@ -247,7 +248,7 @@ if (waf.rate_limit) {
         ratelimit: {
             characteristics: ['ip.src'],
             period: 300,
-            requests_per_period: Number(waf.rate_limit) || 2000,
+            requests_per_period: numberOr(waf.rate_limit, 2000),
             mitigation_timeout: 600,
         },
     });
