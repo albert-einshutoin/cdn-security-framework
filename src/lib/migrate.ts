@@ -28,18 +28,14 @@
  */
 
 const fs = require('fs');
-const path = require('path');
 const yaml = require('js-yaml');
+const { resolveAbsolute } = require('../emitter');
 
 interface MigratePolicyOptions {
   policyPath?: string;
   toVersion?: number | string;
   write?: boolean;
   cwd?: string;
-}
-
-function resolveAbsolute(inputPath: string, cwd: string): string {
-  return path.isAbsolute(inputPath) ? inputPath : path.join(cwd, inputPath);
 }
 
 function migratePolicy(opts: MigratePolicyOptions = {}) {
