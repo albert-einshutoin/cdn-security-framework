@@ -6,7 +6,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const { parsePolicyFile } = require('../parser');
 const {
   parsePathPatterns,
   regexesLiteralCode,
@@ -33,55 +32,26 @@ const {
   normalizeStringList,
   numberOr,
 } = require('./lib/value-normalize');
+const {
+  parseArgs,
+  loadPolicyWithWarnings,
+  reportPolicyWarnings,
+  reportPolicyLoadError,
+} = require('./lib/policy-io');
 
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
-const securityPath = path.join(repoRoot, 'policy', 'security.yml');
-const basePath = path.join(repoRoot, 'policy', 'base.yml');
-let policyPath = fs.existsSync(securityPath) ? securityPath : basePath;
-let outDir = path.join(repoRoot, 'dist');
-for (let i = 0; i < argv.length; i++) {
-  if (argv[i] === '--policy' && argv[i + 1]) { policyPath = argv[++i]; continue; }
-  if (argv[i] === '--out-dir' && argv[i + 1]) { outDir = argv[++i]; continue; }
-  if (argv[i] === '--allow-placeholder-token') { continue; }
-  if (argv[i] === '--fail-on-permissive') { continue; }
-  if (!argv[i].startsWith('--')) { policyPath = argv[i]; }
-}
+const { policyPath, outDir } = parseArgs(argv, repoRoot);
 const allowPlaceholderToken = hasAllowPlaceholderFlag(argv);
 const failOnPermissive = hasFailOnPermissiveFlag(argv);
-
-function reportPolicyWarnings(warnings: string[]) {
-  if (warnings.length === 0) return;
-  console.warn('Policy parse warnings:', policyPath);
-  for (const warning of warnings) {
-    console.warn('  - ' + warning);
-  }
-}
-
-function loadPolicyWithWarnings(policyPath: string) {
-  const parsed = parsePolicyFile({ policyPath });
-  if (!parsed.ok) {
-    const message = parsed.errors.join('; ') || 'failed to parse policy';
-    const e: any = new Error(message);
-    if (message.startsWith('policy file not found:')) {
-      e.code = 'ENOENT';
-    }
-    throw e;
-  }
-  return parsed;
-}
 
 let policy;
 try {
   const parsed = loadPolicyWithWarnings(policyPath);
-  reportPolicyWarnings(parsed.warnings || []);
+  reportPolicyWarnings(parsed.warnings || [], policyPath);
   policy = parsed.policy;
 } catch (e: any) {
-  if (e.code === 'ENOENT') {
-    console.error('Error: policy file not found:', policyPath);
-    process.exit(1);
-  }
-  console.error('Error: failed to parse policy YAML:', e.message);
+  reportPolicyLoadError(policyPath, e);
   process.exit(1);
 }
 

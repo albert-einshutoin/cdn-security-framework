@@ -10,9 +10,9 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
-const { parsePolicyFile } = require('../parser');
 const Ajv = require('ajv');
 const { validateAuthGates, parsePathPatterns } = require('./lib/compile-core');
+const { loadPolicyWithWarnings, reportPolicyWarnings, reportPolicyLoadError, } = require('./lib/policy-io');
 const repoRoot = path.join(__dirname, '..');
 const schemaPath = path.join(repoRoot, 'policy', 'schema.json');
 const defaultPolicyPath = path.join(repoRoot, 'policy', 'base.yml');
@@ -40,41 +40,17 @@ function validateCorsCredentials(policy) {
         '  - response_headers.cors: allow_origins cannot include "*" when allow_credentials is true',
     ];
 }
-function loadPolicyFileWithWarnings(policyPath) {
-    const parsed = parsePolicyFile({ policyPath });
-    if (!parsed.ok) {
-        const message = parsed.errors.join('; ') || 'failed to parse policy';
-        const e = new Error(message);
-        if (message.startsWith('policy file not found:')) {
-            e.code = 'ENOENT';
-        }
-        throw e;
-    }
-    return parsed;
-}
-function reportPolicyWarnings(policyPath, warnings) {
-    if (warnings.length === 0)
-        return;
-    console.warn('Policy parse warnings:', policyPath);
-    for (const warning of warnings) {
-        console.warn('  - ' + warning);
-    }
-}
 function main() {
     const policyPath = process.argv[2] || defaultPolicyPath;
     const errors = [];
     let policy;
     try {
-        const parsed = loadPolicyFileWithWarnings(policyPath);
+        const parsed = loadPolicyWithWarnings(policyPath);
         policy = parsed.policy;
-        reportPolicyWarnings(String(policyPath), parsed.warnings);
+        reportPolicyWarnings(parsed.warnings, String(policyPath));
     }
     catch (e) {
-        if (e.code === 'ENOENT') {
-            console.error('Error: policy file not found:', policyPath);
-            process.exit(1);
-        }
-        console.error('Error: failed to parse policy YAML:', e.message);
+        reportPolicyLoadError(policyPath, e);
         process.exit(1);
     }
     let schema;

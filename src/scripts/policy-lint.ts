@@ -9,9 +9,13 @@
 
 const fs = require('fs');
 const path = require('path');
-const { parsePolicyFile } = require('../parser');
 const Ajv = require('ajv');
 const { validateAuthGates, parsePathPatterns } = require('./lib/compile-core');
+const {
+  loadPolicyWithWarnings,
+  reportPolicyWarnings,
+  reportPolicyLoadError,
+} = require('./lib/policy-io');
 
 const repoRoot = path.join(__dirname, '..');
 const schemaPath = path.join(repoRoot, 'policy', 'schema.json');
@@ -46,42 +50,17 @@ function validateCorsCredentials(policy: any): string[] {
   ];
 }
 
-function loadPolicyFileWithWarnings(policyPath: string) {
-  const parsed = parsePolicyFile({ policyPath });
-  if (!parsed.ok) {
-    const message = parsed.errors.join('; ') || 'failed to parse policy';
-    const e: any = new Error(message);
-    if (message.startsWith('policy file not found:')) {
-      e.code = 'ENOENT';
-    }
-    throw e;
-  }
-  return parsed;
-}
-
-function reportPolicyWarnings(policyPath: string, warnings: string[]) {
-  if (warnings.length === 0) return;
-  console.warn('Policy parse warnings:', policyPath);
-  for (const warning of warnings) {
-    console.warn('  - ' + warning);
-  }
-}
-
 function main(): void {
   const policyPath = process.argv[2] || defaultPolicyPath;
   const errors: string[] = [];
 
   let policy;
   try {
-    const parsed = loadPolicyFileWithWarnings(policyPath);
+    const parsed = loadPolicyWithWarnings(policyPath);
     policy = parsed.policy;
-    reportPolicyWarnings(String(policyPath), parsed.warnings);
+    reportPolicyWarnings(parsed.warnings, String(policyPath));
   } catch (e: any) {
-    if (e.code === 'ENOENT') {
-      console.error('Error: policy file not found:', policyPath);
-      process.exit(1);
-    }
-    console.error('Error: failed to parse policy YAML:', e.message);
+    reportPolicyLoadError(policyPath, e);
     process.exit(1);
   }
 
