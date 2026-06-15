@@ -21,6 +21,7 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
+const { defaultPolicyPath } = require('./lib/policy-io');
 const CHECK_NODE_VERSION = 'node_version';
 const CHECK_POLICY_EXISTS = 'policy_exists';
 const CHECK_POLICY_PARSES = 'policy_parses';
@@ -67,13 +68,7 @@ function resolvePolicyPath(cwd, explicitPath) {
     if (explicitPath) {
         return path.isAbsolute(explicitPath) ? explicitPath : path.join(cwd, explicitPath);
     }
-    const security = path.join(cwd, 'policy', 'security.yml');
-    const base = path.join(cwd, 'policy', 'base.yml');
-    if (fs.existsSync(security))
-        return security;
-    if (fs.existsSync(base))
-        return base;
-    return security; // will be reported as missing
+    return defaultPolicyPath(cwd);
 }
 function checkPolicyExists(policyPath) {
     if (!fs.existsSync(policyPath)) {

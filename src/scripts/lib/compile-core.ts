@@ -1,6 +1,5 @@
 const fs = require('fs');
 const path = require('path');
-const { parsePolicyFile } = require('../../parser');
 const {
   assertInjectedConstDeclarations,
   injectTemplateCode,
@@ -12,6 +11,14 @@ const {
   normalizeStringList,
   numberOr,
 } = require('./value-normalize');
+const {
+  parseArgs: parseArgsIo,
+  hasFlag,
+  loadPolicy: loadPolicyIo,
+  loadPolicyWithWarnings,
+  reportPolicyWarnings,
+  reportPolicyLoadError,
+} = require('./policy-io');
 
 const repoRoot = path.join(__dirname, '..', '..');
 const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
@@ -21,54 +28,14 @@ const LEGACY_KNOWN_MAP = {
   '(?i)%2e%2e': { contains: ['%2e%2e'] },
 } as Record<string, { contains?: string[]; regex?: string[] }>;
 
-function parseArgs(argv: string[], rootDir = repoRoot) {
-  const securityPath = path.join(rootDir, 'policy', 'security.yml');
-  const basePath = path.join(rootDir, 'policy', 'base.yml');
-  let policyPath = fs.existsSync(securityPath) ? securityPath : basePath;
-  let outDir = path.join(rootDir, 'dist');
-
-  for (let i = 0; i < argv.length; i++) {
-    if (argv[i] === '--policy' && argv[i + 1]) {
-      policyPath = argv[++i];
-      continue;
-    }
-    if (argv[i] === '--out-dir' && argv[i + 1]) {
-      outDir = argv[++i];
-      continue;
-    }
-    if (!argv[i].startsWith('--')) {
-      policyPath = argv[i];
-    }
-  }
-
-  return { policyPath, outDir };
+// Backed by ./policy-io. Kept as a thin wrapper to preserve the
+// (rootDir = repoRoot) default that older callers and tests rely on.
+function parseArgs(argv: string[], rootDir: string = repoRoot) {
+  return parseArgsIo(argv, rootDir);
 }
 
 function loadPolicy(policyPath: string) {
-  return loadPolicyWithWarnings(policyPath).policy;
-}
-
-function loadPolicyWithWarnings(policyPath: string) {
-  const parsed = parsePolicyFile({ policyPath });
-  if (!parsed.ok) {
-    const message = parsed.errors.join('; ') || 'failed to parse policy';
-    const err: any = new Error(message);
-    if (message.startsWith('policy file not found:')) {
-      err.code = 'ENOENT';
-    }
-    throw err;
-  }
-  return { policy: parsed.policy, warnings: parsed.warnings };
-}
-
-function reportPolicyWarnings(warnings: string[]) {
-  if (warnings.length === 0) {
-    return;
-  }
-  console.warn('Policy parse warnings:');
-  for (const warning of warnings) {
-    console.warn('  - ' + warning);
-  }
+  return loadPolicyIo(policyPath);
 }
 
 function extractRegex(source: string) {
@@ -449,15 +416,15 @@ function getAuthGates(policy: any, options: any = {}) {
 }
 
 function hasAllowPlaceholderFlag(argv: string[]) {
-  return Array.isArray(argv) && argv.includes('--allow-placeholder-token');
+  return hasFlag(argv, '--allow-placeholder-token');
 }
 
 function hasFailOnPermissiveFlag(argv: string[]) {
-  return Array.isArray(argv) && argv.includes('--fail-on-permissive');
+  return hasFlag(argv, '--fail-on-permissive');
 }
 
 function hasStrictOriginAuthFlag(argv: string[]) {
-  return Array.isArray(argv) && argv.includes('--strict-origin-auth');
+  return hasFlag(argv, '--strict-origin-auth');
 }
 
 // Verify that origin.auth secrets and runtime-shaping options are usable before
@@ -919,11 +886,7 @@ function main(argv: string[] = process.argv.slice(2)) {
     policy = parsed.policy;
     policyWarnings = parsed.warnings;
   } catch (e: any) {
-    if (e.code === 'ENOENT') {
-      console.error('Error: policy file not found:', policyPath);
-      process.exit(1);
-    }
-    console.error('Error: failed to parse policy YAML:', e.message);
+    reportPolicyLoadError(policyPath, e);
     process.exit(1);
   }
   reportPolicyWarnings(policyWarnings);

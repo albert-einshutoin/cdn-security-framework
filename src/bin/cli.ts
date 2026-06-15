@@ -9,6 +9,7 @@ const fs = require('fs');
 const { Command } = require('commander');
 
 const pkgRoot = path.resolve(__dirname, '..');
+const { defaultPolicyPath } = require(path.join(pkgRoot, 'scripts', 'lib', 'policy-io.js'));
 
 const program = new Command();
 
@@ -281,9 +282,7 @@ async function promptQuestions(questions: any[]) {
 
 function resolvePolicyPath(cwd: string, explicitPath?: string | null): string {
   if (explicitPath) return path.isAbsolute(explicitPath) ? explicitPath : path.join(cwd, explicitPath);
-  const security = path.join(cwd, 'policy', 'security.yml');
-  const base = path.join(cwd, 'policy', 'base.yml');
-  return fs.existsSync(security) ? security : base;
+  return defaultPolicyPath(cwd);
 }
 
 function loadPolicyDocument(policyPath: string) {
@@ -3445,9 +3444,7 @@ program
     const cwd = process.cwd();
     let policyPath = opts.policy;
     if (!policyPath) {
-      const security = path.join(cwd, 'policy', 'security.yml');
-      const base = path.join(cwd, 'policy', 'base.yml');
-      policyPath = fs.existsSync(security) ? security : base;
+      policyPath = defaultPolicyPath(cwd);
     }
 
     const result = compile({
@@ -3883,9 +3880,7 @@ program
     const cwd = process.cwd();
     let policyPath = opts.policy;
     if (!policyPath) {
-      const security = path.join(cwd, 'policy', 'security.yml');
-      const base = path.join(cwd, 'policy', 'base.yml');
-      policyPath = fs.existsSync(security) ? security : base;
+      policyPath = defaultPolicyPath(cwd);
     }
 
     const result = emitWaf({
