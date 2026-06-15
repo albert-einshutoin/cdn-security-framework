@@ -284,23 +284,34 @@ test('parseArgs allows --policy <value> mixed with boolean flags', () => {
   }
 });
 
-test('parseArgs consumes --output-mode <value> so the value does not leak into the positional handler', () => {
+test('parseArgs preserves non-infra --output-mode value as a positional policy path by default', () => {
   const root = makeTempRoot();
   try {
-    const security = writePolicy(root, 'security.yml');
-    // Without this, 'rule-group' would be picked up as a positional and
-    // overwrite policyPath — the original pre-#182 inline loops consumed
-    // --output-mode the same way, so the test in scripts/infra-unit-tests
-    // for `--output-mode rule-group` keeps working.
+    writePolicy(root, 'security.yml');
     const { policyPath, outDir } = parseArgs(
       ['--policy', 'policy/from-flag.yml', '--out-dir', '/tmp/x', '--output-mode', 'rule-group'],
       root,
     );
+    assert.strictEqual(policyPath, 'rule-group');
+    assert.strictEqual(outDir, '/tmp/x');
+  } finally {
+    rmTempRoot(root);
+  }
+});
+
+test('parseArgs consumes --output-mode <value> only when infra-style callers opt in', () => {
+  const root = makeTempRoot();
+  try {
+    const security = writePolicy(root, 'security.yml');
+    const { policyPath, outDir } = parseArgs(
+      ['--policy', 'policy/from-flag.yml', '--out-dir', '/tmp/x', '--output-mode', 'rule-group'],
+      root,
+      { consumeOutputMode: true },
+    );
     assert.strictEqual(policyPath, 'policy/from-flag.yml');
     assert.strictEqual(outDir, '/tmp/x');
-    // Sanity: with security.yml as the default and only --output-mode in argv,
-    // policyPath stays at the default.
-    const result2 = parseArgs(['--output-mode', 'rule-group'], root);
+
+    const result2 = parseArgs(['--output-mode', 'rule-group'], root, { consumeOutputMode: true });
     assert.strictEqual(result2.policyPath, security);
   } finally {
     rmTempRoot(root);

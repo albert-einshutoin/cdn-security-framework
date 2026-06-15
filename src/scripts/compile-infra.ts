@@ -23,7 +23,7 @@ const {
 
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
-const { policyPath, outDir } = parseArgs(argv, repoRoot);
+const { policyPath, outDir } = parseArgs(argv, repoRoot, { consumeOutputMode: true });
 const ruleGroupOnly = hasFlag(argv, '--rule-group-only');
 let outputMode = 'full';
 for (let i = 0; i < argv.length; i++) {

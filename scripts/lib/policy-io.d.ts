@@ -10,6 +10,9 @@ export type CompilerArgs = {
     strictOriginAuth: boolean;
     failOnWafApproximation: boolean;
 };
+export type ParseArgsOptions = {
+    consumeOutputMode?: boolean;
+};
 export type PolicyLoadError = Error & {
     code?: string;
 };
@@ -39,10 +42,11 @@ export declare function defaultOutDir(rootDir: string): string;
  *   - `--policy` without any following token is ignored. When a following
  *     token exists, it is consumed as the value, matching the old loop
  *   - `--out-dir <value>` sets `outDir`; same end-of-argv ignored rule
- *   - `--output-mode <value>` (used by compile-infra / emit-waf to pick
- *     between `full` and `rule-group`) is consumed so its value does NOT
- *     leak into the positional handler. The actual mode string is then
- *     re-parsed by the script-specific loop; we only skip the value here
+ *   - `--output-mode <value>` is only consumed when callers opt in via
+ *     `{ consumeOutputMode: true }`. This keeps non-infra compilers on their
+ *     legacy behavior where the value can still become a positional policy
+ *     path, while letting infra-style emitters keep `rule-group` out of
+ *     policyPath.
  *   - any other flag (including `--allow-placeholder-token`,
  *     `--fail-on-permissive`, `--strict-origin-auth`,
  *     `--fail-on-waf-approximation`, `--rule-group-only`, etc.) is ignored
@@ -51,7 +55,7 @@ export declare function defaultOutDir(rootDir: string): string;
  *   - boolean flags (any `--flag` with no following non-flag value) are
  *     treated as no-arg flags and skipped
  */
-export declare function parseArgs(argv: string[], rootDir: string): {
+export declare function parseArgs(argv: string[], rootDir: string, options?: ParseArgsOptions): {
     policyPath: string;
     outDir: string;
 };
