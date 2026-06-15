@@ -33,6 +33,20 @@ const {
   numberOr,
 } = require('./lib/value-normalize');
 const {
+  DEFAULT_ADMIN_PATH_PREFIXES,
+  DEFAULT_ALLOW_METHODS,
+  DEFAULT_CLEAR_SITE_DATA_TYPES,
+  DEFAULT_CSP_ADMIN,
+  DEFAULT_CSP_PUBLIC,
+  DEFAULT_DROP_QUERY_KEYS,
+  DEFAULT_REQUIRED_HEADERS,
+  DEFAULT_SECURITY_HEADERS,
+  DEFAULT_UA_DENY_CONTAINS,
+  JWKS_DEFAULTS,
+  JWT_CLOCK_SKEW,
+  LIMITS_DEFAULTS,
+} = require('./lib/policy-defaults');
+const {
   parseArgs,
   loadPolicyWithWarnings,
   reportPolicyWarnings,
@@ -147,7 +161,7 @@ function getWorkerAuthGates(): any[] {
 
     const gateConfig: any = {
       name: route.name || 'unnamed',
-      protectedPrefixes: prefixes.length ? prefixes : ['/admin', '/docs', '/swagger'],
+      protectedPrefixes: prefixes.length ? prefixes : [...DEFAULT_ADMIN_PATH_PREFIXES],
       type: authType,
     };
 
@@ -167,7 +181,12 @@ function getWorkerAuthGates(): any[] {
         ? gate.allowed_algorithms.filter((a: unknown) => typeof a === 'string' && a !== 'none' && a === algorithm)
         : null;
       gateConfig.allowed_algorithms = userAllowed && userAllowed.length > 0 ? userAllowed : [algorithm];
-      gateConfig.clock_skew_sec = clampNumber(gate.clock_skew_sec, 0, 600, 30);
+      gateConfig.clock_skew_sec = clampNumber(
+        gate.clock_skew_sec,
+        JWT_CLOCK_SKEW.min,
+        JWT_CLOCK_SKEW.max,
+        JWT_CLOCK_SKEW.defaultSec,
+      );
       gateConfig.jwks_url = gate.jwks_url || '';
       gateConfig.issuer = gate.issuer || '';
       gateConfig.audience = gate.audience || '';
@@ -190,21 +209,29 @@ function getWorkerAuthGates(): any[] {
 }
 const authGates = getWorkerAuthGates();
 
-const dropQueryKeysArray = normalize.drop_query_keys || [
-  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid',
-];
+const dropQueryKeysArray = normalize.drop_query_keys || DEFAULT_DROP_QUERY_KEYS;
 const { contains: blockPathContains, regexSources: blockPathRegexSources } = parsePathPatterns(block.path_patterns);
-const allowMethods = request.allow_methods || ['GET', 'HEAD', 'POST'];
+const allowMethods = request.allow_methods || DEFAULT_ALLOW_METHODS;
 const pathNormalize = normalize.path || {};
-const requiredHeaders = block.header_missing || ['user-agent'];
+const requiredHeaders = block.header_missing || DEFAULT_REQUIRED_HEADERS;
 const resHeaders = policy.response_headers || {};
 const corsConfig = resHeaders.cors || null;
 const originAuth = (policy.origin || {}).auth || null;
 const allowedHosts = normalizeStringList(request.allowed_hosts, 'lower');
 const trustForwardedFor = request.trust_forwarded_for === true;
 const jwksGlobal = (policy.firewall || {}).jwks || {};
-const jwksStaleIfError = clampNumber(jwksGlobal.stale_if_error_sec, 0, 86400, 3600);
-const jwksNegativeCache = clampNumber(jwksGlobal.negative_cache_sec, 0, 600, 60);
+const jwksStaleIfError = clampNumber(
+  jwksGlobal.stale_if_error_sec,
+  0,
+  JWKS_DEFAULTS.staleMax,
+  JWKS_DEFAULTS.staleIfErrorSec,
+);
+const jwksNegativeCache = clampNumber(
+  jwksGlobal.negative_cache_sec,
+  0,
+  JWKS_DEFAULTS.negativeMax,
+  JWKS_DEFAULTS.negativeCacheSec,
+);
 const fwGeo = (policy.firewall || {}).geo || {};
 // Keep String() coercion here; policy authors sometimes provide numeric country-like values.
 const geoBlockCountries = Array.isArray(fwGeo.block_countries)
@@ -218,13 +245,18 @@ const challengeConfig = buildChallengeConfig(policy);
 const cfgCode = renderConstObject('CFG', {
   mode: defaults.mode || 'enforce',
   allowMethods: runtimeCode(`new Set(${JSON.stringify(allowMethods)})`),
-  maxQueryLength: numberOr(limits.max_query_length, 1024),
-  maxQueryParams: numberOr(limits.max_query_params, 30),
-  maxUriLength: numberOr(limits.max_uri_length, 2048),
-  maxHeaderSize: numberOr(limits.max_header_size, 0),
-  maxHeaderCount: clampNumber(limits.max_header_count, 1, 500, 64),
+  maxQueryLength: numberOr(limits.max_query_length, LIMITS_DEFAULTS.maxQueryLength),
+  maxQueryParams: numberOr(limits.max_query_params, LIMITS_DEFAULTS.maxQueryParams),
+  maxUriLength: numberOr(limits.max_uri_length, LIMITS_DEFAULTS.maxUriLength),
+  maxHeaderSize: numberOr(limits.max_header_size, LIMITS_DEFAULTS.maxHeaderSize),
+  maxHeaderCount: clampNumber(
+    limits.max_header_count,
+    LIMITS_DEFAULTS.headerCountMin,
+    LIMITS_DEFAULTS.headerCountMax,
+    LIMITS_DEFAULTS.maxHeaderCount,
+  ),
   dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(dropQueryKeysArray)})`),
-  uaDenyContains: block.ua_contains || ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests'],
+  uaDenyContains: block.ua_contains || DEFAULT_UA_DENY_CONTAINS,
   blockPathContains,
   blockPathRegexes: runtimeCode(regexesLiteralCode(blockPathRegexSources)),
   normalizePath: {
@@ -247,7 +279,7 @@ const cfgCode = renderConstObject('CFG', {
   obs: buildObsConfig(policy),
 });
 
-let adminPathPrefixes = ['/admin', '/docs', '/swagger'];
+let adminPathPrefixes = [...DEFAULT_ADMIN_PATH_PREFIXES];
 let adminCacheControl = 'no-store';
 for (const route of routes) {
   const match = route.match || {};
@@ -268,13 +300,13 @@ const responseDlp = normalizeResponseDlp(policy);
 
 const responseCfgCode = renderConstObject('RESPONSE_CFG', {
   headers: {
-    'strict-transport-security': resHeaders.hsts || 'max-age=31536000; includeSubDomains; preload',
-    'x-content-type-options': resHeaders.x_content_type_options || 'nosniff',
-    'referrer-policy': resHeaders.referrer_policy || 'strict-origin-when-cross-origin',
-    'permissions-policy': resHeaders.permissions_policy || 'camera=(), microphone=(), geolocation=()',
+    'strict-transport-security': resHeaders.hsts || DEFAULT_SECURITY_HEADERS['strict-transport-security'],
+    'x-content-type-options': resHeaders.x_content_type_options || DEFAULT_SECURITY_HEADERS['x-content-type-options'],
+    'referrer-policy': resHeaders.referrer_policy || DEFAULT_SECURITY_HEADERS['referrer-policy'],
+    'permissions-policy': resHeaders.permissions_policy || DEFAULT_SECURITY_HEADERS['permissions-policy'],
   },
-  csp_public: resHeaders.csp_public || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
-  csp_admin: resHeaders.csp_admin || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+  csp_public: resHeaders.csp_public || DEFAULT_CSP_PUBLIC,
+  csp_admin: resHeaders.csp_admin || DEFAULT_CSP_ADMIN,
   csp_report_only: resHeaders.csp_report_only || '',
   csp_report_uri: resHeaders.csp_report_uri || '',
   csp_nonce: resHeaders.csp_nonce === true,
@@ -289,7 +321,7 @@ const responseCfgCode = renderConstObject('RESPONSE_CFG', {
   clearSiteDataPaths: normalizeStringList(resHeaders.clear_site_data_paths, 'preserve', { trim: false }),
   clearSiteDataTypes: Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
     ? resHeaders.clear_site_data_types
-    : ['cache', 'cookies', 'storage'],
+    : DEFAULT_CLEAR_SITE_DATA_TYPES,
   cors: corsConfig,
   cookie_attributes: resHeaders.cookie_attributes || null,
   responseDlp: responseDlp.config,

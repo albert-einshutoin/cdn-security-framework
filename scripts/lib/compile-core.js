@@ -4,6 +4,7 @@ const fs = require('fs');
 const path = require('path');
 const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./template-inject');
 const { clampNumber, normalizeStringList, numberOr, } = require('./value-normalize');
+const { DEFAULT_ADMIN_PATH_PREFIXES, DEFAULT_ALLOW_METHODS, DEFAULT_CLEAR_SITE_DATA_TYPES, DEFAULT_CSP_ADMIN, DEFAULT_CSP_PUBLIC, DEFAULT_DROP_QUERY_KEYS, DEFAULT_REQUIRED_HEADERS, DEFAULT_SECURITY_HEADERS, DEFAULT_UA_DENY_CONTAINS, JWKS_DEFAULTS, JWT_CLOCK_SKEW, LIMITS_DEFAULTS, } = require('./policy-defaults');
 const { parseArgs: parseArgsIo, hasFlag, loadPolicy: loadPolicyIo, loadPolicyWithWarnings, reportPolicyWarnings, reportPolicyLoadError, } = require('./policy-io');
 const repoRoot = path.join(__dirname, '..', '..');
 const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
@@ -345,7 +346,7 @@ function getAuthGates(policy, options = {}) {
         const authType = gate.type || 'static_token';
         const gateConfig = {
             name: route.name || 'unnamed',
-            protectedPrefixes: prefixes.length ? prefixes : ['/admin', '/docs', '/swagger'],
+            protectedPrefixes: prefixes.length ? prefixes : [...DEFAULT_ADMIN_PATH_PREFIXES],
             type: authType,
         };
         if (authType === 'static_token') {
@@ -630,12 +631,10 @@ function build(policy, options = {}) {
     const block = request.block || {};
     const normalize = request.normalize || {};
     const authGates = getAuthGates(policy, { env, allowPlaceholderToken });
-    const dropQueryKeysArray = normalize.drop_query_keys || [
-        'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid',
-    ];
+    const dropQueryKeysArray = normalize.drop_query_keys || DEFAULT_DROP_QUERY_KEYS;
     const { contains: blockPathContains, regexSources: blockPathRegexSources } = parsePathPatterns(block.path_patterns);
     const pathNormalize = normalize.path || {};
-    const requiredHeaders = block.header_missing || ['user-agent'];
+    const requiredHeaders = block.header_missing || DEFAULT_REQUIRED_HEADERS;
     const corsConfig = (policy.response_headers || {}).cors || null;
     // Host allowlist: lowercase entries so we can compare against the lowercase
     // Host header value without per-request normalization.
@@ -644,13 +643,13 @@ function build(policy, options = {}) {
     const obsCfg = buildObsConfig(policy);
     const cfgCode = renderConstObject('CFG', {
         mode: defaults.mode || 'enforce',
-        allowMethods: request.allow_methods || ['GET', 'HEAD', 'POST'],
-        maxQueryLength: numberOr(limits.max_query_length, 1024),
-        maxQueryParams: numberOr(limits.max_query_params, 30),
-        maxUriLength: numberOr(limits.max_uri_length, 2048),
-        maxHeaderCount: clampNumber(limits.max_header_count, 1, 500, 64),
+        allowMethods: request.allow_methods || DEFAULT_ALLOW_METHODS,
+        maxQueryLength: numberOr(limits.max_query_length, LIMITS_DEFAULTS.maxQueryLength),
+        maxQueryParams: numberOr(limits.max_query_params, LIMITS_DEFAULTS.maxQueryParams),
+        maxUriLength: numberOr(limits.max_uri_length, LIMITS_DEFAULTS.maxUriLength),
+        maxHeaderCount: clampNumber(limits.max_header_count, LIMITS_DEFAULTS.headerCountMin, LIMITS_DEFAULTS.headerCountMax, LIMITS_DEFAULTS.maxHeaderCount),
         dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(dropQueryKeysArray)})`),
-        uaDenyContains: block.ua_contains || ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests'],
+        uaDenyContains: block.ua_contains || DEFAULT_UA_DENY_CONTAINS,
         blockPathContains,
         blockPathRegexes: runtimeCode(regexesLiteralCode(blockPathRegexSources)),
         normalizePath: {
@@ -689,20 +688,20 @@ function build(policy, options = {}) {
         }
     }
     if (adminPathPrefixes.length === 0)
-        adminPathPrefixes = ['/admin', '/docs', '/swagger'];
+        adminPathPrefixes = [...DEFAULT_ADMIN_PATH_PREFIXES];
     // Union of every auth-gate protected prefix — used to force no-store +
     // Vary: Authorization regardless of which gate type applies. Issue #8.
     const authProtectedPrefixes = Array.from(new Set((authGates || []).flatMap((g) => Array.isArray(g.protectedPrefixes) ? g.protectedPrefixes : [])));
     const forceVaryAuth = resHeaders.force_vary_auth !== false; // default on
     const responseCfgCode = renderConstObject('RESPONSE_CFG', {
         headers: {
-            'strict-transport-security': resHeaders.hsts || 'max-age=31536000; includeSubDomains; preload',
-            'x-content-type-options': resHeaders.x_content_type_options || 'nosniff',
-            'referrer-policy': resHeaders.referrer_policy || 'strict-origin-when-cross-origin',
-            'permissions-policy': resHeaders.permissions_policy || 'camera=(), microphone=(), geolocation=()',
+            'strict-transport-security': resHeaders.hsts || DEFAULT_SECURITY_HEADERS['strict-transport-security'],
+            'x-content-type-options': resHeaders.x_content_type_options || DEFAULT_SECURITY_HEADERS['x-content-type-options'],
+            'referrer-policy': resHeaders.referrer_policy || DEFAULT_SECURITY_HEADERS['referrer-policy'],
+            'permissions-policy': resHeaders.permissions_policy || DEFAULT_SECURITY_HEADERS['permissions-policy'],
         },
-        csp_public: resHeaders.csp_public || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
-        csp_admin: resHeaders.csp_admin || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+        csp_public: resHeaders.csp_public || DEFAULT_CSP_PUBLIC,
+        csp_admin: resHeaders.csp_admin || DEFAULT_CSP_ADMIN,
         csp_report_only: resHeaders.csp_report_only || '',
         csp_report_uri: resHeaders.csp_report_uri || '',
         csp_nonce: resHeaders.csp_nonce === true,
@@ -717,7 +716,7 @@ function build(policy, options = {}) {
         clearSiteDataPaths: normalizeStringList(resHeaders.clear_site_data_paths, 'preserve', { trim: false }),
         clearSiteDataTypes: Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
             ? resHeaders.clear_site_data_types
-            : ['cache', 'cookies', 'storage'],
+            : DEFAULT_CLEAR_SITE_DATA_TYPES,
         cors: resHeaders.cors || null,
         cookie_attributes: resHeaders.cookie_attributes || null,
     });
@@ -740,7 +739,7 @@ function build(policy, options = {}) {
             ? gate.allowed_algorithms.filter((a) => typeof a === 'string' && a !== 'none' && a === algorithm)
             : null;
         const allowedAlgorithms = userAllowed && userAllowed.length > 0 ? userAllowed : [algorithm];
-        const clockSkewSec = clampNumber(gate.clock_skew_sec, 0, 600, 30);
+        const clockSkewSec = clampNumber(gate.clock_skew_sec, JWT_CLOCK_SKEW.min, JWT_CLOCK_SKEW.max, JWT_CLOCK_SKEW.defaultSec);
         return {
             name: g.name,
             protectedPrefixes: g.protectedPrefixes,
@@ -773,13 +772,13 @@ function build(policy, options = {}) {
     });
     const originAuth = (policy.origin || {}).auth || null;
     const jwksGlobal = (policy.firewall || {}).jwks || {};
-    const jwksStaleIfError = clampNumber(jwksGlobal.stale_if_error_sec, 0, 86400, 3600);
-    const jwksNegativeCache = clampNumber(jwksGlobal.negative_cache_sec, 0, 600, 60);
+    const jwksStaleIfError = clampNumber(jwksGlobal.stale_if_error_sec, 0, JWKS_DEFAULTS.staleMax, JWKS_DEFAULTS.staleIfErrorSec);
+    const jwksNegativeCache = clampNumber(jwksGlobal.negative_cache_sec, 0, JWKS_DEFAULTS.negativeMax, JWKS_DEFAULTS.negativeCacheSec);
     const obsCfgOrigin = buildObsConfig(policy);
     const originCfgCode = renderConstObject('CFG', {
         project: policy.project || 'cdn-security',
         mode: defaults.mode || 'enforce',
-        maxHeaderSize: numberOr(limits.max_header_size, 0),
+        maxHeaderSize: numberOr(limits.max_header_size, LIMITS_DEFAULTS.maxHeaderSize),
         trustForwardedFor,
         jwtGates,
         signedUrlGates,

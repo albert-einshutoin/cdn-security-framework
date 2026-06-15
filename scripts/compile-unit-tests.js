@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { DEFAULT_CONTAINS, parsePathPatterns, hasCatastrophicBacktrackShape, regexesLiteralCode, getAuthGates, validateAuthGates, validateJwksUrl, build, PLACEHOLDER_TOKEN, hasFailOnPermissiveFlag, warnIfPermissive, warnWeakAwsCspNonce, warnUnsupportedAwsResponseDlp, warnSignedUrlReplay, buildChallengeConfig, warnUnsupportedAwsChallenge, buildGraphqlGuardConfig, buildAnomalyGuardConfig, warnUnsupportedGraphqlGuard, validateOriginAuth, } = require('./lib/compile-core');
+const { DEFAULT_ADMIN_PATH_PREFIXES, DEFAULT_ALLOW_METHODS, DEFAULT_CLEAR_SITE_DATA_TYPES, DEFAULT_CSP_ADMIN, DEFAULT_CSP_PUBLIC, DEFAULT_DROP_QUERY_KEYS, DEFAULT_REQUIRED_HEADERS, DEFAULT_SECURITY_HEADERS, DEFAULT_UA_DENY_CONTAINS, JWKS_DEFAULTS, JWT_CLOCK_SKEW, LIMITS_DEFAULTS, } = require('./lib/policy-defaults');
 const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
 function test(name, fn) {
     try {
@@ -38,6 +39,49 @@ function withEnv(key, value, fn) {
         }
     }
 }
+test('policy-defaults exposes immutable runtime defaults shared by compiler targets', () => {
+    assert.deepStrictEqual(DEFAULT_UA_DENY_CONTAINS, ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests']);
+    assert.deepStrictEqual(DEFAULT_DROP_QUERY_KEYS, [
+        'utm_source',
+        'utm_medium',
+        'utm_campaign',
+        'utm_term',
+        'utm_content',
+        'gclid',
+        'fbclid',
+    ]);
+    assert.deepStrictEqual(DEFAULT_ADMIN_PATH_PREFIXES, ['/admin', '/docs', '/swagger']);
+    assert.deepStrictEqual(DEFAULT_ALLOW_METHODS, ['GET', 'HEAD', 'POST']);
+    assert.deepStrictEqual(DEFAULT_REQUIRED_HEADERS, ['user-agent']);
+    assert.strictEqual(DEFAULT_CSP_PUBLIC, "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';");
+    assert.strictEqual(DEFAULT_CSP_ADMIN, "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';");
+    assert.deepStrictEqual(DEFAULT_SECURITY_HEADERS, {
+        'strict-transport-security': 'max-age=31536000; includeSubDomains; preload',
+        'x-content-type-options': 'nosniff',
+        'referrer-policy': 'strict-origin-when-cross-origin',
+        'permissions-policy': 'camera=(), microphone=(), geolocation=()',
+    });
+    assert.deepStrictEqual(LIMITS_DEFAULTS, {
+        maxQueryLength: 1024,
+        maxQueryParams: 30,
+        maxUriLength: 2048,
+        maxHeaderSize: 0,
+        maxHeaderCount: 64,
+        headerCountMin: 1,
+        headerCountMax: 500,
+    });
+    assert.deepStrictEqual(JWKS_DEFAULTS, {
+        staleIfErrorSec: 3600,
+        staleMax: 86400,
+        negativeCacheSec: 60,
+        negativeMax: 600,
+    });
+    assert.deepStrictEqual(JWT_CLOCK_SKEW, { defaultSec: 30, min: 0, max: 600 });
+    assert.deepStrictEqual(DEFAULT_CLEAR_SITE_DATA_TYPES, ['cache', 'cookies', 'storage']);
+    assert.ok(Object.isFrozen(DEFAULT_UA_DENY_CONTAINS));
+    assert.ok(Object.isFrozen(DEFAULT_SECURITY_HEADERS));
+    assert.ok(Object.isFrozen(LIMITS_DEFAULTS));
+});
 test('template-inject renders structured config with runtime literals', () => {
     const code = renderConstObject('CFG', {
         mode: 'enforce',
