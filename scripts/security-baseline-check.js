@@ -17,6 +17,16 @@ function ensureIncludes(file, pattern, desc) {
         fail(`${file} is missing ${desc} (${pattern})`);
     }
 }
+
+function ensureYamlSchemaHint(file) {
+    const content = read(file);
+    if (!content.includes('# yaml-language-server:')) {
+        fail(`${file} is missing yaml-language-server directive`);
+    }
+    if (!content.includes('schema.json')) {
+        fail(`${file} is missing schema.json reference in directive`);
+    }
+}
 function readJson(file) {
     return JSON.parse(read(file));
 }
@@ -36,6 +46,21 @@ function main() {
     if (!schema.includes('ja3_fingerprints') || !schema.includes('ja4_fingerprints')) {
         fail('policy/schema.json must include ja3_fingerprints and ja4_fingerprints');
     }
+    // Policy artifacts should retain YAML language server hints for IDE assistance.
+    const policyFiles = [
+        'policy/base.yml',
+        'policy/profiles/strict.yml',
+        'policy/profiles/balanced.yml',
+        'policy/profiles/permissive.yml',
+        'policy/archetypes/spa-static-site.yml',
+        'policy/archetypes/rest-api.yml',
+        'policy/archetypes/admin-panel.yml',
+        'policy/archetypes/microservice-origin.yml',
+    ];
+    for (const policyFile of policyFiles) {
+        ensureYamlSchemaHint(policyFile);
+    }
+
     // Keep the TypeScript quality gate single-sourced. The scoped strict
     // typecheck scripts duplicated tsconfig.json and made test:all run the same
     // project-wide check repeatedly.

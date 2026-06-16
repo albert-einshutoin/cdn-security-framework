@@ -792,6 +792,7 @@ test('CLI authoring DX: init --guided emits lintable policy with selected shape'
         const policyPath = path.join(tmp, 'policy', 'security.yml');
         const raw = fs.readFileSync(policyPath, 'utf8');
         assert.ok(raw.includes('Secrets are referenced by environment variable name only'));
+        assert.ok(raw.includes('# yaml-language-server: $schema=./schema.json'));
         const policy = require('js-yaml').load(raw);
         assert.strictEqual(policy.project, 'guided-api');
         assert.strictEqual(policy.metadata.risk_level, 'strict');

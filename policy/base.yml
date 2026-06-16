@@ -1,5 +1,4 @@
-# yaml-language-server: $schema=./schema.json
-
+# yaml-language-server: $schema=schema.json
 version: 1
 project: example-cdn-security
 
