@@ -242,6 +242,11 @@ firewall:
     managed_rules:
       - AWSManagedRulesCommonRuleSet
 `;
+const POLICY_YAML_SCHEMA_HINT_SECURITY = '# yaml-language-server: $schema=./schema.json';
+const POLICY_YAML_SCHEMA_HINT_PROFILE = '# yaml-language-server: $schema=../schema.json';
+function assertPolicySchemaHint(raw, expectedHint) {
+    assert.ok(raw.includes(expectedHint), `expected policy to include schema hint ${expectedHint}`);
+}
 const PLAYGROUND_FIXTURES = [
     {
         name: 'allow GET /',
@@ -901,6 +906,22 @@ test('CLI authoring DX: init --guided non-interactive applies defaults without o
     }
     finally {
         fs.rmSync(tmp, { recursive: true, force: true });
+    }
+});
+test('policy template files include yaml-language-server schema hint', () => {
+    const templatePaths = [
+        { path: path.join(repoRoot, 'policy', 'base.yml'), hint: POLICY_YAML_SCHEMA_HINT_SECURITY },
+        { path: path.join(repoRoot, 'policy', 'profiles', 'strict.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+        { path: path.join(repoRoot, 'policy', 'profiles', 'balanced.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+        { path: path.join(repoRoot, 'policy', 'profiles', 'permissive.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+        { path: path.join(repoRoot, 'policy', 'archetypes', 'spa-static-site.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+        { path: path.join(repoRoot, 'policy', 'archetypes', 'rest-api.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+        { path: path.join(repoRoot, 'policy', 'archetypes', 'admin-panel.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+        { path: path.join(repoRoot, 'policy', 'archetypes', 'microservice-origin.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+    ];
+    for (const entry of templatePaths) {
+        const raw = fs.readFileSync(entry.path, 'utf8');
+        assertPolicySchemaHint(raw, entry.hint);
     }
 });
 test('CLI authoring DX: explain summarizes policy posture', () => {
