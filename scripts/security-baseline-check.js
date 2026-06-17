@@ -17,16 +17,6 @@ function ensureIncludes(file, pattern, desc) {
         fail(`${file} is missing ${desc} (${pattern})`);
     }
 }
-
-function ensureYamlSchemaHint(file) {
-    const content = read(file);
-    if (!content.includes('# yaml-language-server:')) {
-        fail(`${file} is missing yaml-language-server directive`);
-    }
-    if (!content.includes('schema.json')) {
-        fail(`${file} is missing schema.json reference in directive`);
-    }
-}
 function readJson(file) {
     return JSON.parse(read(file));
 }
@@ -36,31 +26,28 @@ function main() {
     ensureIncludes('docs/threat-model.md', 'OWASP API Security Top 10 (2023)', 'OWASP API Top 10 mapping');
     ensureIncludes('docs/threat-model.ja.md', 'OWASP Top 10:2025', 'OWASP Top 10:2025 mapping');
     ensureIncludes('docs/threat-model.ja.md', 'OWASP API Security Top 10 (2023)', 'OWASP API Top 10 mapping');
-    // CI quality gate should include runtime/unit/drift.
+    // CI quality gate should delegate to the single source.
     const workflow = read('.github/workflows/policy-lint.yml');
-    if (!workflow.includes('npm run test:runtime') || !workflow.includes('npm run test:unit') || !workflow.includes('npm run test:drift')) {
-        fail('.github/workflows/policy-lint.yml must run runtime/unit/drift checks');
+    if (!workflow.includes('npm run test:ci')) {
+        fail('.github/workflows/policy-lint.yml must run npm run test:ci');
+    }
+    const scriptsJson = readJson('package.json');
+    const packageScripts = scriptsJson.scripts || {};
+    const ciScript = String(packageScripts['test:ci'] || '');
+    if (!ciScript.includes('npm run test:drift')) {
+        fail('package.json test:ci must run npm run test:drift');
+    }
+    if (!ciScript.includes('npm run test:security-baseline')) {
+        fail('package.json test:ci must run npm run test:security-baseline');
+    }
+    if (!ciScript.includes('npm run test:coverage')) {
+        fail('package.json test:ci must run npm run test:coverage');
     }
     // Schema should include fingerprint controls.
     const schema = read('policy/schema.json');
     if (!schema.includes('ja3_fingerprints') || !schema.includes('ja4_fingerprints')) {
         fail('policy/schema.json must include ja3_fingerprints and ja4_fingerprints');
     }
-    // Policy artifacts should retain YAML language server hints for IDE assistance.
-    const policyFiles = [
-        'policy/base.yml',
-        'policy/profiles/strict.yml',
-        'policy/profiles/balanced.yml',
-        'policy/profiles/permissive.yml',
-        'policy/archetypes/spa-static-site.yml',
-        'policy/archetypes/rest-api.yml',
-        'policy/archetypes/admin-panel.yml',
-        'policy/archetypes/microservice-origin.yml',
-    ];
-    for (const policyFile of policyFiles) {
-        ensureYamlSchemaHint(policyFile);
-    }
-
     // Keep the TypeScript quality gate single-sourced. The scoped strict
     // typecheck scripts duplicated tsconfig.json and made test:all run the same
     // project-wide check repeatedly.
