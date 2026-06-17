@@ -41,7 +41,7 @@ Implementation status reconciliation:
 
 - #128 was implemented as local runtime playground simulation and now has dedicated docs and tests in `docs` + CLI behavior.
 - #103 and #105 are documented as implemented features in `docs/SECURITY-FEATURE-MATRIX.md` with explicit runtime scope and unsupported-target warnings.
-- This PR closes #128, #103, #105 to keep issue tracker aligned with shipped behavior and avoid duplicated triage.
+- This PR aligns docs and issue tracking references for #128, #103, and #105 as shipped behavior; issue-closing actions will be handled in the release PR targeting the repository default branch (`main`) to avoid stale issue states.
 
 ---
 
