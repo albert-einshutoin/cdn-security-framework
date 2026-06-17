@@ -234,9 +234,7 @@ function validateJwksUrl(rawUrl, allowedHosts) {
         return { ok: false, reason: `jwks_url hostname "${hostname}" resolves to a private/loopback/link-local range` };
     }
     if (Array.isArray(allowedHosts) && allowedHosts.length > 0) {
-        const normalized = allowedHosts
-            .map((h) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
-            .filter(Boolean);
+        const normalized = normalizeStringList(allowedHosts, 'lower');
         if (!normalized.includes(hostname)) {
             return {
                 ok: false,
@@ -254,11 +252,7 @@ function validateAuthGates(policy, options = {}) {
     const routes = policy.routes || [];
     const errors = [];
     const jwksAllowedHosts = ((policy.firewall || {}).jwks || {}).allowed_hosts;
-    const normalizedJwksAllowedHosts = Array.isArray(jwksAllowedHosts)
-        ? jwksAllowedHosts
-            .map((h) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
-            .filter(Boolean)
-        : [];
+    const normalizedJwksAllowedHosts = normalizeStringList(jwksAllowedHosts, 'lower');
     const requireJwksAllowedHosts = options.requireJwksAllowedHosts === true;
     for (const route of routes) {
         const gate = route.auth_gate;
