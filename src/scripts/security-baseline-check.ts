@@ -32,10 +32,22 @@ function main() {
   ensureIncludes('docs/threat-model.ja.md', 'OWASP Top 10:2025', 'OWASP Top 10:2025 mapping');
   ensureIncludes('docs/threat-model.ja.md', 'OWASP API Security Top 10 (2023)', 'OWASP API Top 10 mapping');
 
-  // CI quality gate should include runtime/unit/drift.
+  // CI quality gate should delegate to the single source.
   const workflow = read('.github/workflows/policy-lint.yml');
-  if (!workflow.includes('npm run test:runtime') || !workflow.includes('npm run test:unit') || !workflow.includes('npm run test:drift')) {
-    fail('.github/workflows/policy-lint.yml must run runtime/unit/drift checks');
+  if (!workflow.includes('npm run test:ci')) {
+    fail('.github/workflows/policy-lint.yml must run npm run test:ci');
+  }
+  const scriptsJson = readJson('package.json');
+  const packageScripts = scriptsJson.scripts || {};
+  const ciScript = String(packageScripts['test:ci'] || '');
+  if (!ciScript.includes('npm run test:drift')) {
+    fail('package.json test:ci must run npm run test:drift');
+  }
+  if (!ciScript.includes('npm run test:security-baseline')) {
+    fail('package.json test:ci must run npm run test:security-baseline');
+  }
+  if (!ciScript.includes('npm run test:coverage')) {
+    fail('package.json test:ci must run npm run test:coverage');
   }
 
   // Schema should include fingerprint controls.
