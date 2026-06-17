@@ -34,14 +34,14 @@ Implemented:
 
 ## Track C: Issue-to-docs alignment
 
-Status: Completed (2026-06-11)
+Status: Completed (2026-06-17)
 Priority: Medium
 
 Implementation status reconciliation:
 
 - #128 was implemented as local runtime playground simulation and now has dedicated docs and tests in `docs` + CLI behavior.
 - #103 and #105 are documented as implemented features in `docs/SECURITY-FEATURE-MATRIX.md` with explicit runtime scope and unsupported-target warnings.
-- Closing these issues keeps issue tracker aligned with shipped behavior and avoids duplicated triage.
+- This PR closes #128, #103, #105 to keep issue tracker aligned with shipped behavior and avoid duplicated triage.
 
 ---
 
