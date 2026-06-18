@@ -2,6 +2,8 @@
 
 CDN Security Framework の補助スクリプト一覧です。
 
+このディレクトリ配下のファイルは `src/scripts/*.ts` から生成される成果物です。変更は `src/scripts/` 側で行い、`npm run build:ts` で再生成してください。
+
 ---
 
 ## スクリプト一覧
@@ -11,22 +13,28 @@ CDN Security Framework の補助スクリプト一覧です。
 | `policy-lint.js` | ポリシー YAML の構造・必須キー・auth gate 制約を検証。 |
 | `compile.js` | AWS 向け Edge 生成物（`dist/edge/viewer-request.js` / `viewer-response.js` / `origin-request.js`）を生成。 |
 | `compile-cloudflare.js` | Cloudflare Workers 生成物（`dist/edge/cloudflare/index.ts`）を生成。 |
+| `compile-cloudflare-waf.js` | Cloudflare 向け WAF パリティ検証用生成物を作成。 |
 | `compile-infra.js` | Terraform 向け infra 生成物（`dist/infra/*.tf.json`）を生成。 |
 | `runtime-tests.js` | AWS viewer/origin テンプレートのランタイム挙動テスト。 |
-| `cloudflare-runtime-tests.js` | Cloudflare の compile/template 挙動テスト（JWT/署名付き URL/origin auth 経路）。 |
+| `cloudflare-runtime-tests.js` | Cloudflare の compile/template 挙動テスト（JWT/署名付き URL/origin auth フロー）。 |
+| `api-contract-tests.js` | パッケージ smoke で使う API 契約チェック。 |
 | `compile-unit-tests.js` | コンパイラコアの単体テスト。 |
 | `infra-unit-tests.js` | infra コンパイラ出力の単体テスト（JA3/JA4 ルール含む）。 |
+| `policy-io-unit-tests.js` | policy IO 周りの単体テスト。 |
 | `check-drift.js` | 生成物とコミット済み golden のドリフト検知。 |
-| `fingerprint-candidates.js` | WAF JSONL ログから JA3/JA4 候補を抽出（段階導入向け）。 |
 | `security-baseline-check.js` | OWASP ベースライン参照と CI ガードレールの必須項目を検証。 |
-
----
+| `fingerprint-candidates.js` | WAF JSONL ログから JA3/JA4 候補を抽出（段階導入向け）。 |
+| `package-smoke-tests.js` | パッケージを pack/install して smoke を行う。 |
+| `benchmark-compiler.js` | コンパイラ基準性能計測と optional なインストール計測。 |
+| `fingerprint-candidates-unit-tests.js` | 指紋候補抽出ヘルパーの単体テスト。 |
+| `schema-lint-tests.js` | schema とテンプレートメタデータの静的チェック。 |
 
 ## 使い方
 
 ### ビルド
 
 ```bash
+npm run build:ts
 node scripts/compile.js
 node scripts/compile-cloudflare.js
 node scripts/compile-infra.js
@@ -50,6 +58,7 @@ npm run test:runtime
 npm run test:unit
 npm run test:drift
 npm run test:security-baseline
+npm run test:package
 ```
 
 ### フィンガープリント候補抽出
@@ -58,15 +67,22 @@ npm run test:security-baseline
 npm run fingerprints:candidates -- --input waf-logs.jsonl --min-count 20 --top 50
 ```
 
+### コンパイラ計測
+
+```bash
+npm run benchmark:compiler -- --iterations 8 --warmup 1 --policy policy/base.yml
+npm run benchmark:compiler -- --measure-install --iterations 5 --policy policy/base.yml
+```
+
 ---
 
 ## CI
 
-GitHub Actions の `.github/workflows/policy-lint.yml` では、`main` への push/PR で `policy/`、`scripts/`、`templates/`、`bin/`、`tests/`、`docs/`、およびトップレベルのガイド文書（`README*`, `CONTRIBUTING*`）が変更された場合、次の品質ゲートを実行します。
+`.github/workflows/policy-lint.yml` は `main` / `develop` への push・PR 時に品質ゲートを実行します。
 
 1. policy lint（base + 全プロファイル）
 2. build（AWS + Cloudflare）
-3. 生成物存在チェック
+3. 生成物存在チェック（`npm run test:dist-exists`）
 4. runtime テスト（`npm run test:runtime`）
 5. unit テスト（`npm run test:unit`）
 6. drift チェック（`npm run test:drift`）
@@ -74,8 +90,7 @@ GitHub Actions の `.github/workflows/policy-lint.yml` では、`main` への pu
 8. coverage（`npm run test:coverage`）
 9. package smoke（`npm run test:package`）
 
-ローカルで単一 Node 版の同等ゲートを走らせる場合は `npm run test:ci` を使います。
-GitHub workflow では追加で Node バージョン matrix の package smoke も実行します。
+ローカル同等ゲートは `npm run test:ci`。Workflow では Node マトリックス（`20.17.0`, `22`, `24`）で package smoke も実行します。
 
 ---
 
