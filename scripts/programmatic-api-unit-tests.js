@@ -242,6 +242,10 @@ firewall:
     managed_rules:
       - AWSManagedRulesCommonRuleSet
 `;
+const VISUALIZE_NO_CONTROL_POLICY = `
+version: 1
+project: visualize-no-control-test
+`;
 const POLICY_YAML_SCHEMA_HINT_SECURITY = '# yaml-language-server: $schema=./schema.json';
 const POLICY_YAML_SCHEMA_HINT_PROFILE = '# yaml-language-server: $schema=../schema.json';
 function assertPolicySchemaHint(raw, expectedHint) {
@@ -966,6 +970,32 @@ test('CLI authoring DX: visualize emits mermaid with control coverage', () => {
         assert.ok(result.stdout.includes('request.graphql_guard'));
         assert.ok(result.stdout.includes('response_dlp'));
         assert.ok(result.stdout.includes('(monitor)'));
+        const baseClassDirective = 'class policy,edge,waf,origin,response enforce';
+        const baseClassDirectiveCount = result.stdout.split(baseClassDirective).length - 1;
+        assert.strictEqual(baseClassDirectiveCount, 1);
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: visualize emits single base class directive without controls', () => {
+    const ctx = tmpProject(VISUALIZE_NO_CONTROL_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'visualize',
+            '--policy', ctx.policyPath,
+            '--target', 'aws',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `visualize failed: ${result.stderr}`);
+        assert.ok(result.stdout.includes('%% target: aws'));
+        assert.ok(result.stdout.includes('note_no_controls'));
+        assert.ok(result.stdout.includes('No configured control blocks were detected'));
         const baseClassDirective = 'class policy,edge,waf,origin,response enforce';
         const baseClassDirectiveCount = result.stdout.split(baseClassDirective).length - 1;
         assert.strictEqual(baseClassDirectiveCount, 1);
