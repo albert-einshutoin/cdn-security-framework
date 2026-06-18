@@ -2,6 +2,11 @@
 
 Helper scripts for the CDN Security Framework.
 
+Generated runtime artifacts in this directory come from `src/scripts/*.ts`.
+This guide and `scripts/README.ja.md` are maintained directly as contributor
+documentation, while runtime implementation changes should be made under
+`src/scripts/` followed by `npm run build:ts`.
+
 ---
 
 ## Scripts
@@ -11,23 +16,28 @@ Helper scripts for the CDN Security Framework.
 | `policy-lint.js` | Validates policy YAML structure (required keys, version, auth-gate constraints). |
 | `compile.js` | Builds AWS edge artifacts (`dist/edge/viewer-request.js`, `viewer-response.js`, `origin-request.js`). |
 | `compile-cloudflare.js` | Builds Cloudflare Worker artifact (`dist/edge/cloudflare/index.ts`). |
+| `compile-cloudflare-waf.js` | Builds Cloudflare Worker artifact for WAF parity checks. |
 | `compile-infra.js` | Builds infra Terraform JSON artifacts (`dist/infra/*.tf.json`). |
 | `runtime-tests.js` | Runtime behavior tests for AWS viewer/origin templates. |
-| `cloudflare-runtime-tests.js` | Cloudflare compile/template behavior tests (JWT/Signed URL/origin-auth paths). |
+| `cloudflare-runtime-tests.js` | Cloudflare compile/template behavior tests (JWT/signed URL/origin-auth flows). |
+| `api-contract-tests.js` | Contract/API compatibility validation used by package smoke CI. |
 | `compile-unit-tests.js` | Unit tests for compiler core logic. |
 | `infra-unit-tests.js` | Unit tests for infra compiler outputs (including JA3/JA4 rules). |
+| `policy-io-unit-tests.js` | Unit tests for policy IO helpers. |
 | `check-drift.js` | Drift check: compares generated artifacts with committed golden fixtures. |
-| `fingerprint-candidates.js` | Extracts JA3/JA4 candidates from WAF JSONL logs for staged rollout. |
-| `benchmark-compiler.js` | Measures baseline compiler runtime and optional package-install timings. |
 | `security-baseline-check.js` | Verifies OWASP baseline references and mandatory CI guardrails. |
-
----
+| `fingerprint-candidates.js` | Extracts JA3/JA4 candidates from WAF JSONL logs for rollout. |
+| `package-smoke-tests.js` | Packs and installs the package for smoke verification. |
+| `benchmark-compiler.js` | Measures baseline compiler runtime and optional package-install timings. |
+| `fingerprint-candidates-unit-tests.js` | Unit tests for fingerprint candidate extraction helpers. |
+| `schema-lint-tests.js` | Schema-level lint coverage for policy and template metadata. |
 
 ## Usage
 
 ### Build
 
 ```bash
+npm run build:ts
 node scripts/compile.js
 node scripts/compile-cloudflare.js
 node scripts/compile-infra.js
@@ -51,6 +61,7 @@ npm run test:runtime
 npm run test:unit
 npm run test:drift
 npm run test:security-baseline
+npm run test:package
 ```
 
 ### Fingerprint candidate extraction
@@ -70,11 +81,11 @@ npm run benchmark:compiler -- --measure-install --iterations 5 --policy policy/b
 
 ## CI
 
-GitHub Actions workflow `.github/workflows/policy-lint.yml` runs the default quality gate on push/PR to `main` when `policy/`, `scripts/`, `templates/`, `bin/`, `tests/`, `docs/`, or top-level guidance docs (`README*`, `CONTRIBUTING*`) change:
+GitHub Actions workflow `.github/workflows/policy-lint.yml` runs the default quality gate on push/PR to `main` and `develop`:
 
 1. policy lint (base + all profiles)
 2. build (AWS + Cloudflare)
-3. generated artifact existence checks
+3. generated artifact existence checks (`npm run test:dist-exists`)
 4. runtime tests (`npm run test:runtime`)
 5. unit tests (`npm run test:unit`)
 6. drift check (`npm run test:drift`)
@@ -82,8 +93,7 @@ GitHub Actions workflow `.github/workflows/policy-lint.yml` runs the default qua
 8. coverage (`npm run test:coverage`)
 9. package smoke (`npm run test:package`)
 
-Use `npm run test:ci` for the local single-Node equivalent. The GitHub workflow
-also runs package smoke on the Node-version matrix.
+`npm run test:ci` is the local single-Node equivalent. The workflow also runs package smoke on the Node matrix (`20.17.0`, `22`, `24`).
 
 ---
 
