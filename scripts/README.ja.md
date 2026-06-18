@@ -2,7 +2,10 @@
 
 CDN Security Framework の補助スクリプト一覧です。
 
-このディレクトリ配下のファイルは `src/scripts/*.ts` から生成される成果物です。変更は `src/scripts/` 側で行い、`npm run build:ts` で再生成してください。
+このディレクトリ配下のランタイム成果物は `src/scripts/*.ts` から生成されます。
+本ドキュメント（`scripts/README.md`）と `scripts/README.ja.md` は、直接編集して
+更新するガイドです。ランタイム実装を変更したら `src/scripts/` 側で編集し、
+`npm run build:ts` で成果物を再生成してください。
 
 ---
 

@@ -2,8 +2,10 @@
 
 Helper scripts for the CDN Security Framework.
 
-All files in this directory are generated from `src/scripts/*.ts` and committed outputs.
-Edit only under `src/scripts/` and regenerate with `npm run build:ts`.
+Generated runtime artifacts in this directory come from `src/scripts/*.ts`.
+This guide and `scripts/README.ja.md` are maintained directly as contributor
+documentation, while runtime implementation changes should be made under
+`src/scripts/` followed by `npm run build:ts`.
 
 ---
 
