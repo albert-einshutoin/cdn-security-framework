@@ -6,11 +6,17 @@
 
 const path = require('path');
 const fs = require('fs');
-const { Command } = require('commander');
 
 const pkgRoot = path.resolve(__dirname, '..');
 
-const program = new Command();
+async function main() {
+  const dynamicImport = new Function('specifier', 'return import(specifier)');
+  const commanderMod = await dynamicImport('commander') as { Command?: new () => any; default?: { Command?: new () => any } };
+  const CommandCtor = commanderMod.Command || commanderMod.default?.Command;
+  if (!CommandCtor) {
+    throw new Error('Failed to load Commander Command constructor from commander package.');
+  }
+  const program = new CommandCtor();
 
 type InitOptions = {
   force?: boolean;
@@ -1996,3 +2002,11 @@ program
   });
 
 program.parse();
+
+}
+
+void main().catch((error: unknown) => {
+  const err = error as Error;
+  console.error('[ERROR]', err.message || String(error));
+  process.exit(1);
+});
