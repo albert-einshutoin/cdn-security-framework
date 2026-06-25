@@ -125,7 +125,7 @@ AWS `rate_limit_rules[].scope_down_statement` is a structured AST. Cloudflare ra
 npx cdn-security build --target cloudflare --fail-on-waf-approximation
 ```
 
-Exits non-zero when any `APPROXIMATE` or `UNSUPPORTED` entry is touched by the compiled policy. Use this gate in `main`-branch pipelines; keep the default (warn-only) for development branches.
+Exits non-zero when any `APPROXIMATE` or `UNSUPPORTED` entry is touched by the compiled policy. Use this gate in `main`-branch release pipelines; keep the default (warn-only) for local feature-branch builds.
 
 ## Updating this document
 

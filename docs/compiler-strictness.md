@@ -2,11 +2,11 @@
 
 > **Languages:** English · [日本語](./compiler-strictness.ja.md)
 
-The compiler now has a dedicated strict TypeScript gate for parser, validator,
-emitter, and target compile entry points:
+The compiler strictness checks now run through the repository TypeScript gate,
+covering parser, validator, emitter, and target compile entry points:
 
 ```sh
-npm run typecheck:compiler-strict
+npm run typecheck
 ```
 
 This gate is part of `npm run test:all`.

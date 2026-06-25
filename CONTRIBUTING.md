@@ -14,10 +14,13 @@ Thank you for your interest in contributing. This document explains how to propo
 
 ### Code and documentation
 
-1. **Fork** the repository and create a branch from `develop` (e.g. `fix/admin-gate`, `docs/quickstart`).
+This project uses GitHub Flow: `main` is the releasable integration branch, and
+all changes land through short-lived feature, fix, or docs branches.
+
+1. **Fork** the repository and create a branch from `main` (e.g. `fix/admin-gate`, `docs/quickstart`).
 2. **Make your changes** in small, focused commits. Use English for all non–`.ja` files and code comments; Japanese only in `.ja` files.
 3. **Test** manually: run the runtime you changed (e.g. CloudFront Functions in console, Workers with `wrangler dev`) and verify behavior.
-4. **Open a Pull Request** against `develop` with a short description and, if relevant, link to an issue.
+4. **Open a Pull Request** against `main` with a short description and, if relevant, link to an issue.
 
 ---
 
@@ -50,7 +53,7 @@ runtime and coverage suites.
 Release is automated by tag:
 
 1. Update `package.json` version.
-2. Push commit to the release branch.
+2. Merge the release commit to `main`.
 3. Push tag `vX.Y.Z`.
 4. `.github/workflows/release-npm.yml` runs the full gate and publishes to npm only when green.
 

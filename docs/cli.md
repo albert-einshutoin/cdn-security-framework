@@ -12,12 +12,15 @@ npx cdn-security <subcommand> [options]
 | --- | --- |
 | `init` | Scaffold `policy/security.yml` from a profile or archetype. |
 | `build` | Validate policy, compile edge runtime + infra config. |
+| `playground` | Compile policy locally and run sample request fixtures against edge runtimes (AWS + Cloudflare). |
+| `analyze` | Aggregate block/monitor JSONL logs and surface low-frequency candidates. |
 | `emit-waf` | Emit infra config only (no edge code). For redeploying firewall rules without touching edge. |
 | `doctor` | One-shot environment diagnostics. Exits non-zero on any failing check. |
 | `readiness` | Production release gate that combines diagnostics and policy posture findings. |
 | `capabilities` | Print target support matrix and optionally evaluate policy controls against a target. |
 | `deploy-template` | Generate GitHub Actions workflow templates for AWS and Cloudflare artifact deployment. |
 | `explain` | Print a concise policy posture summary for review and onboarding. |
+| `visualize` | Render a deterministic policy control map in Mermaid or static HTML, including supported/monitor/unsupported/target-specific status. |
 | `diff` | Compare generated output drift or semantic policy posture changes between policies. |
 | `migrate` | Migrate a policy file between schema versions (stub — v1 is the only shipped version today). |
 
@@ -52,6 +55,97 @@ Outputs:
 - `dist/edge/viewer-request.js`, `dist/edge/viewer-response.js`, `dist/edge/origin-request.js` (AWS)
 - `dist/edge/cloudflare/index.ts` (Cloudflare)
 - `dist/infra/*.tf.json` — WAF, geo, IP sets, CloudFront settings, origin timeouts
+
+Build supports inheritance via top-level `extends`:
+
+- `policy` can point to another policy file and reuse defaults across services.
+- `extends` path is resolved relative to the selected policy file.
+- Merge behavior is deep-merge for objects and append for arrays:
+  - object key collisions are resolved by child
+  - arrays from parent then child
+  - scalar replacement replaces the parent subtree
+- Inheritance is transitive (supports `child` -> `parent` -> `grandparent`).
+
+## `playground`
+
+```bash
+npx cdn-security playground                                      # local fixtures against built-in examples (AWS + Cloudflare)
+npx cdn-security playground --target aws --json                   # machine-readable output
+npx cdn-security playground --policy policy/security.yml -f cases.json
+npx cdn-security playground --allow-placeholder-token --target all  # allow INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN
+```
+
+`playground` builds the selected policy to a temporary directory and executes synthetic requests through the generated runtime. It reports `pass|block`, HTTP `status`, and `block_reason` for each fixture and includes the runtime target (`aws` or `cloudflare`).
+
+Input format options:
+
+- `--fixture <path>` accepts one of:
+  - `{ "fixtures": [ ... ] }`
+  - `[ ... ]`
+  - `{ "request": { ... } }`
+- each fixture item accepts:
+  - `method`
+  - `path`
+  - `query` (string or object map)
+  - `headers`
+  - `body`
+
+Example fixture:
+
+```json
+{
+  "fixtures": [
+    { "name": "GET /", "request": { "method": "GET", "path": "/" } },
+    { "name": "PATCH blocked", "request": { "method": "PATCH", "path": "/" } },
+    { "name": "admin missing auth", "request": { "method": "GET", "path": "/admin", "headers": { "x-edge-token": "INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN" } } }
+  ]
+}
+```
+
+When `--json` is set, output is:
+
+```json
+{
+  "policyPath": "/path/to/policy/security.yml",
+  "targets": [
+    {
+      "target": "aws",
+      "fixtures": [
+        {
+          "name": "GET /",
+          "decision": "pass",
+          "status": 200,
+          "block_reason": "",
+          "path": "/",
+          "method": "GET",
+          "query": ""
+        }
+      ]
+    }
+  ]
+}
+```
+
+## `analyze`
+
+```bash
+npx cdn-security analyze --input /path/to/monitor.jsonl
+npx cdn-security analyze --input /path/to/monitor.jsonl --min-count 3 --top 10 --json
+```
+
+`analyze` accepts monitor logs in JSON Lines format and aggregates by route/reason to support migration from monitor mode to enforce.
+
+- `--input` required: log file path (JSONL)
+- `--min-count` minimum event count for low-frequency candidates (default `5`)
+- `--top` max number of printed/exported per-group samples (default `20`)
+- `--json` prints machine-readable report
+
+It reports:
+
+- summary lines (parsed/unparsed/analyzed)
+- by block reason (event count + route counts)
+- by policy route (reason and target distribution)
+- low-frequency candidates (`count <= --min-count`) for `block` events
 
 ## `emit-waf`
 
@@ -116,6 +210,7 @@ Exit code is `0` when no check has status `fail`, else `1`. With `--strict`, war
 npx cdn-security readiness
 npx cdn-security readiness --target cloudflare
 npx cdn-security readiness --strict
+npx cdn-security readiness --fail-on-weak-waf-baseline
 npx cdn-security readiness --json
 npx cdn-security readiness --report readiness-report.json
 ```
@@ -123,6 +218,10 @@ npx cdn-security readiness --report readiness-report.json
 Runs a production-oriented release gate over the selected policy. It reuses environment diagnostics and policy validation, then adds production posture checks for risk level, enforce mode, method restrictions, response headers, WAF rate limits, managed-rule coverage, and target-specific unsupported controls.
 
 Exit code is `1` when any finding has severity `fail`. With `--strict`, warning findings also fail the command. Use `--json` for stdout JSON, or `--report <path>` to write the same machine-readable report while keeping the human summary on stdout/stderr.
+
+Use `--fail-on-weak-waf-baseline` for production CI when starter policies should remain usable locally but weak WAF posture must stop a release. The flag promotes WAF baseline findings to `fail`, including missing WAF config, missing rate limits, missing AWS managed-rule signal coverage, and missing CloudFront WAF logging when `firewall.waf.scope: CLOUDFRONT`.
+
+Readiness reports also include read-only `wafRecommendations`. The engine infers `spa-static-site`, `rest-api`, `admin-panel`, or `microservice-origin` posture from the policy and suggests managed WAF rule groups plus related settings with rationale, cost notes, false-positive notes, and AWS/Cloudflare target support. It never mutates the policy; apply recommendations manually in a follow-up change.
 
 ## `capabilities`
 
@@ -158,6 +257,23 @@ npx cdn-security explain --policy policy/security.yml
 ```
 
 Prints the policy's schema, mode, allowed methods, request limits, host and route posture, auth gates, WAF settings, and response headers. It is read-only and intended for code review, runbooks, and issue triage.
+
+## `visualize`
+
+```bash
+npx cdn-security visualize
+npx cdn-security visualize --policy policy/security.yml --target aws
+npx cdn-security visualize --policy policy/security.yml --target all --format mermaid
+npx cdn-security visualize --policy policy/security.yml --target cloudflare --format html --out policy-coverage.html
+```
+
+Generates a deterministic policy control visualization by policy section and control matrix, grouped by policy layer:
+
+- Layer nodes for Edge, WAF, Origin, and Response
+- Route coverage and auth gate summaries
+- Control coverage status at the selected target(s): enforce / monitor / target-specific / unsupported
+
+`--format mermaid` prints Mermaid flowchart text to stdout, which is CI-friendly because it requires no browser runtime. Use `--format html` to generate a static HTML artifact that renders the same Mermaid diagram when opened in a browser.
 
 ## `diff`
 

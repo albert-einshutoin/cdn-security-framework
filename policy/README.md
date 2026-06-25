@@ -27,6 +27,35 @@ Build looks for `policy/security.yml` first; if it does not exist, it uses `poli
 | `profiles/strict.yml` | Stricter limits and more blocks; best when you control clients. |
 | `profiles/permissive.yml` | Looser limits and fewer blocks; for APIs, scripts, legacy clients. |
 
+## Policy inheritance with overlays
+
+For multi-service or environment-specific policy sets, keep shared policy in a base file and create overlays with `extends`:
+
+```yml
+# policy/base.yml
+version: 1
+defaults:
+  mode: monitor
+project: web-frontend
+
+# policy/prod.yml
+extends: ./base.yml
+defaults:
+  mode: enforce
+firewall:
+  waf:
+    rate_limit_rules:
+      - name: api-limit
+        limit: 500
+```
+
+The `extends` path is resolved relative to the child policy file.
+
+- Object fields merge recursively (child keys override parent keys)
+- Arrays append in source order (parent entries first, child entries after)
+- Scalar values replace the parent subtree
+- Transitive inheritance is supported (`prod.yml` -> `base.yml` -> `global.yml`)
+
 ---
 
 ## Choosing a Profile (when using base.yml)

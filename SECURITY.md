@@ -11,8 +11,8 @@ current `0.x` / latest published minor and the immediately preceding minor line.
 | previous  | :white_check_mark: |
 | older     | :x:                |
 
-The `main` branch reflects the most recent released line. Pre-release work happens on
-`develop` and feature branches.
+The `main` branch is the releasable integration branch. Pre-release work happens on
+short-lived feature, fix, or docs branches and lands through pull requests to `main`.
 
 ## Reporting a Vulnerability
 

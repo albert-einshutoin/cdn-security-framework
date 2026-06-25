@@ -6,7 +6,6 @@
 
 const fs = require('fs');
 const path = require('path');
-const yaml = require('js-yaml');
 const {
   parsePathPatterns,
   regexesLiteralCode,
@@ -28,33 +27,45 @@ const {
   renderConstObject,
   runtimeCode,
 } = require('./lib/template-inject');
+const {
+  clampNumber,
+  normalizeStringList,
+  numberOr,
+} = require('./lib/value-normalize');
+const {
+  DEFAULT_ADMIN_PATH_PREFIXES,
+  DEFAULT_ALLOW_METHODS,
+  DEFAULT_CLEAR_SITE_DATA_TYPES,
+  DEFAULT_CSP_ADMIN,
+  DEFAULT_CSP_PUBLIC,
+  DEFAULT_DROP_QUERY_KEYS,
+  DEFAULT_REQUIRED_HEADERS,
+  DEFAULT_SECURITY_HEADERS,
+  DEFAULT_UA_DENY_CONTAINS,
+  JWKS_DEFAULTS,
+  JWT_CLOCK_SKEW,
+  LIMITS_DEFAULTS,
+} = require('./lib/policy-defaults');
+const {
+  parseArgs,
+  loadPolicyWithWarnings,
+  reportPolicyWarnings,
+  reportPolicyLoadError,
+} = require('./lib/policy-io');
 
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
-const securityPath = path.join(repoRoot, 'policy', 'security.yml');
-const basePath = path.join(repoRoot, 'policy', 'base.yml');
-let policyPath = fs.existsSync(securityPath) ? securityPath : basePath;
-let outDir = path.join(repoRoot, 'dist');
-for (let i = 0; i < argv.length; i++) {
-  if (argv[i] === '--policy' && argv[i + 1]) { policyPath = argv[++i]; continue; }
-  if (argv[i] === '--out-dir' && argv[i + 1]) { outDir = argv[++i]; continue; }
-  if (argv[i] === '--allow-placeholder-token') { continue; }
-  if (argv[i] === '--fail-on-permissive') { continue; }
-  if (!argv[i].startsWith('--')) { policyPath = argv[i]; }
-}
+const { policyPath, outDir } = parseArgs(argv, repoRoot);
 const allowPlaceholderToken = hasAllowPlaceholderFlag(argv);
 const failOnPermissive = hasFailOnPermissiveFlag(argv);
 
 let policy;
 try {
-  const content = fs.readFileSync(policyPath, 'utf8');
-  policy = yaml.load(content);
+  const parsed = loadPolicyWithWarnings(policyPath);
+  reportPolicyWarnings(parsed.warnings || [], policyPath);
+  policy = parsed.policy;
 } catch (e: any) {
-  if (e.code === 'ENOENT') {
-    console.error('Error: policy file not found:', policyPath);
-    process.exit(1);
-  }
-  console.error('Error: failed to parse policy YAML:', e.message);
+  reportPolicyLoadError(policyPath, e);
   process.exit(1);
 }
 
@@ -86,6 +97,10 @@ function normalizeResponseDlp(policyObj: any) {
   const headers = raw.headers || {};
   const detectors = raw.detectors || {};
   const defaultContentTypes = ['text/', 'application/json', 'application/xml', 'text/xml', 'application/javascript'];
+  const hasContentTypes = Array.isArray(body.content_types) && body.content_types.length > 0;
+  const hasHeaderNames = Array.isArray(headers.names) && headers.names.length > 0;
+  const contentTypes = normalizeStringList(body.content_types, 'lower', { trim: false });
+  const headerNames = normalizeStringList(headers.names, 'lower', { trim: false });
   const builtIn = Array.isArray(detectors.built_in) && detectors.built_in.length > 0
     ? detectors.built_in.filter((d: unknown) => d === 'api_key' || d === 'credit_card')
     : ['api_key', 'credit_card'];
@@ -117,24 +132,16 @@ function normalizeResponseDlp(policyObj: any) {
       enabled,
       action,
       mask: typeof raw.mask === 'string' && raw.mask ? raw.mask : '[REDACTED]',
-      blockStatus: Number.isFinite(Number(raw.block_status))
-        ? Math.max(400, Math.min(599, Number(raw.block_status)))
-        : 451,
+      blockStatus: clampNumber(raw.block_status, 400, 599, 451),
       blockBody: typeof raw.block_body === 'string' && raw.block_body ? raw.block_body : 'Response blocked by edge DLP',
       body: {
         enabled: enabled && body.enabled !== false,
-        maxBytes: Number.isFinite(Number(body.max_bytes))
-          ? Math.max(1, Math.min(131072, Number(body.max_bytes)))
-          : 32768,
-        contentTypes: Array.isArray(body.content_types) && body.content_types.length > 0
-          ? body.content_types.filter((s: unknown) => typeof s === 'string' && s.trim()).map((s: string) => s.toLowerCase())
-          : defaultContentTypes,
+        maxBytes: clampNumber(body.max_bytes, 1, 131072, 32768),
+        contentTypes: hasContentTypes ? contentTypes : defaultContentTypes,
       },
       headers: {
         enabled: enabled && headers.enabled !== false,
-        names: Array.isArray(headers.names) && headers.names.length > 0
-          ? headers.names.filter((s: unknown) => typeof s === 'string' && s.trim()).map((s: string) => s.toLowerCase())
-          : ['set-cookie', 'authorization', 'x-api-key'],
+        names: hasHeaderNames ? headerNames : ['set-cookie', 'authorization', 'x-api-key'],
       },
       detectors: { builtIn, customRegexNames },
     },
@@ -154,7 +161,7 @@ function getWorkerAuthGates(): any[] {
 
     const gateConfig: any = {
       name: route.name || 'unnamed',
-      protectedPrefixes: prefixes.length ? prefixes : ['/admin', '/docs', '/swagger'],
+      protectedPrefixes: prefixes.length ? prefixes : [...DEFAULT_ADMIN_PATH_PREFIXES],
       type: authType,
     };
 
@@ -174,14 +181,17 @@ function getWorkerAuthGates(): any[] {
         ? gate.allowed_algorithms.filter((a: unknown) => typeof a === 'string' && a !== 'none' && a === algorithm)
         : null;
       gateConfig.allowed_algorithms = userAllowed && userAllowed.length > 0 ? userAllowed : [algorithm];
-      gateConfig.clock_skew_sec = Number.isFinite(Number(gate.clock_skew_sec))
-        ? Math.max(0, Math.min(600, Number(gate.clock_skew_sec)))
-        : 30;
+      gateConfig.clock_skew_sec = clampNumber(
+        gate.clock_skew_sec,
+        JWT_CLOCK_SKEW.min,
+        JWT_CLOCK_SKEW.max,
+        JWT_CLOCK_SKEW.defaultSec,
+      );
       gateConfig.jwks_url = gate.jwks_url || '';
       gateConfig.issuer = gate.issuer || '';
       gateConfig.audience = gate.audience || '';
       gateConfig.secret_env = gate.secret_env || '';
-      gateConfig.cache_ttl_sec = Number(gate.cache_ttl_sec) || 3600;
+      gateConfig.cache_ttl_sec = numberOr(gate.cache_ttl_sec, 3600);
     } else if (authType === 'signed_url') {
       gateConfig.algorithm = gate.algorithm || 'HMAC-SHA256';
       gateConfig.secret_env = gate.secret_env || 'URL_SIGNING_SECRET';
@@ -199,29 +209,31 @@ function getWorkerAuthGates(): any[] {
 }
 const authGates = getWorkerAuthGates();
 
-const dropQueryKeysArray = normalize.drop_query_keys || [
-  'utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid',
-];
+const dropQueryKeysArray = normalize.drop_query_keys || DEFAULT_DROP_QUERY_KEYS;
 const { contains: blockPathContains, regexSources: blockPathRegexSources } = parsePathPatterns(block.path_patterns);
-const allowMethods = request.allow_methods || ['GET', 'HEAD', 'POST'];
+const allowMethods = request.allow_methods || DEFAULT_ALLOW_METHODS;
 const pathNormalize = normalize.path || {};
-const requiredHeaders = block.header_missing || ['user-agent'];
+const requiredHeaders = block.header_missing || DEFAULT_REQUIRED_HEADERS;
 const resHeaders = policy.response_headers || {};
 const corsConfig = resHeaders.cors || null;
 const originAuth = (policy.origin || {}).auth || null;
-const rawAllowedHosts = Array.isArray(request.allowed_hosts) ? request.allowed_hosts : [];
-const allowedHosts = rawAllowedHosts
-  .map((h: unknown) => (typeof h === 'string' ? h.trim().toLowerCase() : ''))
-  .filter(Boolean);
+const allowedHosts = normalizeStringList(request.allowed_hosts, 'lower');
 const trustForwardedFor = request.trust_forwarded_for === true;
 const jwksGlobal = (policy.firewall || {}).jwks || {};
-const jwksStaleIfError = Number.isFinite(Number(jwksGlobal.stale_if_error_sec))
-  ? Math.max(0, Math.min(86400, Number(jwksGlobal.stale_if_error_sec)))
-  : 3600;
-const jwksNegativeCache = Number.isFinite(Number(jwksGlobal.negative_cache_sec))
-  ? Math.max(0, Math.min(600, Number(jwksGlobal.negative_cache_sec)))
-  : 60;
+const jwksStaleIfError = clampNumber(
+  jwksGlobal.stale_if_error_sec,
+  0,
+  JWKS_DEFAULTS.staleMax,
+  JWKS_DEFAULTS.staleIfErrorSec,
+);
+const jwksNegativeCache = clampNumber(
+  jwksGlobal.negative_cache_sec,
+  0,
+  JWKS_DEFAULTS.negativeMax,
+  JWKS_DEFAULTS.negativeCacheSec,
+);
 const fwGeo = (policy.firewall || {}).geo || {};
+// Keep String() coercion here; policy authors sometimes provide numeric country-like values.
 const geoBlockCountries = Array.isArray(fwGeo.block_countries)
   ? fwGeo.block_countries.map((c: unknown) => String(c || '').trim().toUpperCase()).filter(Boolean)
   : [];
@@ -233,15 +245,18 @@ const challengeConfig = buildChallengeConfig(policy);
 const cfgCode = renderConstObject('CFG', {
   mode: defaults.mode || 'enforce',
   allowMethods: runtimeCode(`new Set(${JSON.stringify(allowMethods)})`),
-  maxQueryLength: Number(limits.max_query_length) || 1024,
-  maxQueryParams: Number(limits.max_query_params) || 30,
-  maxUriLength: Number(limits.max_uri_length) || 2048,
-  maxHeaderSize: Number(limits.max_header_size) || 0,
-  maxHeaderCount: Number.isFinite(Number(limits.max_header_count))
-    ? Math.max(1, Math.min(500, Number(limits.max_header_count)))
-    : 64,
+  maxQueryLength: numberOr(limits.max_query_length, LIMITS_DEFAULTS.maxQueryLength),
+  maxQueryParams: numberOr(limits.max_query_params, LIMITS_DEFAULTS.maxQueryParams),
+  maxUriLength: numberOr(limits.max_uri_length, LIMITS_DEFAULTS.maxUriLength),
+  maxHeaderSize: numberOr(limits.max_header_size, LIMITS_DEFAULTS.maxHeaderSize),
+  maxHeaderCount: clampNumber(
+    limits.max_header_count,
+    LIMITS_DEFAULTS.headerCountMin,
+    LIMITS_DEFAULTS.headerCountMax,
+    LIMITS_DEFAULTS.maxHeaderCount,
+  ),
   dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(dropQueryKeysArray)})`),
-  uaDenyContains: block.ua_contains || ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests'],
+  uaDenyContains: block.ua_contains || DEFAULT_UA_DENY_CONTAINS,
   blockPathContains,
   blockPathRegexes: runtimeCode(regexesLiteralCode(blockPathRegexSources)),
   normalizePath: {
@@ -264,7 +279,7 @@ const cfgCode = renderConstObject('CFG', {
   obs: buildObsConfig(policy),
 });
 
-let adminPathPrefixes = ['/admin', '/docs', '/swagger'];
+let adminPathPrefixes = [...DEFAULT_ADMIN_PATH_PREFIXES];
 let adminCacheControl = 'no-store';
 for (const route of routes) {
   const match = route.match || {};
@@ -285,13 +300,13 @@ const responseDlp = normalizeResponseDlp(policy);
 
 const responseCfgCode = renderConstObject('RESPONSE_CFG', {
   headers: {
-    'strict-transport-security': resHeaders.hsts || 'max-age=31536000; includeSubDomains; preload',
-    'x-content-type-options': resHeaders.x_content_type_options || 'nosniff',
-    'referrer-policy': resHeaders.referrer_policy || 'strict-origin-when-cross-origin',
-    'permissions-policy': resHeaders.permissions_policy || 'camera=(), microphone=(), geolocation=()',
+    'strict-transport-security': resHeaders.hsts || DEFAULT_SECURITY_HEADERS['strict-transport-security'],
+    'x-content-type-options': resHeaders.x_content_type_options || DEFAULT_SECURITY_HEADERS['x-content-type-options'],
+    'referrer-policy': resHeaders.referrer_policy || DEFAULT_SECURITY_HEADERS['referrer-policy'],
+    'permissions-policy': resHeaders.permissions_policy || DEFAULT_SECURITY_HEADERS['permissions-policy'],
   },
-  csp_public: resHeaders.csp_public || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
-  csp_admin: resHeaders.csp_admin || "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+  csp_public: resHeaders.csp_public || DEFAULT_CSP_PUBLIC,
+  csp_admin: resHeaders.csp_admin || DEFAULT_CSP_ADMIN,
   csp_report_only: resHeaders.csp_report_only || '',
   csp_report_uri: resHeaders.csp_report_uri || '',
   csp_nonce: resHeaders.csp_nonce === true,
@@ -303,12 +318,10 @@ const responseCfgCode = renderConstObject('RESPONSE_CFG', {
   adminCacheControl,
   authProtectedPrefixes: authProtectedPrefixesForResp,
   forceVaryAuth,
-  clearSiteDataPaths: Array.isArray(resHeaders.clear_site_data_paths)
-    ? resHeaders.clear_site_data_paths.filter((s: unknown) => typeof s === 'string' && s.trim())
-    : [],
+  clearSiteDataPaths: normalizeStringList(resHeaders.clear_site_data_paths, 'preserve', { trim: false }),
   clearSiteDataTypes: Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
     ? resHeaders.clear_site_data_types
-    : ['cache', 'cookies', 'storage'],
+    : DEFAULT_CLEAR_SITE_DATA_TYPES,
   cors: corsConfig,
   cookie_attributes: resHeaders.cookie_attributes || null,
   responseDlp: responseDlp.config,

@@ -9,6 +9,7 @@ const repoRoot = path.join(__dirname, '..');
 const { parsePolicyFile } = require('../parser');
 const { validatePolicy } = require('../validator');
 const { listInfraArtifacts, resolveAbsolute } = require('../emitter');
+const { parseMaxRssBytes } = require('./benchmark-compiler');
 
 function test(name: string, fn: () => void) {
   try {
@@ -34,6 +35,95 @@ test('parser phase: parses YAML without invoking validation or emission', () => 
     assert.strictEqual(result.ok, true);
     assert.strictEqual(result.policy.version, 1);
     assert.deepStrictEqual(result.errors, []);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('parser phase: resolves transitive extends with deep merge', () => {
+  const tmp = mktmp();
+  const globalPath = path.join(tmp, 'global.yml');
+  const basePath = path.join(tmp, 'base.yml');
+  const childPath = path.join(tmp, 'child.yml');
+  fs.writeFileSync(globalPath, `version: 1
+defaults:
+  mode: monitor
+request:
+  allow_methods: [GET]
+  limits:
+    max_query_length: 1024
+response_headers:
+  hsts: "max-age=31536000"\n`, 'utf8');
+  fs.writeFileSync(basePath, `version: 1
+extends: ./global.yml
+request:
+  limits:
+    max_query_params: 30
+response_headers:
+  csp: "default-src 'self'"\n`, 'utf8');
+  fs.writeFileSync(childPath, `extends: ./base.yml
+defaults:
+  mode: enforce
+request:
+  limits:
+    max_query_params: 60
+`, 'utf8');
+  try {
+    const result = parsePolicyFile({ policyPath: childPath });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.policy.defaults.mode, 'enforce');
+    assert.strictEqual(result.policy.request.limits.max_query_length, 1024);
+    assert.strictEqual(result.policy.request.limits.max_query_params, 60);
+    assert.deepStrictEqual(result.policy.request.allow_methods, ['GET']);
+    assert.strictEqual(result.policy.response_headers.csp, "default-src 'self'");
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('parser phase: appends array entries from child to parent on inheritance', () => {
+  const tmp = mktmp();
+  const basePath = path.join(tmp, 'base.yml');
+  const childPath = path.join(tmp, 'child.yml');
+  fs.writeFileSync(basePath, `version: 1\nrequest:\n  allow_methods: [GET]\nresponse_headers: {}\n`, 'utf8');
+  fs.writeFileSync(childPath, `version: 1\nextends: ./base.yml\nrequest:\n  allow_methods: [POST]\nresponse_headers: {}\n`, 'utf8');
+  try {
+    const result = parsePolicyFile({ policyPath: childPath });
+    assert.strictEqual(result.ok, true);
+    assert.deepStrictEqual(result.policy.request.allow_methods, ['GET', 'POST']);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('parser phase: merges nested objects with child overrides', () => {
+  const tmp = mktmp();
+  const basePath = path.join(tmp, 'base.yml');
+  const childPath = path.join(tmp, 'child.yml');
+  fs.writeFileSync(basePath, `version: 1\nrequest:\n  limits:\n    max_query_length: 1024\n    max_query_params: 20\nresponse_headers: {}\n`, 'utf8');
+  fs.writeFileSync(childPath, `version: 1\nextends: ./base.yml\nrequest:\n  limits:\n    max_query_params: 30\n    max_uri_length: 2048\nresponse_headers: {}\n`, 'utf8');
+  try {
+    const result = parsePolicyFile({ policyPath: childPath });
+    assert.strictEqual(result.ok, true);
+    assert.strictEqual(result.policy.request.limits.max_query_length, 1024);
+    assert.strictEqual(result.policy.request.limits.max_query_params, 30);
+    assert.strictEqual(result.policy.request.limits.max_uri_length, 2048);
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('parser phase: emits unreachable-key warning when scalar replaces subtree', () => {
+  const tmp = mktmp();
+  const basePath = path.join(tmp, 'base.yml');
+  const childPath = path.join(tmp, 'child.yml');
+  fs.writeFileSync(basePath, `version: 1\nrequest:\n  limits:\n    max_query_length: 1024\nresponse_headers: {}\n`, 'utf8');
+  fs.writeFileSync(childPath, `version: 1\nextends: ./base.yml\nrequest:\n  limits: null\nresponse_headers: {}\n`, 'utf8');
+  try {
+    const result = parsePolicyFile({ policyPath: childPath });
+    assert.strictEqual(result.ok, true);
+    assert.ok(Array.isArray(result.warnings));
+    assert.ok(result.warnings.some((warning: string) => warning.includes('request.limits')));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -70,6 +160,18 @@ test('emitter phase helpers: resolve paths and list infra artifacts without pars
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
+});
+
+test('benchmark compiler parses max RSS units from time output', () => {
+  assert.strictEqual(
+    parseMaxRssBytes('Maximum resident set size (kbytes): 1234\n'),
+    1234 * 1024,
+  );
+  assert.strictEqual(
+    parseMaxRssBytes('maximum resident set size: 2048 kbytes\n'),
+    2048 * 1024,
+  );
+  assert.strictEqual(parseMaxRssBytes('987654  maximum resident set size\n'), 987654);
 });
 
 if (process.exitCode) {

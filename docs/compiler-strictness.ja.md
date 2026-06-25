@@ -2,11 +2,11 @@
 
 > **Languages:** [English](./compiler-strictness.md) · 日本語
 
-compiler には、parser、validator、emitter、target compile entry point を対象にした
-専用の strict TypeScript gate を追加しています。
+compiler strictness check は repository の TypeScript gate 経由で実行し、
+parser、validator、emitter、target compile entry point を対象にしています。
 
 ```sh
-npm run typecheck:compiler-strict
+npm run typecheck
 ```
 
 この gate は `npm run test:all` に含まれます。

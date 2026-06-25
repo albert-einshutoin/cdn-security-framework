@@ -128,6 +128,57 @@ firewall:
     managed_rules:
       - AWSManagedRulesCommonRuleSet
 `;
+const REST_RECOMMENDATION_POLICY = `
+version: 1
+project: recommendation-rest-api
+metadata:
+  risk_level: balanced
+  description: "REST API protected by CDN security framework."
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, POST, OPTIONS]
+response_headers:
+  hsts: "max-age=31536000"
+  csp_public: "default-src 'none'; frame-ancestors 'none'"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    rate_limit: 1000
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+    logging:
+      enabled: true
+      destination_arn_env: WAF_LOG_DESTINATION_ARN
+      redacted_fields: [authorization, cookie]
+`;
+const MALFORMED_PREFIX_RECOMMENDATION_POLICY = `
+version: 1
+project: malformed-admin-prefix
+metadata:
+  risk_level: balanced
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, POST]
+routes:
+  - name: admin
+    match:
+      path_prefixes: ["/admin", 7]
+    auth_gate:
+      type: static_token
+      header: x-edge-token
+      token_env: EDGE_ADMIN_TOKEN
+response_headers:
+  hsts: "max-age=31536000"
+  csp_public: "default-src 'self'"
+firewall:
+  waf:
+    scope: CLOUDFRONT
+    rate_limit: 1000
+    managed_rules:
+      - AWSManagedRulesCommonRuleSet
+`;
 const DIFF_SEMANTIC_BASELINE = `
 version: 1
 project: diff-test
@@ -135,6 +186,21 @@ request:
   allow_methods: [GET, POST]
   limits:
     max_query_length: 1024
+routes:
+  - name: account
+    match:
+      path_prefixes: ["/account"]
+    request:
+      allow_methods: [GET]
+    auth_gate:
+      type: static_token
+      header: x-edge-token
+      token_env: EDGE_ADMIN_TOKEN
+  - name: account
+    match:
+      path_prefixes: ["/account"]
+    request:
+      allow_methods: [POST]
 response_headers:
   csp_public: "default-src 'self'; frame-ancestors 'none'"
 firewall:
@@ -151,8 +217,23 @@ request:
   allow_methods: [GET, POST, TRACE]
   limits:
     max_query_length: 4096
+  graphql_guard:
+    enabled: true
+    endpoint_paths: ["/graphql"]
+    max_depth: 8
 defaults:
   mode: monitor
+routes:
+  - name: account
+    match:
+      path_prefixes: ["/account"]
+    request:
+      allow_methods: [GET]
+  - name: account
+    match:
+      path_prefixes: ["/account"]
+    request:
+      allow_methods: [POST]
 response_headers:
   csp_public: "default-src *"
 firewall:
@@ -161,6 +242,79 @@ firewall:
     managed_rules:
       - AWSManagedRulesCommonRuleSet
 `;
+const VISUALIZE_NO_CONTROL_POLICY = `
+version: 1
+project: visualize-no-control-test
+`;
+const POLICY_YAML_SCHEMA_HINT_SECURITY = '# yaml-language-server: $schema=./schema.json';
+const POLICY_YAML_SCHEMA_HINT_PROFILE = '# yaml-language-server: $schema=../schema.json';
+function assertPolicySchemaHint(raw, expectedHint) {
+    assert.ok(raw.includes(expectedHint), `expected policy to include schema hint ${expectedHint}`);
+}
+const PLAYGROUND_FIXTURES = [
+    {
+        name: 'allow GET /',
+        request: {
+            method: 'GET',
+            path: '/',
+            headers: {
+                'user-agent': 'cli-test-client',
+            },
+        },
+    },
+    {
+        name: 'block PATCH',
+        request: {
+            method: 'PATCH',
+            path: '/',
+            headers: {
+                'user-agent': 'cli-test-client',
+            },
+        },
+    },
+    {
+        name: 'path traversal is blocked',
+        request: {
+            method: 'GET',
+            path: '/foo/../bar',
+            headers: {
+                'user-agent': 'cli-test-client',
+            },
+        },
+    },
+    {
+        name: 'auth missing on admin',
+        request: {
+            method: 'GET',
+            path: '/admin',
+            headers: {
+                'user-agent': 'cli-test-client',
+            },
+        },
+    },
+    {
+        name: 'auth placeholder passes',
+        request: {
+            method: 'GET',
+            path: '/admin',
+            headers: {
+                'user-agent': 'cli-test-client',
+                'x-edge-token': 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN',
+            },
+        },
+    },
+    {
+        name: 'query is visible in output',
+        request: {
+            method: 'GET',
+            path: '/search',
+            query: { q: 'hello', utm_source: 'cli' },
+            headers: {
+                'user-agent': 'cli-test-client',
+            },
+        },
+    },
+];
 function tmpProject(yamlBody) {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'api-'));
     const policyDir = path.join(tmp, 'policy');
@@ -505,6 +659,120 @@ test('CLI authoring DX: build --allow-placeholder-token succeeds without auth en
         ctx.cleanup();
     }
 });
+test('CLI authoring DX: playground emits AWS + Cloudflare fixture decisions', () => {
+    const ctx = tmpProject(STATIC_TOKEN_POLICY);
+    try {
+        const fixturePath = path.join(ctx.tmp, 'playground.fixture.json');
+        fs.writeFileSync(fixturePath, JSON.stringify({ fixtures: PLAYGROUND_FIXTURES }, null, 2), 'utf8');
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'playground',
+            '-p', ctx.policyPath,
+            '-f', fixturePath,
+            '--target', 'all',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: Object.assign({}, process.env, {
+                // playground defaults allow placeholder replacement, no runtime secrets required
+                EDGE_ADMIN_TOKEN: '',
+                ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+            }),
+        });
+        assert.strictEqual(result.status, 0, `playground failed: ${result.stderr}`);
+        const report = JSON.parse(result.stdout);
+        assert.strictEqual(report.policyPath, ctx.policyPath);
+        assert.strictEqual(report.targets.length, 2, 'expected aws + cloudflare results');
+        const byTarget = Object.fromEntries(report.targets.map((r) => [r.target, r.fixtures]));
+        assert.ok(Array.isArray(byTarget.aws), 'aws target missing');
+        assert.ok(Array.isArray(byTarget.cloudflare), 'cloudflare target missing');
+        const awsAllow = byTarget.aws.find((f) => f.name === 'allow GET /');
+        const awsPatch = byTarget.aws.find((f) => f.name === 'block PATCH');
+        const awsAuthMissing = byTarget.aws.find((f) => f.name === 'auth missing on admin');
+        const awsAuthPass = byTarget.aws.find((f) => f.name === 'auth placeholder passes');
+        const awsTraversal = byTarget.aws.find((f) => f.name === 'path traversal is blocked');
+        const awsQuery = byTarget.aws.find((f) => f.name === 'query is visible in output');
+        assert.ok(awsAllow);
+        assert.ok(awsPatch);
+        assert.ok(awsAuthMissing);
+        assert.ok(awsAuthPass);
+        assert.ok(awsTraversal);
+        assert.ok(awsQuery);
+        assert.strictEqual(awsAllow.decision, 'pass');
+        assert.strictEqual(awsPatch.decision, 'block');
+        assert.strictEqual(awsTraversal.decision, 'block');
+        assert.strictEqual(awsAuthMissing.decision, 'block');
+        assert.strictEqual(awsAuthPass.decision, 'pass');
+        assert.ok(awsPatch.status >= 400);
+        assert.ok(awsTraversal.status >= 400);
+        assert.ok(awsAuthMissing.status >= 400);
+        assert.strictEqual(awsAllow.status, 200);
+        assert.strictEqual(awsAuthPass.status, 200);
+        assert.strictEqual(awsQuery.query, 'q=hello&utm_source=cli');
+        assert.ok(awsQuery.path === '/search');
+        const cloudAllow = byTarget.cloudflare.find((f) => f.name === 'allow GET /');
+        const cloudPatch = byTarget.cloudflare.find((f) => f.name === 'block PATCH');
+        assert.ok(cloudAllow);
+        assert.ok(cloudPatch);
+        assert.strictEqual(cloudAllow.decision, 'pass');
+        assert.strictEqual(cloudPatch.decision, 'block');
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: analyze surfaces low-frequency block candidates', () => {
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'analyze-'));
+    const logPath = path.join(tmp, 'monitor.jsonl');
+    const lines = [
+        { event: 'block', block_reason: 'bad_method', method: 'POST', status: 405, uri: '/api/data', target: 'aws', policy_route: '/api/data' },
+        { event: 'block', block_reason: 'bad_method', method: 'PUT', status: 405, uri: '/api/data', target: 'aws', policy_route: '/api/data' },
+        { event: 'block', block_reason: 'path_traversal', method: 'GET', status: 404, uri: '/assets/../etc/passwd', target: 'cloudflare', policy_route: '/assets' },
+        { event: 'monitor', block_reason: 'path_traversal', method: 'GET', status: 200, uri: '/assets/favicon.ico', target: 'aws', policy_route: '/assets' },
+        { eventName: 'blocked', block_reason: 'token_replay', method: 'POST', status: 200, uri: '/api/login', target: 'aws', policy_route: '/api/login' },
+        { outcome: 'monitoring', reason: 'slow_path_probe', method: 'GET', status: 200, uri: '/search', target: 'cloudflare', policy_route: '/search' },
+    ];
+    fs.writeFileSync(logPath, lines.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'analyze',
+            '--input', logPath,
+            '--min-count', '2',
+            '--top', '10',
+            '--json',
+        ], {
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `analyze failed: ${result.stderr}`);
+        const report = JSON.parse(result.stdout);
+        assert.strictEqual(report.summary.totalLines, 6);
+        assert.strictEqual(report.summary.parsedLines, 6);
+        assert.strictEqual(report.summary.unparseableLines, 0);
+        assert.strictEqual(report.summary.analyzedEvents, 6);
+        assert.strictEqual(report.summary.blockEvents, 4);
+        assert.strictEqual(report.summary.monitorEvents, 2);
+        assert.strictEqual(report.byBlockReason['bad_method']?.count, 2);
+        assert.strictEqual(report.byPolicyRoute['/api/data']?.count, 2);
+        const badMethod = report.candidates.find((x) => x.blockReason === 'bad_method' && x.policyRoute === '/api/data');
+        assert.ok(badMethod, 'missing bad_method candidate');
+        assert.strictEqual(badMethod.count, 2);
+        assert.strictEqual(Array.isArray(badMethod.targets), true);
+        assert.ok(badMethod.targets.includes('aws'));
+        assert.strictEqual(Array.isArray(badMethod.events), true);
+        assert.ok(badMethod.events.length >= 1);
+        const tokenReplay = report.candidates.find((x) => x.blockReason === 'token_replay' && x.policyRoute === '/api/login');
+        assert.ok(tokenReplay, 'missing eventName fallback candidate');
+        assert.strictEqual(report.byBlockReason['slow_path_probe']?.count, 1);
+    }
+    finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+    }
+});
 test('CLI authoring DX: init --guided emits lintable policy with selected shape', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-init-'));
     try {
@@ -533,6 +801,7 @@ test('CLI authoring DX: init --guided emits lintable policy with selected shape'
         const policyPath = path.join(tmp, 'policy', 'security.yml');
         const raw = fs.readFileSync(policyPath, 'utf8');
         assert.ok(raw.includes('Secrets are referenced by environment variable name only'));
+        assert.ok(raw.includes('# yaml-language-server: $schema=./schema.json'));
         const policy = require('js-yaml').load(raw);
         assert.strictEqual(policy.project, 'guided-api');
         assert.strictEqual(policy.metadata.risk_level, 'strict');
@@ -576,8 +845,12 @@ test('CLI backwards-compat: init --profile still scaffolds existing starter flow
             env: process.env,
         });
         assert.strictEqual(result.status, 0, `profile init failed: ${result.stderr}`);
-        assert.ok(fs.existsSync(path.join(tmp, 'policy', 'security.yml')));
-        assert.ok(fs.existsSync(path.join(tmp, 'policy', 'profiles', 'balanced.yml')));
+        const securityPath = path.join(tmp, 'policy', 'security.yml');
+        const starterPath = path.join(tmp, 'policy', 'profiles', 'balanced.yml');
+        assert.ok(fs.existsSync(securityPath));
+        assert.ok(fs.existsSync(starterPath));
+        assert.strictEqual(fs.readFileSync(securityPath, 'utf8').split(/\r?\n/, 1)[0], '# yaml-language-server: $schema=./schema.json');
+        assert.strictEqual(fs.readFileSync(starterPath, 'utf8').split(/\r?\n/, 1)[0], '# yaml-language-server: $schema=../schema.json');
     }
     finally {
         fs.rmSync(tmp, { recursive: true, force: true });
@@ -639,6 +912,22 @@ test('CLI authoring DX: init --guided non-interactive applies defaults without o
         fs.rmSync(tmp, { recursive: true, force: true });
     }
 });
+test('policy template files include yaml-language-server schema hint', () => {
+    const templatePaths = [
+        { path: path.join(repoRoot, 'policy', 'base.yml'), hint: POLICY_YAML_SCHEMA_HINT_SECURITY },
+        { path: path.join(repoRoot, 'policy', 'profiles', 'strict.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+        { path: path.join(repoRoot, 'policy', 'profiles', 'balanced.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+        { path: path.join(repoRoot, 'policy', 'profiles', 'permissive.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+        { path: path.join(repoRoot, 'policy', 'archetypes', 'spa-static-site.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+        { path: path.join(repoRoot, 'policy', 'archetypes', 'rest-api.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+        { path: path.join(repoRoot, 'policy', 'archetypes', 'admin-panel.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+        { path: path.join(repoRoot, 'policy', 'archetypes', 'microservice-origin.yml'), hint: POLICY_YAML_SCHEMA_HINT_PROFILE },
+    ];
+    for (const entry of templatePaths) {
+        const raw = fs.readFileSync(entry.path, 'utf8');
+        assertPolicySchemaHint(raw, entry.hint);
+    }
+});
 test('CLI authoring DX: explain summarizes policy posture', () => {
     const ctx = tmpProject(BASIC_AWS_POLICY);
     try {
@@ -656,6 +945,90 @@ test('CLI authoring DX: explain summarizes policy posture', () => {
         assert.ok(/Policy: api-test/.test(result.stdout));
         assert.ok(/Allowed methods: GET, POST/.test(result.stdout));
         assert.ok(/WAF:/.test(result.stdout));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: visualize emits mermaid with control coverage', () => {
+    const ctx = tmpProject(CAPABILITIES_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'visualize',
+            '--policy', ctx.policyPath,
+            '--target', 'aws',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `visualize failed: ${result.stderr}`);
+        assert.ok(result.stdout.includes('flowchart LR'));
+        assert.ok(result.stdout.includes('Policy: capabilities-test (v1)'));
+        assert.ok(result.stdout.includes('request.graphql_guard'));
+        assert.ok(result.stdout.includes('response_dlp'));
+        assert.ok(result.stdout.includes('(monitor)'));
+        const baseClassDirective = 'class policy,edge,waf,origin,response enforce';
+        const baseClassDirectiveCount = result.stdout.split(baseClassDirective).length - 1;
+        assert.strictEqual(baseClassDirectiveCount, 1);
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: visualize emits single base class directive without controls', () => {
+    const ctx = tmpProject(VISUALIZE_NO_CONTROL_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'visualize',
+            '--policy', ctx.policyPath,
+            '--target', 'aws',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `visualize failed: ${result.stderr}`);
+        assert.ok(result.stdout.includes('%% target: aws'));
+        assert.ok(result.stdout.includes('note_no_controls'));
+        assert.ok(result.stdout.includes('No configured control blocks were detected'));
+        const baseClassDirective = 'class policy,edge,waf,origin,response enforce';
+        const baseClassDirectiveCount = result.stdout.split(baseClassDirective).length - 1;
+        assert.strictEqual(baseClassDirectiveCount, 1);
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: visualize --format html writes escaped file artifact', () => {
+    const maliciousPolicy = CAPABILITIES_POLICY.replace('project: capabilities-test', 'project: "</pre><script>alert(1)</script><pre>"');
+    const ctx = tmpProject(maliciousPolicy);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const outputPath = path.join(ctx.tmp, 'policy-coverage.html');
+        const result = spawnSync(process.execPath, [
+            cli, 'visualize',
+            '--policy', ctx.policyPath,
+            '--target', 'all',
+            '--format', 'html',
+            '--out', outputPath,
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `visualize html failed: ${result.stderr}`);
+        assert.ok(result.stdout.includes('[SUCCESS] Wrote visualization to'));
+        const html = fs.readFileSync(outputPath, 'utf8');
+        assert.ok(html.includes('<pre class="mermaid">'));
+        assert.ok(!html.includes('</pre><script>alert(1)</script><pre>'));
+        assert.ok(html.includes('&lt;/pre&gt;&lt;script&gt;alert(1)&lt;/script&gt;&lt;pre&gt;'));
+        assert.ok(html.includes('mermaid.min.js'));
     }
     finally {
         ctx.cleanup();
@@ -829,6 +1202,266 @@ test('CLI authoring DX: readiness strict mode fails on warnings', () => {
         ctx.cleanup();
     }
 });
+test('CLI authoring DX: readiness keeps weak WAF baseline as warning by default', () => {
+    const ctx = tmpProject(BASIC_AWS_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'aws',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `readiness failed: ${result.stderr}`);
+        const report = JSON.parse(result.stdout);
+        assert.strictEqual(report.status, 'warn');
+        assert.strictEqual(report.failOnWeakWafBaseline, false);
+        assert.ok(report.findings.some((finding) => finding.id === 'firewall.waf.managed_rules.core_signal_missing' &&
+            finding.severity === 'warn'));
+        assert.ok(report.findings.some((finding) => finding.id === 'firewall.waf.logging.missing' &&
+            finding.severity === 'warn'));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: readiness can fail weak WAF baseline without strict mode', () => {
+    const ctx = tmpProject(BASIC_AWS_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'aws',
+            '--fail-on-weak-waf-baseline',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 1);
+        const report = JSON.parse(result.stdout);
+        assert.strictEqual(report.status, 'fail');
+        assert.strictEqual(report.failOnWeakWafBaseline, true);
+        assert.ok(report.findings.some((finding) => finding.id === 'firewall.waf.managed_rules.core_signal_missing' &&
+            finding.severity === 'fail'));
+        assert.ok(report.findings.some((finding) => finding.id === 'firewall.waf.logging.missing' &&
+            finding.severity === 'fail'));
+        assert.ok(report.findings.some((finding) => finding.id === 'policy.risk_level.missing' &&
+            finding.severity === 'warn'));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: readiness weak WAF baseline gate passes production-shaped policy', () => {
+    const ctx = tmpProject(READINESS_AWS_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'aws',
+            '--fail-on-weak-waf-baseline',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `readiness failed: ${result.stderr}`);
+        const report = JSON.parse(result.stdout);
+        assert.strictEqual(report.status, 'pass');
+        assert.strictEqual(report.failOnWeakWafBaseline, true);
+        assert.deepStrictEqual(report.summary, { fail: 0, warn: 0 });
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: readiness has stable outcomes for built-in profiles', () => {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const runProfile = (name) => {
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', path.join(repoRoot, 'policy', 'profiles', `${name}.yml`),
+            '--target', 'aws',
+            '--json',
+        ], {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            env: Object.assign({}, process.env, {
+                EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy',
+            }),
+        });
+        return { result, report: JSON.parse(result.stdout) };
+    };
+    const balanced = runProfile('balanced');
+    assert.strictEqual(balanced.result.status, 0, balanced.result.stderr);
+    assert.strictEqual(balanced.report.status, 'pass');
+    const strict = runProfile('strict');
+    assert.strictEqual(strict.result.status, 0, strict.result.stderr);
+    assert.strictEqual(strict.report.status, 'warn');
+    assert.ok(strict.report.findings.some((finding) => finding.id === 'firewall.waf.logging.missing' &&
+        finding.severity === 'warn'));
+    const permissive = runProfile('permissive');
+    assert.strictEqual(permissive.result.status, 1);
+    assert.strictEqual(permissive.report.status, 'fail');
+    assert.ok(permissive.report.findings.some((finding) => finding.id === 'policy.risk_level.permissive' &&
+        finding.severity === 'fail'));
+});
+test('CLI authoring DX: readiness reports target-specific unsupported controls', () => {
+    const ctx = tmpProject(CAPABILITIES_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const aws = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'aws',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(aws.status, 1);
+        const awsReport = JSON.parse(aws.stdout);
+        assert.ok(awsReport.findings.some((finding) => finding.id === 'target.aws.graphql_guard.unsupported'));
+        assert.ok(awsReport.findings.some((finding) => finding.id === 'target.aws.challenge.unsupported'));
+        assert.ok(awsReport.findings.some((finding) => finding.id === 'target.aws.response_dlp.unsupported'));
+        const cloudflare = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'cloudflare',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(cloudflare.status, 0, cloudflare.stderr);
+        const cloudflareReport = JSON.parse(cloudflare.stdout);
+        assert.ok(!cloudflareReport.findings.some((finding) => finding.id.startsWith('target.aws.')));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: readiness emits read-only WAF recommendations with rationale', () => {
+    const ctx = tmpProject(REST_RECOMMENDATION_POLICY);
+    try {
+        const before = fs.readFileSync(ctx.policyPath, 'utf8');
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'aws',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: process.env,
+        });
+        assert.strictEqual(result.status, 0, `readiness failed: ${result.stderr}`);
+        assert.strictEqual(fs.readFileSync(ctx.policyPath, 'utf8'), before, 'readiness must not mutate policy files');
+        const report = JSON.parse(result.stdout);
+        assert.strictEqual(report.wafRecommendations.readOnly, true);
+        assert.strictEqual(report.wafRecommendations.inferredAppShape, 'rest-api');
+        const rec = report.wafRecommendations.recommendations[0];
+        assert.strictEqual(rec.id, 'waf.recommendation.rest_api');
+        assert.strictEqual(rec.targetSupport.aws, 'supported');
+        assert.strictEqual(rec.targetSupport.cloudflare, 'partial');
+        assert.ok(rec.missingRules.includes('AWSManagedRulesKnownBadInputsRuleSet'));
+        assert.ok(rec.missingRules.includes('AWSManagedRulesSQLiRuleSet'));
+        assert.ok(rec.missingRules.includes('AWSManagedRulesIPReputationList'));
+        assert.ok(rec.settings.some((setting) => setting.includes('rate_limit_rules')));
+        assert.ok(/JSON APIs/.test(rec.rationale));
+        assert.ok(/costs/i.test(rec.cost));
+        assert.ok(/SQLi/.test(rec.falsePositiveRisk));
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
+test('CLI authoring DX: WAF recommendations infer all built-in archetype shapes', () => {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const archetypes = [
+        'spa-static-site',
+        'rest-api',
+        'admin-panel',
+        'microservice-origin',
+    ];
+    for (const shape of archetypes) {
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', path.join(repoRoot, 'policy', 'archetypes', `${shape}.yml`),
+            '--target', 'aws',
+            '--json',
+        ], {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            env: Object.assign({}, process.env, {
+                EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy',
+                ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+            }),
+        });
+        assert.strictEqual(result.status, 0, `${shape} readiness failed: ${result.stderr}`);
+        const report = JSON.parse(result.stdout);
+        assert.strictEqual(report.wafRecommendations.inferredAppShape, shape);
+        assert.strictEqual(report.wafRecommendations.recommendations.length, 1);
+        const rec = report.wafRecommendations.recommendations[0];
+        assert.strictEqual(rec.appShape, shape);
+        assert.ok(rec.rationale);
+        assert.ok(rec.cost);
+        assert.ok(rec.falsePositiveRisk);
+        if (shape === 'admin-panel') {
+            assert.strictEqual(rec.targetSupport.cloudflare, 'unsupported');
+            assert.ok(/paid/.test(rec.cost));
+            assert.ok(rec.rules.includes('AWSManagedRulesBotControlRuleSet'));
+            assert.ok(rec.rules.includes('AWSManagedRulesATPRuleSet'));
+        }
+    }
+});
+test('CLI authoring DX: WAF recommendation inference does not mask lint errors', () => {
+    const ctx = tmpProject(MALFORMED_PREFIX_RECOMMENDATION_POLICY);
+    try {
+        const { spawnSync } = require('child_process');
+        const cli = path.join(repoRoot, 'bin', 'cli.js');
+        const result = spawnSync(process.execPath, [
+            cli, 'readiness',
+            '-p', ctx.policyPath,
+            '--target', 'aws',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env: Object.assign({}, process.env, {
+                EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy',
+            }),
+        });
+        assert.strictEqual(result.status, 1);
+        assert.doesNotThrow(() => JSON.parse(result.stdout));
+        const report = JSON.parse(result.stdout);
+        assert.ok(report.findings.some((finding) => finding.id === 'policy.lint.error' &&
+            /path_prefixes/.test(finding.detail)));
+        assert.strictEqual(report.wafRecommendations.inferredAppShape, 'admin-panel');
+    }
+    finally {
+        ctx.cleanup();
+    }
+});
 test('CLI authoring DX: deploy-template emits AWS and Cloudflare workflow templates', () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'deploy-template-'));
     try {
@@ -989,6 +1622,20 @@ test('CLI authoring DX: diff --semantic surfaces posture drift', () => {
         assert.strictEqual(noChangeReport.mode, 'semantic');
         assert.ok(noChangeReport.findings.length >= 0);
         assert.strictEqual(noChangeReport.summary.total, 0);
+        const invalidTarget = spawnSync(process.execPath, [
+            cli, 'diff',
+            '--semantic',
+            '--baseline', baselinePath,
+            '--policy', ctx.policyPath,
+            '--target', 'clouflare',
+            '--json',
+        ], {
+            cwd: ctx.tmp,
+            encoding: 'utf8',
+            env,
+        });
+        assert.strictEqual(invalidTarget.status, 1);
+        assert.ok(/Invalid --target/.test(invalidTarget.stderr));
         fs.writeFileSync(ctx.policyPath, DIFF_SEMANTIC_CANDIDATE, 'utf8');
         const semanticDrift = spawnSync(process.execPath, [
             cli, 'diff',
@@ -1009,7 +1656,10 @@ test('CLI authoring DX: diff --semantic surfaces posture drift', () => {
         assert.ok(report.summary.regressions >= 1);
         assert.ok(Array.isArray(report.findings));
         assert.ok(report.findings.some((finding) => finding.id === 'request.allow_methods.added.TRACE'));
+        assert.ok(report.findings.some((finding) => finding.id === 'response_headers.csp_public.weakened'));
         assert.ok(report.findings.some((finding) => finding.id === 'firewall.waf.managed_rules.removed.awsmanagedrulesipreputationlist'));
+        assert.ok(report.findings.some((finding) => finding.id === 'capability.aws.request.graphql_guard.added'));
+        assert.ok(report.findings.some((finding) => finding.id === 'routes.auth_gate.changed.account|/account|GET'));
     }
     finally {
         ctx.cleanup();

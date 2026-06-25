@@ -19,6 +19,7 @@ docs/SELF-REVIEW.md
 
 # Build / logs
 # dist/ は npm run build で生成する。リポジトリには含めず、ユーザー環境でビルドさせる。CI で検証する場合は CI 内で build して diff チェックする。
+.tsbuildinfo
 dist/
 /examples/*/dist/
 /examples/*/policy/

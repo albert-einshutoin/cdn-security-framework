@@ -10,17 +10,14 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
-const yaml = require('js-yaml');
 const Ajv = require('ajv');
 const { validateAuthGates, parsePathPatterns } = require('./lib/compile-core');
+const { loadPolicyWithWarnings, reportPolicyWarnings, reportPolicyLoadError, } = require('./lib/policy-io');
 const repoRoot = path.join(__dirname, '..');
 const schemaPath = path.join(repoRoot, 'policy', 'schema.json');
 const defaultPolicyPath = path.join(repoRoot, 'policy', 'base.yml');
 function loadJson(filePath) {
     return JSON.parse(fs.readFileSync(filePath, 'utf8'));
-}
-function loadYaml(filePath) {
-    return yaml.load(fs.readFileSync(filePath, 'utf8'));
 }
 function formatAjvErrors(errors) {
     return errors.map((err) => {
@@ -48,14 +45,12 @@ function main() {
     const errors = [];
     let policy;
     try {
-        policy = loadYaml(policyPath);
+        const parsed = loadPolicyWithWarnings(policyPath);
+        policy = parsed.policy;
+        reportPolicyWarnings(parsed.warnings, String(policyPath));
     }
     catch (e) {
-        if (e.code === 'ENOENT') {
-            console.error('Error: policy file not found:', policyPath);
-            process.exit(1);
-        }
-        console.error('Error: failed to parse policy YAML:', e.message);
+        reportPolicyLoadError(policyPath, e);
         process.exit(1);
     }
     let schema;

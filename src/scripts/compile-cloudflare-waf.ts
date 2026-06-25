@@ -17,23 +17,21 @@
 
 const fs = require('fs');
 const path = require('path');
-const yaml = require('js-yaml');
+const { numberOr } = require('./lib/value-normalize');
+const {
+  parseArgs,
+  hasFlag,
+  loadPolicyWithWarnings,
+  reportPolicyWarnings,
+  reportPolicyLoadError,
+} = require('./lib/policy-io');
 
 const parity = require('./lib/cloudflare-waf-parity');
 
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
-const securityPath = path.join(repoRoot, 'policy', 'security.yml');
-const basePath = path.join(repoRoot, 'policy', 'base.yml');
-let policyPath = fs.existsSync(securityPath) ? securityPath : basePath;
-let outDir = path.join(repoRoot, 'dist');
-let failOnApproximation = false;
-for (let i = 0; i < argv.length; i++) {
-  if (argv[i] === '--policy' && argv[i + 1]) { policyPath = argv[++i]; continue; }
-  if (argv[i] === '--out-dir' && argv[i + 1]) { outDir = argv[++i]; continue; }
-  if (argv[i] === '--fail-on-waf-approximation') { failOnApproximation = true; continue; }
-  if (!argv[i].startsWith('--')) { policyPath = argv[i]; }
-}
+const { policyPath, outDir } = parseArgs(argv, repoRoot);
+const failOnApproximation = hasFlag(argv, '--fail-on-waf-approximation');
 
 // Parity warnings collected during emission — surfaced once at the end so
 // the order is stable (managed rules first, then scope-down notes).
@@ -48,13 +46,11 @@ function recordParity(entry: any) {
 
 let policy;
 try {
-  policy = yaml.load(fs.readFileSync(policyPath, 'utf8'));
+  const parsed = loadPolicyWithWarnings(policyPath);
+  reportPolicyWarnings(parsed.warnings || [], policyPath);
+  policy = parsed.policy;
 } catch (e: any) {
-  if (e.code === 'ENOENT') {
-    console.error('Error: policy file not found:', policyPath);
-    process.exit(1);
-  }
-  console.error('Error: failed to parse policy YAML:', e.message);
+  reportPolicyLoadError(policyPath, e);
   process.exit(1);
 }
 
@@ -124,7 +120,7 @@ function makeBlockAction() {
       action: 'block',
       action_parameters: {
         response: {
-          status_code: Number(br.status_code) || 403,
+          status_code: numberOr(br.status_code, 403),
           content: String(br.body || 'blocked'),
           content_type: (br.content_type === 'TEXT_HTML' ? 'text/html'
             : br.content_type === 'APPLICATION_JSON' ? 'application/json'
@@ -227,7 +223,7 @@ if (waf.rate_limit) {
     ratelimit: {
       characteristics: ['ip.src'],
       period: 300,
-      requests_per_period: Number(waf.rate_limit) || 2000,
+      requests_per_period: numberOr(waf.rate_limit, 2000),
       mitigation_timeout: 600,
     },
   });

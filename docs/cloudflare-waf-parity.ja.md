@@ -125,7 +125,7 @@ AWS の `rate_limit_rules[].scope_down_statement` は構造化 AST ですが、C
 npx cdn-security build --target cloudflare --fail-on-waf-approximation
 ```
 
-コンパイル対象のポリシーが `APPROXIMATE` か `UNSUPPORTED` に触れていると非ゼロで終了します。`main` ブランチのパイプラインではこのゲートを有効化し、開発ブランチではデフォルト（警告のみ）のままで運用するのが推奨です。
+コンパイル対象のポリシーが `APPROXIMATE` か `UNSUPPORTED` に触れていると非ゼロで終了します。`main` ブランチのリリースパイプラインではこのゲートを有効化し、ローカルの feature ブランチビルドではデフォルト（警告のみ）のままで運用するのが推奨です。
 
 ## 更新手順
 

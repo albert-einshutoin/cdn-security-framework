@@ -6,11 +6,18 @@
 
 const path = require('path');
 const fs = require('fs');
-const { Command } = require('commander');
 
 const pkgRoot = path.resolve(__dirname, '..');
+const { defaultPolicyPath } = require(path.join(pkgRoot, 'scripts', 'lib', 'policy-io.js'));
 
-const program = new Command();
+async function main() {
+  const dynamicImport = new Function('specifier', 'return import(specifier)');
+  const commanderMod = await dynamicImport('commander') as { Command?: new () => any; default?: { Command?: new () => any } };
+  const CommandCtor = commanderMod.Command || commanderMod.default?.Command;
+  if (!CommandCtor) {
+    throw new Error('Failed to load Commander Command constructor from commander package.');
+  }
+  const program = new CommandCtor();
 
 type InitOptions = {
   force?: boolean;
@@ -52,6 +59,7 @@ type ReadinessOptions = {
   report?: string | null;
   json?: boolean;
   strict?: boolean;
+  failOnWeakWafBaseline?: boolean;
 };
 
 type CapabilitiesOptions = {
@@ -86,6 +94,13 @@ type ExplainOptions = {
   policy?: string | null;
 };
 
+type VisualizeOptions = {
+  policy?: string | null;
+  target: string;
+  format: string;
+  out?: string | null;
+};
+
 type DiffOptions = {
   policy?: string | null;
   outDir: string;
@@ -93,6 +108,126 @@ type DiffOptions = {
   baseline?: string | null;
   semantic?: boolean;
   json?: boolean;
+};
+
+type PlaygroundTarget = 'aws' | 'cloudflare' | 'all';
+
+type PlaygroundOptions = {
+  policy?: string | null;
+  target: PlaygroundTarget;
+  fixture?: string | null;
+  json?: boolean;
+  allowPlaceholderToken?: boolean;
+};
+
+type PlaygroundRequest = {
+  method?: string;
+  path?: string;
+  uri?: string;
+  query?: string | Record<string, string | number | boolean | object> | null;
+  headers?: Record<string, string | number | boolean | null>;
+  body?: unknown;
+};
+
+type RawFixtureEntry = {
+  name?: string;
+  request?: PlaygroundRequest;
+};
+
+type PlaygroundFixture = {
+  name: string;
+  request: {
+    method: string;
+    path: string;
+    query: string;
+    headers: Record<string, string>;
+    body: unknown;
+    raw?: Record<string, unknown>;
+  };
+};
+
+type PlaygroundCaseResult = {
+  name: string;
+  decision: PlaygroundDecision;
+  status: number;
+  block_reason: string;
+  path: string;
+  method: string;
+  query: string;
+};
+
+type PlaygroundDecision = 'pass' | 'block';
+
+type AnalyzeLogOptions = {
+  input: string;
+  minCount: number;
+  top: number;
+  json?: boolean;
+};
+
+type AnalyzeEvent = {
+  target: string;
+  policyRoute: string;
+  method: string;
+  uri: string;
+  status: number;
+  event: string;
+  blockReason: string;
+};
+
+type AnalyzeCandidate = {
+  policyRoute: string;
+  blockReason: string;
+  count: number;
+  targets: string[];
+  events: {
+    method: string;
+    status: number;
+    uri: string;
+    target: string;
+  }[];
+};
+
+type AnalyzeSummary = {
+  input: string;
+  totalLines: number;
+  parsedLines: number;
+  unparseableLines: number;
+  analyzedEvents: number;
+  blockEvents: number;
+  monitorEvents: number;
+  lowFrequencyThreshold: number;
+  top: number;
+};
+
+type AnalyzeReport = {
+  summary: AnalyzeSummary;
+  byBlockReason: Record<string, {
+    count: number;
+    targets: Record<string, number>;
+    policyRoutes: Record<string, number>;
+  }>;
+  byPolicyRoute: Record<string, {
+    count: number;
+    blockReasons: Record<string, number>;
+    targets: Record<string, number>;
+  }>;
+  candidates: AnalyzeCandidate[];
+};
+
+function isBlockedStatus(status: unknown): boolean {
+  const numericStatus = Number(status);
+  return Number.isFinite(numericStatus) && numericStatus >= 400;
+}
+
+type PlaygroundTargetResult = {
+  target: PlaygroundTarget | 'aws' | 'cloudflare';
+  fixtures: PlaygroundCaseResult[];
+};
+
+type PlaygroundReport = {
+  policyPath: string | null;
+  targets: PlaygroundTargetResult[];
 };
 
 type StarterAnswers = {
@@ -111,6 +246,37 @@ type StarterAnswers = {
   project?: string;
 };
 
+async function withMutedOutput<T>(fn: () => T | Promise<T>, condition: boolean): Promise<T> {
+  if (!condition) {
+    return await fn();
+  }
+
+  const stdoutWrite = process.stdout.write.bind(process.stdout);
+  const stderrWrite = process.stderr.write.bind(process.stderr);
+  const consoleLog = console.log;
+  const consoleWarn = console.warn;
+  const consoleError = console.error;
+
+  const mutedWrite = () => true as unknown as void;
+  const mutedConsole = () => undefined;
+
+  process.stdout.write = mutedWrite as never;
+  process.stderr.write = mutedWrite as never;
+  console.log = mutedConsole;
+  console.warn = mutedConsole;
+  console.error = mutedConsole;
+
+  try {
+    return await fn();
+  } finally {
+    process.stdout.write = stdoutWrite as never;
+    process.stderr.write = stderrWrite as never;
+    console.log = consoleLog;
+    console.warn = consoleWarn;
+    console.error = consoleError;
+  }
+}
+
 async function promptQuestions(questions: any[]) {
   // inquirer v13+ is ESM-only. Keep it lazy so simple commands like
   // `cdn-security --version` and `build` do not require loading the prompt UI.
@@ -122,9 +288,7 @@ async function promptQuestions(questions: any[]) {
 
 function resolvePolicyPath(cwd: string, explicitPath?: string | null): string {
   if (explicitPath) return path.isAbsolute(explicitPath) ? explicitPath : path.join(cwd, explicitPath);
-  const security = path.join(cwd, 'policy', 'security.yml');
-  const base = path.join(cwd, 'policy', 'base.yml');
-  return fs.existsSync(security) ? security : base;
+  return defaultPolicyPath(cwd);
 }
 
 function loadPolicyDocument(policyPath: string) {
@@ -145,10 +309,209 @@ function yamlInlineArray(values: string[]): string {
   return '[' + values.map(yamlString).join(', ') + ']';
 }
 
+function withYamlLanguageServerHint(content: string, schemaPath: string): string {
+  const schemaDirectivePrefix = '# yaml-language-server: $schema=';
+  const normalizedContent = content.replace(/^\uFEFF/, '');
+  const contentWithoutDirective = normalizedContent.replace(
+    /^# yaml-language-server: \$schema=.*\r?\n(?:\r?\n)?/,
+    '',
+  );
+  return `${schemaDirectivePrefix}${schemaPath}\n\n${contentWithoutDirective}`;
+}
+
 function appendYamlList(lines: string[], indent: string, key: string, values: string[]): void {
   if (values.length === 0) return;
   lines.push(`${indent}${key}:`);
   values.forEach((value) => lines.push(`${indent}  - ${yamlString(value)}`));
+}
+
+function escapeMermaidLabel(value: string): string {
+  return value
+    .replace(/\\/g, '\\\\')
+    .replace(/"/g, '\\"')
+    .replace(/\n/g, '\\n')
+    .trim();
+}
+
+function escapeHtml(value: string): string {
+  return value
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
+type VisualizedStatus = 'enforce' | 'monitor' | 'unsupported' | 'target_specific';
+
+type VisualizedControl = {
+  category: string;
+  label: string;
+  id: string;
+  statusByTarget: Record<'aws' | 'cloudflare', CapabilityStatus>;
+  summary: string;
+  visualStatus: VisualizedStatus;
+  notes: string;
+};
+
+function visualStatusFromTargets(
+  targets: ('aws' | 'cloudflare')[],
+  statusByTarget: Record<'aws' | 'cloudflare', CapabilityStatus>
+): VisualizedStatus {
+  const selectedStatuses = targets.map((target) => statusByTarget[target]);
+  const unique = new Set(selectedStatuses);
+  if (targets.length > 1 && unique.size > 1) return 'target_specific';
+  if (selectedStatuses[0] === 'unsupported') return 'unsupported';
+  if (selectedStatuses[0] === 'partial' || selectedStatuses[0] === 'warning-only' || selectedStatuses.includes('partial') || selectedStatuses.includes('warning-only')) return 'monitor';
+  return 'enforce';
+}
+
+function summaryForTargets(targets: ('aws' | 'cloudflare')[], statusByTarget: Record<'aws' | 'cloudflare', CapabilityStatus>): string {
+  return targets.map((target) => `${target}:${statusByTarget[target]}`).join(', ');
+}
+
+function collectVisualizedCapabilities(policy: any, target: CapabilityDeployTarget): VisualizedControl[] {
+  const configured = CAPABILITY_MATRIX.filter((entry) => {
+    if (entry.configured) return entry.configured(policy);
+    return anyPolicyPath(policy, entry.policyPaths);
+  });
+  if (configured.length === 0) return [];
+  const targets: ('aws' | 'cloudflare')[] = target === 'all' ? ['aws', 'cloudflare'] : [target];
+  const ordered = configured
+    .map((entry) => {
+      const statusByTarget: Record<'aws' | 'cloudflare', CapabilityStatus> = {
+        aws: entry.deploySupport.aws,
+        cloudflare: entry.deploySupport.cloudflare,
+      };
+      return {
+        category: entry.category,
+        label: entry.label,
+        id: entry.id,
+        notes: entry.notes,
+        statusByTarget,
+        summary: summaryForTargets(targets, statusByTarget),
+        visualStatus: visualStatusFromTargets(targets, statusByTarget),
+      };
+    })
+    .sort((a, b) => `${a.category}\0${a.label}`.localeCompare(`${b.category}\0${b.label}`));
+  return ordered;
+}
+
+function routePrefixSummary(route: any): string[] {
+  const match = route && route.match ? route.match : {};
+  return Array.isArray(match.path_prefixes) ? match.path_prefixes : ['/'];
+}
+
+function routeMethodsSummary(route: any): string[] {
+  const request = route && route.request ? route.request : {};
+  if (Array.isArray(request.allow_methods) && request.allow_methods.length > 0) return request.allow_methods;
+  return [];
+}
+
+function routeAuthSummary(route: any): string {
+  const authGate = route && route.auth_gate ? route.auth_gate : {};
+  return authGate && authGate.type ? authGate.type : 'none';
+}
+
+function renderPolicyVisualization(policyPath: string, target: CapabilityDeployTarget, options?: { format?: 'mermaid' | 'html' }) {
+  const policy = loadPolicyDocument(policyPath);
+  const policyName = policy && policy.project ? String(policy.project) : 'unnamed-policy';
+  const version = policy && Number(policy.version) ? String(policy.version) : '1';
+  const routes = Array.isArray(policy && policy.routes) ? policy.routes : [];
+  const controls = collectVisualizedCapabilities(policy, target);
+  const requestedTargets: ('aws' | 'cloudflare')[] = target === 'all' ? ['aws', 'cloudflare'] : [target];
+  const lines: string[] = [];
+
+  lines.push('flowchart LR');
+  lines.push(`  policy["Policy: ${escapeMermaidLabel(`${policyName} (v${version})`)}"]`);
+  lines.push('  edge["Edge / Request Intake"]');
+  lines.push('  waf["WAF and Edge Control Coverage"]');
+  lines.push('  origin["Origin / Upstream"]');
+  lines.push('  response["Response / Output"]');
+  lines.push('  policy --> edge');
+  lines.push('  policy --> waf');
+  lines.push('  waf --> origin');
+  lines.push('  origin --> response');
+
+  if (routes.length > 0) {
+    lines.push('');
+    lines.push('  subgraph Routes');
+    routes.forEach((route: any, index: number) => {
+      const idx = String(index + 1).padStart(2, '0');
+      const routeNode = `route_${idx}`;
+      const routeName = route && route.name ? route.name : `route-${idx}`;
+      const prefixes = routePrefixSummary(route).map((value: string) => `"${escapeMermaidLabel(String(value))}"`).join(', ');
+      const methods = routeMethodsSummary(route).map((value: string) => `"${escapeMermaidLabel(String(value))}"`).join(', ');
+      const authType = routeAuthSummary(route);
+      const methodSuffix = methods ? ` methods=${methods}` : '';
+      lines.push(`    ${routeNode}[\"${escapeMermaidLabel(`${routeName}${methodSuffix} | auth=${authType} | paths=${prefixes}`)}\"]`);
+      lines.push(`    edge --> ${routeNode}`);
+    });
+    lines.push('  end');
+  }
+
+  if (controls.length === 0) {
+    lines.push('  note_no_controls["No configured control blocks were detected"]');
+    lines.push('  waf --> note_no_controls');
+    lines.push('  class note_no_controls monitor');
+  } else {
+    lines.push('');
+    lines.push('  subgraph Controls');
+    const groupedByCategory: Record<string, VisualizedControl[]> = {};
+    controls.forEach((control) => {
+      if (!groupedByCategory[control.category]) groupedByCategory[control.category] = [];
+      groupedByCategory[control.category].push(control);
+    });
+    for (const category of Object.keys(groupedByCategory).sort()) {
+      lines.push(`    subgraph ${category.replace(/[^a-z0-9_]/gi, '_')}`);
+      for (const control of groupedByCategory[category]) {
+        const nodeId = `control_${escapeMermaidLabel(control.id).replace(/[^a-z0-9_]/gi, '_')}`;
+        const targetSuffix = requestedTargets.length > 1 ? `targets=${control.summary}` : control.summary;
+        const title = `${control.id} (${control.visualStatus})`;
+        const detail = `${title}\\n${targetSuffix}\\n${control.notes}`;
+        lines.push(`      ${nodeId}["${escapeMermaidLabel(detail)}"]`);
+        lines.push(`      waf --> ${nodeId}`);
+        lines.push(`      class ${nodeId} ${control.visualStatus}`);
+      }
+      lines.push('    end');
+    }
+    lines.push('  end');
+  }
+
+  lines.push('');
+  lines.push('  classDef enforce fill:#dcfce7,stroke:#16a34a,color:#052e16');
+  lines.push('  classDef monitor fill:#fff7ed,stroke:#ea580c,color:#7c2d12');
+  lines.push('  classDef unsupported fill:#fee2e2,stroke:#dc2626,color:#7f1d1d');
+  lines.push('  classDef target_specific fill:#fef9c3,stroke:#ca8a04,color:#713f12');
+
+  lines.push(`  class policy,edge,waf,origin,response enforce`);
+  lines.push(`  %% target: ${requestedTargets.join(', ')}`);
+
+  const mermaid = lines.join('\n') + '\n';
+
+  if (options?.format === 'html') {
+    const htmlTitle = escapeHtml(policyName);
+    const htmlMermaid = escapeHtml(mermaid);
+    return `<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Policy visualization - ${htmlTitle}</title>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <style>
+    body { font-family: ui-sans-serif, system-ui, sans-serif; margin: 24px; }
+  </style>
+</head>
+<body>
+<pre class="mermaid">
+${htmlMermaid}</pre>
+<script>mermaid.initialize({ startOnLoad: true });</script>
+</body>
+</html>`;
+  }
+
+  return mermaid;
 }
 
 function defaultAuthForShape(appShape: string): string {
@@ -234,6 +597,7 @@ function renderGuidedPolicy(opts: {
     ? "default-src 'none'; frame-ancestors 'none';"
     : "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';";
   const lines: string[] = [
+    '# yaml-language-server: $schema=./schema.json',
     '# Generated by `cdn-security init --guided`.',
     '# Secrets are referenced by environment variable name only. Store values in',
     '# CI/CD secrets or Cloudflare Worker secrets; never commit secret values.',
@@ -524,7 +888,7 @@ function cspRiskScore(csp: string): number {
   let score = 0;
   if (normalized.includes("'unsafe-inline'")) score += 3;
   if (normalized.includes("'unsafe-eval'")) score += 3;
-  if (/\s'\*'/.test(normalized)) score += 2;
+  if (/(^|[;\s])(?:default-src|script-src|connect-src|img-src)[^;]*\*/.test(normalized)) score += 2;
   if (!/default-src/.test(normalized)) score += 1;
   return score;
 }
@@ -534,7 +898,7 @@ type RouteAuthMap = Map<string, string>;
 function routeSignature(route: any, index: number): string {
   const routeName = typeof route?.name === 'string' ? route.name : `route-${index}`;
   const prefixes = asStringArray(route?.match?.path_prefixes).join('|') || '<no-path-prefixes>';
-  const methods = asStringArray(route?.match?.methods).join('|') || '<all-methods>';
+  const methods = asStringArray(route?.request?.allow_methods).join('|') || '<all-methods>';
   return `${routeName}|${prefixes}|${methods}`;
 }
 
@@ -584,7 +948,37 @@ function compareCapabilitySupportFindings(
     for (const id of policyIds) {
       const before = baselineMap.get(id);
       const after = candidateMap.get(id);
-      if (!before || !after || before === after) continue;
+      if (!before && !after) continue;
+      if (!before && after) {
+        buildPolicyFinding(findings, {
+          id: `capability.${deployTarget}.${id}.added`,
+          category: 'Capability support',
+          severity: after === 'supported' ? 'low' : 'medium',
+          summary: `Configured control ${id} was added with ${after} support on ${deployTarget}.`,
+          before: '(not configured)',
+          after,
+          impact: after === 'supported'
+            ? 'Added target-supported control can improve enforcement posture.'
+            : 'Added control may not fully enforce on this deploy target.',
+        });
+        continue;
+      }
+      if (before && !after) {
+        buildPolicyFinding(findings, {
+          id: `capability.${deployTarget}.${id}.removed`,
+          category: 'Capability support',
+          severity: before === 'supported' ? 'medium' : 'low',
+          summary: `Configured control ${id} was removed from ${deployTarget} evaluation.`,
+          before,
+          after: '(not configured)',
+          impact: before === 'supported'
+            ? 'Removing a target-supported control can weaken deploy-time enforcement.'
+            : 'Removing a non-fully-supported control may reduce target-specific surprises.',
+        });
+        continue;
+      }
+      if (!before || !after) continue;
+      if (before === after) continue;
       const beforeScore = statusRank[before];
       const afterScore = statusRank[after];
       buildPolicyFinding(findings, {
@@ -972,6 +1366,651 @@ const CAPABILITY_TARGETS: { key: CapabilityTargetKey; label: string }[] = [
 ];
 
 const CAPABILITY_STATUSES: CapabilityStatus[] = ['supported', 'partial', 'unsupported', 'warning-only'];
+const PLAYGROUND_PLACEHOLDER_TOKEN = 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
+
+function normalizeFixtureHeader(raw: Record<string, string | number | boolean | null> | undefined | null): Record<string, string> {
+  const headers: Record<string, string> = {};
+  if (!raw) return headers;
+  for (const [key, value] of Object.entries(raw)) {
+    if (value === undefined || value === null) continue;
+    if (typeof value === 'object') continue;
+    headers[key] = String(value);
+  }
+  return headers;
+}
+
+function normalizeFixtureQuery(raw: PlaygroundRequest['query']): string {
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw;
+  if (typeof raw !== 'object' || Array.isArray(raw)) return '';
+  const pairs: string[] = [];
+  for (const [key, value] of Object.entries(raw)) {
+    if (value === null || value === undefined) continue;
+    if (typeof value === 'object') {
+      const obj = value as Record<string, any>;
+      if (obj.value !== undefined && obj.value !== null) {
+        pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(obj.value))}`);
+      }
+      if (Array.isArray(obj.multiValue)) {
+        for (const item of obj.multiValue) {
+          if (item && item.value !== undefined && item.value !== null) {
+            pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(item.value))}`);
+          }
+        }
+      }
+      continue;
+    }
+    if (Array.isArray(value)) {
+      for (const item of value) {
+        if (item === undefined || item === null) continue;
+        pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(item))}`);
+      }
+      continue;
+    }
+    pairs.push(`${encodeURIComponent(key)}=${encodeURIComponent(String(value))}`);
+  }
+  return pairs.join('&');
+}
+
+function buildDefaultPlaygroundFixtures(): PlaygroundFixture[] {
+  return [
+    {
+      name: 'GET / with explicit user-agent',
+      request: {
+        method: 'GET',
+        path: '/',
+        query: '',
+        headers: {
+          'user-agent': 'cdn-security-framework-playground',
+          accept: 'text/plain',
+        },
+        body: null,
+      },
+    },
+    {
+      name: 'PATCH / is blocked by method rule',
+      request: {
+        method: 'PATCH',
+        path: '/',
+        query: '',
+        headers: {
+          'user-agent': 'cdn-security-framework-playground',
+        },
+        body: null,
+      },
+    },
+    {
+      name: 'Path traversal is blocked',
+      request: {
+        method: 'GET',
+        path: '/foo/../bar',
+        query: '',
+        headers: {
+          'user-agent': 'cdn-security-framework-playground',
+        },
+        body: null,
+      },
+    },
+    {
+      name: 'Query string strip example',
+      request: {
+        method: 'GET',
+        path: '/search',
+        query: 'utm_source=google&q=abc',
+        headers: {
+          'user-agent': 'cdn-security-framework-playground',
+        },
+        body: null,
+      },
+    },
+    {
+      name: 'Auth missing on admin route',
+      request: {
+        method: 'GET',
+        path: '/admin',
+        query: '',
+        headers: {
+          'user-agent': 'cdn-security-framework-playground',
+        },
+        body: null,
+      },
+    },
+    {
+      name: 'Auth with placeholder token on admin route',
+      request: {
+        method: 'GET',
+        path: '/admin',
+        query: '',
+        headers: {
+          'user-agent': 'cdn-security-framework-playground',
+          'x-edge-token': PLAYGROUND_PLACEHOLDER_TOKEN,
+        },
+        body: null,
+      },
+    },
+  ];
+}
+
+function loadPlaygroundFixtures(fixturePath: string | null | undefined): PlaygroundFixture[] {
+  if (!fixturePath) {
+    return buildDefaultPlaygroundFixtures();
+  }
+  const raw = JSON.parse(fs.readFileSync(fixturePath, 'utf8'));
+  let list: RawFixtureEntry[] = [];
+  if (Array.isArray(raw)) {
+    list = raw;
+  } else if (raw && Array.isArray((raw as any).fixtures)) {
+    list = (raw as any).fixtures;
+  } else if (raw && (raw as any).request) {
+    list = [raw as RawFixtureEntry];
+  } else {
+    throw new Error('Invalid fixture format. Use array, {fixtures: [...]}, or {request: {...}}.');
+  }
+  return list.map((entry, index: number) => {
+    const payload: any = (entry && entry.request && typeof entry.request === 'object') ? entry.request : entry;
+    if (!payload || typeof payload !== 'object') {
+      throw new Error(`Fixture entry #${index + 1} is invalid.`);
+    }
+    const req = payload as PlaygroundRequest;
+    return {
+      name: String((entry as any).name || `request-${index + 1}`),
+      request: {
+        method: String(req.method || 'GET').toUpperCase(),
+        path: String(req.path || req.uri || '/'),
+        query: normalizeFixtureQuery(req.query),
+        headers: normalizeFixtureHeader(req.headers),
+        body: req.body,
+        raw: req.body as Record<string, unknown> | undefined,
+      },
+    };
+  });
+}
+
+function buildAwsEvent(fixture: PlaygroundFixture['request']): any {
+  const headers: Record<string, { value: string }> = {};
+  for (const [name, value] of Object.entries(fixture.headers)) {
+    headers[name.toLowerCase()] = { value: String(value) };
+  }
+  return {
+    request: {
+      method: fixture.method,
+      uri: fixture.path,
+      headers,
+      querystring: fixture.query,
+    },
+  };
+}
+
+function buildCloudflareRequest(fixture: PlaygroundFixture['request']): Request {
+  const basePath = fixture.path || '/';
+  const [pathOnly, rawQuery] = basePath.split('?');
+  const normalizedQuery = fixture.query || (rawQuery || '');
+  const queryString = normalizedQuery ? (normalizedQuery.startsWith('?') ? normalizedQuery.slice(1) : normalizedQuery) : '';
+  const url = new URL(pathOnly + (queryString ? `?${queryString}` : ''), 'https://edge.example.com');
+  const headers = new Headers();
+  for (const [name, value] of Object.entries(fixture.headers)) {
+    headers.set(name, value);
+  }
+  const body = (fixture.body === undefined || fixture.body === null)
+    ? undefined
+    : typeof fixture.body === 'string' ? fixture.body : JSON.stringify(fixture.body);
+  return new Request(url.toString(), {
+    method: fixture.method,
+    headers,
+    body: ['GET', 'HEAD'].includes(fixture.method) ? undefined : body as any,
+  });
+}
+
+function runAwsPlayground(outDir: string, fixtures: PlaygroundFixture[]): PlaygroundTargetResult {
+  const viewerRequestPath = path.join(outDir, 'edge', 'viewer-request.js');
+  const code = fs.readFileSync(viewerRequestPath, 'utf8');
+  const handler = Function(`${code}\nreturn handler;`)();
+  if (typeof handler !== 'function') {
+    throw new Error('AWS compiled artifact is malformed: handler missing.');
+  }
+  const result: PlaygroundTargetResult = { target: 'aws', fixtures: [] };
+  for (const fixture of fixtures) {
+    const response = handler(buildAwsEvent(fixture.request));
+    const status = response && response.statusCode != null ? Number(response.statusCode) : 200;
+    const blocked = isBlockedStatus(response && response.statusCode);
+    result.fixtures.push({
+      name: fixture.name,
+      decision: blocked ? 'block' : 'pass',
+      status,
+      block_reason: blocked ? String(response.body || 'blocked') : '',
+      path: fixture.request.path,
+      method: fixture.request.method,
+      query: fixture.request.query,
+    });
+  }
+  return result;
+}
+
+async function runCloudflarePlayground(outDir: string, fixtures: PlaygroundFixture[]): Promise<PlaygroundTargetResult> {
+  const esbuild = require('esbuild');
+  const workerSourcePath = path.join(outDir, 'edge', 'cloudflare', 'index.ts');
+  const generated = fs.readFileSync(workerSourcePath, 'utf8');
+  const compiled = esbuild.transformSync(generated, {
+    loader: 'ts',
+    format: 'cjs',
+    target: 'es2022',
+  }).code;
+  const tmpDir = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cdn-security-playground-cf-'));
+  const modPath = path.join(tmpDir, 'worker.cjs');
+  const env: Record<string, string> = {
+    EDGE_ADMIN_TOKEN: PLAYGROUND_PLACEHOLDER_TOKEN,
+    BASIC_AUTH_CREDS: 'basic:cred',
+    URL_SIGNING_SECRET: 'url-signing-secret',
+    JWT_SECRET: 'jwt-secret',
+    ORIGIN_SECRET: 'origin-secret',
+    CHALLENGE_SECRET: 'challenge-secret',
+  };
+  const previousFetch = (globalThis as any).fetch;
+  (globalThis as any).fetch = async () => new Response('origin-ok', { status: 200, headers: {} });
+  const result: PlaygroundTargetResult = { target: 'cloudflare', fixtures: [] };
+  try {
+    fs.writeFileSync(modPath, compiled, 'utf8');
+    delete require.cache[modPath];
+    const mod = require(modPath);
+    const fetchHandler = mod && mod.default && typeof mod.default.fetch === 'function'
+      ? mod.default.fetch
+      : null;
+    if (typeof fetchHandler !== 'function') {
+      throw new Error('Cloudflare compiled artifact is malformed: default.fetch missing.');
+    }
+    for (const fixture of fixtures) {
+      const request = buildCloudflareRequest(fixture.request);
+      const response = await fetchHandler(request, env, {});
+      const status = Number(response.status) || 0;
+      const blocked = isBlockedStatus(status);
+      const body = blocked ? await response.text() : '';
+      result.fixtures.push({
+        name: fixture.name,
+        decision: blocked ? 'block' : 'pass',
+        status,
+        block_reason: blocked ? body : '',
+        path: fixture.request.path,
+        method: fixture.request.method,
+        query: fixture.request.query,
+      });
+    }
+    return result;
+  } finally {
+    (globalThis as any).fetch = previousFetch;
+    if (fs.existsSync(tmpDir)) fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+}
+
+async function runPlayground(opts: PlaygroundOptions): Promise<PlaygroundReport> {
+  const cwd = process.cwd();
+  const policyPath = resolvePolicyPath(cwd, opts.policy);
+  const fixtures = loadPlaygroundFixtures(opts.fixture ? path.isAbsolute(opts.fixture)
+    ? opts.fixture
+    : path.join(cwd, opts.fixture) : null);
+  const tmpRoot = fs.mkdtempSync(path.join(require('os').tmpdir(), 'cdn-security-playground-'));
+  const allowPlaceholderToken = opts.allowPlaceholderToken !== false;
+  const target = opts.target || 'all';
+  const { compile } = require(path.join(pkgRoot, 'lib'));
+  const results: PlaygroundTargetResult[] = [];
+  const isAws = target === 'aws' || target === 'all';
+  const isCloudflare = target === 'cloudflare' || target === 'all';
+  try {
+    if (isAws) {
+      const outDir = path.join(tmpRoot, 'aws');
+      const compileResult = compile({
+        policyPath,
+        outDir,
+        target: 'aws',
+        allowPlaceholderToken,
+        cwd,
+        pkgRoot,
+      });
+      if (!compileResult.ok) {
+        throw new Error(`playground: aws compile failed: ${compileResult.errors.join(' | ')}`);
+      }
+      results.push(runAwsPlayground(outDir, fixtures));
+    }
+    if (isCloudflare) {
+      const outDir = path.join(tmpRoot, 'cloudflare');
+      const compileResult = compile({
+        policyPath,
+        outDir,
+        target: 'cloudflare',
+        allowPlaceholderToken,
+        cwd,
+        pkgRoot,
+      });
+      if (!compileResult.ok) {
+        throw new Error(`playground: cloudflare compile failed: ${compileResult.errors.join(' | ')}`);
+      }
+      results.push(await runCloudflarePlayground(outDir, fixtures));
+    }
+    return { policyPath, targets: results };
+  } finally {
+    if (fs.existsSync(tmpRoot)) fs.rmSync(tmpRoot, { recursive: true, force: true });
+  }
+}
+
+function asString(value: unknown): string | null {
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    return trimmed.length > 0 ? trimmed : null;
+  }
+  return null;
+}
+
+function asNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+  if (typeof value === 'string') {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+  return null;
+}
+
+function normalizePolicyRoute(value: string | null): string {
+  if (!value) {
+    return 'unknown';
+  }
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return 'unknown';
+  }
+  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+}
+
+function normalizeEvent(value: unknown): string {
+  const raw = asString(value);
+  if (!raw) {
+    return 'other';
+  }
+  const lower = raw.toLowerCase();
+  if (lower === 'allow' || lower === 'pass' || lower === 'passed') {
+    return 'pass';
+  }
+  if (lower === 'block' || lower === 'blocked') {
+    return 'block';
+  }
+  if (lower === 'monitor' || lower === 'monitoring' || lower === 'logged') {
+    return 'monitor';
+  }
+  return lower;
+}
+
+function parseAnalyzeRecord(row: unknown): AnalyzeEvent | null {
+  if (!row || typeof row !== 'object') {
+    return null;
+  }
+  const record = row as Record<string, unknown>;
+  const method = asString((record as any).method)
+    || asString((record as any).httpRequest?.method)
+    || asString((record as any).request?.method)
+    || 'UNKNOWN';
+  const rawEvent = asString((record as any).event) !== null
+    ? (record as any).event
+    : asString((record as any).eventName) !== null
+      ? (record as any).eventName
+      : (record as any).outcome;
+  const event = normalizeEvent(rawEvent);
+  const blockReason = asString((record as any).block_reason)
+    || asString((record as any).blockReason)
+    || asString((record as any).reason)
+    || 'unclassified';
+
+  const uri = normalizePolicyRoute(
+    asString((record as any).uri)
+      || asString((record as any).path)
+      || asString((record as any).request?.uri)
+      || asString((record as any).request?.path)
+      || asString((record as any).httpRequest?.uri)
+      || asString((record as any).httpRequest?.path),
+  );
+  const policyRoute = normalizePolicyRoute(
+    asString((record as any).policy_route)
+      || asString((record as any).policyRoute)
+      || asString((record as any).route)
+      || asString((record as any).request?.route)
+      || uri,
+  );
+
+  const target = asString((record as any).target)
+    || asString((record as any).platform)
+    || asString((record as any).provider)
+    || asString((record as any).runtime)
+    || 'unknown';
+
+  const status = asNumber((record as any).status) || asNumber((record as any).statusCode) || 0;
+  if (status < 0 || status > 999999) {
+    return null;
+  }
+
+  return {
+    target,
+    policyRoute,
+    method,
+    uri,
+    status,
+    event: event === 'other' && isBlockedStatus(status) ? 'block' : event,
+    blockReason,
+  };
+}
+
+function buildEmptyAnalyzeReport(input: string, minCount: number, top: number): AnalyzeReport {
+  return {
+    summary: {
+      input,
+      totalLines: 0,
+      parsedLines: 0,
+      unparseableLines: 0,
+      analyzedEvents: 0,
+      blockEvents: 0,
+      monitorEvents: 0,
+      lowFrequencyThreshold: minCount,
+      top,
+    },
+    byBlockReason: {},
+    byPolicyRoute: {},
+    candidates: [],
+  };
+}
+
+function incrementCounter(map: Record<string, number>, key: string) {
+  map[key] = (map[key] || 0) + 1;
+}
+
+function parseAnalyzeLine(line: string): AnalyzeEvent | null {
+  if (!line.trim()) {
+    return null;
+  }
+  let row: unknown;
+  try {
+    row = JSON.parse(line);
+  } catch (_e) {
+    return null;
+  }
+
+  if (!row || typeof row !== 'object') {
+    return null;
+  }
+
+  const nested = (row as Record<string, unknown>).message;
+  if (asString(nested) && typeof nested === 'string') {
+    try {
+      const parsed = JSON.parse(nested);
+      return parseAnalyzeRecord(parsed);
+    } catch (_e) {
+      // fall through
+    }
+  }
+
+  return parseAnalyzeRecord(row);
+}
+
+function runAnalyze(opts: AnalyzeLogOptions): AnalyzeReport {
+  const cwd = process.cwd();
+  const inputPath = opts.input
+    ? path.isAbsolute(opts.input) ? opts.input : path.join(cwd, opts.input)
+    : '';
+
+  if (!inputPath) {
+    throw new Error('analyze: --input is required');
+  }
+  if (!fs.existsSync(inputPath)) {
+    throw new Error(`analyze: input file not found: ${inputPath}`);
+  }
+
+  const minCount = Number(opts.minCount);
+  const top = Number(opts.top);
+  if (!Number.isFinite(minCount) || minCount < 1) {
+    throw new Error('analyze: --min-count must be a positive integer');
+  }
+  if (!Number.isFinite(top) || top < 1) {
+    throw new Error('analyze: --top must be a positive integer');
+  }
+
+  const report = buildEmptyAnalyzeReport(inputPath, Math.floor(minCount), Math.floor(top));
+  const text = fs.readFileSync(inputPath, 'utf8');
+  const lines = text.split(/\r?\n/);
+  const candidateMap: Record<string, {
+    policyRoute: string;
+    blockReason: string;
+    count: number;
+    targets: Record<string, boolean>;
+    events: AnalyzeEvent[];
+  }> = {};
+
+  for (const rawLine of lines) {
+    if (!rawLine.trim()) {
+      continue;
+    }
+    report.summary.totalLines += 1;
+    const event = parseAnalyzeLine(rawLine);
+    if (!event) {
+      report.summary.unparseableLines += 1;
+      continue;
+    }
+    report.summary.parsedLines += 1;
+    report.summary.analyzedEvents += 1;
+
+    const byReason = report.byBlockReason[event.blockReason] || {
+      count: 0,
+      targets: {},
+      policyRoutes: {},
+    };
+    incrementCounter(byReason.targets, event.target);
+    incrementCounter(byReason.policyRoutes, event.policyRoute);
+    byReason.count += 1;
+    report.byBlockReason[event.blockReason] = byReason;
+
+    const byRoute = report.byPolicyRoute[event.policyRoute] || {
+      count: 0,
+      blockReasons: {},
+      targets: {},
+    };
+    byRoute.count += 1;
+    incrementCounter(byRoute.blockReasons, event.blockReason);
+    incrementCounter(byRoute.targets, event.target);
+    report.byPolicyRoute[event.policyRoute] = byRoute;
+
+    const evt = event.event || 'other';
+    if (evt === 'block') {
+      report.summary.blockEvents += 1;
+      const key = `${event.blockReason}|${event.policyRoute}`;
+      const bucket = candidateMap[key] || {
+        policyRoute: event.policyRoute,
+        blockReason: event.blockReason,
+        count: 0,
+        targets: {},
+        events: [],
+      };
+      bucket.count += 1;
+      bucket.targets[event.target] = true;
+      if (bucket.events.length < report.summary.top) {
+        bucket.events.push({
+          method: event.method,
+          status: event.status,
+          uri: event.uri,
+          target: event.target,
+        } as AnalyzeEvent);
+      }
+      candidateMap[key] = bucket;
+    }
+    if (evt === 'monitor') {
+      report.summary.monitorEvents += 1;
+    }
+  }
+
+  const candidateKeys = Object.keys(candidateMap);
+  report.candidates = candidateKeys
+    .map((key) => {
+      const bucket = candidateMap[key];
+      return {
+        policyRoute: bucket.policyRoute,
+        blockReason: bucket.blockReason,
+        count: bucket.count,
+        targets: Object.keys(bucket.targets),
+        events: bucket.events
+          .slice(0, report.summary.top)
+          .map((event: AnalyzeEvent) => ({
+            method: event.method,
+            status: event.status,
+            uri: event.uri,
+            target: event.target,
+          })),
+      };
+    })
+    .filter((entry) => entry.count <= report.summary.lowFrequencyThreshold)
+    .sort((a, b) => a.count - b.count || a.policyRoute.localeCompare(b.policyRoute))
+    .slice(0, report.summary.top);
+
+  return report;
+}
+
+function printAnalyzeReport(report: AnalyzeReport) {
+  console.log(`[analyze] input=${report.summary.input}`);
+  console.log(`[analyze] total_lines=${report.summary.totalLines} parsed_lines=${report.summary.parsedLines} unparseable=${report.summary.unparseableLines}`);
+  console.log(`[analyze] analyzed_events=${report.summary.analyzedEvents} block=${report.summary.blockEvents} monitor=${report.summary.monitorEvents}`);
+  console.log('');
+
+  const reasonEntries = Object.entries(report.byBlockReason)
+    .map(([reason, value]) => ({ reason, count: value.count, routes: Object.entries(value.policyRoutes).length }))
+    .sort((a, b) => b.count - a.count || a.reason.localeCompare(b.reason));
+  const routeEntries = Object.entries(report.byPolicyRoute)
+    .map(([policyRoute, value]) => ({ policyRoute, count: value.count, reasons: Object.entries(value.blockReasons).length }))
+    .sort((a, b) => b.count - a.count || a.policyRoute.localeCompare(b.policyRoute));
+
+  console.log('[analyze] Block reasons:');
+  for (const item of reasonEntries) {
+    console.log(`- ${item.reason}: ${item.count} events across ${item.routes} policy route(s)`);
+  }
+  if (reasonEntries.length === 0) {
+    console.log('- none');
+  }
+
+  console.log('');
+  console.log('[analyze] Top policy routes:');
+  for (const item of routeEntries.slice(0, 20)) {
+    console.log(`- ${item.policyRoute}: ${item.count} events (${item.reasons} block reason(s))`);
+  }
+  if (routeEntries.length === 0) {
+    console.log('- none');
+  }
+
+  console.log('');
+  if (report.candidates.length > 0) {
+    console.log('[analyze] Low-frequency candidates:');
+    for (const candidate of report.candidates) {
+      console.log(`- route=${candidate.policyRoute} reason=${candidate.blockReason} count=${candidate.count} targets=${candidate.targets.join(',')}`);
+      for (const evt of candidate.events) {
+        console.log(`  sample: ${evt.method} ${evt.uri} status=${evt.status} target=${evt.target}`);
+      }
+    }
+  } else {
+    console.log('[analyze] Low-frequency candidates: none');
+  }
+}
 
 function routeAuthConfigured(policy: any, types: string[]): boolean {
   const routes = Array.isArray(policy && policy.routes) ? policy.routes : [];
@@ -1347,6 +2386,11 @@ function normalizeCapabilityTarget(raw: string): CapabilityDeployTarget {
   throw new Error('Invalid --target. Use aws, cloudflare, or all.');
 }
 
+function normalizeVisualFormat(raw: string): 'mermaid' | 'html' {
+  if (raw === 'mermaid' || raw === 'html') return raw;
+  throw new Error('Invalid --format. Use mermaid or html.');
+}
+
 function capabilityFinding(
   entry: CapabilityEntry,
   target: 'aws' | 'cloudflare',
@@ -1456,6 +2500,33 @@ type ReadinessFinding = {
   recommendation: string;
 };
 
+type ReadinessEvaluationOptions = {
+  failOnWeakWafBaseline?: boolean;
+};
+
+type WafAppShape = 'spa-static-site' | 'rest-api' | 'admin-panel' | 'microservice-origin' | 'unknown';
+type WafTargetSupport = 'supported' | 'partial' | 'unsupported';
+type WafRecommendationTemplate = {
+  id: string;
+  appShape: Exclude<WafAppShape, 'unknown'>;
+  title: string;
+  rules: string[];
+  settings: string[];
+  rationale: string;
+  cost: string;
+  falsePositiveRisk: string;
+};
+type WafRecommendation = WafRecommendationTemplate & {
+  targetSupport: {
+    aws: WafTargetSupport;
+    cloudflare: WafTargetSupport;
+  };
+  configuredRules: string[];
+  missingRules: string[];
+  alreadySatisfied: boolean;
+  notes: string[];
+};
+
 function readinessFinding(
   severity: ReadinessSeverity,
   id: string,
@@ -1465,7 +2536,204 @@ function readinessFinding(
   return { severity, id, detail, recommendation };
 }
 
-function evaluateReadiness(policy: any, target: string, lintWarnings: string[]): ReadinessFinding[] {
+const WAF_RECOMMENDATION_TEMPLATES: Record<Exclude<WafAppShape, 'unknown'>, WafRecommendationTemplate> = {
+  'spa-static-site': {
+    id: 'waf.recommendation.spa_static_site',
+    appShape: 'spa-static-site',
+    title: 'SPA/static site managed-rule baseline',
+    rules: [
+      'AWSManagedRulesCommonRuleSet',
+      'AWSManagedRulesKnownBadInputsRuleSet',
+      'AWSManagedRulesIPReputationList',
+    ],
+    settings: [
+      'Keep request.allow_methods to GET/HEAD for static assets.',
+      'Use a global WAF rate limit around 2000 requests per 5 minutes per IP, then tune from logs.',
+      'Enable WAF logging when scope=CLOUDFRONT before production release.',
+    ],
+    rationale: 'Static sites mostly need traversal, scanner, XSS/cache-poisoning, and known-bad source coverage without heavy auth-specific managed rules.',
+    cost: 'Standard AWS WAF request/WCU costs; no BotControl or ATP paid add-on in this baseline.',
+    falsePositiveRisk: 'Low to medium. KnownBadInputs/OWASP-style rules can catch unusual asset paths, so monitor before enforcing on legacy static content.',
+  },
+  'rest-api': {
+    id: 'waf.recommendation.rest_api',
+    appShape: 'rest-api',
+    title: 'REST API managed-rule baseline',
+    rules: [
+      'AWSManagedRulesCommonRuleSet',
+      'AWSManagedRulesKnownBadInputsRuleSet',
+      'AWSManagedRulesSQLiRuleSet',
+      'AWSManagedRulesIPReputationList',
+    ],
+    settings: [
+      'Add scoped rate_limit_rules for auth, write-heavy, or expensive API paths.',
+      'Keep CORS origins explicit; do not rely on WAF rules to compensate for wildcard credentials.',
+      'Enable WAF logging for CloudFront-scoped APIs before production release.',
+    ],
+    rationale: 'JSON APIs need injection and scanner coverage plus SQLi signatures and reputation filtering, especially on write/query endpoints.',
+    cost: 'Standard AWS WAF request/WCU costs; SQLi adds WCU pressure but avoids BotControl/ATP paid add-ons.',
+    falsePositiveRisk: 'Medium. SQLi signatures can flag unusual query DSLs or search syntax; start in count/monitor mode for affected routes.',
+  },
+  'admin-panel': {
+    id: 'waf.recommendation.admin_panel',
+    appShape: 'admin-panel',
+    title: 'Admin panel managed-rule baseline',
+    rules: [
+      'AWSManagedRulesCommonRuleSet',
+      'AWSManagedRulesKnownBadInputsRuleSet',
+      'AWSManagedRulesIPReputationList',
+      'AWSManagedRulesAnonymousIpList',
+      'AWSManagedRulesBotControlRuleSet',
+      'AWSManagedRulesATPRuleSet',
+    ],
+    settings: [
+      'Use a low global WAF rate limit and a stricter scoped login/admin rate_limit_rule.',
+      'Require WAF logging and redaction for authorization, cookie, and x-api-key fields.',
+      'Combine managed rules with route auth, IP allowlists, VPN, or SSO where possible.',
+    ],
+    rationale: 'Admin panels are high-value targets for credential stuffing, bot traffic, anonymizers, and exploit probes, so stronger managed signals are justified.',
+    cost: 'Higher. BotControl and ATP are paid AWS managed protections and add operational tuning cost.',
+    falsePositiveRisk: 'Medium to high. Bot and ATP controls can challenge or block automation; allowlist known internal tooling before enforce mode.',
+  },
+  'microservice-origin': {
+    id: 'waf.recommendation.microservice_origin',
+    appShape: 'microservice-origin',
+    title: 'Microservice origin managed-rule baseline',
+    rules: [
+      'AWSManagedRulesCommonRuleSet',
+      'AWSManagedRulesKnownBadInputsRuleSet',
+      'AWSManagedRulesIPReputationList',
+    ],
+    settings: [
+      'Prefer signed origin authentication or an IP allowlist so direct-origin bypasses fail closed.',
+      'Add scoped rate_limit_rules for expensive service endpoints instead of only a global limit.',
+      'Enable WAF logging for CloudFront-scoped origins and correlate logs with origin auth failures.',
+    ],
+    rationale: 'Service origins need exploit-probe and reputation coverage, but broad bot or ATP controls may interfere with legitimate service clients.',
+    cost: 'Standard AWS WAF request/WCU costs; avoids paid bot/account-takeover add-ons by default.',
+    falsePositiveRisk: 'Low to medium. Reputation lists can block shared egress ranges used by partners; validate known service clients before enforce mode.',
+  },
+};
+
+function includesAny(text: string, tokens: string[]): boolean {
+  return tokens.some((token) => text.includes(token));
+}
+
+function inferWafAppShape(policy: any): WafAppShape {
+  const metadata = (policy && policy.metadata) || {};
+  const text = [
+    policy && policy.project,
+    metadata.description,
+    metadata.app_shape,
+    metadata.appShape,
+  ].filter(Boolean).join(' ').toLowerCase();
+  if (includesAny(text, ['spa-static-site', 'spa / static', 'static site', 'single-page', 'spa'])) {
+    return 'spa-static-site';
+  }
+  if (includesAny(text, ['rest-api', 'rest api', 'json api'])) {
+    return 'rest-api';
+  }
+  if (includesAny(text, ['admin-panel', 'admin panel', 'back-office', 'ops dashboard'])) {
+    return 'admin-panel';
+  }
+  if (includesAny(text, ['microservice-origin', 'microservice origin', 'service-to-service'])) {
+    return 'microservice-origin';
+  }
+
+  const routes = Array.isArray(policy && policy.routes) ? policy.routes : [];
+  const originAuth = policy && policy.origin && policy.origin.auth;
+  if (originAuth) return 'microservice-origin';
+  if (routes.some((route: any) => route && route.auth_gate && route.auth_gate.type === 'jwt')) {
+    return 'rest-api';
+  }
+  if (routes.some((route: any) => {
+    const gateType = route && route.auth_gate && route.auth_gate.type;
+    const prefixes = route && route.match && Array.isArray(route.match.path_prefixes)
+      ? route.match.path_prefixes
+      : [];
+    return (gateType === 'static_token' || gateType === 'basic_auth') &&
+      prefixes.some((prefix: unknown) => typeof prefix === 'string' && (prefix === '/' || prefix.includes('admin')));
+  })) {
+    return 'admin-panel';
+  }
+
+  const methods = Array.isArray(policy && policy.request && policy.request.allow_methods)
+    ? policy.request.allow_methods.map((m: string) => String(m).toUpperCase()).sort()
+    : [];
+  if (methods.length > 0 && methods.every((method: string) => method === 'GET' || method === 'HEAD')) {
+    return 'spa-static-site';
+  }
+  if (methods.includes('OPTIONS') || (policy && policy.response_headers && policy.response_headers.cors)) {
+    return 'rest-api';
+  }
+  return 'unknown';
+}
+
+function cloudflareSupportForRules(rules: string[]): { support: WafTargetSupport; notes: string[] } {
+  const { classifyManagedRule } = require(path.join(pkgRoot, 'scripts', 'lib', 'cloudflare-waf-parity.js'));
+  const notes: string[] = [];
+  let support: WafTargetSupport = 'supported';
+  for (const rule of rules) {
+    const entry = classifyManagedRule(rule);
+    if (entry.status === 'unsupported') {
+      support = 'unsupported';
+    } else if (entry.status === 'approximate' && support !== 'unsupported') {
+      support = 'partial';
+    }
+    if (entry.status !== 'equivalent') {
+      const target = entry.cloudflare && entry.cloudflare.rulesetName
+        ? entry.cloudflare.rulesetName
+        : 'no direct Cloudflare ruleset target';
+      notes.push(`${rule}: ${entry.status} on Cloudflare (${target}).`);
+    }
+  }
+  return { support, notes };
+}
+
+function buildWafRecommendation(template: WafRecommendationTemplate, policy: any): WafRecommendation {
+  const managed = policy && policy.firewall && policy.firewall.waf && Array.isArray(policy.firewall.waf.managed_rules)
+    ? policy.firewall.waf.managed_rules
+    : [];
+  const configuredRules = template.rules.filter((rule) => managed.includes(rule));
+  const missingRules = template.rules.filter((rule) => !managed.includes(rule));
+  const cloudflare = cloudflareSupportForRules(template.rules);
+  return Object.assign({}, template, {
+    targetSupport: {
+      aws: 'supported' as WafTargetSupport,
+      cloudflare: cloudflare.support,
+    },
+    configuredRules,
+    missingRules,
+    alreadySatisfied: missingRules.length === 0,
+    notes: cloudflare.notes,
+  });
+}
+
+function buildWafRecommendations(policy: any, policyPath: string, target: string) {
+  const inferredAppShape = inferWafAppShape(policy);
+  const templates = inferredAppShape === 'unknown'
+    ? Object.values(WAF_RECOMMENDATION_TEMPLATES)
+    : [WAF_RECOMMENDATION_TEMPLATES[inferredAppShape]];
+  const recommendations = templates.map((template) => buildWafRecommendation(template, policy));
+  return {
+    policyPath,
+    target,
+    inferredAppShape,
+    readOnly: true,
+    recommendations,
+  };
+}
+
+function weakWafSeverity(options: ReadinessEvaluationOptions): ReadinessSeverity {
+  return options.failOnWeakWafBaseline ? 'fail' : 'warn';
+}
+
+function evaluateReadiness(
+  policy: any,
+  target: string,
+  lintWarnings: string[],
+  options: ReadinessEvaluationOptions = {}
+): ReadinessFinding[] {
   const findings: ReadinessFinding[] = [];
   const metadata = (policy && policy.metadata) || {};
   const defaults = (policy && policy.defaults) || {};
@@ -1537,7 +2805,7 @@ function evaluateReadiness(policy: any, target: string, lintWarnings: string[]):
 
   if (!firewall.waf) {
     findings.push(readinessFinding(
-      'warn',
+      weakWafSeverity(options),
       'firewall.waf.missing',
       'firewall.waf is not configured.',
       'Add WAF rate limits and managed rules for production traffic.'
@@ -1545,7 +2813,7 @@ function evaluateReadiness(policy: any, target: string, lintWarnings: string[]):
   } else {
     if (!waf.rate_limit && !Array.isArray(waf.rate_limit_rules)) {
       findings.push(readinessFinding(
-        'warn',
+        weakWafSeverity(options),
         'firewall.waf.rate_limit.missing',
         'No global or scoped WAF rate limit is configured.',
         'Set firewall.waf.rate_limit or firewall.waf.rate_limit_rules for production.'
@@ -1560,10 +2828,19 @@ function evaluateReadiness(policy: any, target: string, lintWarnings: string[]):
     );
     if (target === 'aws' && !hasCoreSignal) {
       findings.push(readinessFinding(
-        'warn',
+        weakWafSeverity(options),
         'firewall.waf.managed_rules.core_signal_missing',
         'Managed WAF rules omit BotControl, ATP, IPReputation, and AnonymousIp.',
         'Consider at least AWSManagedRulesIPReputationList and AWSManagedRulesAnonymousIpList for production enforce mode.'
+      ));
+    }
+    const loggingEnabled = waf.logging && waf.logging.enabled === true;
+    if (target === 'aws' && waf.scope === 'CLOUDFRONT' && !loggingEnabled) {
+      findings.push(readinessFinding(
+        weakWafSeverity(options),
+        'firewall.waf.logging.missing',
+        'WAF logging is not enabled while scope=CLOUDFRONT.',
+        'Set firewall.waf.logging.enabled: true and supply destination_arn_env for production WAF log retention.'
       ));
     }
     if (target === 'cloudflare') {
@@ -1620,6 +2897,9 @@ function evaluateReadiness(policy: any, target: string, lintWarnings: string[]):
     if (warning.includes('managed_rules does not include any of BotControl')) {
       continue;
     }
+    if (target === 'aws' && warning.includes('firewall.waf.logging is not enabled while scope=CLOUDFRONT')) {
+      continue;
+    }
     findings.push(readinessFinding(
       'warn',
       'policy.lint.warning',
@@ -1635,13 +2915,29 @@ function printReadinessReport(report: any): void {
   console.log(`Readiness: ${report.status.toUpperCase()} (target=${report.target}, policy=${report.policyPath})`);
   if (report.findings.length === 0) {
     console.log('[OK] No production readiness findings.');
-    return;
+  } else {
+    for (const finding of report.findings) {
+      const marker = finding.severity === 'fail' ? 'FAIL' : 'WARN';
+      const stream = finding.severity === 'fail' ? console.error : console.warn;
+      stream(`[${marker}] ${finding.id}: ${finding.detail}`);
+      stream(`       ${finding.recommendation}`);
+    }
   }
-  for (const finding of report.findings) {
-    const marker = finding.severity === 'fail' ? 'FAIL' : 'WARN';
-    const stream = finding.severity === 'fail' ? console.error : console.warn;
-    stream(`[${marker}] ${finding.id}: ${finding.detail}`);
-    stream(`       ${finding.recommendation}`);
+  const waf = report.wafRecommendations;
+  if (waf && Array.isArray(waf.recommendations) && waf.recommendations.length > 0) {
+    console.log('');
+    console.log(`WAF recommendations: inferred_app_shape=${waf.inferredAppShape}, read_only=${waf.readOnly}`);
+    for (const rec of waf.recommendations) {
+      console.log(`- ${rec.id}: ${rec.title}`);
+      console.log(`  Target support: aws=${rec.targetSupport.aws}, cloudflare=${rec.targetSupport.cloudflare}`);
+      console.log(`  Recommended managed rules: ${rec.rules.join(', ')}`);
+      console.log(`  Missing managed rules: ${rec.missingRules.length > 0 ? rec.missingRules.join(', ') : 'none'}`);
+      console.log(`  Related settings: ${rec.settings.join('; ')}`);
+      console.log(`  Rationale: ${rec.rationale}`);
+      console.log(`  Cost: ${rec.cost}`);
+      console.log(`  False-positive risk: ${rec.falsePositiveRisk}`);
+      if (rec.notes.length > 0) console.log(`  Target notes: ${rec.notes.join(' ')}`);
+    }
   }
 }
 
@@ -2103,7 +3399,7 @@ program
         process.exit(1);
       }
       fs.mkdirSync(policyDir, { recursive: true });
-      fs.writeFileSync(destSecurity, content, 'utf8');
+      fs.writeFileSync(destSecurity, withYamlLanguageServerHint(content, './schema.json'), 'utf8');
       console.log('[SUCCESS] Created policy/security.yml from guided setup');
       console.log('[INFO] Review secret env names and docs/runbooks/secret-rotation.md before production deploy.');
       return;
@@ -2131,8 +3427,8 @@ program
 
     fs.mkdirSync(destStarterDir, { recursive: true });
     const content = fs.readFileSync(srcProfile, 'utf8');
-    fs.writeFileSync(destSecurity, content, 'utf8');
-    fs.writeFileSync(destStarter, content, 'utf8');
+    fs.writeFileSync(destSecurity, withYamlLanguageServerHint(content, './schema.json'), 'utf8');
+    fs.writeFileSync(destStarter, withYamlLanguageServerHint(content, '../schema.json'), 'utf8');
 
     console.log('[SUCCESS] Created policy/security.yml');
     console.log('[SUCCESS] Created policy/' + starterDir + '/' + profileFile);
@@ -2154,9 +3450,7 @@ program
     const cwd = process.cwd();
     let policyPath = opts.policy;
     if (!policyPath) {
-      const security = path.join(cwd, 'policy', 'security.yml');
-      const base = path.join(cwd, 'policy', 'base.yml');
-      policyPath = fs.existsSync(security) ? security : base;
+      policyPath = defaultPolicyPath(cwd);
     }
 
     const result = compile({
@@ -2214,6 +3508,7 @@ program
   .option('--report <path>', 'Write machine-readable JSON report to this path', null)
   .option('--json', 'Print machine-readable JSON instead of a human report')
   .option('--strict', 'Exit non-zero on warnings as well as failures')
+  .option('--fail-on-weak-waf-baseline', 'Promote weak WAF baseline findings to failures for production CI')
   .action((opts: ReadinessOptions) => {
     const cwd = process.cwd();
     const policyPath = resolvePolicyPath(cwd, opts.policy);
@@ -2249,6 +3544,7 @@ program
     }
 
     let policy = null;
+    let wafRecommendations = null;
     const lint = lintPolicy({ policyPath, pkgRoot, env: process.env });
     lint.errors.forEach((error: string) => findings.push(readinessFinding(
       'fail',
@@ -2258,12 +3554,16 @@ program
     )));
     if (lint.policy && typeof lint.policy === 'object') {
       policy = lint.policy;
-      findings.push(...evaluateReadiness(policy, target, lint.warnings));
+      findings.push(...evaluateReadiness(policy, target, lint.warnings, {
+        failOnWeakWafBaseline: Boolean(opts.failOnWeakWafBaseline),
+      }));
+      wafRecommendations = buildWafRecommendations(policy, policyPath, target);
     }
 
     const failCount = findings.filter((f) => f.severity === 'fail').length;
     const warnCount = findings.filter((f) => f.severity === 'warn').length;
     const strict = Boolean(opts.strict);
+    const failOnWeakWafBaseline = Boolean(opts.failOnWeakWafBaseline);
     const exitCode = failCount > 0 || (strict && warnCount > 0) ? 1 : 0;
     const status = failCount > 0 ? 'fail' : warnCount > 0 ? 'warn' : 'pass';
     const report = {
@@ -2271,10 +3571,12 @@ program
       policyPath,
       target,
       strict,
+      failOnWeakWafBaseline,
       status,
       exitCode,
       summary: { fail: failCount, warn: warnCount },
       findings,
+      wafRecommendations,
     };
 
     if (opts.report) {
@@ -2362,6 +3664,49 @@ program
   });
 
 program
+  .command('visualize')
+  .description('Render a deterministic policy control visualizer as Mermaid or static HTML')
+  .option('-p, --policy <path>', 'Policy file path (default: policy/security.yml or policy/base.yml)', null)
+  .option('-t, --target <platform>', 'Target platform for control behavior: aws | cloudflare | all', 'all')
+  .option('--format <mode>', 'Artifact format: mermaid | html', 'mermaid')
+  .option('-o, --out <path>', 'Write rendered output to file')
+  .action((opts: VisualizeOptions) => {
+    let target: CapabilityDeployTarget;
+    let format: 'mermaid' | 'html';
+    try {
+      target = normalizeCapabilityTarget(opts.target || 'all');
+      format = normalizeVisualFormat(opts.format || 'mermaid');
+    } catch (e: any) {
+      console.error('[ERROR]', e.message);
+      process.exit(1);
+    }
+
+    const cwd = process.cwd();
+    const policyPath = resolvePolicyPath(cwd, opts.policy);
+    if (!fs.existsSync(policyPath)) {
+      console.error('[ERROR] Policy file not found:', policyPath);
+      process.exit(1);
+    }
+
+    let artifact: string;
+    try {
+      artifact = renderPolicyVisualization(policyPath, target, { format });
+    } catch (e: any) {
+      console.error('[ERROR] Failed to render policy visualization:', e.message);
+      process.exit(1);
+      return;
+    }
+
+    const resolvedOut = opts.out ? (path.isAbsolute(opts.out) ? opts.out : path.join(cwd, opts.out)) : null;
+    if (resolvedOut) {
+      fs.writeFileSync(resolvedOut, artifact, 'utf8');
+      console.log('[SUCCESS] Wrote visualization to', resolvedOut);
+      return;
+    }
+    console.log(artifact);
+  });
+
+program
   .command('diff')
   .description('Compare generated output or policy posture changes between two policies')
   .option('-p, --policy <path>', 'Policy file path (default: policy/security.yml or policy/base.yml)', null)
@@ -2373,9 +3718,13 @@ program
   .action((opts: DiffOptions) => {
     const cwd = process.cwd();
     const policyPath = resolvePolicyPath(cwd, opts.policy);
-    const target = opts.target === 'all' || opts.target === 'aws' || opts.target === 'cloudflare'
-      ? opts.target
-      : 'aws';
+    let target: CapabilityDeployTarget;
+    try {
+      target = normalizeCapabilityTarget(opts.target);
+    } catch (e: any) {
+      console.error('[ERROR]', e.message || String(e));
+      process.exit(1);
+    }
 
     if (opts.semantic) {
       const baselinePolicyPath = opts.baseline
@@ -2457,6 +3806,72 @@ program
   });
 
 program
+  .command('playground')
+  .description('Run sample requests against locally compiled AWS/Cloudflare runtime artifacts')
+  .option('-p, --policy <path>', 'Policy file path (default: policy/security.yml or policy/base.yml)', null)
+  .option('-t, --target <platform>', 'Target platform: aws | cloudflare | all', 'all')
+  .option('-f, --fixture <path>', 'JSON fixture with request cases (array, {fixtures: [...]}, or {request: {...}})')
+  .option('--json', 'Emit machine-readable output')
+  .option('--allow-placeholder-token', 'Allow non-production placeholder credentials for local policy checks')
+  .action(async (opts: PlaygroundOptions) => {
+    if (opts.target !== 'aws' && opts.target !== 'cloudflare' && opts.target !== 'all') {
+      console.error('[ERROR] --target must be aws, cloudflare, or all.');
+      process.exit(1);
+    }
+    try {
+      const report = await withMutedOutput(() => runPlayground(opts), !!opts.json);
+      if (opts.json) {
+        console.log(JSON.stringify(report, null, 2));
+        return;
+      }
+
+      for (const targetResult of report.targets) {
+        console.log(`[${targetResult.target}]`);
+        for (const item of targetResult.fixtures) {
+          const querySuffix = item.query ? `?${item.query}` : '';
+          const reason = item.block_reason ? ` reason=${item.block_reason}` : '';
+          console.log(`- ${item.name}: ${item.method} ${item.path}${querySuffix} => ${item.decision.toUpperCase()} (status=${item.status})${reason}`);
+        }
+      }
+    } catch (e: any) {
+      console.error('[ERROR]', e.message || String(e));
+      process.exit(1);
+    }
+  });
+
+program
+  .command('analyze')
+  .description('Aggregate monitor-mode JSON logs and flag low-frequency blocking candidates')
+  .requiredOption('-i, --input <path>', 'Path to JSONL log input')
+  .option('--min-count <n>', 'Candidate threshold for suspicious low-frequency blocks', '5')
+  .option('--top <n>', 'Maximum route candidates to print/export', '20')
+  .option('--json', 'Emit machine-readable output')
+  .action((opts: {
+    input: string;
+    minCount: string;
+    top: string;
+    json?: boolean;
+  }) => {
+    try {
+      const minCount = Number(opts.minCount);
+      const top = Number(opts.top);
+      const report = runAnalyze({
+        input: opts.input,
+        minCount,
+        top,
+      });
+      if (opts.json) {
+        console.log(JSON.stringify(report, null, 2));
+      } else {
+        printAnalyzeReport(report);
+      }
+    } catch (e: any) {
+      console.error('[ERROR]', e.message || String(e));
+      process.exit(1);
+    }
+  });
+
+program
   .command('emit-waf')
   .description('Generate only the WAF/infra config (no edge code). Use when edge is already deployed and you only need to refresh firewall rules.')
   .option('-p, --policy <path>', 'Policy file path', null)
@@ -2471,9 +3886,7 @@ program
     const cwd = process.cwd();
     let policyPath = opts.policy;
     if (!policyPath) {
-      const security = path.join(cwd, 'policy', 'security.yml');
-      const base = path.join(cwd, 'policy', 'base.yml');
-      policyPath = fs.existsSync(security) ? security : base;
+      policyPath = defaultPolicyPath(cwd);
     }
 
     const result = emitWaf({
@@ -2538,3 +3951,11 @@ program
   });
 
 program.parse();
+
+}
+
+void main().catch((error: unknown) => {
+  const err = error as Error;
+  console.error('[ERROR]', err.message || String(error));
+  process.exit(1);
+});

@@ -27,6 +27,35 @@ build は `policy/security.yml` を優先して参照し、なければ `policy/
 | `profiles/strict.yml` | 制限を強め、ブロックを増やす。クライアントを制御できる場合向け。 |
 | `profiles/permissive.yml` | 制限を緩め、ブロックを減らす。API・スクリプト・レガシークライアント向け。 |
 
+## ポリシー継承（環境オーバーレイ）
+
+サービス横断または環境別運用で、共通の基盤ポリシーを切り出し、`extends` で差分だけを重ねます。
+
+```yml
+# policy/base.yml
+version: 1
+defaults:
+  mode: monitor
+project: web-frontend
+
+# policy/prod.yml
+extends: ./base.yml
+defaults:
+  mode: enforce
+firewall:
+  waf:
+    rate_limit_rules:
+      - name: api-limit
+        limit: 500
+```
+
+`extends` のパスは子ポリシーファイルからの相対パスで解決されます。
+
+- オブジェクトは深い階層で再帰マージし、子が親キーを上書き
+- 配列は末尾へ追記（親が先、子が後）
+- スカラー値は該当サブツリーを置換
+- `prod.yml` -> `base.yml` -> `global.yml` のような階層継承（transitive extends）に対応
+
 ---
 
 ## プロファイルの選び方（base.yml を使う場合）

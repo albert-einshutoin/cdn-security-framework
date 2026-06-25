@@ -311,6 +311,15 @@ test('resolvePolicyPath: falls back to base.yml when only base exists', () => {
   }
 });
 
+test('resolvePolicyPath: defaults to base.yml path when no policy file exists', () => {
+  const tmp = mktmp();
+  try {
+    assert.strictEqual(resolvePolicyPath(tmp), path.join(tmp, 'policy', 'base.yml'));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
 // ---- runDoctor end-to-end ------------------------------------------------
 
 test('runDoctor: clean pass with valid policy + env vars set, writes report', () => {

@@ -6,6 +6,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { execFileSync } = require('child_process');
+const { buildWafRules } = require('./lib/waf-rule-builder');
 function test(name, fn) {
     try {
         fn();
@@ -18,6 +19,48 @@ function test(name, fn) {
     }
 }
 const repoRoot = path.join(__dirname, '..');
+test('buildWafRules centralizes rate, fingerprint, block response, and capacity decisions', () => {
+    const built = buildWafRules({
+        rate_limit: 1000,
+        rate_limit_rules: [{
+                name: 'login-tight',
+                limit: 50,
+                aggregate_key_type: 'CUSTOM_KEYS',
+                custom_keys: [{ uri_path: {} }],
+                action: 'captcha',
+                priority: 7,
+                scope_down_statement: {
+                    byte_match_statement: {
+                        field_to_match: { uri_path: {} },
+                        positional_constraint: 'STARTS_WITH',
+                        search_string: '/login',
+                        text_transformation: [{ priority: 0, type: 'NONE' }],
+                    },
+                },
+            }],
+        fingerprint_action: 'count',
+        ja3_fingerprints: ['0123456789abcdef0123456789abcdef'],
+        ja4_fingerprints: ['t13d1516h2_8daaf6152771_02713d6af862'],
+        block_response: {
+            status_code: 451,
+            body: 'blocked',
+            content_type: 'TEXT_PLAIN',
+        },
+    }, 'shared-waf');
+    assert.strictEqual(built.blockResponseKey, 'cdn_sec_block');
+    assert.strictEqual(built.capacity, 8);
+    assert.strictEqual(built.rules.length, 4);
+    assert.strictEqual(built.rules[0].name, 'rate-based-rule');
+    assert.strictEqual(built.rules[0].action.block.custom_response.response_code, 451);
+    assert.strictEqual(built.rules[1].name, 'login-tight');
+    assert.strictEqual(built.rules[1].priority, 7);
+    assert.ok(built.rules[1].action.captcha);
+    assert.deepStrictEqual(built.rules[1].statement.rate_based_statement.custom_key, [{ uri_path: {} }]);
+    assert.ok(built.rules[1].statement.rate_based_statement.scope_down_statement.byte_match_statement);
+    assert.ok(built.rules[2].action.count);
+    assert.ok(built.rules[2].statement.byte_match_statement.field_to_match.ja3_fingerprint);
+    assert.ok(built.rules[3].statement.byte_match_statement.field_to_match.ja4_fingerprint);
+});
 function runCompileInfra(policyContent, options = {}) {
     const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'infra-unit-'));
     const policyPath = path.join(tempDir, 'policy.yml');

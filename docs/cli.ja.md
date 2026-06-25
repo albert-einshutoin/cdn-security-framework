@@ -12,12 +12,15 @@ npx cdn-security <subcommand> [options]
 | --- | --- |
 | `init` | プロファイル / アーキタイプから `policy/security.yml` をスキャフォールド。 |
 | `build` | ポリシー検証 + エッジランタイム + インフラ設定の生成。 |
+| `playground` | ポリシーをローカルでコンパイルし、サンプルリクエストを AWS/Cloudflare ランタイムで再生して pass/block を確認。 |
+| `analyze` | 監視モード JSONL を集約し、低頻度ブロック候補を抽出。 |
 | `emit-waf` | インフラ設定のみ生成（エッジは生成しない）。エッジはそのままで WAF ルールだけ再デプロイしたいとき。 |
 | `doctor` | 環境診断をワンショット実行。失敗チェックがあれば非ゼロ終了。 |
 | `readiness` | 環境診断と policy posture を統合する本番リリースゲート。 |
 | `capabilities` | target 対応状況の matrix を表示し、任意で policy control を target 別に評価。 |
 | `deploy-template` | AWS / Cloudflare の artifact deployment 用 GitHub Actions workflow template を生成。 |
 | `explain` | レビューやオンボーディング向けにポリシーの要点を表示。 |
+| `visualize` | Mermaid/HTML のポリシー可視化を生成し、実装・監視・未対応・target別制御を明示。 |
 | `diff` | 生成物の drift または policy posture の差分を比較。 |
 | `migrate` | スキーマのバージョン間マイグレーション（現状 v1 のみの stub）。 |
 
@@ -52,6 +55,96 @@ npx cdn-security build --fail-on-permissive   # metadata.risk_level == permissiv
 - `dist/edge/viewer-request.js`, `dist/edge/viewer-response.js`, `dist/edge/origin-request.js`（AWS）
 - `dist/edge/cloudflare/index.ts`（Cloudflare）
 - `dist/infra/*.tf.json` — WAF / geo / IP / CloudFront 設定 / origin タイムアウト
+
+`build` では top-level の `extends` をサポートします。
+
+- 選択したポリシーが別ポリシーを継承し、共通設定を再利用できます。
+- `extends` は子ポリシーからの相対パスで解決されます。
+- マージはオブジェクトは深い階層で子優先、配列は親→子の順で append です。
+- スカラー置換は親サブツリーを上書きし、inheritance は `child` → `parent` → `grandparent` のような連鎖も有効です。
+
+## `playground`
+
+```bash
+npx cdn-security playground                                      # 組み込みのサンプルケースを AWS+Cloudflare で実行
+npx cdn-security playground --target aws --json                   # JSON 形式で結果を取得
+npx cdn-security playground --policy policy/security.yml -f cases.json
+npx cdn-security playground --allow-placeholder-token --target all  # INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN を許可
+```
+
+`playground` は指定ポリシーを一時ディレクトリへコンパイルし、生成された runtime で fixture を実行します。各 fixture ごとに `pass|block`、HTTP `status`、`block_reason`、対象 target（`aws` / `cloudflare`）を出力します。
+
+入力形式:
+
+- `--fixture <path>` は以下のいずれかを受け取れます。
+  - `{ "fixtures": [ ... ] }`
+  - `[ ... ]`
+  - `{ "request": { ... } }`
+- 各 fixture は以下を受け取れます。
+  - `method`
+  - `path`
+  - `query`（文字列またはオブジェクト）
+  - `headers`
+  - `body`
+
+fixture 例:
+
+```json
+{
+  "fixtures": [
+    { "name": "GET /", "request": { "method": "GET", "path": "/" } },
+    { "name": "PATCH blocked", "request": { "method": "PATCH", "path": "/" } },
+    { "name": "admin missing auth", "request": { "method": "GET", "path": "/admin", "headers": { "x-edge-token": "INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN" } } }
+  ]
+}
+```
+
+`--json` を指定すると、次のような machine-readable 出力になります。
+
+```json
+{
+  "policyPath": "/path/to/policy/security.yml",
+  "targets": [
+    {
+      "target": "aws",
+      "fixtures": [
+        {
+          "name": "GET /",
+          "decision": "pass",
+          "status": 200,
+          "block_reason": "",
+          "path": "/",
+          "method": "GET",
+          "query": ""
+        }
+      ]
+    }
+  ]
+}
+```
+
+## `analyze`
+
+```bash
+npx cdn-security analyze --input /path/to/monitor.jsonl
+npx cdn-security analyze --input /path/to/monitor.jsonl --min-count 3 --top 10 --json
+```
+
+`analyze` は監視モードの構造化ログ（JSONL）を受け取り、`block` / `monitor` / `pass` を集約して低頻度な block の候補を抽出し、監視から enforce への移行判断を支援します。
+
+対応オプション:
+
+- `--input`: `JSONL` のログファイルパス（必須）
+- `--min-count`: `block` 判定の低頻度しきい値（デフォルト `5`）
+- `--top`: ルート/サンプルの最大表示件数（デフォルト `20`）
+- `--json`: 機械可読 JSON を標準出力
+
+出力:
+
+- 全体サマリ（総行数 / パース可能行 / ブロック / monitor）
+- `block_reason` ごとの集計（対象 target / route）
+- `policy route` ごとの集計（`block_reason` / target）
+- `count <= --min-count` の低頻度 block候補（サンプルイベント付き）
 
 ## `emit-waf`
 
@@ -116,6 +209,7 @@ npx cdn-security doctor --no-report                   # JSON レポートを生�
 npx cdn-security readiness
 npx cdn-security readiness --target cloudflare
 npx cdn-security readiness --strict
+npx cdn-security readiness --fail-on-weak-waf-baseline
 npx cdn-security readiness --json
 npx cdn-security readiness --report readiness-report.json
 ```
@@ -123,6 +217,10 @@ npx cdn-security readiness --report readiness-report.json
 選択した policy に対して、本番向けのリリースゲートを実行します。環境診断と policy validation を再利用し、そのうえで risk level、enforce mode、HTTP method 制限、レスポンスヘッダー、WAF rate limit、managed rule のカバレッジ、target 固有の未対応機能を確認します。
 
 `fail` finding が 1 件でもあれば exit `1` です。`--strict` では warning finding も失敗扱いになります。`--json` は stdout に JSON を出力し、`--report <path>` は人間向け summary を出しつつ同じ machine-readable report をファイルに書き出します。
+
+starter policy はローカルで使えるままにしつつ、本番 CI では弱い WAF posture を止めたい場合は `--fail-on-weak-waf-baseline` を使います。この flag は WAF baseline finding を `fail` に昇格します。対象は WAF 設定なし、rate limit なし、AWS managed rule の signal coverage 不足、`firewall.waf.scope: CLOUDFRONT` で CloudFront WAF logging が無効な場合です。
+
+readiness report には read-only の `wafRecommendations` も含まれます。この engine は policy から `spa-static-site`、`rest-api`、`admin-panel`、`microservice-origin` の posture を推定し、managed WAF rule group と関連設定を、rationale、cost notes、false-positive notes、AWS / Cloudflare target support 付きで提案します。policy は変更しません。推奨の適用は別 change として手動で行ってください。
 
 ## `capabilities`
 
@@ -158,6 +256,23 @@ npx cdn-security explain --policy policy/security.yml
 ```
 
 ポリシーのスキーマ、モード、許可メソッド、リクエスト制限、host / route の姿勢、認証ゲート、WAF 設定、レスポンスヘッダーを要約表示します。読み取り専用なので、コードレビュー、運用 Runbook、Issue 調査に使えます。
+
+## `visualize`
+
+```bash
+npx cdn-security visualize
+npx cdn-security visualize --policy policy/security.yml --target aws
+npx cdn-security visualize --policy policy/security.yml --target all --format mermaid
+npx cdn-security visualize --policy policy/security.yml --target cloudflare --format html --out policy-coverage.html
+```
+
+ポリシーの層、ルート、認証ゲート、WAF 対応、レスポンス設定を deterministic なフロー図として出力します。
+
+- Edge / WAF / Origin / Response のレイヤーを可視化
+- ルートと auth gate の要約
+- target ごとの制御状態（enforce / monitor / target-specific / unsupported）
+
+`--format mermaid` は標準出力へ Mermaid テキストを出すため、CI でブラウザランタイム不要です。`--format html` は同じ図を静的 HTML にし、ブラウザ閲覧時に mermaid を描画します。
 
 ## `diff`
 
