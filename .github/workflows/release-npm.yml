@@ -53,10 +53,10 @@ jobs:
             v*) ;;
             *) echo "Release tag must start with v. Got: $TAG_NAME"; exit 1 ;;
           esac
-          git fetch origin main develop
+          git fetch origin main
           TAG_COMMIT="$(git rev-list -n 1 "$TAG_NAME")"
-          if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main && ! git merge-base --is-ancestor "$TAG_COMMIT" origin/develop; then
-            echo "Release tag $TAG_NAME is not reachable from origin/main or origin/develop."
+          if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main; then
+            echo "Release tag $TAG_NAME is not reachable from origin/main."
             exit 1
           fi
           TAG_VERSION="${TAG_NAME#v}"

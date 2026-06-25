@@ -117,7 +117,7 @@ function renderEn() {
   lines.push('npx cdn-security build --target cloudflare --fail-on-waf-approximation');
   lines.push('```');
   lines.push('');
-  lines.push('Exits non-zero when any `APPROXIMATE` or `UNSUPPORTED` entry is touched by the compiled policy. Use this gate in `main`-branch pipelines; keep the default (warn-only) for development branches.');
+  lines.push('Exits non-zero when any `APPROXIMATE` or `UNSUPPORTED` entry is touched by the compiled policy. Use this gate in `main`-branch release pipelines; keep the default (warn-only) for local feature-branch builds.');
   lines.push('');
   lines.push('## Updating this document');
   lines.push('');
@@ -213,7 +213,7 @@ function renderJa() {
   lines.push('npx cdn-security build --target cloudflare --fail-on-waf-approximation');
   lines.push('```');
   lines.push('');
-  lines.push('コンパイル対象のポリシーが `APPROXIMATE` か `UNSUPPORTED` に触れていると非ゼロで終了します。`main` ブランチのパイプラインではこのゲートを有効化し、開発ブランチではデフォルト（警告のみ）のままで運用するのが推奨です。');
+  lines.push('コンパイル対象のポリシーが `APPROXIMATE` か `UNSUPPORTED` に触れていると非ゼロで終了します。`main` ブランチのリリースパイプラインではこのゲートを有効化し、ローカルの feature ブランチビルドではデフォルト（警告のみ）のままで運用するのが推奨です。');
   lines.push('');
   lines.push('## 更新手順');
   lines.push('');

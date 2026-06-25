@@ -81,7 +81,7 @@ npm run benchmark:compiler -- --measure-install --iterations 5 --policy policy/b
 
 ## CI
 
-GitHub Actions workflow `.github/workflows/policy-lint.yml` runs the default quality gate on push/PR to `main` and `develop`:
+GitHub Actions workflow `.github/workflows/policy-lint.yml` runs the default quality gate on push/PR to `main`:
 
 1. policy lint (base + all profiles)
 2. build (AWS + Cloudflare)

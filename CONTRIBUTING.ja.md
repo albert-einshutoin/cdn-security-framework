@@ -14,10 +14,12 @@
 
 ### コード・ドキュメント
 
-1. リポジトリを **Fork** し、`develop` からブランチを作成（例: `fix/admin-gate`, `docs/quickstart`）。
+このプロジェクトは GitHub Flow で運用します。`main` をリリース可能な統合ブランチとし、すべての変更は短命の feature / fix / docs ブランチから Pull Request で取り込みます。
+
+1. リポジトリを **Fork** し、`main` からブランチを作成（例: `fix/admin-gate`, `docs/quickstart`）。
 2. **変更**は小さく分けたコミットで行ってください。`.ja` が付かないファイルとコード内コメントは **英語**、`.ja` ファイルには **日本語** のみ記載してください。
 3. **手動でテスト**: 変更したランタイム（CloudFront Functions のコンソール、Workers の `wrangler dev` など）で動作確認してください。
-4. **Pull Request** を `develop` 向けに作成し、短い説明と、あれば Issue へのリンクを書いてください。
+4. **Pull Request** を `main` 向けに作成し、短い説明と、あれば Issue へのリンクを書いてください。
 
 ---
 
@@ -41,12 +43,12 @@ PR 作成前に、次のチェックがローカルで通ることを確認し�
 6. `npm run test:drift`
 7. `npm run test:security-baseline`
 
-GitHub Actions でも、`develop` への push/PR で同じゲートを実行します。
+GitHub Actions でも、`main` への push/PR で同じゲートを実行します。
 
 リリースはタグで自動化しています:
 
 1. `package.json` の version を更新
-2. リリースブランチへコミット/プッシュ
+2. リリースコミットを `main` にマージ
 3. `vX.Y.Z` タグを push
 4. `.github/workflows/release-npm.yml` が品質ゲートを実行し、成功時のみ npm 公開
 

@@ -81,7 +81,7 @@ npm run benchmark:compiler -- --measure-install --iterations 5 --policy policy/b
 
 ## CI
 
-`.github/workflows/policy-lint.yml` は `main` / `develop` への push・PR 時に品質ゲートを実行します。
+`.github/workflows/policy-lint.yml` は `main` への push・PR 時に品質ゲートを実行します。
 
 1. policy lint（base + 全プロファイル）
 2. build（AWS + Cloudflare）
