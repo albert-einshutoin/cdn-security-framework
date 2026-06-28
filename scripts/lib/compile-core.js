@@ -6,6 +6,7 @@ const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, 
 const { clampNumber, normalizeStringList, numberOr, } = require('./value-normalize');
 const { DEFAULT_ADMIN_PATH_PREFIXES, DEFAULT_ALLOW_METHODS, DEFAULT_CLEAR_SITE_DATA_TYPES, DEFAULT_CSP_ADMIN, DEFAULT_CSP_PUBLIC, DEFAULT_DROP_QUERY_KEYS, DEFAULT_REQUIRED_HEADERS, DEFAULT_SECURITY_HEADERS, DEFAULT_UA_DENY_CONTAINS, JWKS_DEFAULTS, JWT_CLOCK_SKEW, LIMITS_DEFAULTS, } = require('./policy-defaults');
 const { parseArgs: parseArgsIo, hasFlag, loadPolicy: loadPolicyIo, loadPolicyWithWarnings, reportPolicyWarnings, reportPolicyLoadError, } = require('./policy-io');
+const { errorMessage, isErrnoException, PolicyValidationError, } = require('./errors');
 const repoRoot = path.join(__dirname, '..', '..');
 const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
 const LEGACY_KNOWN_MAP = {
@@ -40,7 +41,7 @@ function compileRegexOrThrow(source, context) {
         return new RegExp(pattern, flags);
     }
     catch (e) {
-        throw new Error(`Invalid regex in ${context}: ${source} — ${e.message}`);
+        throw new Error(`Invalid regex in ${context}: ${source} — ${errorMessage(e)}`);
     }
 }
 // Catch the classic `(a+)+` / `([^x]+)*` / `(a|a)+` family: a group that itself
@@ -321,9 +322,7 @@ function validateAuthGates(policy, options = {}) {
         errors.forEach((e) => logger.error('  -', e));
         process.exit(1);
     }
-    const error = new Error('Auth gate validation failed');
-    error.validationErrors = errors;
-    throw error;
+    throw new PolicyValidationError('Auth gate validation failed', errors);
 }
 const PLACEHOLDER_TOKEN = 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
 function getAuthGates(policy, options = {}) {
@@ -440,9 +439,7 @@ function validateOriginAuth(policy, options = {}) {
     if (errors.length > 0 && strict) {
         logger.error('origin-auth validation failed (--strict-origin-auth):');
         errors.forEach((e) => logger.error('  - ' + e));
-        const err = new Error('origin-auth validation failed');
-        err.validationErrors = errors;
-        throw err;
+        throw new PolicyValidationError('origin-auth validation failed', errors);
     }
     return { warnings, errors };
 }
@@ -821,7 +818,7 @@ function main(argv = process.argv.slice(2)) {
     try {
         validateOriginAuth(policy, { strict: strictOriginAuth });
     }
-    catch (e) {
+    catch (_e) {
         process.exit(1);
     }
     try {
@@ -833,11 +830,11 @@ function main(argv = process.argv.slice(2)) {
         }
     }
     catch (e) {
-        if (e.code === 'ENOENT') {
+        if (isErrnoException(e) && e.code === 'ENOENT') {
             console.error('Error: template not found:', e.path);
             process.exit(1);
         }
-        console.error('Error:', e.message);
+        console.error('Error:', errorMessage(e));
         process.exit(1);
     }
 }

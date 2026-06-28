@@ -24,6 +24,7 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { defaultPolicyPath, defaultOutDir, parseArgs, parseCompilerArgs, hasFlag, loadPolicy, loadPolicyWithWarnings, reportPolicyWarnings, reportPolicyLoadError, } = require('./lib/policy-io');
+const { isErrnoException } = require('./lib/errors');
 function test(name, fn) {
     try {
         fn();
@@ -31,7 +32,7 @@ function test(name, fn) {
     }
     catch (e) {
         console.error('FAIL:', name);
-        console.error(e && e.stack ? e.stack : e);
+        console.error(e instanceof Error && e.stack ? e.stack : String(e));
         process.exitCode = 1;
     }
 }
@@ -376,6 +377,7 @@ test('loadPolicy throws an Error with code ENOENT for a missing file', () => {
             caught = e;
         }
         assert.ok(caught, 'expected loadPolicy to throw for missing file');
+        assert.ok(isErrnoException(caught));
         assert.strictEqual(caught.code, 'ENOENT');
         assert.ok(/policy file not found/.test(caught.message), `expected "policy file not found" prefix, got: ${caught.message}`);
     }
@@ -395,6 +397,7 @@ test('loadPolicyWithWarnings throws an Error with code ENOENT for a missing file
             caught = e;
         }
         assert.ok(caught, 'expected loadPolicyWithWarnings to throw for missing file');
+        assert.ok(isErrnoException(caught));
         assert.strictEqual(caught.code, 'ENOENT');
     }
     finally {
@@ -422,8 +425,7 @@ test('reportPolicyWarnings preserves compile-core header when no policy path is 
 test('reportPolicyLoadError prints file-not-found errors with the friendly policy path', () => {
     const lines = [];
     const logger = { error: (...args) => lines.push(args.map(String).join(' ')) };
-    const err = new Error('policy file not found: missing.yml');
-    err.code = 'ENOENT';
+    const err = Object.assign(new Error('policy file not found: missing.yml'), { code: 'ENOENT' });
     reportPolicyLoadError('missing.yml', err, logger);
     assert.deepStrictEqual(lines, ['Error: policy file not found: missing.yml']);
 });

@@ -6,6 +6,7 @@ exports.validatePolicy = validatePolicy;
 const fs = require('fs');
 const path = require('path');
 const Ajv = require('ajv');
+const errors_1 = require("../scripts/lib/errors");
 const { validateAuthGates, parsePathPatterns, } = require('../scripts/lib/compile-core');
 const DEFAULT_PKG_ROOT = path.join(__dirname, '..');
 function formatAjvErrors(errors = []) {
@@ -46,10 +47,9 @@ function validatePolicy(opts) {
         schema = JSON.parse(fs.readFileSync(path.join(pkgRoot, 'policy', 'schema.json'), 'utf8'));
     }
     catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
         return {
             ok: false,
-            errors: [`failed to load schema: ${message}`],
+            errors: [`failed to load schema: ${(0, errors_1.errorMessage)(e)}`],
             warnings,
         };
     }
@@ -72,8 +72,7 @@ function validatePolicy(opts) {
         }
     }
     catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
-        errors.push(`  - request.block.path_patterns: ${message}`);
+        errors.push(`  - request.block.path_patterns: ${(0, errors_1.errorMessage)(e)}`);
     }
     try {
         validateAuthGates(policy, {
@@ -82,16 +81,12 @@ function validatePolicy(opts) {
         });
     }
     catch (e) {
-        if (e &&
-            typeof e === 'object' &&
-            'validationErrors' in e &&
-            Array.isArray(e.validationErrors)) {
+        if ((0, errors_1.isPolicyValidationError)(e)) {
             errors.push('Auth gate validation failed:');
             e.validationErrors.forEach((msg) => errors.push('  - ' + msg));
         }
         else {
-            const message = e instanceof Error ? e.message : String(e);
-            errors.push('Auth gate validation error: ' + message);
+            errors.push('Auth gate validation error: ' + (0, errors_1.errorMessage)(e));
         }
     }
     const waf = (policy && policy.firewall && policy.firewall.waf) || {};

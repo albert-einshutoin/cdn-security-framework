@@ -200,9 +200,9 @@ async function startAwsEdgeHarness() {
         'x-harness-edge-auth-stripped': String(edgeAuthStripped),
       });
       res.end('origin-ok');
-    } catch (e: any) {
+    } catch (e: unknown) {
       res.writeHead(500, { 'content-type': 'text/plain' });
-      res.end(e && e.stack ? e.stack : String(e));
+      res.end(e instanceof Error && e.stack ? e.stack : String(e));
     }
   });
 
@@ -310,7 +310,7 @@ function loadCloudflareWorker() {
   vm.createContext(sandbox);
   try {
     vm.runInContext(compileCloudflareWorker(), sandbox);
-  } catch (e: any) {
+  } catch (e: unknown) {
     if (logs.length) {
       console.error('[cloudflare-worker-sandbox] captured logs before crash:');
       for (const [level, msg] of logs) console.error(`  ${level}: ${msg}`);
@@ -354,9 +354,9 @@ async function startCloudflareEdgeHarness() {
       const body = await workerRes.text();
       res.writeHead(workerRes.status, Object.fromEntries(workerRes.headers.entries()));
       res.end(body);
-    } catch (e: any) {
+    } catch (e: unknown) {
       res.writeHead(500, { 'content-type': 'text/plain' });
-      res.end(e && e.stack ? e.stack : String(e));
+      res.end(e instanceof Error && e.stack ? e.stack : String(e));
     }
   });
 

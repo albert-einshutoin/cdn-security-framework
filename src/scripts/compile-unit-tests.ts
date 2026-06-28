@@ -46,14 +46,16 @@ const {
   renderConstObject,
   runtimeCode,
 } = require('./lib/template-inject');
+const { isPolicyValidationError } = require('./lib/errors') as typeof import('./lib/errors');
+type PolicyValidationError = InstanceType<typeof import('./lib/errors').PolicyValidationError>;
 
 function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('FAIL:', name);
-    console.error(e && e.stack ? e.stack : e);
+    console.error(e instanceof Error && e.stack ? e.stack : String(e));
     process.exitCode = 1;
   }
 }
@@ -531,7 +533,7 @@ test('validateAuthGates reports missing required auth fields', () => {
 
   assert.throws(
     () => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }),
-    (err: any) => Array.isArray(err.validationErrors)
+    (err: unknown) => isPolicyValidationError(err)
       && err.validationErrors.length === 3
       && err.validationErrors.some((e: string) => e.includes('broken-rs'))
       && err.validationErrors.some((e: string) => e.includes('broken-hs'))
@@ -547,7 +549,7 @@ test('validateAuthGates reports missing static_token env at build time', () => {
 
     assert.throws(
       () => validateAuthGates(policy, { exitOnError: false }),
-      (err: any) => Array.isArray(err.validationErrors)
+      (err: unknown) => isPolicyValidationError(err)
         && err.validationErrors.some((e: string) => e.includes('EDGE_ADMIN_TOKEN')),
     );
   });
@@ -761,14 +763,17 @@ test('validateAuthGates rejects allowed_algorithms that include an alg the verif
       },
     }],
   };
-  let caught;
+  let caught: unknown;
   try {
     validateAuthGates(policy, { exitOnError: false });
-  } catch (e: any) {
+  } catch (e: unknown) {
     caught = e;
   }
   assert.ok(caught, 'validateAuthGates should throw');
-  const detail = (caught.validationErrors || []).join('\n');
+  if (!isPolicyValidationError(caught)) {
+    assert.fail('expected PolicyValidationError');
+  }
+  const detail = (caught as PolicyValidationError).validationErrors.join('\n');
   assert.match(detail,
     /allowed_algorithms contains .*HS256.* but the gate only runs the "RS256" verifier/);
 });
@@ -944,7 +949,7 @@ test('validateAuthGates rejects jwks_url in private/loopback ranges', () => {
   };
   assert.throws(
     () => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }),
-    (err: any) => Array.isArray(err.validationErrors)
+    (err: unknown) => isPolicyValidationError(err)
       && err.validationErrors.some((e: string) => /metadata-ssrf/.test(e) && /private\/loopback/.test(e)),
   );
 });
@@ -961,7 +966,7 @@ test('validateAuthGates rejects jwks_url outside firewall.jwks.allowed_hosts', (
   };
   assert.throws(
     () => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }),
-    (err: any) => Array.isArray(err.validationErrors)
+    (err: unknown) => isPolicyValidationError(err)
       && err.validationErrors.some((e: string) => /wrong-idp/.test(e) && /allowed_hosts/.test(e)),
   );
 });
@@ -994,7 +999,7 @@ test('validateAuthGates requires jwks allowed_hosts when target cannot inspect D
       allowPlaceholderToken: true,
       requireJwksAllowedHosts: true,
     }),
-    (err: any) => Array.isArray(err.validationErrors)
+    (err: unknown) => isPolicyValidationError(err)
       && err.validationErrors.some((e: string) => /cloudflare-rs256/.test(e) && /allowed_hosts/.test(e)),
   );
 });

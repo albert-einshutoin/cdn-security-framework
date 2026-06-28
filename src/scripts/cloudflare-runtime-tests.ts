@@ -19,9 +19,9 @@ async function runTests() {
   try {
       await t.fn();
       console.log('OK:', t.name);
-  } catch (e: any) {
-      console.error('FAIL:', t.name);
-    console.error(e && e.stack ? e.stack : e);
+  } catch (e: unknown) {
+    console.error('FAIL:', t.name);
+    console.error(e instanceof Error && e.stack ? e.stack : String(e));
     process.exitCode = 1;
   }
   }
@@ -728,7 +728,7 @@ routes:
       audience: test
       allowed_algorithms: ["HS256"]
 `);
-  } catch (e: any) {
+  } catch (e: unknown) {
     caught = e;
   }
   assert.ok(caught, 'expected compile-cloudflare to fail validation');
@@ -853,7 +853,7 @@ response_dlp:
       - name: bad
         pattern: "^(a+)+$"
 `);
-  } catch (e: any) {
+  } catch (e: unknown) {
     caught = e;
   }
   assert.ok(caught, 'expected compile-cloudflare to reject nested quantifier custom regex');

@@ -33,6 +33,11 @@ const {
   reportPolicyWarnings,
   reportPolicyLoadError,
 } = require('./policy-io');
+const {
+  errorMessage,
+  isErrnoException,
+  PolicyValidationError,
+} = require('./errors') as typeof import('./errors');
 
 const repoRoot = path.join(__dirname, '..', '..');
 const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
@@ -71,8 +76,8 @@ function compileRegexOrThrow(source: string, context: string) {
   const { pattern, flags } = extractRegex(source);
   try {
     return new RegExp(pattern, flags);
-  } catch (e: any) {
-    throw new Error(`Invalid regex in ${context}: ${source} — ${e.message}`);
+  } catch (e: unknown) {
+    throw new Error(`Invalid regex in ${context}: ${source} — ${errorMessage(e)}`);
   }
 }
 
@@ -358,9 +363,7 @@ function validateAuthGates(policy: any, options: any = {}) {
     process.exit(1);
   }
 
-  const error: any = new Error('Auth gate validation failed');
-  error.validationErrors = errors;
-  throw error;
+  throw new PolicyValidationError('Auth gate validation failed', errors);
 }
 
 const PLACEHOLDER_TOKEN = 'INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN';
@@ -493,9 +496,7 @@ function validateOriginAuth(policy: any, options: any = {}) {
   if (errors.length > 0 && strict) {
     logger.error('origin-auth validation failed (--strict-origin-auth):');
     errors.forEach((e) => logger.error('  - ' + e));
-    const err: any = new Error('origin-auth validation failed');
-    err.validationErrors = errors;
-    throw err;
+    throw new PolicyValidationError('origin-auth validation failed', errors);
   }
   return { warnings, errors };
 }
@@ -911,7 +912,7 @@ function main(argv: string[] = process.argv.slice(2)) {
     const parsed = loadPolicyWithWarnings(policyPath);
     policy = parsed.policy;
     policyWarnings = parsed.warnings;
-  } catch (e: any) {
+  } catch (e: unknown) {
     reportPolicyLoadError(policyPath, e);
     process.exit(1);
   }
@@ -934,7 +935,7 @@ function main(argv: string[] = process.argv.slice(2)) {
 
   try {
     validateOriginAuth(policy, { strict: strictOriginAuth });
-  } catch (e: any) {
+  } catch (_e: unknown) {
     process.exit(1);
   }
 
@@ -945,12 +946,12 @@ function main(argv: string[] = process.argv.slice(2)) {
     if (allowPlaceholderToken) {
       console.error('[WARN] Built with --allow-placeholder-token. Generated artifacts are NOT safe for production.');
     }
-  } catch (e: any) {
-    if (e.code === 'ENOENT') {
+  } catch (e: unknown) {
+    if (isErrnoException(e) && e.code === 'ENOENT') {
       console.error('Error: template not found:', e.path);
       process.exit(1);
     }
-    console.error('Error:', e.message);
+    console.error('Error:', errorMessage(e));
     process.exit(1);
   }
 }

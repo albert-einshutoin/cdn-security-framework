@@ -52,6 +52,9 @@ const {
   reportPolicyWarnings,
   reportPolicyLoadError,
 } = require('./lib/policy-io');
+const {
+  isErrnoException,
+} = require('./lib/errors') as typeof import('./lib/errors');
 
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
@@ -64,7 +67,7 @@ try {
   const parsed = loadPolicyWithWarnings(policyPath);
   reportPolicyWarnings(parsed.warnings || [], policyPath);
   policy = parsed.policy;
-} catch (e: any) {
+} catch (e: unknown) {
   reportPolicyLoadError(policyPath, e);
   process.exit(1);
 }
@@ -332,8 +335,8 @@ const templatePath = path.join(repoRoot, 'templates', 'cloudflare', 'index.ts');
 let code;
 try {
   code = fs.readFileSync(templatePath, 'utf8');
-} catch (e: any) {
-  if (e.code === 'ENOENT') {
+} catch (e: unknown) {
+  if (isErrnoException(e) && e.code === 'ENOENT') {
     console.error('Error: template not found:', templatePath);
     process.exit(1);
   }

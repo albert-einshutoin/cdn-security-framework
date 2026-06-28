@@ -12,6 +12,7 @@ const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, 
 const { clampNumber, normalizeStringList, numberOr, } = require('./lib/value-normalize');
 const { DEFAULT_ADMIN_PATH_PREFIXES, DEFAULT_ALLOW_METHODS, DEFAULT_CLEAR_SITE_DATA_TYPES, DEFAULT_CSP_ADMIN, DEFAULT_CSP_PUBLIC, DEFAULT_DROP_QUERY_KEYS, DEFAULT_REQUIRED_HEADERS, DEFAULT_SECURITY_HEADERS, DEFAULT_UA_DENY_CONTAINS, JWKS_DEFAULTS, JWT_CLOCK_SKEW, LIMITS_DEFAULTS, } = require('./lib/policy-defaults');
 const { parseArgs, loadPolicyWithWarnings, reportPolicyWarnings, reportPolicyLoadError, } = require('./lib/policy-io');
+const { isErrnoException, } = require('./lib/errors');
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
 const { policyPath, outDir } = parseArgs(argv, repoRoot);
@@ -259,7 +260,7 @@ try {
     code = fs.readFileSync(templatePath, 'utf8');
 }
 catch (e) {
-    if (e.code === 'ENOENT') {
+    if (isErrnoException(e) && e.code === 'ENOENT') {
         console.error('Error: template not found:', templatePath);
         process.exit(1);
     }
