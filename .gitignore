@@ -37,3 +37,5 @@ doctor-report.json
 
 # Local dev override — users copy a profile here; never check it in
 policy/security.yml
+
+.takt/
