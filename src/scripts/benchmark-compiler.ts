@@ -1,16 +1,16 @@
 #!/usr/bin/env node
-"use strict";
+'use strict';
 
-const { accessSync, constants, mkdirSync, rmSync, writeFileSync, mkdtempSync } = require("node:fs");
-const { performance } = require("node:perf_hooks");
-const { tmpdir } = require("node:os");
-const { spawnSync } = require("node:child_process");
-const path = require("node:path");
-const process = require("node:process");
+const { accessSync, constants, mkdirSync, rmSync, writeFileSync, mkdtempSync } = require('node:fs');
+const { performance } = require('node:perf_hooks');
+const { tmpdir } = require('node:os');
+const { spawnSync } = require('node:child_process');
+const path = require('node:path');
+const process = require('node:process');
 
 const DEFAULT_ITERATIONS = 8;
 const DEFAULT_WARMUP = 1;
-const DEFAULT_POLICY = "policy/base.yml";
+const DEFAULT_POLICY = 'policy/base.yml';
 const DEFAULT_INSTALL_BENCHMARKS = 1;
 const USAGE = `Usage:
   node scripts/benchmark-compiler.js [options]
@@ -27,7 +27,36 @@ Options:
   --keep-output          Keep compiled outputs in --out-dir
   --help                Show this help\n`;
 
-function parseIntArg(value, label, minimum = 1) {
+interface BenchmarkOptions {
+  policyPath: string;
+  iterations: number;
+  warmup: number;
+  measureInstall: boolean;
+  allowPlaceholderToken: boolean;
+  installIterations: number;
+  output: string;
+  outDir: string;
+  keepOutput: boolean;
+  help?: boolean;
+}
+
+interface SampleSummary {
+  count: number;
+  min: number;
+  max: number;
+  mean: number;
+  p50: number;
+  p95: number;
+}
+
+interface CommandResult {
+  elapsedMs: number;
+  maxRssBytes: number | null;
+  stdout: string;
+  stderr: string;
+}
+
+function parseIntArg(value: string, label: string, minimum = 1): number {
   const parsed = Number.parseInt(value, 10);
   if (!Number.isFinite(parsed) || parsed < minimum) {
     throw new Error(`Invalid ${label}: ${value}`);
@@ -35,58 +64,58 @@ function parseIntArg(value, label, minimum = 1) {
   return parsed;
 }
 
-function parseArgs(argv) {
-  const options = {
+function parseArgs(argv: string[]): BenchmarkOptions {
+  const options: BenchmarkOptions = {
     policyPath: DEFAULT_POLICY,
     iterations: DEFAULT_ITERATIONS,
     warmup: DEFAULT_WARMUP,
     measureInstall: false,
     allowPlaceholderToken: false,
     installIterations: DEFAULT_INSTALL_BENCHMARKS,
-    output: "",
-    outDir: "",
+    output: '',
+    outDir: '',
     keepOutput: false,
   };
 
   for (let i = 0; i < argv.length; i += 1) {
     const arg = argv[i];
-    if (arg === "--policy") {
+    if (arg === '--policy') {
       options.policyPath = argv[++i];
       continue;
     }
-    if (arg === "--iterations") {
-      options.iterations = parseIntArg(argv[++i], "--iterations");
+    if (arg === '--iterations') {
+      options.iterations = parseIntArg(argv[++i], '--iterations');
       continue;
     }
-    if (arg === "--warmup") {
-      options.warmup = parseIntArg(argv[++i], "--warmup", 0);
+    if (arg === '--warmup') {
+      options.warmup = parseIntArg(argv[++i], '--warmup', 0);
       continue;
     }
-    if (arg === "--measure-install") {
+    if (arg === '--measure-install') {
       options.measureInstall = true;
       continue;
     }
-    if (arg === "--allow-placeholder-token") {
+    if (arg === '--allow-placeholder-token') {
       options.allowPlaceholderToken = true;
       continue;
     }
-    if (arg === "--install-iterations") {
-      options.installIterations = parseIntArg(argv[++i], "--install-iterations");
+    if (arg === '--install-iterations') {
+      options.installIterations = parseIntArg(argv[++i], '--install-iterations');
       continue;
     }
-    if (arg === "--output") {
+    if (arg === '--output') {
       options.output = argv[++i];
       continue;
     }
-    if (arg === "--out-dir") {
+    if (arg === '--out-dir') {
       options.outDir = argv[++i];
       continue;
     }
-    if (arg === "--keep-output") {
+    if (arg === '--keep-output') {
       options.keepOutput = true;
       continue;
     }
-    if (arg === "--help" || arg === "-h") {
+    if (arg === '--help' || arg === '-h') {
       options.help = true;
       continue;
     }
@@ -96,22 +125,25 @@ function parseArgs(argv) {
   return options;
 }
 
-function detectTimeCommand() {
-  const base = process.platform === "darwin" ? "-l" : "-v";
+function detectTimeCommand(): { command: string; args: string[] } | null {
+  const base = process.platform === 'darwin' ? '-l' : '-v';
   try {
-    accessSync("/usr/bin/time", constants.X_OK);
-    return { command: "/usr/bin/time", args: [base] };
+    accessSync('/usr/bin/time', constants.X_OK);
+    return { command: '/usr/bin/time', args: [base] };
   } catch {
     return null;
   }
 }
 
-function parseMaxRssBytes(raw) {
+function parseMaxRssBytes(raw: string | undefined | null): number | null {
   if (!raw) return null;
-  const candidates = [
+  const candidates: Array<{ regex: RegExp; scale: number }> = [
     { regex: /\s*([0-9]+(?:\.[0-9]+)?)\s+maximum resident set size/i, scale: 1 },
     { regex: /maximum resident set size\s*:\s*([0-9]+(?:\.[0-9]+)?)\s+bytes/i, scale: 1 },
-    { regex: /maximum resident set size\s*\(\s*kbytes?\s*\)\s*:\s*([0-9]+(?:\.[0-9]+)?)/i, scale: 1024 },
+    {
+      regex: /maximum resident set size\s*\(\s*kbytes?\s*\)\s*:\s*([0-9]+(?:\.[0-9]+)?)/i,
+      scale: 1024,
+    },
     { regex: /maximum resident set size[^:]*:\s*([0-9]+(?:\.[0-9]+)?)\s*kbytes?/i, scale: 1024 },
     { regex: /maximum resident set size[^:]*:\s*([0-9]+(?:\.[0-9]+)?)/i, scale: 1 },
   ];
@@ -126,9 +158,9 @@ function parseMaxRssBytes(raw) {
   return null;
 }
 
-function runCommand(command, args, cwd) {
+function runCommand(command: string, args: string[], cwd?: string): CommandResult {
   const timeCommand = detectTimeCommand();
-  const commandArgs = [];
+  const commandArgs: string[] = [];
   let launch = command;
   let timeWrapped = false;
   if (timeCommand) {
@@ -142,12 +174,12 @@ function runCommand(command, args, cwd) {
   const startWall = performance.now();
   const result = spawnSync(launch, commandArgs, {
     cwd: cwd || process.cwd(),
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "pipe"],
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
     maxBuffer: 20 * 1024 * 1024,
     env: {
       ...process.env,
-      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ""} ${process.platform === "win32" ? "" : "--no-warnings"}`.trim(),
+      NODE_OPTIONS: `${process.env.NODE_OPTIONS || ''} ${process.platform === 'win32' ? '' : '--no-warnings'}`.trim(),
     },
   });
   const elapsedMs = performance.now() - startWall;
@@ -157,21 +189,21 @@ function runCommand(command, args, cwd) {
   }
   if (result.status !== 0) {
     throw new Error(
-      `Command failed: ${command} ${args.join(" ")}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
+      `Command failed: ${command} ${args.join(' ')}\nstdout: ${result.stdout}\nstderr: ${result.stderr}`,
     );
   }
 
-  const outputForParse = timeWrapped ? result.stderr : "";
+  const outputForParse = timeWrapped ? result.stderr : '';
   const maxRssBytes = timeWrapped ? parseMaxRssBytes(outputForParse) : null;
   return {
     elapsedMs,
     maxRssBytes,
-    stdout: result.stdout || "",
-    stderr: result.stderr || "",
+    stdout: result.stdout || '',
+    stderr: result.stderr || '',
   };
 }
 
-function summarizeSamples(values) {
+function summarizeSamples(values: number[]): SampleSummary {
   if (values.length === 0) return { count: 0, min: 0, max: 0, mean: 0, p50: 0, p95: 0 };
   const sorted = [...values].sort((a, b) => a - b);
   const sum = sorted.reduce((acc, value) => acc + value, 0);
@@ -185,20 +217,21 @@ function summarizeSamples(values) {
   };
 }
 
-function formatMs(value) {
+function formatMs(value: number): string {
   return `${Math.round(value)}ms`;
 }
 
-function ensureDir(p) {
+function ensureDir(p: string): void {
   mkdirSync(p, { recursive: true });
 }
 
-function main() {
-  let options;
+function main(): void {
+  let options!: BenchmarkOptions;
   try {
     options = parseArgs(process.argv.slice(2));
-  } catch (error) {
-    console.error(error.message);
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error(message);
     console.error(USAGE);
     process.exit(1);
   }
@@ -209,29 +242,29 @@ function main() {
   }
 
   if (options.warmup >= options.iterations) {
-    throw new Error("warmup must be less than iterations");
+    throw new Error('warmup must be less than iterations');
   }
   if (!options.outDir) {
-    options.outDir = mkdtempSync(path.join(tmpdir(), "cdn-security-compiler-bench-"));
+    options.outDir = mkdtempSync(path.join(tmpdir(), 'cdn-security-compiler-bench-'));
   }
   ensureDir(options.outDir);
   const projectRoot = process.cwd();
   const policyPath = path.join(projectRoot, options.policyPath);
-  const compileSamples = [];
-  const compileMemory = [];
+  const compileSamples: number[] = [];
+  const compileMemory: number[] = [];
 
   for (let i = 0; i < options.iterations; i += 1) {
-    const runDir = path.join(options.outDir, `run-${String(i + 1).padStart(3, "0")}`);
+    const runDir = path.join(options.outDir, `run-${String(i + 1).padStart(3, '0')}`);
     mkdirSync(runDir, { recursive: true });
     const result = runCommand(
-      "node",
+      'node',
       [
-        path.join(projectRoot, "scripts", "compile.js"),
-        "--policy",
+        path.join(projectRoot, 'scripts', 'compile.js'),
+        '--policy',
         policyPath,
-        "--out-dir",
+        '--out-dir',
         runDir,
-        ...(options.allowPlaceholderToken ? ["--allow-placeholder-token"] : []),
+        ...(options.allowPlaceholderToken ? ['--allow-placeholder-token'] : []),
       ],
       projectRoot,
     );
@@ -249,11 +282,15 @@ function main() {
     memoryBytes: compileMemory.length > 0 ? summarizeSamples(compileMemory) : null,
   };
 
-  let installReport = null;
+  let installReport: { runs: number; summary: SampleSummary } | null = null;
   if (options.measureInstall) {
-    const installSamples = [];
+    const installSamples: number[] = [];
     for (let i = 0; i < options.installIterations; i += 1) {
-      const result = runCommand("npm", ["ci", "--ignore-scripts", "--no-audit", "--no-fund"], projectRoot);
+      const result = runCommand(
+        'npm',
+        ['ci', '--ignore-scripts', '--no-audit', '--no-fund'],
+        projectRoot,
+      );
       installSamples.push(result.elapsedMs);
     }
     installReport = {
@@ -281,7 +318,7 @@ function main() {
     install: installReport,
   };
 
-  console.log("=== cdn-security compiler benchmark ===");
+  console.log('=== cdn-security compiler benchmark ===');
   console.log(`Node ${report.environment.node} on ${report.environment.platform}/${report.environment.arch}`);
   console.log(`Policy: ${report.benchmarkInput.policyPath}`);
   console.log(`Iterations: ${options.iterations} (warmup: ${options.warmup})`);
@@ -297,15 +334,17 @@ function main() {
         `max ${Math.round(compileSummary.memoryBytes.max / 1024 / 1024)}`,
     );
   } else {
-    console.log("Install / time-command metrics for RSS were not available in this environment.");
+    console.log('Install / time-command metrics for RSS were not available in this environment.');
   }
   if (installReport) {
-    console.log(`npm ci (ms): median ${formatMs(installReport.summary.p50)} | mean ${formatMs(installReport.summary.mean)}`);
+    console.log(
+      `npm ci (ms): median ${formatMs(installReport.summary.p50)} | mean ${formatMs(installReport.summary.mean)}`,
+    );
   }
 
   const output = JSON.stringify(report, null, 2);
   if (options.output) {
-    writeFileSync(options.output, `${output}\n`, "utf8");
+    writeFileSync(options.output, `${output}\n`, 'utf8');
     console.log(`Report written: ${options.output}`);
   } else {
     console.log(output);
