@@ -22,6 +22,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
 const { defaultPolicyPath } = require('./lib/policy-io');
+const { errorMessage } = require('./lib/errors');
 const CHECK_NODE_VERSION = 'node_version';
 const CHECK_POLICY_EXISTS = 'policy_exists';
 const CHECK_POLICY_PARSES = 'policy_parses';
@@ -84,7 +85,7 @@ function tryParsePolicy(policyPath) {
         return { ok: true, doc };
     }
     catch (e) {
-        return { ok: false, error: e.message };
+        return { ok: false, error: errorMessage(e) };
     }
 }
 function checkPolicyParses(parseResult) {
@@ -167,7 +168,7 @@ function checkDistWritable(cwd) {
         return pass(CHECK_DIST_WRITABLE, `dist/edge/ is writable (${edgeDir}).`);
     }
     catch (e) {
-        return fail(CHECK_DIST_WRITABLE, `Cannot write to dist/edge/: ${e.message}. Check filesystem permissions — build will fail.`);
+        return fail(CHECK_DIST_WRITABLE, `Cannot write to dist/edge/: ${errorMessage(e)}. Check filesystem permissions — build will fail.`);
     }
 }
 function checkDependencies(cwd, spawnSyncImpl) {
@@ -188,7 +189,7 @@ function checkDependencies(cwd, spawnSyncImpl) {
         parsed = JSON.parse(res.stdout);
     }
     catch (e) {
-        return warn(CHECK_DEPENDENCIES, `Could not parse \`npm ls --json\` output: ${e.message}`);
+        return warn(CHECK_DEPENDENCIES, `Could not parse \`npm ls --json\` output: ${errorMessage(e)}`);
     }
     const problems = Array.isArray(parsed.problems) ? parsed.problems : [];
     if (problems.length > 0) {
@@ -252,7 +253,7 @@ function runDoctor(opts) {
         catch (e) {
             // A report-write failure must not mask the actual doctor result, but we
             // surface it on stderr so CI can notice.
-            console.error(`[doctor] failed to write report to ${resolved}: ${e.message}`);
+            console.error(`[doctor] failed to write report to ${resolved}: ${errorMessage(e)}`);
         }
     }
     if (!opts || opts.log !== false) {

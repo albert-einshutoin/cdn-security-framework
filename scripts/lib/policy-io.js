@@ -12,6 +12,7 @@ exports.reportPolicyLoadError = reportPolicyLoadError;
 const fs = require('fs');
 const path = require('path');
 const { parsePolicyFile } = require('../../parser');
+const { errorMessage, isErrnoException, } = require('./errors');
 /**
  * Resolve the default policy path under `rootDir`:
  *   `<rootDir>/policy/security.yml` if it exists, otherwise
@@ -143,15 +144,9 @@ function reportPolicyWarnings(warnings, policyPath, logger = console) {
     }
 }
 function reportPolicyLoadError(policyPath, error, logger = console) {
-    if (isErrorWithCode(error, 'ENOENT')) {
+    if (isErrnoException(error) && error.code === 'ENOENT') {
         logger.error('Error: policy file not found:', policyPath);
         return;
     }
     logger.error('Error: failed to parse policy YAML:', errorMessage(error));
-}
-function isErrorWithCode(error, code) {
-    return error instanceof Error && error.code === code;
-}
-function errorMessage(error) {
-    return error instanceof Error ? error.message : String(error);
 }

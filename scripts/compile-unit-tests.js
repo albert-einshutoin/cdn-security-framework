@@ -6,8 +6,10 @@ const fs = require('fs');
 const os = require('os');
 const path = require('path');
 const { DEFAULT_CONTAINS, parsePathPatterns, hasCatastrophicBacktrackShape, regexesLiteralCode, getAuthGates, validateAuthGates, validateJwksUrl, build, PLACEHOLDER_TOKEN, hasFailOnPermissiveFlag, warnIfPermissive, warnWeakAwsCspNonce, warnUnsupportedAwsResponseDlp, warnSignedUrlReplay, buildChallengeConfig, warnUnsupportedAwsChallenge, buildGraphqlGuardConfig, buildAnomalyGuardConfig, warnUnsupportedGraphqlGuard, validateOriginAuth, } = require('./lib/compile-core');
+const { findAdminCacheRoute, collectAuthProtectedPrefixes, buildAuthGateBase, buildResponseCfgBase, buildJwksCacheCfg, buildJwtGateConfig, buildSignedUrlGateConfig, buildRequestCfgBase, } = require('./lib/edge-cfg');
 const { DEFAULT_ADMIN_PATH_PREFIXES, DEFAULT_ALLOW_METHODS, DEFAULT_CLEAR_SITE_DATA_TYPES, DEFAULT_CSP_ADMIN, DEFAULT_CSP_PUBLIC, DEFAULT_DROP_QUERY_KEYS, DEFAULT_REQUIRED_HEADERS, DEFAULT_SECURITY_HEADERS, DEFAULT_UA_DENY_CONTAINS, JWKS_DEFAULTS, JWT_CLOCK_SKEW, LIMITS_DEFAULTS, } = require('./lib/policy-defaults');
 const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./lib/template-inject');
+const { isPolicyValidationError } = require('./lib/errors');
 function test(name, fn) {
     try {
         fn();
@@ -15,7 +17,7 @@ function test(name, fn) {
     }
     catch (e) {
         console.error('FAIL:', name);
-        console.error(e && e.stack ? e.stack : e);
+        console.error(e instanceof Error && e.stack ? e.stack : String(e));
         process.exitCode = 1;
     }
 }
@@ -39,6 +41,106 @@ function withEnv(key, value, fn) {
         }
     }
 }
+test('edge-cfg findAdminCacheRoute picks first auth or cache_control route', () => {
+    const routes = [
+        { name: 'public', match: { path_prefixes: ['/public'] } },
+        {
+            name: 'admin',
+            match: { path_prefixes: ['/admin', '/docs'] },
+            auth_gate: { type: 'static_token' },
+            response: { cache_control: 'private, max-age=60' },
+        },
+    ];
+    assert.deepStrictEqual(findAdminCacheRoute(routes), {
+        adminPathPrefixes: ['/admin', '/docs'],
+        adminCacheControl: 'private, max-age=60',
+    });
+    assert.deepStrictEqual(findAdminCacheRoute([]), {
+        adminPathPrefixes: DEFAULT_ADMIN_PATH_PREFIXES.slice(),
+        adminCacheControl: 'no-store',
+    });
+});
+test('edge-cfg collectAuthProtectedPrefixes unions gate prefixes', () => {
+    const prefixes = collectAuthProtectedPrefixes([
+        { protectedPrefixes: ['/admin', '/docs'] },
+        { protectedPrefixes: ['/api'] },
+        { protectedPrefixes: ['/admin'] },
+    ]);
+    assert.deepStrictEqual(prefixes, ['/admin', '/docs', '/api']);
+});
+test('edge-cfg buildAuthGateBase defaults admin prefixes when route has none', () => {
+    assert.deepStrictEqual(buildAuthGateBase({
+        name: 'admin',
+        match: {},
+        auth_gate: { type: 'static_token' },
+    }), {
+        name: 'admin',
+        protectedPrefixes: DEFAULT_ADMIN_PATH_PREFIXES.slice(),
+        type: 'static_token',
+    });
+});
+test('edge-cfg buildJwtGateConfig intersects allowed_algorithms with gate algorithm', () => {
+    const base = { name: 'api', protectedPrefixes: ['/api'], type: 'jwt' };
+    const cfg = buildJwtGateConfig({
+        algorithm: 'RS256',
+        allowed_algorithms: ['RS256', 'HS256'],
+        clock_skew_sec: 9999,
+        jwks_url: 'https://idp.example.com/jwks.json',
+    }, base);
+    assert.deepStrictEqual(cfg.allowed_algorithms, ['RS256']);
+    assert.strictEqual(cfg.clock_skew_sec, JWT_CLOCK_SKEW.max);
+    assert.strictEqual(cfg.jwks_url, 'https://idp.example.com/jwks.json');
+});
+test('edge-cfg buildSignedUrlGateConfig normalizes nonce_param whitespace', () => {
+    const base = { name: 'dl', protectedPrefixes: ['/download'], type: 'signed_url' };
+    const cfg = buildSignedUrlGateConfig({
+        nonce_param: '  n  ',
+        exact_path: true,
+    }, base);
+    assert.strictEqual(cfg.nonce_param, 'n');
+    assert.strictEqual(cfg.exact_path, true);
+});
+test('edge-cfg buildJwksCacheCfg clamps stale and negative cache seconds', () => {
+    const cfg = buildJwksCacheCfg({
+        firewall: {
+            jwks: {
+                stale_if_error_sec: 999999,
+                negative_cache_sec: 99999,
+            },
+        },
+    });
+    assert.strictEqual(cfg.staleIfErrorSec, JWKS_DEFAULTS.staleMax);
+    assert.strictEqual(cfg.negativeCacheSec, JWKS_DEFAULTS.negativeMax);
+});
+test('edge-cfg buildRequestCfgBase and buildResponseCfgBase share policy defaults', () => {
+    const policy = {
+        defaults: { mode: 'report' },
+        request: {
+            allow_methods: ['GET'],
+            limits: { max_query_length: 512 },
+            block: { ua_contains: ['bot'] },
+            normalize: { drop_query_keys: ['foo'] },
+        },
+        response_headers: { force_vary_auth: false },
+        routes: [{
+                name: 'admin',
+                match: { path_prefixes: ['/admin'] },
+                auth_gate: { type: 'static_token' },
+            }],
+    };
+    const requestBase = buildRequestCfgBase(policy);
+    assert.strictEqual(requestBase.mode, 'report');
+    assert.deepStrictEqual(requestBase.allowMethods, ['GET']);
+    assert.strictEqual(requestBase.maxQueryLength, 512);
+    assert.deepStrictEqual(requestBase.dropQueryKeysArray, ['foo']);
+    assert.deepStrictEqual(requestBase.uaDenyContains, ['bot']);
+    const authGates = [{ protectedPrefixes: ['/admin'], type: 'static_token', name: 'admin' }];
+    const responseBase = buildResponseCfgBase(policy, authGates);
+    assert.deepStrictEqual(responseBase.adminPathPrefixes, ['/admin']);
+    assert.deepStrictEqual(responseBase.authProtectedPrefixes, ['/admin']);
+    assert.strictEqual(responseBase.forceVaryAuth, false);
+    assert.strictEqual(responseBase.headers['x-content-type-options'], DEFAULT_SECURITY_HEADERS['x-content-type-options']);
+});
 test('policy-defaults exposes immutable runtime defaults shared by compiler targets', () => {
     assert.deepStrictEqual(DEFAULT_UA_DENY_CONTAINS, ['sqlmap', 'nikto', 'acunetix', 'masscan', 'python-requests']);
     assert.deepStrictEqual(DEFAULT_DROP_QUERY_KEYS, [
@@ -388,7 +490,7 @@ test('validateAuthGates reports missing required auth fields', () => {
             { name: 'broken-signed', auth_gate: { type: 'signed_url' } },
         ],
     };
-    assert.throws(() => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }), (err) => Array.isArray(err.validationErrors)
+    assert.throws(() => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }), (err) => isPolicyValidationError(err)
         && err.validationErrors.length === 3
         && err.validationErrors.some((e) => e.includes('broken-rs'))
         && err.validationErrors.some((e) => e.includes('broken-hs'))
@@ -399,7 +501,7 @@ test('validateAuthGates reports missing static_token env at build time', () => {
         const policy = {
             routes: [{ name: 'admin', auth_gate: { type: 'static_token' } }],
         };
-        assert.throws(() => validateAuthGates(policy, { exitOnError: false }), (err) => Array.isArray(err.validationErrors)
+        assert.throws(() => validateAuthGates(policy, { exitOnError: false }), (err) => isPolicyValidationError(err)
             && err.validationErrors.some((e) => e.includes('EDGE_ADMIN_TOKEN')));
     });
 });
@@ -610,7 +712,10 @@ test('validateAuthGates rejects allowed_algorithms that include an alg the verif
         caught = e;
     }
     assert.ok(caught, 'validateAuthGates should throw');
-    const detail = (caught.validationErrors || []).join('\n');
+    if (!isPolicyValidationError(caught)) {
+        assert.fail('expected PolicyValidationError');
+    }
+    const detail = caught.validationErrors.join('\n');
     assert.match(detail, /allowed_algorithms contains .*HS256.* but the gate only runs the "RS256" verifier/);
 });
 test('build filters cross-alg entries from emitted allowed_algorithms even when validateAuthGates is bypassed', () => {
@@ -763,7 +868,7 @@ test('validateAuthGates rejects jwks_url in private/loopback ranges', () => {
             },
         ],
     };
-    assert.throws(() => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }), (err) => Array.isArray(err.validationErrors)
+    assert.throws(() => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }), (err) => isPolicyValidationError(err)
         && err.validationErrors.some((e) => /metadata-ssrf/.test(e) && /private\/loopback/.test(e)));
 });
 test('validateAuthGates rejects jwks_url outside firewall.jwks.allowed_hosts', () => {
@@ -776,7 +881,7 @@ test('validateAuthGates rejects jwks_url outside firewall.jwks.allowed_hosts', (
             },
         ],
     };
-    assert.throws(() => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }), (err) => Array.isArray(err.validationErrors)
+    assert.throws(() => validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true }), (err) => isPolicyValidationError(err)
         && err.validationErrors.some((e) => /wrong-idp/.test(e) && /allowed_hosts/.test(e)));
 });
 test('validateAuthGates accepts jwks_url on allowed_hosts (case-insensitive)', () => {
@@ -804,7 +909,7 @@ test('validateAuthGates requires jwks allowed_hosts when target cannot inspect D
         exitOnError: false,
         allowPlaceholderToken: true,
         requireJwksAllowedHosts: true,
-    }), (err) => Array.isArray(err.validationErrors)
+    }), (err) => isPolicyValidationError(err)
         && err.validationErrors.some((e) => /cloudflare-rs256/.test(e) && /allowed_hosts/.test(e)));
 });
 test('validateAuthGates accepts required jwks allowed_hosts for matching RS256 host', () => {

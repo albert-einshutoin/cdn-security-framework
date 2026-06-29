@@ -9,6 +9,7 @@ const fs = require('fs');
 
 const pkgRoot = path.resolve(__dirname, '..');
 const { defaultPolicyPath } = require(path.join(pkgRoot, 'scripts', 'lib', 'policy-io.js'));
+const { errorMessage } = require(path.join(pkgRoot, 'scripts', 'lib', 'errors.js'));
 
 async function main() {
   const dynamicImport = new Function('specifier', 'return import(specifier)');
@@ -3207,8 +3208,8 @@ program
       if (opts.auth) validateGuidedChoice('auth', opts.auth, authModes);
       if (opts.waf) validateGuidedChoice('waf', opts.waf, wafPostures);
       if (opts.deployment) validateGuidedChoice('deployment', opts.deployment, deploymentIntents);
-    } catch (e: any) {
-      console.error('[ERROR]', e.message);
+    } catch (e: unknown) {
+      console.error('[ERROR]', errorMessage(e));
       process.exit(1);
     }
 
@@ -3603,8 +3604,8 @@ program
     let target: CapabilityDeployTarget;
     try {
       target = normalizeCapabilityTarget(opts.target || 'all');
-    } catch (e: any) {
-      console.error('[ERROR]', e.message);
+    } catch (e: unknown) {
+      console.error('[ERROR]', errorMessage(e));
       process.exit(1);
     }
 
@@ -3624,8 +3625,8 @@ program
       } else {
         printCapabilitiesReport(report);
       }
-    } catch (e: any) {
-      console.error('[ERROR] Failed to inspect capabilities:', e.message);
+    } catch (e: unknown) {
+      console.error('[ERROR] Failed to inspect capabilities:', errorMessage(e));
       process.exit(1);
     }
   });
@@ -3640,8 +3641,8 @@ program
     try {
       const files = writeDeploymentTemplates(opts, process.cwd());
       files.forEach((filePath) => console.log('[SUCCESS] Generated ' + filePath));
-    } catch (e: any) {
-      console.error('[ERROR]', e.message);
+    } catch (e: unknown) {
+      console.error('[ERROR]', errorMessage(e));
       process.exit(1);
     }
   });
@@ -3656,8 +3657,8 @@ program
     let policy;
     try {
       policy = loadPolicyDocument(policyPath);
-    } catch (e: any) {
-      console.error('[ERROR] Failed to read policy:', e.message);
+    } catch (e: unknown) {
+      console.error('[ERROR] Failed to read policy:', errorMessage(e));
       process.exit(1);
     }
     explainPolicy(policy).forEach((line) => console.log(line));
@@ -3676,8 +3677,8 @@ program
     try {
       target = normalizeCapabilityTarget(opts.target || 'all');
       format = normalizeVisualFormat(opts.format || 'mermaid');
-    } catch (e: any) {
-      console.error('[ERROR]', e.message);
+    } catch (e: unknown) {
+      console.error('[ERROR]', errorMessage(e));
       process.exit(1);
     }
 
@@ -3691,8 +3692,8 @@ program
     let artifact: string;
     try {
       artifact = renderPolicyVisualization(policyPath, target, { format });
-    } catch (e: any) {
-      console.error('[ERROR] Failed to render policy visualization:', e.message);
+    } catch (e: unknown) {
+      console.error('[ERROR] Failed to render policy visualization:', errorMessage(e));
       process.exit(1);
       return;
     }
@@ -3721,8 +3722,8 @@ program
     let target: CapabilityDeployTarget;
     try {
       target = normalizeCapabilityTarget(opts.target);
-    } catch (e: any) {
-      console.error('[ERROR]', e.message || String(e));
+    } catch (e: unknown) {
+      console.error('[ERROR]', errorMessage(e));
       process.exit(1);
     }
 
@@ -3750,8 +3751,8 @@ program
         );
         const exitCode = printPolicyDiffReport(report, !!opts.json);
         process.exit(exitCode);
-      } catch (e: any) {
-        console.error('[ERROR] Failed to evaluate policy diff:', e.message);
+      } catch (e: unknown) {
+        console.error('[ERROR] Failed to evaluate policy diff:', errorMessage(e));
         process.exit(1);
       }
       return;
@@ -3833,8 +3834,8 @@ program
           console.log(`- ${item.name}: ${item.method} ${item.path}${querySuffix} => ${item.decision.toUpperCase()} (status=${item.status})${reason}`);
         }
       }
-    } catch (e: any) {
-      console.error('[ERROR]', e.message || String(e));
+    } catch (e: unknown) {
+      console.error('[ERROR]', errorMessage(e));
       process.exit(1);
     }
   });
@@ -3865,8 +3866,8 @@ program
       } else {
         printAnalyzeReport(report);
       }
-    } catch (e: any) {
-      console.error('[ERROR]', e.message || String(e));
+    } catch (e: unknown) {
+      console.error('[ERROR]', errorMessage(e));
       process.exit(1);
     }
   });

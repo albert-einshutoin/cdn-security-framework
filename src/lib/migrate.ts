@@ -30,6 +30,7 @@
 const fs = require('fs');
 const yaml = require('js-yaml');
 const { resolveAbsolute } = require('../emitter');
+const { errorMessage } = require('../scripts/lib/errors');
 
 interface MigratePolicyOptions {
   policyPath?: string;
@@ -86,10 +87,10 @@ function migratePolicy(opts: MigratePolicyOptions = {}) {
   let doc: any;
   try {
     doc = yaml.load(fs.readFileSync(policyPath, 'utf8'));
-  } catch (e: any) {
+  } catch (e: unknown) {
     return {
       ok: false,
-      errors: [`failed to parse policy YAML: ${e.message}`],
+      errors: [`failed to parse policy YAML: ${errorMessage(e)}`],
       warnings,
       fromVersion: undefined,
       toVersion,

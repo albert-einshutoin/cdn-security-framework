@@ -16,6 +16,10 @@ const {
   reportPolicyWarnings,
   reportPolicyLoadError,
 } = require('./lib/policy-io');
+const {
+  errorMessage,
+  isPolicyValidationError,
+} = require('./lib/errors') as typeof import('./lib/errors');
 
 const repoRoot = path.join(__dirname, '..');
 const schemaPath = path.join(repoRoot, 'policy', 'schema.json');
@@ -59,7 +63,7 @@ function main(): void {
     const parsed = loadPolicyWithWarnings(policyPath);
     policy = parsed.policy;
     reportPolicyWarnings(parsed.warnings, String(policyPath));
-  } catch (e: any) {
+  } catch (e: unknown) {
     reportPolicyLoadError(policyPath, e);
     process.exit(1);
   }
@@ -67,8 +71,8 @@ function main(): void {
   let schema;
   try {
     schema = loadJson(schemaPath);
-  } catch (e: any) {
-    console.error('Error: failed to load schema:', e.message);
+  } catch (e: unknown) {
+    console.error('Error: failed to load schema:', errorMessage(e));
     process.exit(1);
   }
 
@@ -92,20 +96,20 @@ function main(): void {
     if (block.path_patterns !== undefined) {
       parsePathPatterns(block.path_patterns);
     }
-  } catch (e: any) {
-    errors.push(`  - request.block.path_patterns: ${e.message}`);
+  } catch (e: unknown) {
+    errors.push(`  - request.block.path_patterns: ${errorMessage(e)}`);
   }
 
   // Cross-field auth gate validation (jwt/signed_url required fields).
   // Allow missing token envs at lint time — they are enforced at build time.
   try {
     validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true });
-  } catch (e: any) {
-    if (Array.isArray(e.validationErrors)) {
+  } catch (e: unknown) {
+    if (isPolicyValidationError(e)) {
       errors.push('Auth gate validation failed:');
       e.validationErrors.forEach((msg: string) => errors.push('  - ' + msg));
     } else {
-      errors.push('Auth gate validation error: ' + e.message);
+      errors.push('Auth gate validation error: ' + errorMessage(e));
     }
   }
 

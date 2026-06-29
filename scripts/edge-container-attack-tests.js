@@ -184,7 +184,7 @@ async function startAwsEdgeHarness() {
         }
         catch (e) {
             res.writeHead(500, { 'content-type': 'text/plain' });
-            res.end(e && e.stack ? e.stack : String(e));
+            res.end(e instanceof Error && e.stack ? e.stack : String(e));
         }
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));
@@ -334,7 +334,7 @@ async function startCloudflareEdgeHarness() {
         }
         catch (e) {
             res.writeHead(500, { 'content-type': 'text/plain' });
-            res.end(e && e.stack ? e.stack : String(e));
+            res.end(e instanceof Error && e.stack ? e.stack : String(e));
         }
     });
     await new Promise((resolve) => server.listen(0, '127.0.0.1', resolve));

@@ -4,6 +4,10 @@ const Ajv = require('ajv');
 
 import type { ErrorObject } from 'ajv';
 import type { CDNSecurityFrameworkPolicy } from '../types/policy';
+import {
+  errorMessage,
+  isPolicyValidationError,
+} from '../scripts/lib/errors';
 
 const {
   validateAuthGates,
@@ -69,10 +73,9 @@ export function validatePolicy(opts: ValidatePolicyOptions): ValidatePolicyResul
       fs.readFileSync(path.join(pkgRoot, 'policy', 'schema.json'), 'utf8'),
     );
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
     return {
       ok: false,
-      errors: [`failed to load schema: ${message}`],
+      errors: [`failed to load schema: ${errorMessage(e)}`],
       warnings,
     };
   }
@@ -97,8 +100,7 @@ export function validatePolicy(opts: ValidatePolicyOptions): ValidatePolicyResul
       parsePathPatterns(block.path_patterns);
     }
   } catch (e: unknown) {
-    const message = e instanceof Error ? e.message : String(e);
-    errors.push(`  - request.block.path_patterns: ${message}`);
+    errors.push(`  - request.block.path_patterns: ${errorMessage(e)}`);
   }
 
   try {
@@ -107,17 +109,11 @@ export function validatePolicy(opts: ValidatePolicyOptions): ValidatePolicyResul
       allowPlaceholderToken: true,
     });
   } catch (e: unknown) {
-    if (
-      e &&
-      typeof e === 'object' &&
-      'validationErrors' in e &&
-      Array.isArray(e.validationErrors)
-    ) {
+    if (isPolicyValidationError(e)) {
       errors.push('Auth gate validation failed:');
       e.validationErrors.forEach((msg: string) => errors.push('  - ' + msg));
     } else {
-      const message = e instanceof Error ? e.message : String(e);
-      errors.push('Auth gate validation error: ' + message);
+      errors.push('Auth gate validation error: ' + errorMessage(e));
     }
   }
 

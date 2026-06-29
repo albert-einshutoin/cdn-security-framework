@@ -16,6 +16,7 @@
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { errorMessage } = require('./lib/errors');
 const yaml = require('js-yaml');
 const { compileRegexOrThrow, hasCatastrophicBacktrackShape } = require('./lib/compile-core');
 
@@ -27,9 +28,9 @@ function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('FAIL:', name);
-    console.error(e && e.stack ? e.stack : e);
+    console.error(e instanceof Error && e.stack ? e.stack : String(e));
     process.exitCode = 1;
   }
 }
@@ -62,8 +63,8 @@ function runWithTimeout(regex: RegExp, input: string, timeoutMs: number) {
   const start = Date.now();
   try {
     vm.runInContext('regex.test(input)', ctx, { timeout: timeoutMs });
-  } catch (e: any) {
-    if (/Script execution timed out/i.test(String(e && e.message))) {
+  } catch (e: unknown) {
+    if (/Script execution timed out/i.test(errorMessage(e))) {
       return { ok: false, elapsed: Date.now() - start, timedOut: true };
     }
     throw e;
@@ -95,8 +96,8 @@ function fuzzRegex(patternSource: string) {
     // (which Node's RegExp does not natively accept) are translated the same
     // way as at compile time.
     compiled = compileRegexOrThrow(patternSource, 'redos-fuzz');
-  } catch (e: any) {
-    return { compile: false, reason: String(e && e.message) };
+  } catch (e: unknown) {
+    return { compile: false, reason: errorMessage(e) };
   }
   for (const input of adversarialInputs()) {
     const res = runWithTimeout(compiled, input, REDOS_TIMEOUT_MS);
@@ -156,8 +157,8 @@ test('redos-fuzz: runtime timeout triggers on an exponentially backtracking rege
   let timedOut = false;
   try {
     vm.runInContext('regex.test(input)', ctx, { timeout: REDOS_TIMEOUT_MS });
-  } catch (e: any) {
-    if (/Script execution timed out/i.test(String(e && e.message))) timedOut = true;
+  } catch (e: unknown) {
+    if (/Script execution timed out/i.test(errorMessage(e))) timedOut = true;
     else throw e;
   }
   if (!timedOut) {

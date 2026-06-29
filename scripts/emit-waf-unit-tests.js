@@ -23,7 +23,7 @@ function test(name, fn) {
     }
     catch (e) {
         console.error('FAIL:', name);
-        console.error(e && e.stack ? e.stack : e);
+        console.error(e instanceof Error && e.stack ? e.stack : String(e));
         process.exitCode = 1;
     }
 }

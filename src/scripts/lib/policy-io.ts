@@ -1,6 +1,10 @@
 const fs = require('fs');
 const path = require('path');
 const { parsePolicyFile } = require('../../parser');
+const {
+  errorMessage,
+  isErrnoException,
+} = require('./errors') as typeof import('./errors');
 
 export type PolicyLoadResult = {
   policy: any;
@@ -168,17 +172,9 @@ export function reportPolicyWarnings(warnings: string[], policyPath?: string, lo
 }
 
 export function reportPolicyLoadError(policyPath: string, error: unknown, logger: Pick<Console, 'error'> = console): void {
-  if (isErrorWithCode(error, 'ENOENT')) {
+  if (isErrnoException(error) && error.code === 'ENOENT') {
     logger.error('Error: policy file not found:', policyPath);
     return;
   }
   logger.error('Error: failed to parse policy YAML:', errorMessage(error));
-}
-
-function isErrorWithCode(error: unknown, code: string): boolean {
-  return error instanceof Error && (error as NodeJS.ErrnoException).code === code;
-}
-
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

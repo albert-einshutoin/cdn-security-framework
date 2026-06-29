@@ -41,7 +41,7 @@ try {
   const parsed = loadPolicyWithWarnings(policyPath);
   reportPolicyWarnings(parsed.warnings || [], policyPath);
   policy = parsed.policy;
-} catch (e: any) {
+} catch (e: unknown) {
   reportPolicyLoadError(policyPath, e);
   process.exit(1);
 }

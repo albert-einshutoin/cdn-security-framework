@@ -17,6 +17,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 const fs = require('fs');
 const path = require('path');
 const vm = require('vm');
+const { errorMessage } = require('./lib/errors');
 const yaml = require('js-yaml');
 const { compileRegexOrThrow, hasCatastrophicBacktrackShape } = require('./lib/compile-core');
 const REDOS_TIMEOUT_MS = 50;
@@ -28,7 +29,7 @@ function test(name, fn) {
     }
     catch (e) {
         console.error('FAIL:', name);
-        console.error(e && e.stack ? e.stack : e);
+        console.error(e instanceof Error && e.stack ? e.stack : String(e));
         process.exitCode = 1;
     }
 }
@@ -60,7 +61,7 @@ function runWithTimeout(regex, input, timeoutMs) {
         vm.runInContext('regex.test(input)', ctx, { timeout: timeoutMs });
     }
     catch (e) {
-        if (/Script execution timed out/i.test(String(e && e.message))) {
+        if (/Script execution timed out/i.test(errorMessage(e))) {
             return { ok: false, elapsed: Date.now() - start, timedOut: true };
         }
         throw e;
@@ -92,7 +93,7 @@ function fuzzRegex(patternSource) {
         compiled = compileRegexOrThrow(patternSource, 'redos-fuzz');
     }
     catch (e) {
-        return { compile: false, reason: String(e && e.message) };
+        return { compile: false, reason: errorMessage(e) };
     }
     for (const input of adversarialInputs()) {
         const res = runWithTimeout(compiled, input, REDOS_TIMEOUT_MS);
@@ -152,7 +153,7 @@ test('redos-fuzz: runtime timeout triggers on an exponentially backtracking rege
         vm.runInContext('regex.test(input)', ctx, { timeout: REDOS_TIMEOUT_MS });
     }
     catch (e) {
-        if (/Script execution timed out/i.test(String(e && e.message)))
+        if (/Script execution timed out/i.test(errorMessage(e)))
             timedOut = true;
         else
             throw e;

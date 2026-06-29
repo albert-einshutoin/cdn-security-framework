@@ -13,6 +13,7 @@ const path = require('path');
 const Ajv = require('ajv');
 const { validateAuthGates, parsePathPatterns } = require('./lib/compile-core');
 const { loadPolicyWithWarnings, reportPolicyWarnings, reportPolicyLoadError, } = require('./lib/policy-io');
+const { errorMessage, isPolicyValidationError, } = require('./lib/errors');
 const repoRoot = path.join(__dirname, '..');
 const schemaPath = path.join(repoRoot, 'policy', 'schema.json');
 const defaultPolicyPath = path.join(repoRoot, 'policy', 'base.yml');
@@ -58,7 +59,7 @@ function main() {
         schema = loadJson(schemaPath);
     }
     catch (e) {
-        console.error('Error: failed to load schema:', e.message);
+        console.error('Error: failed to load schema:', errorMessage(e));
         process.exit(1);
     }
     // strict: true flips on schema-authoring lint (typos in keywords / unknown
@@ -81,7 +82,7 @@ function main() {
         }
     }
     catch (e) {
-        errors.push(`  - request.block.path_patterns: ${e.message}`);
+        errors.push(`  - request.block.path_patterns: ${errorMessage(e)}`);
     }
     // Cross-field auth gate validation (jwt/signed_url required fields).
     // Allow missing token envs at lint time — they are enforced at build time.
@@ -89,12 +90,12 @@ function main() {
         validateAuthGates(policy, { exitOnError: false, allowPlaceholderToken: true });
     }
     catch (e) {
-        if (Array.isArray(e.validationErrors)) {
+        if (isPolicyValidationError(e)) {
             errors.push('Auth gate validation failed:');
             e.validationErrors.forEach((msg) => errors.push('  - ' + msg));
         }
         else {
-            errors.push('Auth gate validation error: ' + e.message);
+            errors.push('Auth gate validation error: ' + errorMessage(e));
         }
     }
     // WAF fingerprint_action sanity (ajv already enforces enum, but keep friendly message).

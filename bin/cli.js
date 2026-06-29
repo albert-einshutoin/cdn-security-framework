@@ -9,6 +9,7 @@ const path = require('path');
 const fs = require('fs');
 const pkgRoot = path.resolve(__dirname, '..');
 const { defaultPolicyPath } = require(path.join(pkgRoot, 'scripts', 'lib', 'policy-io.js'));
+const { errorMessage } = require(path.join(pkgRoot, 'scripts', 'lib', 'errors.js'));
 async function main() {
     const dynamicImport = new Function('specifier', 'return import(specifier)');
     const commanderMod = await dynamicImport('commander');
@@ -2579,7 +2580,7 @@ jobs:
                 validateGuidedChoice('deployment', opts.deployment, deploymentIntents);
         }
         catch (e) {
-            console.error('[ERROR]', e.message);
+            console.error('[ERROR]', errorMessage(e));
             process.exit(1);
         }
         if ((!platform || (!profile && !archetype && !guided)) && !canPrompt) {
@@ -2938,7 +2939,7 @@ jobs:
             target = normalizeCapabilityTarget(opts.target || 'all');
         }
         catch (e) {
-            console.error('[ERROR]', e.message);
+            console.error('[ERROR]', errorMessage(e));
             process.exit(1);
         }
         let policyPath = null;
@@ -2959,7 +2960,7 @@ jobs:
             }
         }
         catch (e) {
-            console.error('[ERROR] Failed to inspect capabilities:', e.message);
+            console.error('[ERROR] Failed to inspect capabilities:', errorMessage(e));
             process.exit(1);
         }
     });
@@ -2975,7 +2976,7 @@ jobs:
             files.forEach((filePath) => console.log('[SUCCESS] Generated ' + filePath));
         }
         catch (e) {
-            console.error('[ERROR]', e.message);
+            console.error('[ERROR]', errorMessage(e));
             process.exit(1);
         }
     });
@@ -2991,7 +2992,7 @@ jobs:
             policy = loadPolicyDocument(policyPath);
         }
         catch (e) {
-            console.error('[ERROR] Failed to read policy:', e.message);
+            console.error('[ERROR] Failed to read policy:', errorMessage(e));
             process.exit(1);
         }
         explainPolicy(policy).forEach((line) => console.log(line));
@@ -3011,7 +3012,7 @@ jobs:
             format = normalizeVisualFormat(opts.format || 'mermaid');
         }
         catch (e) {
-            console.error('[ERROR]', e.message);
+            console.error('[ERROR]', errorMessage(e));
             process.exit(1);
         }
         const cwd = process.cwd();
@@ -3025,7 +3026,7 @@ jobs:
             artifact = renderPolicyVisualization(policyPath, target, { format });
         }
         catch (e) {
-            console.error('[ERROR] Failed to render policy visualization:', e.message);
+            console.error('[ERROR] Failed to render policy visualization:', errorMessage(e));
             process.exit(1);
             return;
         }
@@ -3054,7 +3055,7 @@ jobs:
             target = normalizeCapabilityTarget(opts.target);
         }
         catch (e) {
-            console.error('[ERROR]', e.message || String(e));
+            console.error('[ERROR]', errorMessage(e));
             process.exit(1);
         }
         if (opts.semantic) {
@@ -3077,7 +3078,7 @@ jobs:
                 process.exit(exitCode);
             }
             catch (e) {
-                console.error('[ERROR] Failed to evaluate policy diff:', e.message);
+                console.error('[ERROR] Failed to evaluate policy diff:', errorMessage(e));
                 process.exit(1);
             }
             return;
@@ -3159,7 +3160,7 @@ jobs:
             }
         }
         catch (e) {
-            console.error('[ERROR]', e.message || String(e));
+            console.error('[ERROR]', errorMessage(e));
             process.exit(1);
         }
     });
@@ -3187,7 +3188,7 @@ jobs:
             }
         }
         catch (e) {
-            console.error('[ERROR]', e.message || String(e));
+            console.error('[ERROR]', errorMessage(e));
             process.exit(1);
         }
     });

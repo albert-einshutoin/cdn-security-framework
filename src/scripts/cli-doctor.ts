@@ -21,6 +21,7 @@
 const fs = require('fs');
 const path = require('path');
 const { defaultPolicyPath } = require('./lib/policy-io');
+const { errorMessage } = require('./lib/errors');
 
 const CHECK_NODE_VERSION = 'node_version';
 const CHECK_POLICY_EXISTS = 'policy_exists';
@@ -114,8 +115,8 @@ function tryParsePolicy(policyPath: string): ParseResult {
     const raw = fs.readFileSync(policyPath, 'utf8');
     const doc = yaml.load(raw);
     return { ok: true, doc };
-  } catch (e: any) {
-    return { ok: false, error: e.message };
+  } catch (e: unknown) {
+    return { ok: false, error: errorMessage(e) };
   }
 }
 
@@ -214,10 +215,10 @@ function checkDistWritable(cwd: string): CheckRow {
     fs.writeFileSync(probe, 'ok', 'utf8');
     fs.unlinkSync(probe);
     return pass(CHECK_DIST_WRITABLE, `dist/edge/ is writable (${edgeDir}).`);
-  } catch (e: any) {
+  } catch (e: unknown) {
     return fail(
       CHECK_DIST_WRITABLE,
-      `Cannot write to dist/edge/: ${e.message}. Check filesystem permissions — build will fail.`
+      `Cannot write to dist/edge/: ${errorMessage(e)}. Check filesystem permissions — build will fail.`
     );
   }
 }
@@ -238,8 +239,8 @@ function checkDependencies(cwd: string, spawnSyncImpl: SpawnSyncImpl | null): Ch
   let parsed;
   try {
     parsed = JSON.parse(res.stdout);
-  } catch (e: any) {
-    return warn(CHECK_DEPENDENCIES, `Could not parse \`npm ls --json\` output: ${e.message}`);
+  } catch (e: unknown) {
+    return warn(CHECK_DEPENDENCIES, `Could not parse \`npm ls --json\` output: ${errorMessage(e)}`);
   }
   const problems = Array.isArray(parsed.problems) ? parsed.problems : [];
   if (problems.length > 0) {
@@ -310,10 +311,10 @@ function runDoctor(opts?: DoctorOptions) {
     const resolved = path.isAbsolute(reportPath) ? reportPath : path.join(cwd, reportPath);
     try {
       fs.writeFileSync(resolved, JSON.stringify(report, null, 2) + '\n', 'utf8');
-    } catch (e: any) {
+    } catch (e: unknown) {
       // A report-write failure must not mask the actual doctor result, but we
       // surface it on stderr so CI can notice.
-      console.error(`[doctor] failed to write report to ${resolved}: ${e.message}`);
+      console.error(`[doctor] failed to write report to ${resolved}: ${errorMessage(e)}`);
     }
   }
 

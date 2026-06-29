@@ -28,9 +28,9 @@ function test(name: string, fn: () => void) {
   try {
     fn();
     console.log('OK:', name);
-  } catch (e: any) {
+  } catch (e: unknown) {
     console.error('FAIL:', name);
-    console.error(e && e.stack ? e.stack : e);
+    console.error(e instanceof Error && e.stack ? e.stack : String(e));
     process.exitCode = 1;
   }
 }
