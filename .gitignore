@@ -17,6 +17,17 @@ AGENTS.md
 CLAUDE.md
 docs/SELF-REVIEW.md
 
+# tsc output (generated from src/ — see tsconfig.json rootDir/outDir)
+/bin/*.js
+/bin/*.d.ts
+/scripts/*.js
+/scripts/*.d.ts
+/scripts/lib/
+/lib/
+/parser/
+/validator/
+/emitter/
+
 # Build / logs
 # dist/ は npm run build で生成する。リポジトリには含めず、ユーザー環境でビルドさせる。CI で検証する場合は CI 内で build して diff チェックする。
 .tsbuildinfo
@@ -34,6 +45,11 @@ reports/
 
 # doctor subcommand report — regenerated on every run, captured as CI artifact
 doctor-report.json
+
+# Local automation state and bytecode caches
+.devloop/
+__pycache__/
+*.py[cod]
 
 # Local dev override — users copy a profile here; never check it in
 policy/security.yml

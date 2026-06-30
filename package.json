@@ -32,7 +32,8 @@
     "cdn-security": "bin/cli.js"
   },
   "scripts": {
-    "build:ts": "tsc -p tsconfig.json",
+    "prepare": "npm run build:ts",
+    "build:ts": "tsc -p tsconfig.json --incremental false && node scripts/ensure-cli-executable.js",
     "types:gen": "json2ts -i policy/schema.json -o src/types/policy.d.ts --unknownAny",
     "test:types": "npm run build:ts && node scripts/check-generated-types.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",

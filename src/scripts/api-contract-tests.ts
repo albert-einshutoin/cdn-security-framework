@@ -24,6 +24,13 @@ test('api exports stable callable surface', () => {
   assert.strictEqual(typeof api.runDoctor, 'function');
 });
 
+test('package prepare script builds tsc artifacts on install', () => {
+  const pkg = require(path.join(repoRoot, 'package.json'));
+  assert.strictEqual(pkg.scripts.prepare, 'npm run build:ts');
+  assert.ok(pkg.scripts['build:ts'].includes('--incremental false'));
+  assert.ok(pkg.scripts['build:ts'].includes('scripts/ensure-cli-executable.js'));
+});
+
 test('package metadata exposes typed root api and bounded exports', () => {
   const pkg = require(path.join(repoRoot, 'package.json'));
   assert.strictEqual(pkg.main, 'lib/index.js');
