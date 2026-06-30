@@ -46,6 +46,11 @@ reports/
 # doctor subcommand report — regenerated on every run, captured as CI artifact
 doctor-report.json
 
+# Local automation state and bytecode caches
+.devloop/
+__pycache__/
+*.py[cod]
+
 # Local dev override — users copy a profile here; never check it in
 policy/security.yml
 
