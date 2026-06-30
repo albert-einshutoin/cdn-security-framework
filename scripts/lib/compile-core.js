@@ -4,15 +4,11 @@ const fs = require('fs');
 const path = require('path');
 const { assertInjectedConstDeclarations, injectTemplateCode, renderConstObject, runtimeCode, } = require('./template-inject');
 const { clampNumber, normalizeStringList, numberOr, } = require('./value-normalize');
-const { DEFAULT_ADMIN_PATH_PREFIXES, DEFAULT_ALLOW_METHODS, DEFAULT_CLEAR_SITE_DATA_TYPES, DEFAULT_CSP_ADMIN, DEFAULT_CSP_PUBLIC, DEFAULT_DROP_QUERY_KEYS, DEFAULT_REQUIRED_HEADERS, DEFAULT_SECURITY_HEADERS, DEFAULT_UA_DENY_CONTAINS, JWKS_DEFAULTS, JWT_CLOCK_SKEW, LIMITS_DEFAULTS, } = require('./policy-defaults');
+const { LIMITS_DEFAULTS, } = require('./policy-defaults');
+const { DEFAULT_CONTAINS, parsePathPatterns, extractRegex, compileRegexOrThrow, hasCatastrophicBacktrackShape, regexesLiteralCode, buildAnomalyGuardConfig, buildObsConfig, buildAuthGateBase, buildRequestCfgBase, buildResponseCfgBase, buildJwksCacheCfg, buildJwtGateConfig, buildSignedUrlGateConfig, } = require('./edge-cfg');
 const { parseArgs: parseArgsIo, hasFlag, loadPolicy: loadPolicyIo, loadPolicyWithWarnings, reportPolicyWarnings, reportPolicyLoadError, } = require('./policy-io');
 const { errorMessage, isErrnoException, PolicyValidationError, } = require('./errors');
 const repoRoot = path.join(__dirname, '..', '..');
-const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
-const LEGACY_KNOWN_MAP = {
-    '(?i)\\.{2}/': { contains: ['/../', '..'] },
-    '(?i)%2e%2e': { contains: ['%2e%2e'] },
-};
 // Backed by ./policy-io. Kept as a thin wrapper to preserve the
 // (rootDir = repoRoot) default that older callers and tests rely on.
 function parseArgs(argv, rootDir = repoRoot) {
@@ -20,135 +16,6 @@ function parseArgs(argv, rootDir = repoRoot) {
 }
 function loadPolicy(policyPath) {
     return loadPolicyIo(policyPath);
-}
-function extractRegex(source) {
-    // Convert `(?i)...` to { pattern: '...', flags: 'i' }; else use the source as pattern.
-    if (typeof source !== 'string') {
-        throw new Error('Regex source must be a string');
-    }
-    const trimmed = source.trim();
-    if (!trimmed) {
-        throw new Error('Regex source must be non-empty');
-    }
-    if (trimmed.startsWith('(?i)')) {
-        return { pattern: trimmed.slice(4), flags: 'i' };
-    }
-    return { pattern: trimmed, flags: '' };
-}
-function compileRegexOrThrow(source, context) {
-    const { pattern, flags } = extractRegex(source);
-    try {
-        return new RegExp(pattern, flags);
-    }
-    catch (e) {
-        throw new Error(`Invalid regex in ${context}: ${source} — ${errorMessage(e)}`);
-    }
-}
-// Catch the classic `(a+)+` / `([^x]+)*` / `(a|a)+` family: a group that itself
-// carries a quantifier metacharacter inside, followed by an outer quantifier.
-// Over-approximate on purpose — no legitimate path_patterns regex in this
-// project needs stacked quantifiers, so false positives cost us nothing while
-// false negatives would ship a runtime DoS to the edge. Paired with the
-// runtime timeout fuzz in scripts/regex-fuzz-tests.js for defense in depth.
-function hasCatastrophicBacktrackShape(src) {
-    if (typeof src !== 'string' || src.length === 0)
-        return false;
-    // Strip the optional `(?i)` etc. inline-flag prefix so the heuristic sees
-    // the same pattern body the engine will.
-    const body = src.replace(/^\(\?[ims]+\)/, '');
-    const nested = /\(([^()]*[+*?{][^()]*)\)[+*?{]/;
-    return nested.test(body);
-}
-function looksLikeRegex(s) {
-    // Heuristic: presence of common regex metacharacters suggests a regex intent.
-    return /[\\(){}\[\]|^$+?*]|\.\{|\\\\/.test(s);
-}
-function parsePathPatterns(pathPatterns) {
-    // Returns { contains: string[], regexSources: string[] } with strict validation.
-    if (pathPatterns === undefined || pathPatterns === null) {
-        return { contains: DEFAULT_CONTAINS.slice(), regexSources: [] };
-    }
-    if (Array.isArray(pathPatterns)) {
-        // Legacy shape: list of strings. Each item is either a known regex literal
-        // (expanded via LEGACY_KNOWN_MAP) or a plain substring (treated as contains).
-        // Anything that looks like an unknown regex is rejected to avoid silent
-        // downgrade to substring semantics.
-        const contains = new Set();
-        const regexSources = [];
-        for (const raw of pathPatterns) {
-            const s = (raw || '').trim();
-            if (!s)
-                continue;
-            const mapped = LEGACY_KNOWN_MAP[s];
-            if (mapped) {
-                // Runtime lowercases the URI before `includes()`, so contains entries
-                // must also be lowercase or they never match.
-                if (mapped.contains)
-                    mapped.contains.forEach((m) => contains.add(m.toLowerCase()));
-                if (mapped.regex)
-                    mapped.regex.forEach((m) => regexSources.push(m));
-                continue;
-            }
-            if (looksLikeRegex(s)) {
-                throw new Error(`Ambiguous path_patterns entry: "${s}". ` +
-                    'Move regex-style patterns under `path_patterns.regex: [...]` or ' +
-                    'literal substrings under `path_patterns.contains: [...]`.');
-            }
-            contains.add(s.toLowerCase());
-        }
-        if (contains.size === 0 && regexSources.length === 0) {
-            return { contains: DEFAULT_CONTAINS.slice(), regexSources: [] };
-        }
-        return { contains: Array.from(contains), regexSources };
-    }
-    if (typeof pathPatterns === 'object') {
-        const rawContains = Array.isArray(pathPatterns.contains) ? pathPatterns.contains.filter(Boolean) : [];
-        const regexSources = Array.isArray(pathPatterns.regex) ? pathPatterns.regex.filter(Boolean) : [];
-        // Reject regex-looking entries under `contains` to prevent silent downgrade
-        // where a user accidentally puts a regex literal under `contains` and it
-        // becomes a substring match that never fires.
-        const contains = [];
-        for (const raw of rawContains) {
-            const s = typeof raw === 'string' ? raw.trim() : '';
-            if (!s)
-                continue;
-            if (looksLikeRegex(s)) {
-                throw new Error(`Ambiguous path_patterns.contains entry: "${s}". ` +
-                    'This looks like a regex. Move it under `path_patterns.regex: [...]`, ' +
-                    'or escape the metacharacters if you genuinely want a literal substring.');
-            }
-            // Runtime lowercases the URI before `includes()`, so contains entries
-            // must also be lowercase or they never match. Normalize at build time.
-            contains.push(s.toLowerCase());
-        }
-        // Validate each regex compiles successfully at build time and reject the
-        // classic nested-quantifier shape `(a+)+` family that triggers catastrophic
-        // backtracking at runtime (effectively a DoS on the edge).
-        for (const src of regexSources) {
-            compileRegexOrThrow(src, 'request.block.path_patterns.regex');
-            if (hasCatastrophicBacktrackShape(src)) {
-                throw new Error(`request.block.path_patterns.regex: pattern rejected by ReDoS safety check ` +
-                    `(nested-quantifier shape triggers catastrophic backtracking): ${JSON.stringify(src)}. ` +
-                    `Rewrite without stacking quantifiers — for example, use a character class like ` +
-                    `[a-z]+ instead of (a+)+.`);
-            }
-        }
-        if (contains.length === 0 && regexSources.length === 0) {
-            return { contains: DEFAULT_CONTAINS.slice(), regexSources: [] };
-        }
-        return { contains, regexSources };
-    }
-    throw new Error('request.block.path_patterns must be an array or an object with contains/regex');
-}
-function regexesLiteralCode(regexSources) {
-    // Emit real RegExp literals in generated JS so runtime avoids `new RegExp` at request time.
-    if (regexSources.length === 0)
-        return '[]';
-    const literals = regexSources.map((src) => {
-        const re = compileRegexOrThrow(src, 'request.block.path_patterns.regex');
-        return re.toString();
-    });
-    return '[' + literals.join(', ') + ']';
 }
 // Reject JWKS URLs that point at loopback, private, link-local, or other
 // internal address ranges. An attacker who can influence the JWKS URL at
@@ -334,14 +201,8 @@ function getAuthGates(policy, options = {}) {
         const gate = route.auth_gate;
         if (!gate)
             continue;
-        const match = route.match || {};
-        const prefixes = match.path_prefixes || [];
         const authType = gate.type || 'static_token';
-        const gateConfig = {
-            name: route.name || 'unnamed',
-            protectedPrefixes: prefixes.length ? prefixes : [...DEFAULT_ADMIN_PATH_PREFIXES],
-            type: authType,
-        };
+        const gateConfig = buildAuthGateBase(route);
         if (authType === 'static_token') {
             // CloudFront Functions only expose header keys in lowercase form, so
             // force the configured name to lowercase to avoid a silent mismatch
@@ -557,27 +418,6 @@ function buildGraphqlGuardConfig(policy) {
         mode: guard.mode === 'report' ? 'report' : 'block',
     };
 }
-function buildAnomalyGuardConfig(policy) {
-    const raw = policy && policy.request && policy.request.anomaly_guards;
-    if (!raw || raw.enabled !== true) {
-        return {
-            enabled: false,
-            crlf: false,
-            malformedCookie: false,
-            doubleEncodedTraversal: false,
-            maxCookieBytes: 4096,
-            maxCookiePairs: 80,
-        };
-    }
-    return {
-        enabled: true,
-        crlf: raw.crlf !== false,
-        malformedCookie: raw.malformed_cookie !== false,
-        doubleEncodedTraversal: raw.double_encoded_traversal !== false,
-        maxCookieBytes: clampNumber(raw.max_cookie_bytes, 1, 65536, 4096),
-        maxCookiePairs: clampNumber(raw.max_cookie_pairs, 1, 1000, 80),
-    };
-}
 function warnUnsupportedGraphqlGuard(policy, target, options = {}) {
     const logger = options.logger || console;
     const guard = buildGraphqlGuardConfig(policy);
@@ -589,71 +429,32 @@ function warnUnsupportedGraphqlGuard(policy, target, options = {}) {
     logger.error(msg);
     return { warned: true, warnings: [msg] };
 }
-// Normalize observability config for injection into edge CFG objects.
-// Kept next to the compiler so every target (CFF / Lambda@Edge / Worker)
-// sees identical defaults and casing.
-function buildObsConfig(policy) {
-    const obs = (policy && policy.observability) || {};
-    const format = obs.log_format === 'text' ? 'text' : 'json';
-    const correlationHeader = typeof obs.correlation_id_header === 'string' && obs.correlation_id_header.trim()
-        ? obs.correlation_id_header.trim().toLowerCase()
-        : '';
-    let sampleRate = Number(obs.sample_rate);
-    if (!Number.isFinite(sampleRate) || sampleRate < 0)
-        sampleRate = 0;
-    if (sampleRate > 1)
-        sampleRate = 1;
-    return {
-        logFormat: format,
-        correlationHeader,
-        sampleRate,
-        auditLogAuth: obs.audit_log_auth === true,
-        auditHashSub: obs.audit_hash_sub === true,
-    };
-}
 function build(policy, options = {}) {
     const rootDir = options.rootDir || repoRoot;
     const outDir = options.outDir || path.join(rootDir, 'dist');
     const env = options.env || process.env;
     const allowPlaceholderToken = options.allowPlaceholderToken === true;
-    const defaults = policy.defaults || {};
-    const request = policy.request || {};
-    const limits = request.limits || {};
-    const block = request.block || {};
-    const normalize = request.normalize || {};
     const authGates = getAuthGates(policy, { env, allowPlaceholderToken });
-    const dropQueryKeysArray = normalize.drop_query_keys || DEFAULT_DROP_QUERY_KEYS;
-    const { contains: blockPathContains, regexSources: blockPathRegexSources } = parsePathPatterns(block.path_patterns);
-    const pathNormalize = normalize.path || {};
-    const requiredHeaders = block.header_missing || DEFAULT_REQUIRED_HEADERS;
-    const corsConfig = (policy.response_headers || {}).cors || null;
-    // Host allowlist: lowercase entries so we can compare against the lowercase
-    // Host header value without per-request normalization.
-    const allowedHosts = normalizeStringList(request.allowed_hosts, 'lower');
-    const trustForwardedFor = request.trust_forwarded_for === true;
-    const obsCfg = buildObsConfig(policy);
+    const requestBase = buildRequestCfgBase(policy);
     const cfgCode = renderConstObject('CFG', {
-        mode: defaults.mode || 'enforce',
-        allowMethods: request.allow_methods || DEFAULT_ALLOW_METHODS,
-        maxQueryLength: numberOr(limits.max_query_length, LIMITS_DEFAULTS.maxQueryLength),
-        maxQueryParams: numberOr(limits.max_query_params, LIMITS_DEFAULTS.maxQueryParams),
-        maxUriLength: numberOr(limits.max_uri_length, LIMITS_DEFAULTS.maxUriLength),
-        maxHeaderCount: clampNumber(limits.max_header_count, LIMITS_DEFAULTS.headerCountMin, LIMITS_DEFAULTS.headerCountMax, LIMITS_DEFAULTS.maxHeaderCount),
-        dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(dropQueryKeysArray)})`),
-        uaDenyContains: block.ua_contains || DEFAULT_UA_DENY_CONTAINS,
-        blockPathContains,
-        blockPathRegexes: runtimeCode(regexesLiteralCode(blockPathRegexSources)),
-        normalizePath: {
-            collapseSlashes: !!pathNormalize.collapse_slashes,
-            removeDotSegments: !!pathNormalize.remove_dot_segments,
-        },
-        requiredHeaders,
-        allowedHosts,
-        trustForwardedFor,
-        cors: corsConfig,
+        mode: requestBase.mode,
+        allowMethods: requestBase.allowMethods,
+        maxQueryLength: requestBase.maxQueryLength,
+        maxQueryParams: requestBase.maxQueryParams,
+        maxUriLength: requestBase.maxUriLength,
+        maxHeaderCount: requestBase.maxHeaderCount,
+        dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(requestBase.dropQueryKeysArray)})`),
+        uaDenyContains: requestBase.uaDenyContains,
+        blockPathContains: requestBase.blockPathContains,
+        blockPathRegexes: runtimeCode(regexesLiteralCode(requestBase.blockPathRegexSources)),
+        normalizePath: requestBase.normalizePath,
+        requiredHeaders: requestBase.requiredHeaders,
+        allowedHosts: requestBase.allowedHosts,
+        trustForwardedFor: requestBase.trustForwardedFor,
+        cors: requestBase.cors,
         authGates,
-        anomalyGuards: buildAnomalyGuardConfig(policy),
-        obs: obsCfg,
+        anomalyGuards: requestBase.anomalyGuards,
+        obs: requestBase.obs,
     });
     const templatePath = path.join(rootDir, 'templates', 'aws', 'viewer-request.js');
     let code = fs.readFileSync(templatePath, 'utf8');
@@ -663,53 +464,26 @@ function build(policy, options = {}) {
     fs.mkdirSync(distDir, { recursive: true });
     const outPath = path.join(distDir, 'viewer-request.js');
     fs.writeFileSync(outPath, code, 'utf8');
-    const resHeaders = policy.response_headers || {};
-    const routes = policy.routes || [];
-    let adminPathPrefixes = [];
-    let adminCacheControl = 'no-store';
-    for (const route of routes) {
-        const match = route.match || {};
-        const prefixes = match.path_prefixes || [];
-        const resp = route.response || {};
-        if (prefixes.length && (route.auth_gate || resp.cache_control)) {
-            adminPathPrefixes = prefixes;
-            if (resp.cache_control)
-                adminCacheControl = resp.cache_control;
-            break;
-        }
-    }
-    if (adminPathPrefixes.length === 0)
-        adminPathPrefixes = [...DEFAULT_ADMIN_PATH_PREFIXES];
-    // Union of every auth-gate protected prefix — used to force no-store +
-    // Vary: Authorization regardless of which gate type applies. Issue #8.
-    const authProtectedPrefixes = Array.from(new Set((authGates || []).flatMap((g) => Array.isArray(g.protectedPrefixes) ? g.protectedPrefixes : [])));
-    const forceVaryAuth = resHeaders.force_vary_auth !== false; // default on
+    const responseBase = buildResponseCfgBase(policy, authGates);
     const responseCfgCode = renderConstObject('RESPONSE_CFG', {
-        headers: {
-            'strict-transport-security': resHeaders.hsts || DEFAULT_SECURITY_HEADERS['strict-transport-security'],
-            'x-content-type-options': resHeaders.x_content_type_options || DEFAULT_SECURITY_HEADERS['x-content-type-options'],
-            'referrer-policy': resHeaders.referrer_policy || DEFAULT_SECURITY_HEADERS['referrer-policy'],
-            'permissions-policy': resHeaders.permissions_policy || DEFAULT_SECURITY_HEADERS['permissions-policy'],
-        },
-        csp_public: resHeaders.csp_public || DEFAULT_CSP_PUBLIC,
-        csp_admin: resHeaders.csp_admin || DEFAULT_CSP_ADMIN,
-        csp_report_only: resHeaders.csp_report_only || '',
-        csp_report_uri: resHeaders.csp_report_uri || '',
-        csp_nonce: resHeaders.csp_nonce === true,
-        coop: resHeaders.coop || '',
-        coep: resHeaders.coep || '',
-        corp: resHeaders.corp || '',
-        reporting_endpoints: resHeaders.reporting_endpoints || '',
-        adminPathPrefixes,
-        adminCacheControl,
-        authProtectedPrefixes,
-        forceVaryAuth,
-        clearSiteDataPaths: normalizeStringList(resHeaders.clear_site_data_paths, 'preserve', { trim: false }),
-        clearSiteDataTypes: Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
-            ? resHeaders.clear_site_data_types
-            : DEFAULT_CLEAR_SITE_DATA_TYPES,
-        cors: resHeaders.cors || null,
-        cookie_attributes: resHeaders.cookie_attributes || null,
+        headers: responseBase.headers,
+        csp_public: responseBase.csp_public,
+        csp_admin: responseBase.csp_admin,
+        csp_report_only: responseBase.csp_report_only,
+        csp_report_uri: responseBase.csp_report_uri,
+        csp_nonce: responseBase.csp_nonce,
+        coop: responseBase.coop,
+        coep: responseBase.coep,
+        corp: responseBase.corp,
+        reporting_endpoints: responseBase.reporting_endpoints,
+        adminPathPrefixes: responseBase.adminPathPrefixes,
+        adminCacheControl: responseBase.adminCacheControl,
+        authProtectedPrefixes: responseBase.authProtectedPrefixes,
+        forceVaryAuth: responseBase.forceVaryAuth,
+        clearSiteDataPaths: responseBase.clearSiteDataPaths,
+        clearSiteDataTypes: responseBase.clearSiteDataTypes,
+        cors: responseBase.cors,
+        cookie_attributes: responseBase.cookie_attributes,
     });
     const templateResponsePath = path.join(rootDir, 'templates', 'aws', 'viewer-response.js');
     let codeResponse = fs.readFileSync(templateResponsePath, 'utf8');
@@ -720,52 +494,18 @@ function build(policy, options = {}) {
     const jwtGates = authGates.filter((g) => g.type === 'jwt').map((g) => {
         const route = (policy.routes || []).find((r) => r.name === g.name);
         const gate = route?.auth_gate || {};
-        const algorithm = gate.algorithm || 'RS256';
-        // Runtime has only one verifier per gate (RS256 or HS256), so the emitted
-        // whitelist can only ever contain that algorithm. `allowed_algorithms` is
-        // honored for its intersection with `algorithm` (filtering `none`/unknown
-        // values out at runtime too), but cross-alg entries are rejected at build
-        // time in `validateAuthGates` to avoid a silent auth outage.
-        const userAllowed = Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0
-            ? gate.allowed_algorithms.filter((a) => typeof a === 'string' && a !== 'none' && a === algorithm)
-            : null;
-        const allowedAlgorithms = userAllowed && userAllowed.length > 0 ? userAllowed : [algorithm];
-        const clockSkewSec = clampNumber(gate.clock_skew_sec, JWT_CLOCK_SKEW.min, JWT_CLOCK_SKEW.max, JWT_CLOCK_SKEW.defaultSec);
-        return {
-            name: g.name,
-            protectedPrefixes: g.protectedPrefixes,
-            type: 'jwt',
-            algorithm,
-            allowed_algorithms: allowedAlgorithms,
-            clock_skew_sec: clockSkewSec,
-            jwks_url: gate.jwks_url || '',
-            issuer: gate.issuer || '',
-            audience: gate.audience || '',
-            secret_env: gate.secret_env || '',
-        };
+        return buildJwtGateConfig(gate, g);
     });
     const signedUrlGates = authGates.filter((g) => g.type === 'signed_url').map((g) => {
         const route = (policy.routes || []).find((r) => r.name === g.name);
         const gate = route?.auth_gate || {};
-        return {
-            name: g.name,
-            protectedPrefixes: g.protectedPrefixes,
-            type: 'signed_url',
-            algorithm: gate.algorithm || 'HMAC-SHA256',
-            secret_env: gate.secret_env || 'URL_SIGNING_SECRET',
-            expires_param: gate.expires_param || 'exp',
-            signature_param: gate.signature_param || 'sig',
-            exact_path: gate.exact_path === true,
-            nonce_param: typeof gate.nonce_param === 'string' && gate.nonce_param.trim()
-                ? gate.nonce_param.trim()
-                : '',
-        };
+        return buildSignedUrlGateConfig(gate, g);
     });
     const originAuth = (policy.origin || {}).auth || null;
-    const jwksGlobal = (policy.firewall || {}).jwks || {};
-    const jwksStaleIfError = clampNumber(jwksGlobal.stale_if_error_sec, 0, JWKS_DEFAULTS.staleMax, JWKS_DEFAULTS.staleIfErrorSec);
-    const jwksNegativeCache = clampNumber(jwksGlobal.negative_cache_sec, 0, JWKS_DEFAULTS.negativeMax, JWKS_DEFAULTS.negativeCacheSec);
-    const obsCfgOrigin = buildObsConfig(policy);
+    const jwksCache = buildJwksCacheCfg(policy);
+    const defaults = policy.defaults || {};
+    const limits = (policy.request || {}).limits || {};
+    const trustForwardedFor = requestBase.trustForwardedFor;
     const originCfgCode = renderConstObject('CFG', {
         project: policy.project || 'cdn-security',
         mode: defaults.mode || 'enforce',
@@ -774,9 +514,9 @@ function build(policy, options = {}) {
         jwtGates,
         signedUrlGates,
         originAuth,
-        jwksStaleIfErrorSec: jwksStaleIfError,
-        jwksNegativeCacheSec: jwksNegativeCache,
-        obs: obsCfgOrigin,
+        jwksStaleIfErrorSec: jwksCache.staleIfErrorSec,
+        jwksNegativeCacheSec: jwksCache.negativeCacheSec,
+        obs: requestBase.obs,
     });
     const templateOriginPath = path.join(rootDir, 'templates', 'aws', 'origin-request.js');
     let codeOrigin = fs.readFileSync(templateOriginPath, 'utf8');
