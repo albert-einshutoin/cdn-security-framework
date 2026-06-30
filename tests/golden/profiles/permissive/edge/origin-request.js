@@ -751,6 +751,39 @@ function readCorrelation(request) {
   return (h && h[0] && h[0].value) || '';
 }
 
+// Deterministic allow-path sampling (issue #224). Block/monitor/audit/error
+// logs always emit; only pass-through allow records honor sampleRate.
+function hashToUnit(key) {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h / 4294967296;
+}
+
+function allowSampleKey(request) {
+  const cid = readCorrelation(request);
+  if (cid) return cid;
+  return (request && request.method ? request.method : '') + ' ' + ((request && request.uri) || '/');
+}
+
+function shouldSampleAllow(key) {
+  const rate = CFG.obs && CFG.obs.sampleRate;
+  if (!rate || rate <= 0) return false;
+  if (rate >= 1) return true;
+  return hashToUnit(key) < rate;
+}
+
+function logAllow(request) {
+  if (!shouldSampleAllow(allowSampleKey(request))) return;
+  logEvent('allow', {
+    method: request && request.method,
+    uri: (request && request.uri) || '/',
+    correlation_id: readCorrelation(request),
+  });
+}
+
 function hashSub(sub) {
   if (!sub) return '';
   return crypto.createHash('sha256').update(String(sub)).digest('hex').slice(0, 16);
@@ -850,6 +883,7 @@ exports.handler = async (event) => {
     // Propagate correlation / trace header to origin so origin logs can join
     // edge block/allow logs.
     propagateCorrelation(req);
+    logAllow(req);
 
     return req;
   } catch (err) {

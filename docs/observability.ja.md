@@ -21,7 +21,7 @@
 |------------|------|-----|
 | `ts` | ISO-8601 タイムスタンプ | `2026-04-23T12:34:56.789Z` |
 | `level` | block/monitor/audit は `info`、実行エラーは `error` | `info` |
-| `event` | `block` / `monitor`（monitor モード）/ `audit` / `error` | `block` |
+| `event` | `block` / `monitor`（monitor モード）/ `audit` / `allow` / `error` | `block` |
 | `status` | 返した HTTP ステータス | `405` |
 | `block_reason` | ブロック理由（下表参照） | `method_not_allowed` |
 | `method` | リクエストメソッド | `POST` |
@@ -49,9 +49,19 @@
 observability:
   log_format: "json"               # "json"（既定）または "text"
   correlation_id_header: "traceparent"  # もしくは "x-request-id"
-  sample_rate: 1                   # 0..1（現状は advisory — block/audit は常時出力）
+  sample_rate: 1                   # 0..1。allow-path の `event:"allow"` ログ比率（block/audit は常時出力）
   audit_log_auth: true             # 認証ゲート成功時に audit イベントを出す
   audit_hash_sub: true             # sub を SHA-256 先頭 16 hex にハッシュ（PII 対策）
+```
+
+### allow-path サンプリング
+
+`sample_rate` は **allow-path** ログ（`event:"allow"`）のみを制御します。block / monitor / audit / error は `sample_rate` に関係なく常に出力されます。`0`（既定）では allow ログは出ません。`1` では origin 転送前に allow-path リクエストごとに 1 行出力します。`0` と `1` の間は `correlation_id`（優先）または `method + uri` の安定ハッシュで決定的にサンプリングします。
+
+allow イベント例:
+
+```json
+{"ts":1713873296789,"level":"info","event":"allow","method":"GET","uri":"/health","correlation_id":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
 ```
 
 ### 相関 ID 伝播

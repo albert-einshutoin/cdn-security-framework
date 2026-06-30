@@ -879,6 +879,101 @@ response_dlp:
   assert.ok(/CloudFront Functions cannot inspect response bodies/.test(result.stderr), result.stderr);
 });
 
+function parseJsonLogs(captured: string[]): any[] {
+  return captured
+    .map((line) => {
+      try { return JSON.parse(line); } catch (_e: unknown) { return null; }
+    })
+    .filter(Boolean);
+}
+
+test('cloudflare allow sampling respects sample_rate', async () => {
+  const policyBase = `
+version: 1
+project: cf-allow-sampling-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+observability:
+  log_format: json
+  correlation_id_header: traceparent
+  sample_rate: SAMPLE_RATE
+  audit_log_auth: true
+`;
+
+  const generated0 = compileCloudflare(policyBase.replace('SAMPLE_RATE', '0'));
+  const captured0: string[] = [];
+  const origLog0 = console.log;
+  console.log = (line: unknown) => { captured0.push(String(line)); };
+  try {
+    const { res, fetchCalls } = await runGeneratedWorkerRequest(
+      generated0,
+      new Request('https://edge.example.com/', {
+        method: 'GET',
+        headers: {
+          'user-agent': 'runtime-test',
+          traceparent: '00-cf-allow-0-test-01',
+        },
+      }),
+    );
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(fetchCalls.length, 1);
+  } finally {
+    console.log = origLog0;
+  }
+  assert.strictEqual(parseJsonLogs(captured0).filter((rec) => rec.event === 'allow').length, 0);
+
+  const generated1 = compileCloudflare(policyBase.replace('SAMPLE_RATE', '1'));
+  const captured1: string[] = [];
+  const origLog1 = console.log;
+  console.log = (line: unknown) => { captured1.push(String(line)); };
+  try {
+    const { res, fetchCalls } = await runGeneratedWorkerRequest(
+      generated1,
+      new Request('https://edge.example.com/allowed', {
+        method: 'GET',
+        headers: {
+          'user-agent': 'runtime-test',
+          traceparent: '00-cf-allow-1-test-01',
+        },
+      }),
+    );
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(fetchCalls.length, 1);
+  } finally {
+    console.log = origLog1;
+  }
+  const allowLogs1 = parseJsonLogs(captured1).filter((rec) => rec.event === 'allow');
+  assert.strictEqual(allowLogs1.length, 1);
+  assert.strictEqual(allowLogs1[0].event, 'allow');
+  assert.strictEqual(allowLogs1[0].method, 'GET');
+  assert.strictEqual(allowLogs1[0].uri, '/allowed');
+  assert.strictEqual(allowLogs1[0].correlation_id, '00-cf-allow-1-test-01');
+
+  const generatedBlock = compileCloudflare(policyBase.replace('SAMPLE_RATE', '0'));
+  const capturedBlock: string[] = [];
+  const origLogBlock = console.log;
+  console.log = (line: unknown) => { capturedBlock.push(String(line)); };
+  try {
+    const { res, fetchCalls } = await runGeneratedWorkerRequest(
+      generatedBlock,
+      new Request('https://edge.example.com/blocked', {
+        method: 'POST',
+        headers: {
+          'user-agent': 'runtime-test',
+          traceparent: '00-cf-block-0-test-01',
+        },
+      }),
+    );
+    assert.strictEqual(res.status, 405);
+    assert.strictEqual(fetchCalls.length, 0);
+  } finally {
+    console.log = origLogBlock;
+  }
+  assert.strictEqual(parseJsonLogs(capturedBlock).filter((rec) => rec.event === 'block').length, 1);
+});
+
 runTests().then(() => {
   if (process.exitCode) {
     process.exit(process.exitCode);

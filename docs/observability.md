@@ -21,7 +21,7 @@ When `observability.log_format: json` is set (default), the generated viewer-req
 |-------|-------------|---------|
 | `ts` | ISO-8601 timestamp | `2026-04-23T12:34:56.789Z` |
 | `level` | `info` on block/monitor/audit, `error` on runtime error | `info` |
-| `event` | `block`, `monitor` (monitor mode), `audit`, `error` | `block` |
+| `event` | `block`, `monitor` (monitor mode), `audit`, `allow`, `error` | `block` |
 | `status` | HTTP status returned | `405` |
 | `block_reason` | Why the request was blocked (see mapping below) | `method_not_allowed` |
 | `method` | Request method | `POST` |
@@ -49,9 +49,19 @@ Example block event:
 observability:
   log_format: "json"               # "json" (default) or "text"
   correlation_id_header: "traceparent"  # or "x-request-id"
-  sample_rate: 1                   # 0..1; currently advisory (block/audit always emit)
+  sample_rate: 1                   # 0..1; fraction of allow-path requests that emit event:"allow" (block/audit always emit)
   audit_log_auth: true             # emit audit events on auth gate success
   audit_hash_sub: true             # SHA-256 truncate sub to 16 hex (PII-safe)
+```
+
+### Allow-path sampling
+
+`sample_rate` controls deterministic sampling of **allow-path** logs only (`event:"allow"`). Block, monitor, audit, and error events always emit regardless of `sample_rate`. At `0` (default) no allow logs are written; at `1` every forwarded allow-path request logs once before origin fetch. Values between `0` and `1` use a stable hash of `correlation_id` (preferred) or `method + uri` so the same request key always makes the same sampling decision.
+
+Example allow event:
+
+```json
+{"ts":1713873296789,"level":"info","event":"allow","method":"GET","uri":"/health","correlation_id":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
 ```
 
 ### Correlation propagation

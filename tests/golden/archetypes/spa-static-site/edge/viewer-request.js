@@ -86,6 +86,39 @@ const CFG = {
     return (h && h.value) || '';
   }
 
+  // Deterministic allow-path sampling (issue #224). FNV-1a avoids crypto deps
+  // in CloudFront Functions; block/monitor/audit/error logs bypass this path.
+  function hashToUnit(key) {
+    var h = 2166136261 >>> 0;
+    for (var i = 0; i < key.length; i++) {
+      h ^= key.charCodeAt(i);
+      h = Math.imul(h, 16777619) >>> 0;
+    }
+    return h / 4294967296;
+  }
+
+  function allowSampleKey(req) {
+    var cid = req ? readCorrelation(req) : '';
+    if (cid) return cid;
+    return (req && req.method ? req.method : '') + ' ' + (req && req.uri ? req.uri : '/');
+  }
+
+  function shouldSampleAllow(key) {
+    var rate = CFG.obs && CFG.obs.sampleRate;
+    if (!rate || rate <= 0) return false;
+    if (rate >= 1) return true;
+    return hashToUnit(key) < rate;
+  }
+
+  function logAllow(req) {
+    if (!shouldSampleAllow(allowSampleKey(req))) return;
+    logEvent('allow', {
+      method: req && req.method,
+      uri: req && req.uri,
+      correlation_id: req ? readCorrelation(req) : '',
+    });
+  }
+
   function shouldBlock(checkResult, req) {
     if (!checkResult) return null;
     var reason = (checkResult.body && String(checkResult.body)) || 'blocked';
@@ -644,5 +677,6 @@ const CFG = {
     const auth = shouldBlockAuth(checkAuthGates(req), req);
     if (auth) return auth;
 
+    logAllow(req);
     return req;
   }

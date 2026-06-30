@@ -459,6 +459,129 @@ const viewerMonitorResult = runViewerMonitorTests();
 viewerFailed += viewerMonitorResult.failed;
 
 // =========================================================================
+// Section 1c: viewer-request allow sampling (issue #224)
+// =========================================================================
+
+function captureConsoleLogs(fn: () => void): string[] {
+  const captured: string[] = [];
+  const origLog = console.log;
+  console.log = (line: unknown) => { captured.push(String(line)); };
+  try {
+    fn();
+  } finally {
+    console.log = origLog;
+  }
+  return captured;
+}
+
+async function captureConsoleLogsAsync(fn: () => Promise<void>): Promise<string[]> {
+  const captured: string[] = [];
+  const origLog = console.log;
+  console.log = (line: unknown) => { captured.push(String(line)); };
+  try {
+    await fn();
+  } finally {
+    console.log = origLog;
+  }
+  return captured;
+}
+
+function parseJsonLogs(captured: string[]): any[] {
+  return captured
+    .map((line) => {
+      try { return JSON.parse(line); } catch (_e: unknown) { return null; }
+    })
+    .filter(Boolean);
+}
+
+function viewerSamplingBaseCfg(sampleRate: number): string {
+  return [
+    'const CFG = {',
+    '  mode: "enforce",',
+    '  allowMethods: ["GET", "HEAD"],',
+    '  maxQueryLength: 1024,',
+    '  maxQueryParams: 30,',
+    '  maxUriLength: 2048,',
+    '  dropQueryKeys: new Set(),',
+    '  uaDenyContains: [],',
+    '  blockPathContains: [],',
+    '  blockPathRegexes: [],',
+    '  normalizePath: { collapseSlashes: true, removeDotSegments: true },',
+    '  requiredHeaders: ["user-agent"],',
+    '  cors: null,',
+    '  authGates: [],',
+    '  allowedHosts: [],',
+    '  trustForwardedFor: false,',
+    `  obs: {"logFormat":"json","correlationHeader":"traceparent","sampleRate":${sampleRate},"auditLogAuth":true,"auditHashSub":true},`,
+    '};',
+  ].join('\n');
+}
+
+function runViewerAllowSamplingTests() {
+  let failed = 0;
+  const total = 3;
+
+  const handler0 = compileViewerTemplate(viewerSamplingBaseCfg(0));
+  if (!handler0) return { failed: total, total };
+
+  const allowEvent = buildEvent('GET', '/sampled', {
+    'user-agent': 'Mozilla',
+    'traceparent': '00-allow-sample-0-test-01',
+  });
+  const logs0 = captureConsoleLogs(() => { handler0(allowEvent); });
+  const allowLogs0 = parseJsonLogs(logs0).filter((rec) => rec.event === 'allow');
+  if (allowLogs0.length !== 0) {
+    console.error('FAIL: viewer sample_rate 0 should not emit allow logs');
+    failed++;
+  } else {
+    console.log('OK: viewer sample_rate 0 suppresses allow logs');
+  }
+
+  const handler1 = compileViewerTemplate(viewerSamplingBaseCfg(1));
+  if (!handler1) return { failed: total, total };
+
+  const allowEvent1 = buildEvent('GET', '/allowed-path', {
+    'user-agent': 'Mozilla',
+    'traceparent': '00-allow-sample-1-test-01',
+  });
+  const logs1 = captureConsoleLogs(() => { handler1(allowEvent1); });
+  const allowLogs1 = parseJsonLogs(logs1).filter((rec) => rec.event === 'allow');
+  if (allowLogs1.length !== 1) {
+    console.error('FAIL: viewer sample_rate 1 should emit one allow log; got', allowLogs1.length);
+    failed++;
+  } else {
+    const rec = allowLogs1[0];
+    const ok = rec.event === 'allow'
+      && rec.method === 'GET'
+      && rec.uri === '/allowed-path'
+      && rec.correlation_id === '00-allow-sample-1-test-01';
+    if (!ok) {
+      console.error('FAIL: viewer allow log missing fields', rec);
+      failed++;
+    } else {
+      console.log('OK: viewer sample_rate 1 emits allow log with method, uri, correlation_id');
+    }
+  }
+
+  const logsBlock = captureConsoleLogs(() => {
+    handler0(buildEvent('POST', '/blocked', { 'user-agent': 'Mozilla' }));
+  });
+  const blockLogs = parseJsonLogs(logsBlock).filter((rec) => rec.event === 'block');
+  if (blockLogs.length !== 1) {
+    console.error('FAIL: viewer sample_rate 0 should still emit block logs; got', blockLogs.length);
+    failed++;
+  } else {
+    console.log('OK: viewer sample_rate 0 still emits block logs');
+  }
+
+  console.log('--- viewer-request (allow sampling): ' + (total - failed) + '/' + total + ' passed ---');
+  return { failed, total };
+}
+
+const viewerSamplingResult = runViewerAllowSamplingTests();
+viewerFailed += viewerSamplingResult.failed;
+
+// =========================================================================
 // Section 2: origin-request.js tests (Lambda@Edge)
 // =========================================================================
 
@@ -1421,6 +1544,97 @@ async function runMonitorModeTests() {
   return { failed: monitorFailed, total: monitorCases.length };
 }
 
+async function runOriginAllowSamplingTests() {
+  let failed = 0;
+  const total = 3;
+  const nowSec = Math.floor(Date.now() / 1000);
+  const testSecret = HS256_SECRET;
+  process.env.JWT_TEST_SECRET = testSecret;
+
+  const originCfg0 = [
+    'const CFG = {',
+    '  project: "test",',
+    '  mode: "enforce",',
+    '  maxHeaderSize: 0,',
+    '  trustForwardedFor: false,',
+    `  obs: {"logFormat":"json","correlationHeader":"traceparent","sampleRate":0,"auditLogAuth":true,"auditHashSub":true},`,
+    '  jwtGates: [{',
+    '    name: "api",',
+    '    protectedPrefixes: ["/api"],',
+    '    type: "jwt",',
+    '    algorithm: "HS256",',
+    '    jwks_url: "",',
+    '    issuer: "test-issuer",',
+    '    audience: "test-audience",',
+    '    secret_env: "JWT_TEST_SECRET"',
+    '  }],',
+    '  signedUrlGates: [],',
+    '  originAuth: null',
+    '};',
+  ].join('\n');
+
+  const handler0 = compileOriginTemplate(originCfg0);
+  if (!handler0) return { failed: total, total };
+
+  const passLogs0 = await captureConsoleLogsAsync(async () => {
+    await handler0(buildLambdaEdgeEvent('/'));
+  });
+  const allowLogs0 = parseJsonLogs(passLogs0).filter((rec) => rec.event === 'allow');
+  if (allowLogs0.length !== 0) {
+    console.error('FAIL: origin sample_rate 0 should not emit allow logs');
+    failed++;
+  } else {
+    console.log('OK: origin sample_rate 0 suppresses allow logs');
+  }
+
+  const originCfg1 = originCfg0.replace('"sampleRate":0', '"sampleRate":1');
+  const handler1 = compileOriginTemplate(originCfg1);
+  if (!handler1) return { failed: total, total };
+
+  const passEvent = buildLambdaEdgeEvent('/', { traceparent: '00-origin-allow-sample-01' });
+  const passLogs1 = await captureConsoleLogsAsync(async () => {
+    await handler1(passEvent);
+  });
+  const allowLogs1 = parseJsonLogs(passLogs1).filter((rec) => rec.event === 'allow');
+  if (allowLogs1.length !== 1) {
+    console.error('FAIL: origin sample_rate 1 should emit one allow log; got', allowLogs1.length);
+    failed++;
+  } else {
+    const rec = allowLogs1[0];
+    const ok = rec.event === 'allow'
+      && rec.method === 'GET'
+      && rec.uri === '/'
+      && rec.correlation_id === '00-origin-allow-sample-01';
+    if (!ok) {
+      console.error('FAIL: origin allow log missing fields', rec);
+      failed++;
+    } else {
+      console.log('OK: origin sample_rate 1 emits allow log with method, uri, correlation_id');
+    }
+  }
+
+  const jwtEvent = buildLambdaEdgeEvent('/api/data', {
+    Authorization: 'Bearer ' + createHS256Jwt({
+      sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
+      exp: nowSec + 3600, nbf: nowSec - 60,
+    }, testSecret),
+    traceparent: '00-origin-audit-sample-01',
+  });
+  const auditLogs = await captureConsoleLogsAsync(async () => {
+    await handler0(jwtEvent);
+  });
+  const auditRecs = parseJsonLogs(auditLogs).filter((rec) => rec.event === 'audit');
+  if (auditRecs.length !== 1) {
+    console.error('FAIL: origin sample_rate 0 should still emit audit logs; got', auditRecs.length);
+    failed++;
+  } else {
+    console.log('OK: origin sample_rate 0 still emits audit logs');
+  }
+
+  console.log('--- origin-request (allow sampling): ' + (total - failed) + '/' + total + ' passed ---');
+  return { failed, total };
+}
+
 // Error boundary test: handler should return 502 on unexpected error
 async function runErrorBoundaryTests() {
   const badCfgCode = [
@@ -1454,7 +1668,7 @@ async function runErrorBoundaryTests() {
 // Run all tests
 async function main() {
   let totalFailed = viewerFailed;
-  let totalTests = cases.length + viewerMonitorResult.total;
+  let totalTests = cases.length + viewerMonitorResult.total + viewerSamplingResult.total;
 
   const enforceResult: any = await runOriginRequestTests();
   totalFailed += enforceResult.failed;
@@ -1483,6 +1697,10 @@ async function main() {
   const monitorResult = await runMonitorModeTests();
   totalFailed += monitorResult.failed;
   totalTests += monitorResult.total;
+
+  const originSamplingResult = await runOriginAllowSamplingTests();
+  totalFailed += originSamplingResult.failed;
+  totalTests += originSamplingResult.total;
 
   const errorResult = await runErrorBoundaryTests();
   totalFailed += errorResult.failed;

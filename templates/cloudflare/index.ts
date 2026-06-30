@@ -49,6 +49,38 @@ function readCorrelation(req: Request | null): string {
   return req.headers.get(CFG.obs.correlationHeader) || '';
 }
 
+// Deterministic allow-path sampling (issue #224). Block/monitor/audit/error
+// logs always emit; only forwarded allow records honor sampleRate.
+function hashToUnit(key: string): number {
+  let h = 2166136261 >>> 0;
+  for (let i = 0; i < key.length; i++) {
+    h ^= key.charCodeAt(i);
+    h = Math.imul(h, 16777619) >>> 0;
+  }
+  return h / 4294967296;
+}
+
+function allowSampleKey(ctx: ReqCtx): string {
+  if (ctx.correlationId) return ctx.correlationId;
+  return (ctx.method || '') + ' ' + (ctx.uri || '/');
+}
+
+function shouldSampleAllow(key: string): boolean {
+  const rate = CFG.obs && CFG.obs.sampleRate;
+  if (!rate || rate <= 0) return false;
+  if (rate >= 1) return true;
+  return hashToUnit(key) < rate;
+}
+
+function logAllow(ctx: ReqCtx) {
+  if (!shouldSampleAllow(allowSampleKey(ctx))) return;
+  logEvent('allow', {
+    method: ctx.method,
+    uri: ctx.uri,
+    correlation_id: ctx.correlationId,
+  });
+}
+
 function reqCtx(req: Request | null): ReqCtx {
   if (!req) return { method: '', uri: '/', correlationId: '' };
   let uri = '/';
@@ -1457,6 +1489,7 @@ export default {
 
     // Propagate correlation / trace header so origin logs can join edge logs.
     // When the header is missing, mint one so every request has a stable ID.
+    let allowCtx = ctx;
     if (CFG.obs && CFG.obs.correlationHeader) {
       const incoming = request.headers.get(CFG.obs.correlationHeader);
       if (!incoming) {
@@ -1464,8 +1497,11 @@ export default {
         crypto.getRandomValues(buf);
         const id = Array.from(buf, (b: number) => b.toString(16).padStart(2, '0')).join('');
         forwardHeaders.set(CFG.obs.correlationHeader, id);
+        allowCtx = { method: ctx.method, uri: ctx.uri, correlationId: id };
       }
     }
+
+    logAllow(allowCtx);
 
     const res = await fetch(new Request(url.toString(), {
       method: request.method,
