@@ -32,6 +32,7 @@ Use this matrix to decide whether a control belongs in **Edge** (CloudFront Func
 | Security header injection | ✓ | — | Edge: response rewrite. |
 | OWASP CRS / SQLi, XSS in body | — | ✓ | WAF managed rules. |
 | CAPTCHA / challenge | — | ✓ | WAF / Bot Management. |
+| Lightweight JS challenge / PoW | ✓ (Cloudflare Workers only) | — | Edge-only via `firewall.challenge`; not CAPTCHA or Bot Management. AWS CloudFront Functions / Lambda@Edge: unsupported warning. See [edge-js-challenge](./edge-js-challenge.md). |
 | Geo / ASN block | Optional (Workers) | ✓ | WAF often easier. |
 | DDoS mitigation | — | ✓ | CDN + Shield / WAF. |
 
