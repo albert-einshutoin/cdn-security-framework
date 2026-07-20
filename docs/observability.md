@@ -15,13 +15,13 @@ This document describes recommended **logging and metrics** for the Edge Securit
 
 ## Structured JSON Logs (generated runtime)
 
-When `observability.log_format: json` is set (default), the generated viewer-request / origin-request / Cloudflare Worker emit one JSON line per decision to `console.log`. Fields:
+When `observability.log_format: json` is set (default), the generated viewer-request / origin-request / Cloudflare Worker emit denied, monitor, audit, and error decisions to `console.log`. Allowed requests are emitted according to `observability.sample_rate`. Fields:
 
 | Field | Description | Example |
 |-------|-------------|---------|
-| `ts` | ISO-8601 timestamp | `2026-04-23T12:34:56.789Z` |
-| `level` | `info` on block/monitor/audit, `error` on runtime error | `info` |
-| `event` | `block`, `monitor` (monitor mode), `audit`, `error` | `block` |
+| `ts` | Unix timestamp in milliseconds | `1776947696789` |
+| `level` | `warn` on block; `info` on allow/monitor/audit; runtime errors use `info` or `error` depending on the emitter | `warn` |
+| `event` | `allow`, `block`, `monitor` (monitor mode), `audit`, `error` | `block` |
 | `status` | HTTP status returned | `405` |
 | `block_reason` | Why the request was blocked (see mapping below) | `method_not_allowed` |
 | `method` | Request method | `POST` |
@@ -40,7 +40,7 @@ Audit events (`audit_log_auth: true`) add:
 Example block event:
 
 ```json
-{"ts":"2026-04-23T12:34:56.789Z","level":"info","event":"block","status":405,"block_reason":"method_not_allowed","method":"POST","uri":"/anything","correlation_id":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
+{"ts":1776947696789,"level":"warn","event":"block","status":405,"block_reason":"method_not_allowed","method":"POST","uri":"/anything","correlation_id":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
 ```
 
 ### Policy
@@ -49,7 +49,7 @@ Example block event:
 observability:
   log_format: "json"               # "json" (default) or "text"
   correlation_id_header: "traceparent"  # or "x-request-id"
-  sample_rate: 1                   # 0..1; currently advisory (block/audit always emit)
+  sample_rate: 1                   # 0..1; sample allowed requests (block/audit always emit)
   audit_log_auth: true             # emit audit events on auth gate success
   audit_hash_sub: true             # SHA-256 truncate sub to 16 hex (PII-safe)
 ```
@@ -57,6 +57,8 @@ observability:
 ### Correlation propagation
 
 At Lambda@Edge / Worker, if the incoming request does **not** carry `correlation_id_header`, the runtime mints one (`crypto.randomUUID` / `crypto.getRandomValues`) and sets it on the forwarded request. Downstream services then see a consistent ID across edge logs, WAF logs, and origin logs.
+
+Allow sampling is deterministic. The runtime uses the incoming correlation ID when present, otherwise it uses the request method and URI path. Lambda@Edge and Workers capture that key before minting a missing correlation ID, so retries for the same method/path remain in the same sample bucket. `sample_rate: 0` disables allow logs; `1` emits every allowed request. Block, monitor, audit, and error logs are never sampled.
 
 ---
 

@@ -751,6 +751,32 @@ function readCorrelation(request) {
   return (h && h[0] && h[0].value) || '';
 }
 
+function allowSampleKey(request) {
+  return readCorrelation(request)
+    || ((request && request.method) || '') + '\n' + ((request && request.uri) || '/');
+}
+
+function shouldSampleAllow(key) {
+  const rate = (CFG.obs && CFG.obs.sampleRate) || 0;
+  if (rate <= 0) return false;
+  if (rate >= 1) return true;
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) | 0;
+  }
+  return (hash >>> 0) / 4294967296 < rate;
+}
+
+function logAllow(request, samplingKey) {
+  if (!shouldSampleAllow(samplingKey)) return;
+  logEvent('allow', {
+    method: request && request.method,
+    uri: (request && request.uri) || '/',
+    correlation_id: readCorrelation(request),
+  });
+}
+
 function hashSub(sub) {
   if (!sub) return '';
   return crypto.createHash('sha256').update(String(sub)).digest('hex').slice(0, 16);
@@ -847,9 +873,14 @@ exports.handler = async (event) => {
     const originAuthBlock = addOriginAuth(req);
     if (originAuthBlock) return originAuthBlock;
 
+    // Capture the sampling key before propagation. A newly minted random ID
+    // must not move identical requests between sample buckets.
+    const allowSamplingKey = allowSampleKey(req);
+
     // Propagate correlation / trace header to origin so origin logs can join
     // edge block/allow logs.
     propagateCorrelation(req);
+    logAllow(req, allowSamplingKey);
 
     return req;
   } catch (err) {

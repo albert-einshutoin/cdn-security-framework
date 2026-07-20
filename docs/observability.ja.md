@@ -15,13 +15,13 @@
 
 ## 構造化 JSON ログ（生成ランタイム）
 
-`observability.log_format: json`（既定）を指定すると、生成された viewer-request / origin-request / Cloudflare Worker は判定 1 件につき 1 行の JSON を `console.log` に出力します。フィールド:
+`observability.log_format: json`（既定）を指定すると、生成された viewer-request / origin-request / Cloudflare Worker は拒否・monitor・audit・error の判定を `console.log` に出力します。許可リクエストは `observability.sample_rate` に従って出力します。フィールド:
 
 | フィールド | 説明 | 例 |
 |------------|------|-----|
-| `ts` | ISO-8601 タイムスタンプ | `2026-04-23T12:34:56.789Z` |
-| `level` | block/monitor/audit は `info`、実行エラーは `error` | `info` |
-| `event` | `block` / `monitor`（monitor モード）/ `audit` / `error` | `block` |
+| `ts` | Unix タイムスタンプ（ミリ秒） | `1776947696789` |
+| `level` | block は `warn`、allow/monitor/audit は `info`。実行エラーは出力元により `info` または `error` | `warn` |
+| `event` | `allow` / `block` / `monitor`（monitor モード）/ `audit` / `error` | `block` |
 | `status` | 返した HTTP ステータス | `405` |
 | `block_reason` | ブロック理由（下表参照） | `method_not_allowed` |
 | `method` | リクエストメソッド | `POST` |
@@ -40,7 +40,7 @@
 ブロックイベント例:
 
 ```json
-{"ts":"2026-04-23T12:34:56.789Z","level":"info","event":"block","status":405,"block_reason":"method_not_allowed","method":"POST","uri":"/anything","correlation_id":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
+{"ts":1776947696789,"level":"warn","event":"block","status":405,"block_reason":"method_not_allowed","method":"POST","uri":"/anything","correlation_id":"00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"}
 ```
 
 ### ポリシー
@@ -49,7 +49,7 @@
 observability:
   log_format: "json"               # "json"（既定）または "text"
   correlation_id_header: "traceparent"  # もしくは "x-request-id"
-  sample_rate: 1                   # 0..1（現状は advisory — block/audit は常時出力）
+  sample_rate: 1                   # 0..1（許可リクエストを抽出。block/audit は常時出力）
   audit_log_auth: true             # 認証ゲート成功時に audit イベントを出す
   audit_hash_sub: true             # sub を SHA-256 先頭 16 hex にハッシュ（PII 対策）
 ```
@@ -57,6 +57,8 @@ observability:
 ### 相関 ID 伝播
 
 Lambda@Edge / Worker は受信リクエストに `correlation_id_header` が無いとき自動採番（`crypto.randomUUID` / `crypto.getRandomValues`）して origin への転送ヘッダに付与します。これにより Edge / WAF / Origin のログを同一 ID で串刺しできます。
+
+allow のサンプリング判定は決定論的です。受信時の相関 ID があればそれを使い、無ければリクエストメソッドと URI パスを使います。Lambda@Edge / Worker は相関 ID の自動採番前にこのキーを確定するため、同じ method/path の再試行は同じサンプルバケットに入ります。`sample_rate: 0` は allow ログを無効化し、`1` はすべての許可リクエストを記録します。block / monitor / audit / error はサンプリングしません。
 
 ---
 

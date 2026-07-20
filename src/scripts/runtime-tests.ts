@@ -1576,6 +1576,88 @@ async function runErrorBoundaryTests() {
   return { failed: 0, total: 1 };
 }
 
+async function runOriginAllowSamplingTests() {
+  const cfg = (sampleRate: number) => [
+    'const CFG = {',
+    '  project: "sampling-test",',
+    '  mode: "enforce",',
+    '  maxHeaderSize: 0,',
+    '  jwtGates: [],',
+    '  signedUrlGates: [],',
+    '  originAuth: null,',
+    `  obs: { logFormat: "json", correlationHeader: "traceparent", sampleRate: ${sampleRate}, auditLogAuth: false, auditHashSub: false }`,
+    '};',
+  ].join('\n');
+
+  let failed = 0;
+  const fullHandler = compileOriginTemplate(cfg(1));
+  const captured: string[] = [];
+  const originalLog = console.log;
+  console.log = (line: any) => { captured.push(String(line)); };
+  try {
+    await fullHandler(buildLambdaEdgeEvent('/sampled', { traceparent: '00-origin-allow-test-01' }));
+  } finally {
+    console.log = originalLog;
+  }
+  const fullAllowLine = captured.find((line) => line.includes('"event":"allow"'));
+  if (!fullAllowLine) {
+    console.error('FAIL: origin sample_rate 1 should emit an allow decision');
+    failed++;
+  } else {
+    const record = JSON.parse(fullAllowLine);
+    const fieldsOk = record.method === 'GET'
+      && record.uri === '/sampled'
+      && record.correlation_id === '00-origin-allow-test-01';
+    if (!fieldsOk) {
+      console.error('FAIL: origin allow decision is missing fields', record);
+      failed++;
+    } else {
+      console.log('OK: origin sample_rate 1 emits an allow decision with correlation fields');
+    }
+  }
+
+  const zeroHandler = compileOriginTemplate(cfg(0));
+  const zeroLogs: string[] = [];
+  console.log = (line: any) => { zeroLogs.push(String(line)); };
+  try {
+    await zeroHandler(buildLambdaEdgeEvent('/not-sampled'));
+  } finally {
+    console.log = originalLog;
+  }
+  if (zeroLogs.some((line) => line.includes('"event":"allow"'))) {
+    console.error('FAIL: origin sample_rate 0 should suppress allow decisions');
+    failed++;
+  } else {
+    console.log('OK: origin sample_rate 0 suppresses allow decisions');
+  }
+
+  const partialHandler = compileOriginTemplate(cfg(0.5), {
+    crypto: {
+      ...crypto,
+      randomUUID: (() => {
+        let sequence = 0;
+        return () => (++sequence % 2 === 0 ? 'minted-50' : 'minted-0');
+      })(),
+    },
+  });
+  const repeated: string[] = [];
+  console.log = (line: any) => { repeated.push(String(line)); };
+  try {
+    for (let i = 0; i < 8; i++) await partialHandler(buildLambdaEdgeEvent('/stable-path'));
+  } finally {
+    console.log = originalLog;
+  }
+  const allowCount = repeated.filter((line) => line.includes('"event":"allow"')).length;
+  if (allowCount !== 0 && allowCount !== 8) {
+    console.error('FAIL: origin sampling changed after minting correlation IDs, allow logs=', allowCount);
+    failed++;
+  } else {
+    console.log('OK: origin sampling is deterministic before correlation ID minting');
+  }
+
+  return { failed, total: 3 };
+}
+
 // Run all tests
 async function main() {
   let totalFailed = viewerFailed;
@@ -1612,6 +1694,10 @@ async function main() {
   const errorResult = await runErrorBoundaryTests();
   totalFailed += errorResult.failed;
   totalTests += errorResult.total;
+
+  const allowSamplingResult = await runOriginAllowSamplingTests();
+  totalFailed += allowSamplingResult.failed;
+  totalTests += allowSamplingResult.total;
 
   if (totalFailed > 0) {
     console.error('Total:', totalFailed, 'failed out of', totalTests, 'tests');
