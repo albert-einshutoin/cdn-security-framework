@@ -3,6 +3,7 @@ const path = require('path');
 const {
   assertInjectedConstDeclarations,
   injectTemplateCode,
+  optimizeCloudFrontFunction,
   renderConstObject,
   runtimeCode,
 } = require('./template-inject');
@@ -409,14 +410,14 @@ function warnWeakAwsCspNonce(policy: any, options: any = {}) {
   const logger = options.logger || console;
   const resHeaders = (policy && policy.response_headers) || {};
   if (resHeaders.csp_nonce !== true) {
-    return { warned: false };
+    return { warned: false, failed: false };
   }
   const msg =
-    '[WARN] response_headers.csp_nonce is enabled for the AWS CloudFront Functions target. ' +
-    'CloudFront Functions do not expose a cryptographic RNG, so AWS viewer-response nonces use Math.random. ' +
-    'Prefer Cloudflare Workers for nonce-based CSP, or disable csp_nonce on AWS and let the origin manage nonces.';
+    '[ERROR] response_headers.csp_nonce is enabled for the AWS CloudFront Functions target. ' +
+    'CloudFront Functions do not expose a cryptographic RNG, so Math.random cannot provide a secure CSP nonce. ' +
+    'Use Cloudflare Workers, disable csp_nonce on AWS, or let the origin manage nonces.';
   logger.error(msg);
-  return { warned: true, warnings: [msg] };
+  return { warned: true, failed: true, warnings: [msg] };
 }
 
 function warnUnsupportedAwsResponseDlp(policy: any, options: any = {}) {
@@ -443,7 +444,7 @@ function buildChallengeConfig(policy: any) {
     mode: raw.mode === 'report' || raw.mode === 'block' || raw.mode === 'challenge' ? raw.mode : 'challenge',
     pathPrefixes,
     uaContains,
-    difficulty: clampNumber(raw.difficulty, 1, 6, 3),
+    difficulty: clampNumber(raw.difficulty, 1, 4, 3),
     ttlSec: clampNumber(raw.ttl_sec, 60, 86400, 900),
     secretEnv: typeof raw.secret_env === 'string' && raw.secret_env.trim()
       ? raw.secret_env.trim()
@@ -530,6 +531,13 @@ function build(policy: any, options: any = {}) {
   const templatePath = path.join(rootDir, 'templates', 'aws', 'viewer-request.js');
   let code = fs.readFileSync(templatePath, 'utf8');
   code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode);
+  code = injectTemplateCode(code, '/* {{FEATURE_CORS}} */ true', String(Boolean(requestBase.cors)));
+  code = injectTemplateCode(code, '/* {{FEATURE_HOST_ALLOWLIST}} */ true', String(requestBase.allowedHosts.length > 0));
+  code = injectTemplateCode(
+    code,
+    '/* {{FEATURE_VIEWER_AUTH}} */ true',
+    String(authGates.some((gate) => gate.type === 'static_token' || gate.type === 'basic_auth')),
+  );
   assertInjectedConstDeclarations(code, ['CFG']);
 
   const distDir = path.join(outDir, 'edge');
@@ -569,16 +577,27 @@ function build(policy: any, options: any = {}) {
   const jwtGates = authGates.filter((g) => g.type === 'jwt').map((g) => {
     const route = (policy.routes || []).find((r: any) => r.name === g.name);
     const gate = route?.auth_gate || {};
-    return buildJwtGateConfig(gate, g);
+    const compiled = buildJwtGateConfig(gate, g);
+    return {
+      ...compiled,
+      // Lambda@Edge does not support custom environment variables. Secrets
+      // therefore become deployment credentials and must be rebuilt/rotated
+      // with the function artifact.
+      secret: gate.secret_env ? (env[gate.secret_env] || '') : '',
+    };
   });
 
   const signedUrlGates = authGates.filter((g) => g.type === 'signed_url').map((g) => {
     const route = (policy.routes || []).find((r: any) => r.name === g.name);
     const gate = route?.auth_gate || {};
-    return buildSignedUrlGateConfig(gate, g);
+    const compiled = buildSignedUrlGateConfig(gate, g);
+    return { ...compiled, secret: gate.secret_env ? (env[gate.secret_env] || '') : '' };
   });
 
-  const originAuth = (policy.origin || {}).auth || null;
+  const rawOriginAuth = (policy.origin || {}).auth || null;
+  const originAuth = rawOriginAuth
+    ? { ...rawOriginAuth, secret: rawOriginAuth.secret_env ? (env[rawOriginAuth.secret_env] || '') : '' }
+    : null;
   const jwksCache = buildJwksCacheCfg(policy);
   const defaults = policy.defaults || {};
   const limits = (policy.request || {}).limits || {};
@@ -633,7 +652,8 @@ function main(argv: string[] = process.argv.slice(2)) {
 
   // Non-fatal advisory: signed_url protecting write-like paths without nonce_param.
   warnSignedUrlReplay(policy);
-  warnWeakAwsCspNonce(policy);
+  const awsCspNonce = warnWeakAwsCspNonce(policy);
+  if (awsCspNonce.failed) process.exit(1);
   warnUnsupportedAwsResponseDlp(policy);
   warnUnsupportedAwsChallenge(policy);
   warnUnsupportedGraphqlGuard(policy, 'aws');
@@ -648,6 +668,10 @@ function main(argv: string[] = process.argv.slice(2)) {
 
   try {
     const outputs = build(policy, { outDir, rootDir: repoRoot, allowPlaceholderToken });
+    for (const outPath of outputs.slice(0, 2)) {
+      const source = fs.readFileSync(outPath, 'utf8');
+      fs.writeFileSync(outPath, optimizeCloudFrontFunction(source, path.basename(outPath)), 'utf8');
+    }
     outputs.forEach((outPath) => console.log('Build complete:', outPath));
     // Advertise placeholder usage loudly so humans notice in CI output.
     if (allowPlaceholderToken) {
@@ -690,6 +714,7 @@ module.exports = {
   warnUnsupportedGraphqlGuard,
   validateJwksUrl,
   build,
+  optimizeCloudFrontFunction,
   main,
   PLACEHOLDER_TOKEN,
 };

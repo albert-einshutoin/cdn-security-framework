@@ -9,6 +9,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Security
+
+- Enforce the CloudFront Functions 10 KiB code limit after optimization and stop uploading secret-bearing AWS edge code as a workflow artifact.
+- Bake Lambda@Edge HS256, signed-URL, and origin-auth credentials at build time because Lambda@Edge does not support custom environment variables.
+- Reject unsupported AWS CSP nonces; Cloudflare now passes a cryptographic nonce to the origin before rendering and bounds response-DLP body reads.
+
+### Fixed
+
+- Ship `esbuild` to npm consumers, align Commander with Node 20 support, preserve template replacement tokens, generate `wrangler.toml`, and pin generated deployment tooling.
+
 ## [1.4.0] - 2026-06-07
 
 ### Security

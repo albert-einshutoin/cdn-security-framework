@@ -121,6 +121,8 @@ request:
     max_depth: 8
 response_headers:
   hsts: "max-age=31536000"
+  csp_nonce: true
+  csp_public: "script-src 'self' 'nonce-PLACEHOLDER'"
 response_dlp:
   enabled: true
   action: report_only
@@ -1422,6 +1424,7 @@ test('CLI authoring DX: readiness reports target-specific unsupported controls',
     assert.ok(awsReport.findings.some((finding: any) => finding.id === 'target.aws.graphql_guard.unsupported'));
     assert.ok(awsReport.findings.some((finding: any) => finding.id === 'target.aws.challenge.unsupported'));
     assert.ok(awsReport.findings.some((finding: any) => finding.id === 'target.aws.response_dlp.unsupported'));
+    assert.ok(awsReport.findings.some((finding: any) => finding.id === 'target.aws.csp_nonce.unsupported'));
 
     const cloudflare: any = spawnSync(process.execPath, [
       cli, 'readiness',
@@ -1570,12 +1573,40 @@ test('CLI authoring DX: deploy-template emits AWS and Cloudflare workflow templa
     assert.ok(aws.includes('cdn-security readiness --target aws --strict'));
     assert.ok(aws.includes('${{ secrets.EDGE_ADMIN_TOKEN }}'));
     assert.ok(aws.includes('cdn-security build --target aws --out-dir dist'));
+    assert.ok(!aws.includes('dist/edge/'), 'secret-bearing AWS edge code must not be uploaded as a workflow artifact');
+    assert.ok(aws.includes('actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0'));
+    assert.ok(aws.includes('actions/setup-node@820762786026740c76f36085b0efc47a31fe5020'));
     assert.ok(cloudflare.includes('cdn-security readiness --target cloudflare --strict'));
     assert.ok(cloudflare.includes('CDN_SECURITY_WORKER_SECRET_NAMES'));
     assert.ok(cloudflare.includes('CDN_SECURITY_WORKER_SECRETS_FILE'));
-    assert.ok(cloudflare.includes('npx wrangler deploy dist/edge/cloudflare/index.ts --secrets-file'));
+    assert.ok(cloudflare.includes('npx --yes wrangler@4.112.0 deploy dist/edge/cloudflare/index.ts --secrets-file'));
     assert.ok(cloudflare.includes('${{ secrets.CLOUDFLARE_API_TOKEN }}'));
     assert.ok(cloudflare.includes("'wrangler.toml'"));
+  } finally {
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('CLI init creates a deployable wrangler.toml for Cloudflare projects', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cloudflare-init-'));
+  try {
+    const { spawnSync } = require('child_process');
+    const cli = path.join(repoRoot, 'bin', 'cli.js');
+    const result: any = spawnSync(process.execPath, [
+      cli, 'init',
+      '--platform', 'cloudflare',
+      '--archetype', 'spa-static-site',
+      '--force',
+    ], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(result.status, 0, `init failed: ${result.stderr}`);
+    const wrangler = fs.readFileSync(path.join(tmp, 'wrangler.toml'), 'utf8');
+    assert.match(wrangler, /^name = "example-spa-static-site"/m);
+    assert.match(wrangler, /^main = "dist\/edge\/cloudflare\/index\.ts"/m);
+    assert.match(wrangler, /^compatibility_date = "\d{4}-\d{2}-\d{2}"/m);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }

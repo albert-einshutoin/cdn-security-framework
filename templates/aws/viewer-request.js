@@ -567,12 +567,16 @@
     }
 
     // 0b) CORS preflight handling
-    const preflight = handleCorsPreflight(req);
-    if (preflight) return preflight;
+    if (/* {{FEATURE_CORS}} */ true) {
+      const preflight = handleCorsPreflight(req);
+      if (preflight) return preflight;
+    }
 
     // 0c) Host allowlist (early reject — cheaper than running every check)
-    const host = shouldBlock(blockIfHostNotAllowed(req), req);
-    if (host) return host;
+    if (/* {{FEATURE_HOST_ALLOWLIST}} */ true) {
+      const host = shouldBlock(blockIfHostNotAllowed(req), req);
+      if (host) return host;
+    }
 
     // 1) Method allowlist
     const m = shouldBlock(blockIfMethodNotAllowed(req), req);
@@ -622,8 +626,10 @@
     normalizeQuery(req);
 
     // 10) Auth gates (static token, basic auth)
-    const auth = shouldBlockAuth(checkAuthGates(req), req);
-    if (auth) return auth;
+    if (/* {{FEATURE_VIEWER_AUTH}} */ true) {
+      const auth = shouldBlockAuth(checkAuthGates(req), req);
+      if (auth) return auth;
+    }
 
     return req;
   }

@@ -245,7 +245,7 @@ npx cdn-security deploy-template --target cloudflare
 npx cdn-security deploy-template --out-dir .github/workflows --force
 ```
 
-Writes starter GitHub Actions workflows for generated edge and infra artifacts. The AWS template builds and uploads `dist/edge/` and `dist/infra/` for a downstream Terraform/CDK/CloudFront release. The Cloudflare template builds the Worker, passes configured runtime secrets through `wrangler deploy --secrets-file`, and uploads generated artifacts.
+Writes starter GitHub Actions workflows. The AWS template builds edge code inside the trusted job but uploads only infra and readiness evidence because AWS edge code can contain baked credentials; deploy the edge code from the same job. The Cloudflare template deploys with a pinned Wrangler version and uploads generated artifacts.
 
 The templates reference GitHub Secrets such as `EDGE_ADMIN_TOKEN`, `BASIC_AUTH_CREDS`, `URL_SIGNING_SECRET`, `JWT_SECRET`, `ORIGIN_SECRET`, `CHALLENGE_SECRET`, `CLOUDFLARE_API_TOKEN`, and `CLOUDFLARE_ACCOUNT_ID`; they never include secret values. For Cloudflare, extend `CDN_SECURITY_WORKER_SECRET_NAMES` when your policy uses additional `*_env` names. Existing files are not overwritten unless `--force` is provided.
 

@@ -24,7 +24,7 @@ const CFG = {
   trustForwardedFor: false,
   jwtGates: [],
   signedUrlGates: [],
-  originAuth: {"type":"hmac_signature","secret_env":"ORIGIN_SECRET","header_prefix":"X-CDN-Auth","timestamp_tolerance_seconds":300,"include_body_hash":false,"signed_components":["method","path","query","body","timestamp","nonce"]},
+  originAuth: {"type":"hmac_signature","secret_env":"ORIGIN_SECRET","header_prefix":"X-CDN-Auth","timestamp_tolerance_seconds":300,"include_body_hash":false,"signed_components":["method","path","query","body","timestamp","nonce"],"secret":"ci-origin-secret-not-for-deploy"},
   jwksStaleIfErrorSec: 3600,
   jwksNegativeCacheSec: 60,
   obs: {"logFormat":"json","correlationHeader":"traceparent","sampleRate":0,"auditLogAuth":true,"auditHashSub":true},
@@ -456,7 +456,7 @@ function verifySignedUrl(uri, querystring, gate) {
   // the signature itself. This prevents a valid URL for one resource selector
   // (for example ?file=a.pdf) from being replayed with a different selector on
   // the same path.
-  const secret = process.env[gate.secret_env] || '';
+  const secret = gate.secret || '';
   if (!secret) return { valid: false, error: 'Secret not configured' };
 
   const signData = canonicalSignedUrlPayload(uri, params, gate.signature_param);
@@ -512,7 +512,7 @@ async function checkJwtGates(request) {
     if (gate.algorithm === 'RS256' && gate.jwks_url) {
       result = await verifyJwtRS256(jwt, gate);
     } else if (gate.algorithm === 'HS256' && gate.secret_env) {
-      const secret = process.env[gate.secret_env] || '';
+      const secret = gate.secret || '';
       if (!secret) {
         return resp(503, 'JWT gate misconfigured');
       }
@@ -672,7 +672,7 @@ function addOriginAuth(request) {
   if (!CFG.originAuth) return null;
 
   const envName = CFG.originAuth.secret_env || '';
-  const secret = envName ? (process.env[envName] || '') : '';
+  const secret = CFG.originAuth.secret || '';
   if (!secret) {
     logEvent('error', {
       block_reason: 'origin_auth_secret_missing',

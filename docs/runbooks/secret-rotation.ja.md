@@ -6,13 +6,13 @@
 
 | 環境変数 | 用途 | ローテーション区分 |
 | --- | --- | --- |
-| `JWT_SECRET` | HS256 JWT ゲート | ホット（デュアルシークレット猶予ウィンドウ） |
+| `JWT_SECRET` | HS256 JWT ゲート | AWS はコールド、Cloudflare は協調切替 |
 | `JWKS_URL` / kid | RS256 JWT ゲート | ホット（新 kid を公開 → 待機 → 旧 kid 撤去） |
-| `URL_SIGNING_SECRET` | 署名付き URL ゲート | ウォーム（発行済み URL の猶予ウィンドウ） |
+| `URL_SIGNING_SECRET` | 署名付き URL ゲート | コールド（発行済み URL は無効化） |
 | `EDGE_ADMIN_TOKEN` | `static_token` ゲート | コールド（ビルド時に `dist/edge/` へ焼き付け） |
-| `ORIGIN_SECRET` | オリジン認証ヘッダ | ホット（オリジン側と同時切替） |
+| `ORIGIN_SECRET` | オリジン認証ヘッダ | AWS はコールド、オリジンと協調切替 |
 
-> **大原則**：いきなり単一の新シークレットに切り替えないこと。必ず**デュアルシークレットウィンドウ**を経由し、発行中トークン、最長 TTL の署名付き URL、デプロイパイプラインの伝搬時間をすべてカバーできる期間、旧値と新値の両方を受け入れます。その後にのみ旧値を撤去します。
+> **現在の契約**：`secret_env` が受け取る環境変数名は 1 つです。`secret_envs` や単一ゲートでの複数 secret 受理には未対応です。同じ prefix の route を重ねると OR ではなく全 gate が評価されるため、デュアル受理にはなりません。検証側の重複期間が必須なら RS256/JWKS を使用してください。
 
 ---
 
@@ -27,20 +27,9 @@ HS256 は対称共有鍵です。発行側と検証側が揃って切替える�
    openssl rand -base64 32
    ```
    例：`JWT_SECRET_V2`。
-3. **発行側を更新**し `V2` で署名を開始します。IdP がデュアル署名対応ならこの期間に `V1` もあわせて発行しても構いません。非対応なら、検証側のデュアル受理ウィンドウで吸収します（次ステップ）。
-4. **検証側ポリシー**を両方受理に更新。
-   ```yaml
-   routes:
-     - name: api
-       auth_gate:
-         type: jwt
-         algorithm: HS256
-         secret_envs: ["JWT_SECRET", "JWT_SECRET_V2"]
-   ```
-   ビルドして `dist/edge/origin-request.js` をデプロイします。
-5. **待機**：`max(access_token_ttl, refresh_token_ttl) + clock_skew_sec + デプロイ伝搬時間`。7 日間のリフレッシュトークンなら 8 日を見込みます。
-6. **切替**：発行側を `V2` のみに切替え、ポリシーを `V2` 検証のみに戻します。再ビルド＋再デプロイ。
-7. **撤去**：シークレットストアから `JWT_SECRET` を削除します。
+3. HS256 は単一 secret 受理のため、**協調切替時間を決めます**。漏洩でなければ V1 の長期 token 発行を止め、有効期限切れを待ちます。
+4. `JWT_SECRET` の値と発行側を V2 に切替え、AWS は `origin-request.js` を再ビルド・再デプロイします。Cloudflare も発行側と Worker secret を協調して切替えます。
+5. V2 canary を直ちに確認し、伝搬後に V1 を撤去します。重複受理が必須なら事前に RS256/JWKS へ移行してください。
 
 ### 検証
 - Canary：`V2` で発行したトークンで `/api/health` を叩き 200 を確認。
@@ -72,19 +61,9 @@ RS256 は非対称鍵で、`kid` クレームと JWKS エンドポイントを�
 
 ### 手順
 1. **猶予ウィンドウ**を `max(signed_url.default_ttl, メール配信ウィンドウ)` で決定。72 時間が一般的な下限です。
-2. **生成**：`URL_SIGNING_SECRET_V2`。
-3. **検証側**を両方受理に更新。
-   ```yaml
-   routes:
-     - name: downloads
-       auth_gate:
-         type: signed_url
-         secret_envs: ["URL_SIGNING_SECRET", "URL_SIGNING_SECRET_V2"]
-   ```
-   ビルド＋デプロイ。
-4. **発行側**（アプリ）を `V2` で署名する設定に更新。
-5. **猶予ウィンドウ**分待機。
-6. **撤去**：ポリシーとシークレットストアから `URL_SIGNING_SECRET` を削除。
+2. 漏洩でなければ V1 URL の新規発行を止め、猶予ウィンドウ分待機します。
+3. `URL_SIGNING_SECRET` と発行側を切替え、AWS は再ビルド・再デプロイ、Cloudflare は Worker secret を同じ切替時間内に更新します。
+4. 新規 URL を検証後、旧値を撤去します。現在は旧新 signed-URL secret の同時受理に未対応です。
 
 ### 漏洩時の強制切替
 旧シークレットが漏洩した場合は猶予ウィンドウをスキップします。
@@ -106,8 +85,8 @@ CloudFront Functions は実行時に環境変数を読めません。`static_tok
 4. **デプロイ**：`dist/edge/viewer-request.js` を CloudFront にデプロイ。CloudFront のグローバル伝搬には 2〜5 分かかり、一部エッジは旧トークン、一部は新トークンを返す瞬間があります。管理アクセス運用はこれを見越します。
 5. **周知**：管理オペレータに新トークンを共有。
 
-### デュアルトークンウィンドウ（任意）
-static_token ゲートは 1 ビルドあたり単一値です。ゼロダウンタイムにしたい場合は、同じプレフィックスに異なるトークンで複数の route を一時的に立て、切替後に統合する構成が可能です。管理パスは L7 ACL で既に絞っていることが多く、5 分の伝搬はほぼ許容されます。
+### route の重複でデュアル受理はできない
+static_token は 1 ビルドあたり単一値です。同じ prefix に route を重ねても OR 条件にはならず両方の gate が実行されます。保守時間を確保するか、edge の前段に別管理の認証機構を置いてください。
 
 ---
 

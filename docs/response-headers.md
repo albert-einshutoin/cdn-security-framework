@@ -9,7 +9,7 @@ The `response_headers` section of `policy/security.yml` drives what the viewer-r
 | `force_vary_auth` | boolean | `true` | When `true`, any path matched by any `auth_gate.match.path_prefixes` receives `Cache-Control: no-store, no-cache, must-revalidate, private` and `Vary: Authorization, Cookie`. Prevents shared-cache mix-ups between identities. Disable only if you know the downstream caches do not key by user. |
 | `cors` | object | unset | Emits allowlisted CORS headers. When the runtime echoes a request `Origin` into `Access-Control-Allow-Origin`, it also merges `Origin` into `Vary` for cache correctness, including preflight responses. |
 | `csp_public` / `csp_admin` | string | safe defaults | CSP strings emitted for non-admin vs. admin paths. `'nonce-PLACEHOLDER'` is substituted at response time when `csp_nonce` is enabled. |
-| `csp_nonce` | boolean | `false` | When `true`, the framework injects a per-response nonce into any `'nonce-PLACEHOLDER'` token in `csp_public` / `csp_admin` / `csp_report_only`, and exposes it to the origin via `X-CSP-Nonce`. AWS target uses `Math.random` (non-CS-PRNG — see limits); Cloudflare target uses `crypto.getRandomValues`. |
+| `csp_nonce` | boolean | `false` | Cloudflare only. The Worker creates a nonce before fetching the origin, sends it in the origin request as `X-CSP-Nonce`, then substitutes the same value into each `'nonce-PLACEHOLDER'` and returns it as a response header. AWS builds reject this option. |
 | `csp_report_only` | string | `""` | If set, emitted as `Content-Security-Policy-Report-Only` alongside the enforced CSP. Use this to A/B a new policy without breaking traffic. |
 | `csp_report_uri` | string | `""` | Forwarded verbatim in any `report-uri` / `report-to` directive your policy string uses. Not validated by the framework. |
 | `coop` | `same-origin` \| `same-origin-allow-popups` \| `unsafe-none` | unset | `Cross-Origin-Opener-Policy`. |
@@ -40,7 +40,7 @@ When `response_headers.cors.allow_origins` is configured and the incoming `Origi
 ### CSP nonce rollout
 
 1. Set `csp_nonce: true`.
-2. Replace any inline `<script>` bootstrap code with `<script nonce="{{NONCE}}">...</script>` at the origin and have the origin read the nonce from the `X-CSP-Nonce` response header the framework forwards.
+2. Replace inline bootstrap code with `<script nonce="{{NONCE}}">...</script>` and have the Cloudflare origin read `X-CSP-Nonce` from the incoming **request** before rendering HTML.
 3. Put `'nonce-PLACEHOLDER'` in your `csp_public` and `csp_admin` strings. The edge substitutes a fresh nonce per response.
 
 ### Report-Only rollout
@@ -56,7 +56,7 @@ Set `csp_report_only` to the stricter CSP you want to try. The enforced `csp_pub
 ### CloudFront Functions (AWS)
 
 - Multi-value `Set-Cookie` is exposed to CFF as a single joined string. Appending cookie attributes safely requires string-level guards; cookie rewrites that must handle multiple cookies independently should run in Lambda@Edge (`origin-response`) or in the Cloudflare Worker target.
-- No Web Crypto API. CSP nonces fall back to `Math.random`. Treat this as a rollout convenience, not as cryptographic defence in depth — prefer the Cloudflare target for production if the nonce property matters. You can also disable `csp_nonce` on AWS and manage nonces at the origin.
+- No Web Crypto API or safe request-to-response nonce transport. AWS builds fail when `csp_nonce: true`; use an origin-managed CSP nonce or the Cloudflare target.
 
 ### Cloudflare Workers
 

@@ -180,6 +180,17 @@ function smokeInstalledPackage(tarballPath: string) {
     assert.ok(fs.existsSync(path.join(installDir, 'dist', 'edge', 'viewer-request.js')));
     assert.ok(fs.existsSync(path.join(installDir, 'dist', 'edge', 'viewer-response.js')));
     assert.ok(fs.existsSync(path.join(installDir, 'dist', 'edge', 'origin-request.js')));
+
+    run(cliPath, [
+      'build',
+      '--target', 'cloudflare',
+      '--policy', installedBasePolicy,
+      '--out-dir', 'dist-cloudflare',
+    ], {
+      cwd: installDir,
+      stdio: 'inherit',
+    });
+    assert.ok(fs.existsSync(path.join(installDir, 'dist-cloudflare', 'edge', 'cloudflare', 'index.ts')));
   });
 }
 

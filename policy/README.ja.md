@@ -121,7 +121,7 @@ node scripts/policy-lint.js policy/base.yml
 | `request.graphql_guard.max_body_bytes` | 1 | 1,048,576 | 複製した POST body から検査するバイト数 |
 | `response_headers.cors.max_age` | 0 | 86,400 | 秒（ブラウザ CORS 上限） |
 | `firewall.waf.rate_limit` | 100 | 2,000,000,000 | AWS WAFv2 の 5 分レートウィンドウ |
-| `firewall.challenge.difficulty` | 1 | 6 | SHA-256 hex の先頭ゼロ数（Cloudflare Workers 実験的機能） |
+| `firewall.challenge.difficulty` | 1 | 4 | SHA-256 hex の先頭ゼロ数（Cloudflare Workers 実験的機能） |
 | `firewall.challenge.ttl_sec` | 60 | 86,400 | 解決済み challenge Cookie の有効期間 |
 | `origin.timeout.connect` | 1 | 10 | CloudFront 上限 |
 | `origin.timeout.read` | 1 | 60 | CloudFront 上限 |

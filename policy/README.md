@@ -124,7 +124,7 @@ issue with the use case.
 | `request.graphql_guard.max_body_bytes` | 1 | 1,048,576 | Bytes inspected from cloned POST body |
 | `response_headers.cors.max_age` | 0 | 86,400 | Seconds (browser CORS cap) |
 | `firewall.waf.rate_limit` | 100 | 2,000,000,000 | AWS WAFv2 rate-based window |
-| `firewall.challenge.difficulty` | 1 | 6 | Leading SHA-256 hex zeroes (Cloudflare Workers experimental) |
+| `firewall.challenge.difficulty` | 1 | 4 | Leading SHA-256 hex zeroes (Cloudflare Workers experimental) |
 | `firewall.challenge.ttl_sec` | 60 | 86,400 | Solved challenge cookie lifetime |
 | `origin.timeout.connect` | 1 | 10 | CloudFront cap |
 | `origin.timeout.read` | 1 | 60 | CloudFront cap |

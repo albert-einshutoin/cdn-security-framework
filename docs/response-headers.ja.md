@@ -9,7 +9,7 @@
 | `force_vary_auth` | boolean | `true` | `true` のとき、いずれかの `auth_gate.match.path_prefixes` にヒットするパスへ `Cache-Control: no-store, no-cache, must-revalidate, private` と `Vary: Authorization, Cookie` を強制付与する。異なる利用者間での共有キャッシュ汚染を防ぐ。ダウンストリームがユーザー単位でキーを切っていることが明らかな場合のみ無効化する。 |
 | `cors` | object | 未設定 | allowlist ベースの CORS ヘッダーを発行する。runtime がリクエストの `Origin` を `Access-Control-Allow-Origin` に echo する場合、preflight を含め `Vary` に `Origin` もマージし、キャッシュの誤再利用を防ぐ。 |
 | `csp_public` / `csp_admin` | string | 安全な既定値 | 非 admin / admin パスに発行する CSP 文字列。`csp_nonce` 有効時、文字列中の `'nonce-PLACEHOLDER'` はレスポンス生成時に per-response nonce へ置換される。 |
-| `csp_nonce` | boolean | `false` | `true` のとき、per-response nonce を `csp_public`/`csp_admin`/`csp_report_only` の `'nonce-PLACEHOLDER'` に注入し、`X-CSP-Nonce` ヘッダーでオリジンへ共有する。AWS は `Math.random`（暗号学的 PRNG ではない。「制限」節参照）、Cloudflare は `crypto.getRandomValues` を使う。 |
+| `csp_nonce` | boolean | `false` | Cloudflare 専用。Worker がオリジン取得前に nonce を生成し、オリジンへのリクエストの `X-CSP-Nonce` で渡す。同じ値を CSP の `'nonce-PLACEHOLDER'` とレスポンスヘッダーへ設定する。AWS ビルドでは拒否される。 |
 | `csp_report_only` | string | `""` | 設定すると、通常の CSP と並行して `Content-Security-Policy-Report-Only` を返す。新しい CSP を破綻なく試すのに使う。 |
 | `csp_report_uri` | string | `""` | ポリシー文字列中の `report-uri` / `report-to` の先として記載する URL。フレームワークは内容を検証しない。 |
 | `coop` | `same-origin` / `same-origin-allow-popups` / `unsafe-none` | 未設定 | `Cross-Origin-Opener-Policy`。 |
@@ -40,7 +40,7 @@
 ### CSP nonce の導入
 
 1. `csp_nonce: true` に設定。
-2. オリジン側で `<script>` のブートストラップを `<script nonce="{{NONCE}}">...</script>` に書き換え、フレームワークが返す `X-CSP-Nonce` ヘッダーから nonce を読み取る。
+2. オリジン側で `<script>` を `<script nonce="{{NONCE}}">...</script>` にし、Cloudflare から届く**リクエスト**の `X-CSP-Nonce` を HTML 生成時に読み取る。
 3. `csp_public` と `csp_admin` の中で `'nonce-PLACEHOLDER'` を使う。エッジがレスポンスごとに新しい nonce を代入する。
 
 ### Report-Only 運用
@@ -56,7 +56,7 @@
 ### CloudFront Functions (AWS)
 
 - 複数 `Set-Cookie` は CFF からは 1 本の結合文字列として見える。属性を安全に追加するには文字列レベルのガードが必要で、複数 Cookie を独立に書き換えるユースケースは Lambda@Edge (`origin-response`) か Cloudflare Worker ターゲットで扱うべき。
-- Web Crypto API は使えない。CSP nonce は `Math.random` にフォールバックする。ロールアウトの利便と割り切ること——暗号学的な防御が求められる場面では Cloudflare ターゲットを使う。もしくは AWS 側では `csp_nonce` を無効にし nonce 管理をオリジンに寄せる。
+- Web Crypto API と安全な request-to-response nonce 伝達がないため、`csp_nonce: true` の AWS ビルドは失敗する。nonce はオリジンで管理するか Cloudflare ターゲットを使う。
 
 ### Cloudflare Workers
 

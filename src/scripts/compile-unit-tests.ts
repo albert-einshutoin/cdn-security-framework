@@ -53,6 +53,7 @@ const {
 const {
   assertInjectedConstDeclarations,
   injectTemplateCode,
+  optimizeCloudFrontFunction,
   renderConstObject,
   runtimeCode,
 } = require('./lib/template-inject');
@@ -501,7 +502,7 @@ test('buildChallengeConfig normalizes experimental challenge defaults', () => {
     mode: 'challenge',
     pathPrefixes: ['/guarded'],
     uaContains: ['headlesschrome'],
-    difficulty: 6,
+    difficulty: 4,
     ttlSec: 60,
     secretEnv: 'CHALLENGE_SECRET',
     cookieName: '__cdn_challenge',
@@ -1197,8 +1198,67 @@ test('warnWeakAwsCspNonce flags csp_nonce on AWS builds', () => {
   const logger = { error: (m: string) => captured.push(m) };
   const r = warnWeakAwsCspNonce({ response_headers: { csp_nonce: true } }, { logger });
   assert.strictEqual(r.warned, true);
+  assert.strictEqual(r.failed, true);
   assert.match(captured[0], /Math\.random/);
   assert.match(captured[0], /CloudFront Functions/);
+});
+
+test('injectTemplateCode preserves JavaScript replacement tokens byte-for-byte', () => {
+  const injected = "const CFG = { token: 'x$&y$`z$\\'w$$q$1' };";
+  const output = injectTemplateCode('// marker\nfunction handler() {}', '// marker', injected);
+  assert.ok(output.includes(injected), output);
+});
+
+test('optimizeCloudFrontFunction keeps handler callable and enforces the 10 KiB deployment limit', () => {
+  const source = [
+    'function unused() { return "'.concat('x'.repeat(12000), '"; }'),
+    'function handler(event) { return event.request; }',
+  ].join('\n');
+  const optimized = optimizeCloudFrontFunction(source, 'viewer-request.js');
+  assert.ok(Buffer.byteLength(optimized, 'utf8') <= 10 * 1024);
+  const handler = new Function(optimized + '\nreturn handler;')();
+  assert.deepStrictEqual(handler({ request: { uri: '/' } }), { uri: '/' });
+});
+
+test('AWS build embeds Lambda@Edge secrets instead of relying on unsupported process.env', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-aws-baked-secrets-'));
+  try {
+    const policy = {
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: { hsts: 'max-age=1' },
+      routes: [
+        {
+          name: 'api',
+          match: { path_prefixes: ['/api'] },
+          auth_gate: { type: 'jwt', algorithm: 'HS256', secret_env: 'JWT_SECRET' },
+        },
+        {
+          name: 'download',
+          match: { path_prefixes: ['/download'] },
+          auth_gate: { type: 'signed_url', secret_env: 'URL_SIGNING_SECRET' },
+        },
+      ],
+      origin: {
+        auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'ORIGIN_SECRET' },
+      },
+    };
+    build(policy, {
+      outDir: tmpDir,
+      env: {
+        JWT_SECRET: 'jwt-build-secret',
+        URL_SIGNING_SECRET: 'url-build-secret',
+        ORIGIN_SECRET: 'origin-build-secret',
+      },
+    });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
+    assert.ok(code.includes('jwt-build-secret'));
+    assert.ok(code.includes('url-build-secret'));
+    assert.ok(code.includes('origin-build-secret'));
+    assert.doesNotMatch(code, /process\.env\[/);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
 });
 
 test('warnWeakAwsCspNonce stays silent when csp_nonce is disabled', () => {

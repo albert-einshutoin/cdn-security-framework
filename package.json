@@ -73,7 +73,8 @@
   "dependencies": {
     "acorn": "^8.16.0",
     "ajv": "^8.20.0",
-    "commander": "^15.0.0",
+    "commander": "^14.0.3",
+    "esbuild": "^0.28.1",
     "inquirer": "^14.0.1",
     "js-yaml": "^5.2.0"
   },
@@ -129,7 +130,6 @@
     "@types/js-yaml": "^4.0.9",
     "@types/node": "^26.0.1",
     "c8": "^11.0.0",
-    "esbuild": "^0.28.0",
     "json-schema-to-typescript": "^15.0.4",
     "typescript": "^6.0.3",
     "vitest": "^4.1.7"

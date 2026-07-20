@@ -148,7 +148,7 @@ This document organizes threats that this Edge Security Framework is designed to
 |--------|---------------------|---------------|
 | Shared downstream cache serves user A's authenticated response to user B when origin emits cacheable headers on an auth-gated path | Force `Cache-Control: no-store, no-cache, must-revalidate, private` and `Vary: Authorization, Cookie` on every auth-gate-protected prefix | — |
 | `Set-Cookie` attribute rewrites corrupt multi-cookie responses on the Cloudflare Worker path | Use `Headers#getSetCookie()` + per-cookie append with regex-anchored attribute checks | — |
-| Inline scripts require `'unsafe-inline'` because there is no nonce transport | Per-response nonce generated with `crypto.getRandomValues` on CF / `Math.random` on AWS, substituted into `'nonce-PLACEHOLDER'` and echoed via `X-CSP-Nonce` | — |
+| Inline scripts require `'unsafe-inline'` without nonce transport | Cloudflare generates a nonce before origin fetch, forwards it in the origin request, and reuses it in CSP. AWS rejects `csp_nonce` and requires origin-managed nonces | — |
 | CSP rollouts break traffic before operators can observe violations | `csp_report_only` emits a second `Content-Security-Policy-Report-Only` header alongside the enforced CSP | — |
 
 **Framework**: `response_headers.force_vary_auth` (default on) unions every `auth_gate.match.path_prefixes` into `authProtectedPrefixes` and forces no-store + Vary on hit. CSP nonces, COOP/COEP/CORP, Reporting-Endpoints, and Report-Only CSPs ship from the same section. Platform limits and field reference: `docs/response-headers.md`.

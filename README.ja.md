@@ -103,7 +103,7 @@
   examples/
 ```
 
-package code の正となるソースは `src/**/*.ts` です。root 配下の JavaScript と `.d.ts` は `npm run build:ts` が生成する package artifact で、npm 利用者が TypeScript build なしで CLI を実行できるよう commit しています。`templates/` 配下の runtime template は手書きで、deploy 可能な `dist/edge/` 出力を生成するために使われます。
+package code の正となるソースは `src/**/*.ts` です。root 配下の JavaScript と `.d.ts` は CI と npm package 作成時に `npm run build:ts` が生成する artifact で、編集・commit 対象のソースではありません。`templates/` 配下の runtime template は手書きで、deploy 可能な `dist/edge/` 出力を生成するために使われます。
 
 Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.md) を参照。
 

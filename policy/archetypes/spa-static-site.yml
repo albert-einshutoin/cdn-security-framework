@@ -59,11 +59,11 @@ response_headers:
   x_content_type_options: "nosniff"
   referrer_policy: "strict-origin-when-cross-origin"
   permissions_policy: "camera=(), microphone=(), geolocation=()"
-  # Nonce-based CSP: the edge injects a per-request nonce. Inline scripts in
-  # your SPA shell must reference `{{nonce}}` (substitution is documented in
-  # docs/response-headers.md). object-src 'none' closes Flash/plugin vectors.
-  csp_nonce: true
-  csp_public: "default-src 'self'; script-src 'self' 'nonce-{{nonce}}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self';"
+  # A nonce-free default works on both targets and does not imply support that
+  # AWS CloudFront Functions cannot securely provide. Cloudflare users can opt
+  # into csp_nonce with the documented nonce-PLACEHOLDER origin contract.
+  csp_nonce: false
+  csp_public: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self';"
 
 firewall:
   waf:

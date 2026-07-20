@@ -203,7 +203,7 @@ export interface CDNSecurityFrameworkPolicy {
      */
     csp_report_uri?: string;
     /**
-     * Generate a per-response nonce and substitute `'nonce-PLACEHOLDER'` in csp_public / csp_admin with the value. The nonce is also exposed as `x-csp-nonce` response header so origin templates can reference it. Cloudflare uses crypto.getRandomValues; CFF falls back to Math.random (lower entropy; documented).
+     * Cloudflare only: generate a per-response nonce before the origin request, send it as x-csp-nonce, and substitute `'nonce-PLACEHOLDER'` in CSP response policies. AWS builds reject this option because CloudFront Functions lack a cryptographic RNG and cannot provide the origin transport contract.
      */
     csp_nonce?: boolean;
     /**

@@ -294,7 +294,7 @@
           "type": "string"
         },
         "csp_nonce": {
-          "description": "Generate a per-response nonce and substitute `'nonce-PLACEHOLDER'` in csp_public / csp_admin with the value. The nonce is also exposed as `x-csp-nonce` response header so origin templates can reference it. Cloudflare uses crypto.getRandomValues; CFF falls back to Math.random (lower entropy; documented).",
+          "description": "Cloudflare only: generate a per-response nonce before the origin request, send it as x-csp-nonce, and substitute `'nonce-PLACEHOLDER'` in CSP response policies. AWS builds reject this option because CloudFront Functions lack a cryptographic RNG and cannot provide the origin transport contract.",
           "type": "boolean"
         },
         "coop": {
@@ -551,7 +551,7 @@
               "description": "Number of leading SHA-256 hex zeroes required in SHA-256(seed:nonce). Keep low; this is a lightweight friction primitive, not CAPTCHA.",
               "type": "integer",
               "minimum": 1,
-              "maximum": 6
+              "maximum": 4
             },
             "ttl_sec": {
               "description": "Lifetime of the solved challenge cookie. Default 900 seconds.",
