@@ -249,6 +249,20 @@ Writes starter GitHub Actions workflows for generated edge and infra artifacts. 
 
 The templates reference GitHub Secrets such as `EDGE_ADMIN_TOKEN`, `BASIC_AUTH_CREDS`, `URL_SIGNING_SECRET`, `JWT_SECRET`, `ORIGIN_SECRET`, `CHALLENGE_SECRET`, `CLOUDFLARE_API_TOKEN`, and `CLOUDFLARE_ACCOUNT_ID`; they never include secret values. For Cloudflare, extend `CDN_SECURITY_WORKER_SECRET_NAMES` when your policy uses additional `*_env` names. Existing files are not overwritten unless `--force` is provided.
 
+Flags:
+
+- `-o, --out-dir <dir>` — workflow output directory (default `.github/workflows`)
+- `-t, --target <aws|cloudflare|all>` — which templates to emit (default `all`)
+- `-f, --force` — overwrite existing workflow files
+
+Outputs:
+
+- `<out-dir>/cdn-security-aws.yml` when `--target` is `aws` or `all`
+- `<out-dir>/cdn-security-cloudflare.yml` when `--target` is `cloudflare` or `all`
+- `[SUCCESS] Generated <path>` per written file
+
+Exit code is `0` on success. Invalid `--target`, or an existing target file without `--force`, exits `1`. When overwrite is refused, no partial writes occur.
+
 ## `explain`
 
 ```bash
@@ -275,6 +289,20 @@ Generates a deterministic policy control visualization by policy section and con
 
 `--format mermaid` prints Mermaid flowchart text to stdout, which is CI-friendly because it requires no browser runtime. Use `--format html` to generate a static HTML artifact that renders the same Mermaid diagram when opened in a browser.
 
+Flags:
+
+- `-p, --policy <path>` — policy file (default `policy/security.yml` → `policy/base.yml`)
+- `-t, --target <aws|cloudflare|all>` — control behavior scope (default `all`)
+- `--format <mermaid|html>` — output format (default `mermaid`)
+- `-o, --out <path>` — write rendered output to file instead of stdout
+
+Outputs:
+
+- Without `--out`: prints Mermaid or HTML to stdout
+- With `--out`: writes the artifact to the given path and prints `[SUCCESS] Wrote visualization to <path>`
+
+Exit code is `0` on success. Invalid `--target` or `--format`, a missing policy file, or a render error exits `1`.
+
 ## `diff`
 
 ```bash
@@ -299,6 +327,22 @@ With `--semantic`, `diff` compares two policy files and reports posture changes 
 ```bash
 npx cdn-security migrate              # dry-run inspection
 npx cdn-security migrate --to 1       # no-op on v1
+npx cdn-security migrate --policy policy/security.yml --to 1 --write
 ```
+
+Inspects or migrates a policy file between schema versions. v1 is the only shipped schema today, so v1 → v1 is a read-only no-op unless a future migration path is registered.
+
+Flags:
+
+- `-p, --policy <path>` — policy file to inspect (default `policy/security.yml`)
+- `--to <version>` — target schema version (default `1`)
+- `--write` — write migrated content back in place when a migration path exists
+
+Outputs:
+
+- `[INFO]` lines with policy path and current/target schema versions
+- `[OK] Already at target version — no migration needed.` when no migration is required
+
+Exit code is `0` when the policy is already at the target version. Parse errors, missing `version`, downgrades, and other validation failures exit `1`. A forward migration to a version with no registered path in this CLI exits `2` (reserved for "upgrade CLI first").
 
 See [schema-migration.md](./schema-migration.md) for the schema SemVer contract and deprecation window.

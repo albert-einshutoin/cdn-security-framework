@@ -248,6 +248,20 @@ npx cdn-security deploy-template --out-dir .github/workflows --force
 
 template は `EDGE_ADMIN_TOKEN`、`BASIC_AUTH_CREDS`、`URL_SIGNING_SECRET`、`JWT_SECRET`、`ORIGIN_SECRET`、`CHALLENGE_SECRET`、`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID` などの GitHub Secrets 名だけを参照し、secret 値は含みません。Cloudflare で policy が追加の `*_env` 名を使う場合は `CDN_SECURITY_WORKER_SECRET_NAMES` を拡張してください。既存ファイルは `--force` を付けない限り上書きしません。
 
+フラグ:
+
+- `-o, --out-dir <dir>` — workflow の出力ディレクトリ（デフォルト `.github/workflows`）
+- `-t, --target <aws|cloudflare|all>` — 生成する template（デフォルト `all`）
+- `-f, --force` — 既存 workflow ファイルを上書き
+
+出力:
+
+- `--target` が `aws` または `all` のとき `<out-dir>/cdn-security-aws.yml`
+- `--target` が `cloudflare` または `all` のとき `<out-dir>/cdn-security-cloudflare.yml`
+- 書き込んだファイルごとに `[SUCCESS] Generated <path>`
+
+成功時は exit `0` です。無効な `--target`、または `--force` なしで既存ファイルがある場合は exit `1` です。上書き拒否時は部分書き込みは行われません。
+
 ## `explain`
 
 ```bash
@@ -274,6 +288,20 @@ npx cdn-security visualize --policy policy/security.yml --target cloudflare --fo
 
 `--format mermaid` は標準出力へ Mermaid テキストを出すため、CI でブラウザランタイム不要です。`--format html` は同じ図を静的 HTML にし、ブラウザ閲覧時に mermaid を描画します。
 
+フラグ:
+
+- `-p, --policy <path>` — ポリシーパス（デフォルト `policy/security.yml` → `policy/base.yml`）
+- `-t, --target <aws|cloudflare|all>` — 制御の対象 target（デフォルト `all`）
+- `--format <mermaid|html>` — 出力形式（デフォルト `mermaid`）
+- `-o, --out <path>` — 標準出力の代わりにファイルへ書き出す
+
+出力:
+
+- `--out` なし: Mermaid または HTML を標準出力へ出力
+- `--out` あり: 指定パスへ artifact を書き出し、`[SUCCESS] Wrote visualization to <path>` を表示
+
+成功時は exit `0` です。無効な `--target` / `--format`、ポリシー未存在、描画エラーは exit `1` です。
+
 ## `diff`
 
 ```bash
@@ -298,6 +326,22 @@ npx cdn-security diff --semantic --baseline policy/security.previous.yml --polic
 ```bash
 npx cdn-security migrate              # ドライラン
 npx cdn-security migrate --to 1       # v1 の場合は no-op
+npx cdn-security migrate --policy policy/security.yml --to 1 --write
 ```
+
+ポリシーファイルのスキーマバージョンを検査または移行します。現状は v1 のみが出荷されているため、v1 → v1 は将来の migration path が登録されるまで読み取り専用の no-op です。
+
+フラグ:
+
+- `-p, --policy <path>` — 検査対象のポリシー（デフォルト `policy/security.yml`）
+- `--to <version>` — 移行先スキーマバージョン（デフォルト `1`）
+- `--write` — migration path が存在するとき、移行結果をその場で書き戻す
+
+出力:
+
+- ポリシーパスと現在/移行先スキーマバージョンを示す `[INFO]` 行
+- 移行不要時は `[OK] Already at target version — no migration needed.`
+
+移行先に既に到達している場合は exit `0` です。パースエラー、`version` 欠落、ダウングレード、その他の検証失敗は exit `1` です。この CLI に未登録の前方 migration は exit `2`（CLI のアップグレードが必要なケース用の予約コード）です。
 
 スキーマの SemVer 契約と非推奨ウィンドウについては [schema-migration.ja.md](./schema-migration.ja.md) を参照してください。
