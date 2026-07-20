@@ -66,13 +66,23 @@ type DriftScenario = {
 };
 
 function runBuild(policyPath: string, outDir: string) {
+  // Golden fixtures must not vary with the operator's shell. These values are
+  // intentionally non-production test credentials and are stable inputs now
+  // that AWS Lambda@Edge secrets are baked into its deployable artifact.
+  const fixtureEnv = {
+    ...process.env,
+    EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy',
+    ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
+  };
   execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile.js'), '--policy', policyPath, '--out-dir', outDir], {
     cwd: repoRoot,
     stdio: 'inherit',
+    env: fixtureEnv,
   });
   execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile-cloudflare.js'), '--policy', policyPath, '--out-dir', outDir], {
     cwd: repoRoot,
     stdio: 'inherit',
+    env: fixtureEnv,
   });
   execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile-infra.js'), '--policy', policyPath, '--out-dir', outDir], {
     cwd: repoRoot,

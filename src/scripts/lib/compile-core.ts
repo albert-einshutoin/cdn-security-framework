@@ -531,6 +531,13 @@ function build(policy: any, options: any = {}) {
   const templatePath = path.join(rootDir, 'templates', 'aws', 'viewer-request.js');
   let code = fs.readFileSync(templatePath, 'utf8');
   code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode);
+  code = injectTemplateCode(code, '/* {{FEATURE_CORS}} */ true', String(Boolean(requestBase.cors)));
+  code = injectTemplateCode(code, '/* {{FEATURE_HOST_ALLOWLIST}} */ true', String(requestBase.allowedHosts.length > 0));
+  code = injectTemplateCode(
+    code,
+    '/* {{FEATURE_VIEWER_AUTH}} */ true',
+    String(authGates.some((gate) => gate.type === 'static_token' || gate.type === 'basic_auth')),
+  );
   assertInjectedConstDeclarations(code, ['CFG']);
 
   const distDir = path.join(outDir, 'edge');

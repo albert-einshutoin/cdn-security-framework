@@ -36,11 +36,11 @@ const CFG = {
 
 const RESPONSE_CFG = {
   headers: {"strict-transport-security":"max-age=31536000; includeSubDomains; preload","x-content-type-options":"nosniff","referrer-policy":"strict-origin-when-cross-origin","permissions-policy":"camera=(), microphone=(), geolocation=()"},
-  csp_public: "default-src 'self'; script-src 'self' 'nonce-{{nonce}}'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
+  csp_public: "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
   csp_admin: "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
   csp_report_only: "",
   csp_report_uri: "",
-  csp_nonce: true,
+  csp_nonce: false,
   coop: "",
   coep: "",
   corp: "",
@@ -957,7 +957,7 @@ async function verifyChallengeSolution(url: URL, env: WorkerEnv, ua: string): Pr
   const uaHash = await challengeUaBinding(ua);
   const expectedSig = await hmacSha256Base64Url(secret, seed + ':' + expRaw + ':' + uaHash);
   if (!timingSafeEqual(expectedSig, sig)) return false;
-  const difficulty = Math.max(1, Math.min(6, Number(ch.difficulty) || 3));
+  const difficulty = Math.max(1, Math.min(4, Number(ch.difficulty) || 3));
   const digest = await sha256Hex(seed + ':' + nonce);
   return digest.startsWith('0'.repeat(difficulty));
 }
@@ -988,7 +988,7 @@ async function challengeResponse(url: URL, env: WorkerEnv, ua: string, ctx: ReqC
   const uaHash = await challengeUaBinding(ua);
   const sig = await hmacSha256Base64Url(secret, seed + ':' + exp + ':' + uaHash);
   const target = removeChallengeParams(url).toString();
-  const difficulty = Math.max(1, Math.min(6, Number(ch.difficulty) || 3));
+  const difficulty = Math.max(1, Math.min(4, Number(ch.difficulty) || 3));
   const payload = JSON.stringify({ seed, exp, sig, target, difficulty }).replace(/</g, '\\u003c');
 
   logEvent('challenge', {
@@ -1196,10 +1196,31 @@ async function applyResponseDlp(out: Response, ctx: ReqCtx): Promise<Response> {
   }
 
   if (!dlpCanInspectBody(out)) return out;
-  const clone = out.clone();
-  const text = await clone.text();
   const maxBytes = Number(dlp.body.maxBytes) || 32768;
-  if (new TextEncoder().encode(text).length > maxBytes) return out;
+  const clone = out.clone();
+  const reader = clone.body && clone.body.getReader();
+  if (!reader) return out;
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  while (true) {
+    const part = await reader.read();
+    if (part.done) break;
+    totalBytes += part.value.byteLength;
+    if (totalBytes > maxBytes) {
+      // Stop consuming the clone as soon as the policy inspection budget is
+      // exceeded. This bounds Worker memory independently of origin honesty.
+      await reader.cancel();
+      return out;
+    }
+    chunks.push(part.value);
+  }
+  const bodyBytes = new Uint8Array(totalBytes);
+  let bodyOffset = 0;
+  for (const chunk of chunks) {
+    bodyBytes.set(chunk, bodyOffset);
+    bodyOffset += chunk.byteLength;
+  }
+  const text = new TextDecoder().decode(bodyBytes);
   const scan = scanAndMaskDlp(text);
   if (!scan.matched) return out;
   responseDlpLog(action, scan.detectors, ctx, 'body', blockStatus);
@@ -1445,6 +1466,16 @@ export default {
     // Only the edge is allowed to assert this; trusting an incoming value
     // would let a client spoof authenticated state.
     forwardHeaders.delete('x-edge-authenticated');
+    // Never trust a viewer-provided nonce. Mint it before origin fetch so the
+    // origin can apply the same nonce to the HTML it returns.
+    forwardHeaders.delete('x-csp-nonce');
+    let cspNonce = '';
+    if (RESPONSE_CFG.csp_nonce) {
+      const nonceBytes = new Uint8Array(16);
+      crypto.getRandomValues(nonceBytes);
+      cspNonce = btoa(String.fromCharCode(...nonceBytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+      forwardHeaders.set('X-CSP-Nonce', cspNonce);
+    }
     // Strip client-supplied X-Forwarded-For unless explicitly trusted. The
     // real client IP is already available via cf-connecting-ip, and a spoofed
     // XFF value can poison downstream rate limiters, IP allowlists, and logs.
@@ -1540,14 +1571,7 @@ export default {
     const isAuthPath = (RESPONSE_CFG.authProtectedPrefixes || []).some((p: string) => url.pathname === p || url.pathname.startsWith(p + '/'));
 
     // Per-response CSP nonce (issue #11). crypto.getRandomValues is a CS-PRNG on Workers.
-    let cspNonce = '';
-    if (RESPONSE_CFG.csp_nonce) {
-      const buf = new Uint8Array(16);
-      crypto.getRandomValues(buf);
-      // base64url without padding, ~22 chars.
-      cspNonce = btoa(String.fromCharCode(...buf)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      out.headers.set('X-CSP-Nonce', cspNonce);
-    }
+    if (cspNonce) out.headers.set('X-CSP-Nonce', cspNonce);
     const applyNonce = (csp: string): string => {
       if (!csp || !cspNonce) return csp;
       return csp.split("'nonce-PLACEHOLDER'").join("'nonce-" + cspNonce + "'");

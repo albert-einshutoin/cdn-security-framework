@@ -22,7 +22,7 @@ const CFG = {
   mode: "enforce",
   maxHeaderSize: 0,
   trustForwardedFor: false,
-  jwtGates: [{"name":"api","protectedPrefixes":["/api"],"type":"jwt","algorithm":"RS256","allowed_algorithms":["RS256"],"clock_skew_sec":30,"jwks_url":"https://auth.example.com/.well-known/jwks.json","issuer":"https://auth.example.com/","audience":"api.example.com","secret_env":""}],
+  jwtGates: [{"name":"api","protectedPrefixes":["/api"],"type":"jwt","algorithm":"RS256","allowed_algorithms":["RS256"],"clock_skew_sec":30,"jwks_url":"https://auth.example.com/.well-known/jwks.json","issuer":"https://auth.example.com/","audience":"api.example.com","secret_env":"","secret":""}],
   signedUrlGates: [],
   originAuth: null,
   jwksStaleIfErrorSec: 120,
@@ -456,7 +456,7 @@ function verifySignedUrl(uri, querystring, gate) {
   // the signature itself. This prevents a valid URL for one resource selector
   // (for example ?file=a.pdf) from being replayed with a different selector on
   // the same path.
-  const secret = process.env[gate.secret_env] || '';
+  const secret = gate.secret || '';
   if (!secret) return { valid: false, error: 'Secret not configured' };
 
   const signData = canonicalSignedUrlPayload(uri, params, gate.signature_param);
@@ -512,7 +512,7 @@ async function checkJwtGates(request) {
     if (gate.algorithm === 'RS256' && gate.jwks_url) {
       result = await verifyJwtRS256(jwt, gate);
     } else if (gate.algorithm === 'HS256' && gate.secret_env) {
-      const secret = process.env[gate.secret_env] || '';
+      const secret = gate.secret || '';
       if (!secret) {
         return resp(503, 'JWT gate misconfigured');
       }
@@ -672,7 +672,7 @@ function addOriginAuth(request) {
   if (!CFG.originAuth) return null;
 
   const envName = CFG.originAuth.secret_env || '';
-  const secret = envName ? (process.env[envName] || '') : '';
+  const secret = CFG.originAuth.secret || '';
   if (!secret) {
     logEvent('error', {
       block_reason: 'origin_auth_secret_missing',
