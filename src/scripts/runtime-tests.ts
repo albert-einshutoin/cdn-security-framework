@@ -459,6 +459,124 @@ const viewerMonitorResult = runViewerMonitorTests();
 viewerFailed += viewerMonitorResult.failed;
 
 // =========================================================================
+// Section 1c: viewer-response.js CORS Vary Origin (issue #250)
+// CHANGELOG 1.4.0 documents Vary: Origin on allowlisted CORS responses; lock it in at runtime.
+// =========================================================================
+
+function compileViewerResponseTemplate(responseCfgCode: string): any {
+  const templatePath = path.join(__dirname, '..', 'templates', 'aws', 'viewer-response.js');
+  let vrCode;
+  try {
+    vrCode = fs.readFileSync(templatePath, 'utf8');
+  } catch (_e: unknown) {
+    console.error('Could not read templates/aws/viewer-response.js');
+    return null;
+  }
+
+  vrCode = vrCode.replace('// {{INJECT_RESPONSE_CONFIG}}', responseCfgCode);
+
+  const wrappedCode = '(function() {\n' + vrCode + '\nreturn handler;\n})()';
+  try {
+    return eval(wrappedCode);
+  } catch (e: unknown) {
+    console.error('Failed to eval viewer-response template:', e instanceof Error ? e.message : String(e));
+    return null;
+  }
+}
+
+function viewerResponseCorsCfgCode(): string {
+  return [
+    'const RESPONSE_CFG = {',
+    '  headers: {',
+    '    "strict-transport-security": "max-age=31536000; includeSubDomains",',
+    '    "x-content-type-options": "nosniff",',
+    '    "referrer-policy": "strict-origin-when-cross-origin",',
+    '    "permissions-policy": "geolocation=()",',
+    '  },',
+    '  csp_public: "default-src \'self\'",',
+    '  csp_admin: "default-src \'self\'",',
+    '  csp_report_only: "",',
+    '  csp_report_uri: "",',
+    '  csp_nonce: false,',
+    '  coop: "",',
+    '  coep: "",',
+    '  corp: "",',
+    '  reporting_endpoints: "",',
+    '  adminPathPrefixes: [],',
+    '  adminCacheControl: "",',
+    '  authProtectedPrefixes: [],',
+    '  forceVaryAuth: false,',
+    '  clearSiteDataPaths: [],',
+    '  clearSiteDataTypes: [],',
+    '  cors: {',
+    '    allow_origins: ["https://app.example.com", "https://admin.example.com"],',
+    '    allow_credentials: true,',
+    '    expose_headers: ["X-Request-Id"],',
+    '  },',
+    '  cookie_attributes: null,',
+    '};',
+  ].join('\n');
+}
+
+function runViewerResponseCorsVaryTests() {
+  const handler = compileViewerResponseTemplate(viewerResponseCorsCfgCode());
+  if (!handler) return { failed: 2, total: 2 };
+
+  let failed = 0;
+  const total = 2;
+
+  const allowlisted = handler({
+    request: {
+      uri: '/api/data',
+      headers: { origin: { value: 'https://app.example.com' } },
+    },
+    response: {
+      statusCode: '200',
+      headers: {},
+    },
+  });
+  const allowOrigin = allowlisted.headers['access-control-allow-origin']?.value;
+  const allowVary = allowlisted.headers.vary?.value;
+  if (allowOrigin !== 'https://app.example.com' || allowVary !== 'Origin') {
+    console.error('FAIL: aws viewer-response CORS should echo allowlisted origin and append Vary Origin', {
+      allowOrigin,
+      allowVary,
+    });
+    failed++;
+  } else {
+    console.log('OK: aws viewer-response CORS appends Vary Origin for allowlisted origin responses');
+  }
+
+  const merged = handler({
+    request: {
+      uri: '/',
+      headers: { origin: { value: 'https://admin.example.com' } },
+    },
+    response: {
+      statusCode: '200',
+      headers: { vary: { value: 'Accept-Language' } },
+    },
+  });
+  const mergedOrigin = merged.headers['access-control-allow-origin']?.value;
+  const mergedVary = merged.headers.vary?.value;
+  if (mergedOrigin !== 'https://admin.example.com' || mergedVary !== 'Accept-Language, Origin') {
+    console.error('FAIL: aws viewer-response CORS should preserve existing Vary tokens when appending Origin', {
+      mergedOrigin,
+      mergedVary,
+    });
+    failed++;
+  } else {
+    console.log('OK: aws viewer-response CORS preserves existing Vary when appending Origin');
+  }
+
+  console.log('--- viewer-response (CORS Vary): ' + (total - failed) + '/' + total + ' passed ---');
+  return { failed, total };
+}
+
+const viewerResponseCorsResult = runViewerResponseCorsVaryTests();
+viewerFailed += viewerResponseCorsResult.failed;
+
+// =========================================================================
 // Section 2: origin-request.js tests (Lambda@Edge)
 // =========================================================================
 
@@ -1454,7 +1572,7 @@ async function runErrorBoundaryTests() {
 // Run all tests
 async function main() {
   let totalFailed = viewerFailed;
-  let totalTests = cases.length + viewerMonitorResult.total;
+  let totalTests = cases.length + viewerMonitorResult.total + viewerResponseCorsResult.total;
 
   const enforceResult: any = await runOriginRequestTests();
   totalFailed += enforceResult.failed;
