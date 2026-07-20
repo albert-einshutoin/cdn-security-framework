@@ -112,8 +112,11 @@ function shouldSampleAllow(key: string): boolean {
   const rate = (CFG.obs && CFG.obs.sampleRate) || 0;
   if (rate <= 0) return false;
   if (rate >= 1) return true;
-  let hash = 0;
-  for (let i = 0; i < key.length; i++) hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+  let hash = 2166136261;
+  for (let i = 0; i < key.length; i++) {
+    hash ^= key.charCodeAt(i);
+    hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) | 0;
+  }
   return (hash >>> 0) / 4294967296 < rate;
 }
 

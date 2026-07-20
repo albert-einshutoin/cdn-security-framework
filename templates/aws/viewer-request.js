@@ -77,8 +77,11 @@
     if (rate >= 1) return true;
     // A stable non-cryptographic hash keeps repeated requests in the same
     // sample bucket without adding random-number work to every edge request.
-    var hash = 0;
-    for (var i = 0; i < key.length; i++) hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+    var hash = 2166136261;
+    for (var i = 0; i < key.length; i++) {
+      hash ^= key.charCodeAt(i);
+      hash = (hash + ((hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24))) | 0;
+    }
     return (hash >>> 0) / 4294967296 < rate;
   }
 

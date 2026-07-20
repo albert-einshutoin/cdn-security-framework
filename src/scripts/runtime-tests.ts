@@ -1636,7 +1636,7 @@ async function runOriginAllowSamplingTests() {
       ...crypto,
       randomUUID: (() => {
         let sequence = 0;
-        return () => (++sequence % 2 === 0 ? 'zzzzzzzzzz' : 'a');
+        return () => (++sequence % 2 === 0 ? 'minted-50' : 'minted-0');
       })(),
     },
   });

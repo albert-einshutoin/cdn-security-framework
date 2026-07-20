@@ -791,7 +791,7 @@ observability:
       ...originalCrypto,
       subtle: originalCrypto.subtle,
       getRandomValues(bytes: Uint8Array) {
-        bytes.fill(++sequence % 2 === 0 ? 0xff : 0x00);
+        bytes.fill(++sequence % 2 === 0 ? 0x05 : 0x12);
         return bytes;
       },
     },
