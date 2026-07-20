@@ -703,6 +703,119 @@ response_headers:
   assert.strictEqual(fetchCalls.length, 1, 'report mode should forward GraphQL violations');
 });
 
+test('cloudflare sample_rate 1 emits an allow decision', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-allow-sampling-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+observability:
+  log_format: json
+  correlation_id_header: traceparent
+  sample_rate: 1
+`);
+  const captured: string[] = [];
+  const originalLog = console.log;
+  console.log = (line: any) => { captured.push(String(line)); };
+  try {
+    const request = new Request('https://edge.example.com/sampled', {
+      method: 'GET',
+      headers: { 'user-agent': 'runtime-test', traceparent: '00-cf-allow-test-01' },
+    });
+    const { res, fetchCalls } = await runGeneratedWorkerRequest(generated, request);
+    assert.strictEqual(res.status, 200);
+    assert.strictEqual(fetchCalls.length, 1);
+  } finally {
+    console.log = originalLog;
+  }
+  const allowLine = captured.find((line) => line.includes('"event":"allow"'));
+  assert.ok(allowLine, 'expected a sampled allow JSON log; got: ' + captured.join('\n'));
+  const record = JSON.parse(allowLine as string);
+  assert.strictEqual(record.method, 'GET');
+  assert.strictEqual(record.uri, '/sampled');
+  assert.strictEqual(record.correlation_id, '00-cf-allow-test-01');
+});
+
+test('cloudflare sample_rate 0 suppresses allow logs but preserves block logs', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-zero-sampling-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+observability:
+  log_format: json
+  correlation_id_header: traceparent
+  sample_rate: 0
+`);
+  const captured: string[] = [];
+  const originalLog = console.log;
+  console.log = (line: any) => { captured.push(String(line)); };
+  try {
+    await runGeneratedWorkerRequest(generated, new Request('https://edge.example.com/allowed', {
+      method: 'GET', headers: { 'user-agent': 'runtime-test' },
+    }));
+    const blocked = await runGeneratedWorkerRequest(generated, new Request('https://edge.example.com/blocked', {
+      method: 'POST', headers: { 'user-agent': 'runtime-test' },
+    }));
+    assert.strictEqual(blocked.res.status, 405);
+    assert.strictEqual(blocked.fetchCalls.length, 0);
+  } finally {
+    console.log = originalLog;
+  }
+  assert.strictEqual(captured.filter((line) => line.includes('"event":"allow"')).length, 0);
+  assert.strictEqual(captured.filter((line) => line.includes('"event":"block"')).length, 1);
+});
+
+test('cloudflare sampling is deterministic before correlation ID minting', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-stable-sampling-test
+request:
+  allow_methods: ["GET"]
+response_headers:
+  hsts: "max-age=31536000"
+observability:
+  log_format: json
+  correlation_id_header: traceparent
+  sample_rate: 0.5
+`);
+  const originalCrypto = globalThis.crypto;
+  let sequence = 0;
+  Object.defineProperty(globalThis, 'crypto', {
+    configurable: true,
+    value: {
+      ...originalCrypto,
+      subtle: originalCrypto.subtle,
+      getRandomValues(bytes: Uint8Array) {
+        bytes.fill(++sequence % 2 === 0 ? 0xff : 0x00);
+        return bytes;
+      },
+    },
+  });
+  const captured: string[] = [];
+  const originalLog = console.log;
+  console.log = (line: any) => { captured.push(String(line)); };
+  try {
+    for (let i = 0; i < 8; i++) {
+      const request = new Request('https://edge.example.com/stable-path', {
+        method: 'GET',
+        headers: { 'user-agent': 'runtime-test' },
+      });
+      await runGeneratedWorkerRequest(generated, request);
+    }
+  } finally {
+    console.log = originalLog;
+    Object.defineProperty(globalThis, 'crypto', { configurable: true, value: originalCrypto });
+  }
+  const allowCount = captured.filter((line) => line.includes('"event":"allow"')).length;
+  assert.ok(allowCount === 0 || allowCount === 8,
+    'minted correlation IDs changed the sampling bucket; allow logs=' + allowCount);
+});
+
 test('cloudflare compile fails when allowed_algorithms includes an alg the verifier cannot validate', () => {
   let caught: any;
   try {

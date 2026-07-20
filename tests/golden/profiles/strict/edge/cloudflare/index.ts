@@ -104,6 +104,28 @@ function reqCtx(req: Request | null): ReqCtx {
   return { method: req.method, uri, correlationId: readCorrelation(req) };
 }
 
+function allowSampleKey(ctx: ReqCtx): string {
+  return ctx.correlationId || ctx.method + '\n' + ctx.uri;
+}
+
+function shouldSampleAllow(key: string): boolean {
+  const rate = (CFG.obs && CFG.obs.sampleRate) || 0;
+  if (rate <= 0) return false;
+  if (rate >= 1) return true;
+  let hash = 0;
+  for (let i = 0; i < key.length; i++) hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+  return (hash >>> 0) / 4294967296 < rate;
+}
+
+function logAllow(ctx: ReqCtx, samplingKey: string) {
+  if (!shouldSampleAllow(samplingKey)) return;
+  logEvent('allow', {
+    method: ctx.method,
+    uri: ctx.uri,
+    correlation_id: ctx.correlationId,
+  });
+}
+
 async function hashSub(sub: string): Promise<string> {
   if (!sub) return '';
   const data = new TextEncoder().encode(sub);
@@ -1247,6 +1269,9 @@ export default {
     const url = new URL(request.url);
     const rawPathname = rawPathnameFromRequestUrl(request.url);
     const ctx = reqCtx(request);
+    // This key intentionally precedes correlation-ID minting so random IDs do
+    // not make repeated requests enter different sample buckets.
+    const allowSamplingKey = allowSampleKey(ctx);
 
     const preflight = handleCorsPreflight(request);
     if (preflight) return preflight;
@@ -1536,6 +1561,7 @@ export default {
 
     // Propagate correlation / trace header so origin logs can join edge logs.
     // When the header is missing, mint one so every request has a stable ID.
+    let forwardedCorrelationId = ctx.correlationId;
     if (CFG.obs && CFG.obs.correlationHeader) {
       const incoming = request.headers.get(CFG.obs.correlationHeader);
       if (!incoming) {
@@ -1543,8 +1569,11 @@ export default {
         crypto.getRandomValues(buf);
         const id = Array.from(buf, (b: number) => b.toString(16).padStart(2, '0')).join('');
         forwardHeaders.set(CFG.obs.correlationHeader, id);
+        forwardedCorrelationId = id;
       }
     }
+
+    logAllow({ ...ctx, correlationId: forwardedCorrelationId }, allowSamplingKey);
 
     const res = await fetch(new Request(url.toString(), {
       method: request.method,

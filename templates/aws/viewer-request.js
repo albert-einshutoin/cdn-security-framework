@@ -67,6 +67,30 @@
     return (h && h.value) || '';
   }
 
+  function allowSampleKey(req) {
+    return readCorrelation(req) || ((req && req.method) || '') + '\n' + ((req && req.uri) || '/');
+  }
+
+  function shouldSampleAllow(key) {
+    var rate = (CFG.obs && CFG.obs.sampleRate) || 0;
+    if (rate <= 0) return false;
+    if (rate >= 1) return true;
+    // A stable non-cryptographic hash keeps repeated requests in the same
+    // sample bucket without adding random-number work to every edge request.
+    var hash = 0;
+    for (var i = 0; i < key.length; i++) hash = ((hash << 5) - hash + key.charCodeAt(i)) | 0;
+    return (hash >>> 0) / 4294967296 < rate;
+  }
+
+  function logAllow(req) {
+    if (!shouldSampleAllow(allowSampleKey(req))) return;
+    logEvent('allow', {
+      method: req && req.method,
+      uri: (req && req.uri) || '/',
+      correlation_id: readCorrelation(req),
+    });
+  }
+
   function shouldBlock(checkResult, req) {
     if (!checkResult) return null;
     var reason = (checkResult.body && String(checkResult.body)) || 'blocked';
@@ -630,6 +654,8 @@
       const auth = shouldBlockAuth(checkAuthGates(req), req);
       if (auth) return auth;
     }
+
+    if (/* {{FEATURE_ALLOW_SAMPLING}} */ true) logAllow(req);
 
     return req;
   }

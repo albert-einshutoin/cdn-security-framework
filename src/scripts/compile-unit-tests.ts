@@ -1917,6 +1917,68 @@ test('viewer-request: structured JSON block log includes status, block_reason, u
   }
 });
 
+test('viewer-request: allow sampling respects sample_rate without suppressing blocks', () => {
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-allow-'));
+  try {
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      observability: { log_format: 'json', correlation_id_header: 'traceparent', sample_rate: 1 },
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    const captured: string[] = [];
+    const origLog = console.log;
+    console.log = (line: any) => { captured.push(String(line)); };
+    try {
+      const handler = eval('(function(){' + code + '; return handler;})()');
+      handler({
+        request: {
+          method: 'GET',
+          uri: '/sampled',
+          querystring: '',
+          headers: {
+            'user-agent': { value: 'runtime-test' },
+            'traceparent': { value: '00-viewer-allow-test-01' },
+          },
+        },
+      });
+    } finally {
+      console.log = origLog;
+    }
+
+    const allowLine = captured.find((line: string) => line.includes('"event":"allow"'));
+    assert.ok(allowLine, 'expected a sampled allow JSON log; got: ' + captured.join('\n'));
+    const parsed = JSON.parse(allowLine as string);
+    assert.strictEqual(parsed.method, 'GET');
+    assert.strictEqual(parsed.uri, '/sampled');
+    assert.strictEqual(parsed.correlation_id, '00-viewer-allow-test-01');
+
+    build({
+      version: 1,
+      request: { allow_methods: ['GET'] },
+      response_headers: {},
+      observability: { log_format: 'json', correlation_id_header: 'traceparent', sample_rate: 0 },
+      routes: [],
+    }, { outDir: tmpDir, allowPlaceholderToken: true });
+    const zeroCode = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-request.js'), 'utf8');
+    const zeroLogs: string[] = [];
+    console.log = (line: any) => { zeroLogs.push(String(line)); };
+    try {
+      const zeroHandler = eval('(function(){' + zeroCode + '; return handler;})()');
+      zeroHandler({ request: { method: 'GET', uri: '/allowed', querystring: '', headers: { 'user-agent': { value: 'runtime-test' } } } });
+      zeroHandler({ request: { method: 'POST', uri: '/blocked', querystring: '', headers: { 'user-agent': { value: 'runtime-test' } } } });
+    } finally {
+      console.log = origLog;
+    }
+    assert.strictEqual(zeroLogs.filter((line) => line.includes('"event":"allow"')).length, 0);
+    assert.strictEqual(zeroLogs.filter((line) => line.includes('"event":"block"')).length, 1);
+  } finally {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  }
+});
+
 test('validateOriginAuth warns when secret_env is unset (non-strict)', () => {
   const policy = { origin: { auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'NONEXISTENT_FOR_TEST' } } };
   const warnings: string[] = [];

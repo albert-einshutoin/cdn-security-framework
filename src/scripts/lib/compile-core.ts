@@ -538,6 +538,11 @@ function build(policy: any, options: any = {}) {
     '/* {{FEATURE_VIEWER_AUTH}} */ true',
     String(authGates.some((gate) => gate.type === 'static_token' || gate.type === 'basic_auth')),
   );
+  code = injectTemplateCode(
+    code,
+    '/* {{FEATURE_ALLOW_SAMPLING}} */ true',
+    String(requestBase.obs.sampleRate > 0),
+  );
   assertInjectedConstDeclarations(code, ['CFG']);
 
   const distDir = path.join(outDir, 'edge');
