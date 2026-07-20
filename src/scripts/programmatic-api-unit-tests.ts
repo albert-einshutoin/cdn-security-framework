@@ -121,6 +121,8 @@ request:
     max_depth: 8
 response_headers:
   hsts: "max-age=31536000"
+  csp_nonce: true
+  csp_public: "script-src 'self' 'nonce-PLACEHOLDER'"
 response_dlp:
   enabled: true
   action: report_only
@@ -1422,6 +1424,7 @@ test('CLI authoring DX: readiness reports target-specific unsupported controls',
     assert.ok(awsReport.findings.some((finding: any) => finding.id === 'target.aws.graphql_guard.unsupported'));
     assert.ok(awsReport.findings.some((finding: any) => finding.id === 'target.aws.challenge.unsupported'));
     assert.ok(awsReport.findings.some((finding: any) => finding.id === 'target.aws.response_dlp.unsupported'));
+    assert.ok(awsReport.findings.some((finding: any) => finding.id === 'target.aws.csp_nonce.unsupported'));
 
     const cloudflare: any = spawnSync(process.execPath, [
       cli, 'readiness',

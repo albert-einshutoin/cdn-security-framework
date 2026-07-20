@@ -2185,6 +2185,21 @@ const CAPABILITY_MATRIX: CapabilityEntry[] = [
     notes: 'Dynamic allowlist echo is supported and appends Vary: Origin.',
   },
   {
+    id: 'response.csp_nonce',
+    category: 'Response security',
+    label: 'Per-response CSP nonce transport',
+    policyPaths: ['response_headers.csp_nonce'],
+    support: {
+      cloudfront_functions: 'unsupported',
+      lambda_edge: 'unsupported',
+      cloudflare_workers: 'supported',
+      terraform_waf: 'unsupported',
+    },
+    deploySupport: { aws: 'unsupported', cloudflare: 'supported' },
+    notes: 'Cloudflare forwards a cryptographic nonce to the origin before rendering. AWS builds reject this control.',
+    configured: (policy: any) => Boolean(policy && policy.response_headers && policy.response_headers.csp_nonce === true),
+  },
+  {
     id: 'response.cookie_attributes',
     category: 'Response security',
     label: 'Cookie attribute hardening',
@@ -2886,6 +2901,14 @@ function evaluateReadiness(
   }
 
   if (target === 'aws') {
+    if (responseHeaders.csp_nonce === true) {
+      findings.push(readinessFinding(
+        'fail',
+        'target.aws.csp_nonce.unsupported',
+        'response_headers.csp_nonce requires cryptographic nonce generation and request-to-origin transport that the AWS output cannot provide.',
+        'Use Cloudflare Workers, disable csp_nonce, or generate and apply CSP nonces entirely at the origin.'
+      ));
+    }
     if (request.graphql_guard) {
       findings.push(readinessFinding(
         'fail',
