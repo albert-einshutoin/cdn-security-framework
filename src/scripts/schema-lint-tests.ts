@@ -210,7 +210,7 @@ test('lint accepts firewall.challenge at configured bounds', () => {
     mode: challenge
     path_prefixes: ["/guarded"]
     ua_contains: ["headless"]
-    difficulty: 6
+    difficulty: 4
     ttl_sec: 86400
     secret_env: CHALLENGE_SECRET
     cookie_name: __cdn_challenge
@@ -269,14 +269,14 @@ test('lint rejects firewall.challenge difficulty above maximum', () => {
   challenge:
     enabled: true
     mode: challenge
-    difficulty: 7
+    difficulty: 5
 `,
   });
   const { dir, file } = writeTempPolicy(yaml);
   try {
     const result: any = runLint(file);
     assert.notStrictEqual(result.status, 0);
-    assert.match(result.stderr + result.stdout, /challenge|difficulty|maximum|<=\s*6/i);
+    assert.match(result.stderr + result.stdout, /challenge|difficulty|maximum|<=\s*4/i);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }

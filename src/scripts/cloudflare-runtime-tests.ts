@@ -772,6 +772,44 @@ response_dlp:
   assert.ok(body.includes('[MASKED]'), body);
 });
 
+test('cloudflare CSP nonce is generated before origin fetch and reused in the response policy', async () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-csp-nonce-test
+request:
+  allow_methods: ["POST"]
+response_headers:
+  csp_nonce: true
+  csp_public: "default-src 'self'; script-src 'self' 'nonce-PLACEHOLDER'"
+`);
+
+  const { res, fetchCalls } = await runGeneratedWorker(generated, 'query { viewer { id } }');
+  assert.strictEqual(fetchCalls.length, 1);
+  const originNonce = fetchCalls[0].headers.get('x-csp-nonce');
+  assert.ok(originNonce, 'origin request must receive the generated CSP nonce');
+  assert.strictEqual(res.headers.get('x-csp-nonce'), originNonce);
+  assert.ok((res.headers.get('content-security-policy') || '').includes(`'nonce-${originNonce}'`));
+});
+
+test('cloudflare response DLP uses a bounded stream reader instead of buffering clone.text()', () => {
+  const generated = compileCloudflare(`
+version: 1
+project: cf-dlp-bounded-reader-test
+request:
+  allow_methods: ["GET"]
+response_dlp:
+  enabled: true
+  action: report_only
+  body:
+    max_bytes: 1024
+    content_types: ["text/plain"]
+`);
+
+  assert.doesNotMatch(generated, /await clone\.text\(\)/);
+  assert.match(generated, /getReader\(\)/);
+  assert.match(generated, /reader\.cancel\(\)/);
+});
+
 test('cloudflare response DLP preserves whitespace-padded match lists for compatibility', () => {
   const generated = compileCloudflare(`
 version: 1
