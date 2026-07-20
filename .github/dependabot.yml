@@ -27,9 +27,12 @@ updates:
     groups:
       dev-dependencies:
         dependency-type: "development"
+    # Commander 15 requires Node >=22.12 while this package supports >=20.17.
     # c8 12 requires Node >=20.19 while this package supports >=20.17.
     # TypeScript 7 removes compiler options still required by this project.
     ignore:
+      - dependency-name: "commander"
+        versions: [">=15.0.0"]
       - dependency-name: "c8"
         versions: [">=12.0.0"]
       - dependency-name: "typescript"
