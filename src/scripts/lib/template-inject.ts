@@ -34,7 +34,35 @@ function injectTemplateCode(template: string, marker: string, code: string): str
   if (count !== 1) {
     throw new Error(`Template marker ${marker} must appear exactly once, found ${count}`);
   }
-  return template.replace(marker, code);
+  // A callback prevents String.replace from interpreting policy-derived `$&`,
+  // `$\`` and related replacement tokens.
+  return template.replace(marker, () => code);
+}
+
+const CLOUDFRONT_FUNCTION_MAX_BYTES = 10 * 1024;
+
+function optimizeCloudFrontFunction(source: string, fileName: string): string {
+  const esbuild = require('esbuild');
+  const transformed = esbuild.transformSync(`${source}\nexport { handler };`, {
+    loader: 'js',
+    format: 'esm',
+    target: 'es2020',
+    treeShaking: true,
+    minify: true,
+    legalComments: 'none',
+  }).code.trim();
+  const exportMatch = /export\{([A-Za-z_$][\w$]*) as handler\};?$/.exec(transformed);
+  if (!exportMatch) {
+    throw new Error(`Unable to preserve the CloudFront handler export in ${fileName}`);
+  }
+  const optimized = `${transformed.slice(0, exportMatch.index)}function handler(event){return ${exportMatch[1]}(event)}\n`;
+  const bytes = Buffer.byteLength(optimized, 'utf8');
+  if (bytes > CLOUDFRONT_FUNCTION_MAX_BYTES) {
+    throw new Error(
+      `${fileName} is ${bytes} bytes after optimization; CloudFront Functions allow at most ${CLOUDFRONT_FUNCTION_MAX_BYTES} bytes`,
+    );
+  }
+  return optimized;
 }
 
 function parseForConstInspection(code: string, loader: 'js' | 'ts') {
@@ -84,6 +112,7 @@ function assertInjectedConstDeclarations(
 module.exports = {
   assertInjectedConstDeclarations,
   injectTemplateCode,
+  optimizeCloudFrontFunction,
   renderConstObject,
   runtimeCode,
 };
