@@ -32,6 +32,7 @@
 | セキュリティヘッダー付与 | ✓ | — | Edge: レスポンス書き換え。 |
 | OWASP CRS / ボディの SQLi, XSS | — | ✓ | WAF マネージドルール。 |
 | CAPTCHA / チャレンジ | — | ✓ | WAF / Bot Management。 |
+| 軽量 JS challenge / PoW | ✓（Cloudflare Workers のみ） | — | `firewall.challenge` による Edge 専用。CAPTCHA や Bot Management とは別物。AWS CloudFront Functions / Lambda@Edge: unsupported warning。詳細は [edge-js-challenge](./edge-js-challenge.ja.md)。 |
 | Geo / ASN ブロック | 任意（Workers） | ✓ | WAF の方が容易なことが多い。 |
 | DDoS 対策 | — | ✓ | CDN + Shield / WAF。 |
 

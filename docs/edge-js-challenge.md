@@ -2,6 +2,8 @@
 
 `firewall.challenge` is an opt-in, experimental Cloudflare Workers-only JavaScript challenge with a lightweight proof-of-work check. It is intended as low-cost friction for suspicious browser-shaped traffic, not as a CAPTCHA replacement or a bot-management product.
 
+For Edge vs WAF placement, see [Decision matrix](./decision-matrix.md).
+
 ```yaml
 firewall:
   challenge:

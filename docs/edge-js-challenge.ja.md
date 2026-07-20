@@ -2,6 +2,8 @@
 
 `firewall.challenge` は、Cloudflare Workers 専用の opt-in experimental JavaScript challenge / lightweight proof-of-work 機能です。疑わしいブラウザ風トラフィックに軽い摩擦を与えるためのもので、CAPTCHA や本格的な bot management の代替ではありません。
 
+Edge と WAF の切り分けは [判断マトリクス](./decision-matrix.ja.md) を参照してください。
+
 ```yaml
 firewall:
   challenge:
