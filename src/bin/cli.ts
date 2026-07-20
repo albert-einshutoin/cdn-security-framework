@@ -54,6 +54,24 @@ type DoctorOptions = {
   strict?: boolean;
 };
 
+function writeWranglerConfig(cwd: string, platform: string | undefined, policyYaml: string): void {
+  if (platform !== 'cloudflare') return;
+  const projectMatch = /^project:\s*["']?([^\n"']+)["']?\s*$/m.exec(policyYaml);
+  const rawProject = projectMatch ? projectMatch[1].trim() : 'cdn-security-worker';
+  const workerName = rawProject
+    .toLowerCase()
+    .replace(/[^a-z0-9-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'cdn-security-worker';
+  const wrangler = [
+    `name = "${workerName}"`,
+    'main = "dist/edge/cloudflare/index.ts"',
+    'compatibility_date = "2026-07-20"',
+    '',
+  ].join('\n');
+  fs.writeFileSync(path.join(cwd, 'wrangler.toml'), wrangler, 'utf8');
+  console.log('[SUCCESS] Created wrangler.toml');
+}
+
 type ReadinessOptions = {
   policy?: string | null;
   target: string;
@@ -2968,10 +2986,10 @@ jobs:
       ORIGIN_SECRET: \${{ secrets.ORIGIN_SECRET }}
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '20.17.0'
           cache: npm
@@ -2988,17 +3006,17 @@ jobs:
       - name: Build AWS edge and WAF artifacts
         run: npx cdn-security build --target aws --out-dir dist
 
-      - name: Upload generated artifacts
-        uses: actions/upload-artifact@v4
+      - name: Upload non-secret build evidence
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cdn-security-aws-artifacts
           path: |
-            dist/edge/
             dist/infra/
             readiness-report.json
 
-      # Deployment is intentionally left explicit. Wire dist/edge/*.js and
-      # dist/infra/*.tf.json into your Terraform/CDK/CloudFront release flow.
+      # Edge functions can contain baked credentials and intentionally never
+      # leave this trusted job as downloadable artifacts. Deploy them in this
+      # job using your Terraform/CDK/CloudFront release flow.
 `;
 }
 
@@ -3037,10 +3055,10 @@ jobs:
       CDN_SECURITY_WORKER_SECRETS_FILE: \${{ runner.temp }}/cdn-security-worker-secrets.json
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '20.17.0'
           cache: npm
@@ -3082,13 +3100,13 @@ jobs:
         run: |
           if [ -f "$CDN_SECURITY_WORKER_SECRETS_FILE" ]; then
             trap 'rm -f "$CDN_SECURITY_WORKER_SECRETS_FILE"' EXIT
-            npx wrangler deploy dist/edge/cloudflare/index.ts --secrets-file "$CDN_SECURITY_WORKER_SECRETS_FILE"
+            npx --yes wrangler@4.112.0 deploy dist/edge/cloudflare/index.ts --secrets-file "$CDN_SECURITY_WORKER_SECRETS_FILE"
           else
-            npx wrangler deploy dist/edge/cloudflare/index.ts
+            npx --yes wrangler@4.112.0 deploy dist/edge/cloudflare/index.ts
           fi
 
       - name: Upload generated artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: cdn-security-cloudflare-artifacts
           path: |
@@ -3401,6 +3419,7 @@ program
       }
       fs.mkdirSync(policyDir, { recursive: true });
       fs.writeFileSync(destSecurity, withYamlLanguageServerHint(content, './schema.json'), 'utf8');
+      writeWranglerConfig(cwd, platform, content);
       console.log('[SUCCESS] Created policy/security.yml from guided setup');
       console.log('[INFO] Review secret env names and docs/runbooks/secret-rotation.md before production deploy.');
       return;
@@ -3430,6 +3449,7 @@ program
     const content = fs.readFileSync(srcProfile, 'utf8');
     fs.writeFileSync(destSecurity, withYamlLanguageServerHint(content, './schema.json'), 'utf8');
     fs.writeFileSync(destStarter, withYamlLanguageServerHint(content, '../schema.json'), 'utf8');
+    writeWranglerConfig(cwd, platform, content);
 
     console.log('[SUCCESS] Created policy/security.yml');
     console.log('[SUCCESS] Created policy/' + starterDir + '/' + profileFile);
