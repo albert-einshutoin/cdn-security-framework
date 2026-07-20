@@ -14,9 +14,9 @@
  *   CFF as a single comma-joined string. Rewriting multi-cookie attributes in
  *   CFF can therefore corrupt cookie payloads; real multi-cookie mutation must
  *   run in Lambda@Edge (origin-response) or a Workers runtime.
- * - No Web Crypto API. CSP nonces are derived from Math.random, which is not a
- *   cryptographic PRNG. Use the Cloudflare Worker target (crypto.getRandomValues)
- *   for production CSP nonces, or disable `csp_nonce` on the AWS target.
+ * - This template retains its nonce helper for isolated template tests, but
+ *   production AWS builds reject `csp_nonce`: Math.random is not a secure RNG
+ *   and CloudFront Functions cannot carry the nonce to the origin renderer.
  */
 
 function set(headers, k, v) { headers[k.toLowerCase()] = { value: v }; }

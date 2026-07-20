@@ -6,13 +6,13 @@ This runbook covers rotating the four secrets the framework consumes at build an
 
 | Env var | Consumer | Rotation class |
 | --- | --- | --- |
-| `JWT_SECRET` | HS256 JWT gate | Hot (grace window via dual-secret) |
+| `JWT_SECRET` | HS256 JWT gate | Cold on AWS; coordinated cutover on Cloudflare |
 | `JWKS_URL` / kids | RS256 JWT gate | Hot (publish new kid, wait, revoke) |
-| `URL_SIGNING_SECRET` | Signed URL gate | Warm (grace window for already-issued URLs) |
+| `URL_SIGNING_SECRET` | Signed URL gate | Cold; already-issued URLs are invalidated |
 | `EDGE_ADMIN_TOKEN` | `static_token` gate | Cold (baked into `dist/edge/` at build time) |
-| `ORIGIN_SECRET` | Origin auth header | Hot (coordinated with origin) |
+| `ORIGIN_SECRET` | Origin auth header | Cold on AWS; coordinated with origin |
 
-> **Baseline principle**: never rotate to a single new value. Always go through a **dual-secret window**: accept both old and new for long enough to cover in-flight tokens, the longest issued signed URL, and your deploy pipeline's propagation time. Only then revoke the old secret.
+> **Current contract**: `secret_env` accepts one environment-variable name. The framework does not support `secret_envs` or multiple accepted secrets in one gate. Do not model a dual-secret window by stacking identical routes: every matching gate is evaluated, so that configuration requires both credentials rather than either credential. Use RS256/JWKS when verifier-side overlap is required.
 
 ---
 
@@ -27,20 +27,9 @@ HS256 is a symmetric shared secret. Rotation requires issuer + verifier to swap 
    openssl rand -base64 32
    ```
    Upload to your secret store with a new key, e.g. `JWT_SECRET_V2`.
-3. **Update the issuer** to sign with `V2` but **keep publishing `V1` tokens during the grace window** if your IdP supports dual-sign. If not, skip to step 4 and accept the verifier-side dual accept window instead.
-4. **Update the verifier policy** to accept both:
-   ```yaml
-   routes:
-     - name: api
-       auth_gate:
-         type: jwt
-         algorithm: HS256
-         secret_envs: ["JWT_SECRET", "JWT_SECRET_V2"]   # verifier tries each
-   ```
-   Rebuild and deploy `dist/edge/origin-request.js`.
-5. **Wait** `max(access_token_ttl, refresh_token_ttl) + clock_skew_sec + deploy_propagation`. For 7-day refresh tokens, plan for 8 days.
-6. **Cut over**: update the issuer to only sign with `V2`. Update policy to verify only `V2`. Rebuild and deploy.
-7. **Revoke** `JWT_SECRET` from the secret store.
+3. **Schedule a coordinated cutoff** because an HS256 gate accepts one secret. Stop issuing long-lived V1 tokens and wait for their TTL where possible.
+4. **Update the existing `JWT_SECRET` value**, switch the issuer to V2, then rebuild and deploy AWS `origin-request.js`. Cloudflare reads the runtime secret, but the issuer and Worker secret still need a coordinated cutover.
+5. **Verify** V2 canaries immediately and revoke V1 after propagation. If verifier-side overlap is mandatory, migrate the gate to RS256/JWKS before rotating.
 
 ### Verification
 - Synthetic canary: issue a token with `V2` and hit `/api/health`; expect 200.
@@ -72,19 +61,9 @@ Signed URLs embed a signature computed at issue time. Rotating the secret invali
 
 ### Procedure
 1. **Decide a grace window** equal to `max(signed_url.default_ttl, email_delivery_window)`. 72h is a common floor.
-2. **Generate** `URL_SIGNING_SECRET_V2`.
-3. **Update the verifier** to accept both:
-   ```yaml
-   routes:
-     - name: downloads
-       auth_gate:
-         type: signed_url
-         secret_envs: ["URL_SIGNING_SECRET", "URL_SIGNING_SECRET_V2"]
-   ```
-   Rebuild and deploy.
-4. **Update the issuer** (your app) to start signing new URLs with `V2`.
-5. **Wait** the grace window.
-6. **Remove** `URL_SIGNING_SECRET` from the verifier policy and secret store.
+2. **Stop issuing V1 URLs** and wait for the grace window if the old secret is not compromised.
+3. **Replace** `URL_SIGNING_SECRET`, update the issuer, then rebuild/deploy AWS or update the Cloudflare Worker secret in one coordinated window.
+4. **Verify** a newly issued URL and revoke the old value. The framework currently cannot accept old and new signed-URL secrets simultaneously.
 
 ### Hard cutoff for a compromise
 If the old secret is compromised, skip the grace window:
@@ -106,8 +85,8 @@ CloudFront Functions cannot read env vars at runtime. The `static_token` gate ba
 4. **Deploy** `dist/edge/viewer-request.js` to CloudFront. There is a brief cut-over window (CloudFront global propagation: 2–5 min) where some edges serve the old token, some the new. Plan admin access accordingly.
 5. **Communicate** the new token to admin operators.
 
-### Dual-token window (optional)
-The static_token gate accepts a single value per build. If you need zero-downtime rotation, temporarily deploy a policy that stacks two routes with the same prefix but different tokens, wait, then collapse to the new token. In practice, for an admin-only path protected by an L7 ACL already, the 5-minute propagation window is acceptable.
+### No dual-token route workaround
+The gate accepts one value per build. Stacking two routes with the same prefix does **not** provide OR semantics; both gates run. Plan a maintenance/cutover window or put a separately managed authenticator in front of the edge.
 
 ---
 

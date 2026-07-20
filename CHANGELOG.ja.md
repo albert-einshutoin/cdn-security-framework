@@ -9,6 +9,16 @@
 
 ## [Unreleased]
 
+### Security
+
+- 最適化後の CloudFront Functions 10 KiB 制限を強制し、secret を含み得る AWS edge code を workflow artifact に upload しないよう変更。
+- Lambda@Edge がカスタム環境変数を使えないため、HS256・署名付き URL・origin auth の credential を build 時に埋め込むよう修正。
+- AWS の未対応 CSP nonce を拒否し、Cloudflare は暗号学的 nonce を origin 描画前に渡すとともに response DLP の本文読取量を制限。
+
+### Fixed
+
+- npm package に `esbuild` を同梱し、Commander を Node 20 対応へ揃え、template replacement token を保持し、`wrangler.toml` を生成して deployment tool を固定。
+
 ## [1.3.0] - 2026-05-01
 
 ### 追加

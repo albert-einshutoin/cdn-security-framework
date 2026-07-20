@@ -244,7 +244,7 @@ npx cdn-security deploy-template --target cloudflare
 npx cdn-security deploy-template --out-dir .github/workflows --force
 ```
 
-生成された edge / infra artifact のための GitHub Actions workflow starter を書き出します。AWS template は `dist/edge/` と `dist/infra/` を build して upload し、後続の Terraform / CDK / CloudFront release flow に渡せる形にします。Cloudflare template は Worker を build し、`wrangler deploy --secrets-file` で設定済み runtime secret を code と一緒に渡して artifact も upload します。
+GitHub Actions workflow starter を書き出します。AWS template は信頼済み job 内で edge code を build しますが、credential が焼き込まれる可能性があるため upload は infra と readiness 証跡だけに限定し、edge は同じ job から deploy します。Cloudflare template は固定バージョンの Wrangler で deploy し、生成 artifact を upload します。
 
 template は `EDGE_ADMIN_TOKEN`、`BASIC_AUTH_CREDS`、`URL_SIGNING_SECRET`、`JWT_SECRET`、`ORIGIN_SECRET`、`CHALLENGE_SECRET`、`CLOUDFLARE_API_TOKEN`、`CLOUDFLARE_ACCOUNT_ID` などの GitHub Secrets 名だけを参照し、secret 値は含みません。Cloudflare で policy が追加の `*_env` 名を使う場合は `CDN_SECURITY_WORKER_SECRET_NAMES` を拡張してください。既存ファイルは `--force` を付けない限り上書きしません。
 
