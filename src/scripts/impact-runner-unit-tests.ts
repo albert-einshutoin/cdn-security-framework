@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import type { ImpactConfig } from './impact/core';
 import type { AnalysisResult } from './impact/result';
 import { runExecutionPlan } from './impact/runner';
+import { compareImpactRuns } from './impact-compare';
 
 async function main(): Promise<void> {
   const config: ImpactConfig = {
@@ -58,6 +59,8 @@ async function main(): Promise<void> {
     diagnostics: [],
     executionPlan: ['pass-one', 'pass-two', 'fail-one'],
     requiresPackageMatrix: false,
+    selectedTestTargetCount: 3,
+    availableTestTargetCount: 3,
   };
 
   const report = await runExecutionPlan(process.cwd(), config, analysis);
@@ -67,6 +70,14 @@ async function main(): Promise<void> {
   assert.equal(report.skippedCount, 0);
   assert.ok(report.wallClockMs > 0);
   assert.ok(report.totalComputeMs >= report.wallClockMs);
+  const comparison = compareImpactRuns(
+    analysis,
+    { ...report, failureCount: 0, wallClockMs: 50, totalComputeMs: 60 },
+    { ...report, failureCount: 1, wallClockMs: 100, totalComputeMs: 120 },
+  );
+  assert.equal(comparison.wallClockReductionRate, 0.5);
+  assert.equal(comparison.computeReductionRate, 0.5);
+  assert.equal(comparison.fullOnlyFailure, true);
   console.log('impact runner unit tests: ok');
 }
 

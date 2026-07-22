@@ -51,6 +51,7 @@ function logSummary(result: ReturnType<typeof analyzeImpact>): void {
   console.log(`Integration test targets: ${result.integrationTestTargets.length}`);
   console.log(`E2E test targets: ${result.e2eTestTargets.length}`);
   console.log(`Smoke test targets: ${result.smokeTestTargets.length}`);
+  console.log(`Selected test targets: ${result.selectedTestTargetCount}/${result.availableTestTargetCount}`);
   console.log(`Fallback: ${result.fallback}`);
   if (result.fallbackReason) console.log(`Fallback reason: ${result.fallbackReason}`);
 }

@@ -25,6 +25,8 @@ export interface AnalysisResult {
   diagnostics: string[];
   executionPlan: string[];
   requiresPackageMatrix: boolean;
+  selectedTestTargetCount: number;
+  availableTestTargetCount: number;
 }
 
 export function validateAnalysisResult(repositoryRoot: string, result: AnalysisResult): void {

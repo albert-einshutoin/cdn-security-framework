@@ -183,6 +183,10 @@ export function analyzeImpact(options: AnalyzeImpactOptions): AnalysisResult {
       diagnostics: [...diagnostics, 'execution plan contains an unknown command'],
       executionPlan: [],
       requiresPackageMatrix: true,
+      selectedTestTargetCount: 0,
+      availableTestTargetCount: config.commands.filter((command) =>
+        ['unit', 'integration', 'e2e', 'smoke'].includes(command.category),
+      ).length,
     };
   }
 
@@ -217,5 +221,9 @@ export function analyzeImpact(options: AnalyzeImpactOptions): AnalysisResult {
     requiresPackageMatrix: changedPaths.some((filePath) =>
       packageMatrixPatterns.some((pattern) => matchesGlob(filePath, pattern)),
     ),
+    selectedTestTargetCount: selected.length + smokeTargetIds.length,
+    availableTestTargetCount: config.commands.filter((command) =>
+      ['unit', 'integration', 'e2e', 'smoke'].includes(command.category),
+    ).length,
   };
 }

@@ -18,7 +18,9 @@
     "fallbackReason",
     "diagnostics",
     "executionPlan",
-    "requiresPackageMatrix"
+    "requiresPackageMatrix",
+    "selectedTestTargetCount",
+    "availableTestTargetCount"
   ],
   "properties": {
     "schemaVersion": { "const": 1 },
@@ -37,7 +39,9 @@
     "fallbackReason": { "type": ["string", "null"] },
     "diagnostics": { "type": "array", "items": { "type": "string" } },
     "executionPlan": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
-    "requiresPackageMatrix": { "type": "boolean" }
+    "requiresPackageMatrix": { "type": "boolean" },
+    "selectedTestTargetCount": { "type": "integer", "minimum": 0 },
+    "availableTestTargetCount": { "type": "integer", "minimum": 0 }
   },
   "additionalProperties": false
 }

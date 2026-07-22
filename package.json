@@ -49,6 +49,7 @@
     "test:impact": "npm run build:ts && node scripts/impact-unit-tests.js && node scripts/impact-runner-unit-tests.js",
     "impact:analyze": "npm run build:ts && node scripts/impact-cli.js analyze",
     "impact:run": "npm run build:ts && node scripts/impact-runner.js",
+    "impact:compare": "npm run build:ts && node scripts/impact-compare.js",
     "test:impact-smoke": "npm run build:test-fixtures && node scripts/impact-smoke-tests.js",
     "test:drift": "npm run build:ts && node scripts/check-drift.js",
     "test:security-baseline": "npm run build:ts && node scripts/security-baseline-check.js",
@@ -59,7 +60,7 @@
     "test:dist-exists": "node -e \"const fs=require('fs'); for (const f of ['dist/edge/viewer-request.js','dist/edge/viewer-response.js','dist/edge/origin-request.js','dist/edge/cloudflare/index.ts']) fs.accessSync(f);\"",
     "test:coverage": "c8 --reporter=text --reporter=lcov --include='scripts/**/*.js' --include='lib/**/*.js' --include='parser/**/*.js' --include='validator/**/*.js' --include='emitter/**/*.js' --exclude='scripts/**/*-tests.js' --lines 80 --functions 75 --branches 70 npm run test:all",
     "test:ci": "npm audit --audit-level=high && npm run lint:policy:ci && npm run build && node scripts/compile-cloudflare.js && node scripts/compile-cloudflare-waf.js --policy policy/base.yml --out-dir dist --fail-on-waf-approximation && npm run test:dist-exists && node bin/cli.js doctor --no-report && npm run test:drift && npm run test:security-baseline && npm run test:package && npm run test:coverage",
-    "test:all": "npm run build:test-fixtures && npm run test:types && npm run typecheck && npm run test:api-contract && npm run test:vitest && npm run test:unit && npm run test:runtime && npm run test:fuzz && npm run test:cloudflare-integration && npm run test:edge-container",
+    "test:all": "npm run build:test-fixtures && npm run test:types && npm run typecheck && npm run test:api-contract && npm run test:vitest && npm run test:unit && npm run test:impact && npm run test:runtime && npm run test:fuzz && npm run test:cloudflare-integration && npm run test:edge-container",
     "fingerprints:candidates": "npm run build:ts && node scripts/fingerprint-candidates.js"
   },
   "keywords": [
