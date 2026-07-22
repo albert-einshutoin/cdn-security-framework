@@ -15,6 +15,7 @@ import {
 } from './impact/core';
 import { loadImpactConfig } from './impact/config';
 import { findRelatedJavaScriptTests } from './impact/adapters/javascript';
+import { findRelatedPythonTests } from './impact/adapters/python';
 import { collectGitChanges } from './impact/git';
 import { selectMappedTargets } from './impact/selector';
 
@@ -266,6 +267,20 @@ function testMappedAndRelatedTestSelection(): void {
   );
 }
 
+function testPythonAdapterSelection(): void {
+  const root = mkdtempSync(path.join(tmpdir(), 'impact-python-'));
+  mkdirSync(path.join(root, 'app'), { recursive: true });
+  mkdirSync(path.join(root, 'tests'), { recursive: true });
+  writeFileSync(path.join(root, 'pyproject.toml'), '[project]\nname="fixture"\n');
+  writeFileSync(path.join(root, 'app', '__init__.py'), '');
+  writeFileSync(path.join(root, 'app', 'service.py'), 'VALUE = 1\n');
+  writeFileSync(path.join(root, 'tests', 'test_service.py'), 'from app import service\nassert service.VALUE == 1\n');
+
+  const result = findRelatedPythonTests(process.cwd(), root, '.', ['app/service.py']);
+  assert.deepEqual(result.diagnostics, []);
+  assert.deepEqual(result.testFiles, ['tests/test_service.py']);
+}
+
 testNameStatusParsing();
 testGlobAndRiskClassification();
 testProjectDetection();
@@ -274,5 +289,6 @@ testConservativeStrategy();
 testRepositoryConfiguration();
 testGitChangeCollection();
 testMappedAndRelatedTestSelection();
+testPythonAdapterSelection();
 
 console.log('impact analysis unit tests: ok');
