@@ -37,26 +37,32 @@ function fetchBaseRef(repositoryRoot: string, baseRef: string): void {
   );
 }
 
-function deepenHistory(repositoryRoot: string, baseRef: string): void {
+function recoverShallowMergeBase(
+  repositoryRoot: string,
+  baseRef: string,
+  headRef: string,
+): { mergeBase: string; baseRevision: string; headRevision: string } | null {
   const remoteMatch = /^([A-Za-z0-9._-]+)\/(.+)$/u.exec(baseRef);
-  if (!remoteMatch) return;
+  if (!remoteMatch) return null;
   const [, remote, branch] = remoteMatch;
-  if (!remote || !branch || branch.startsWith('-')) return;
-  for (const deepen of ['50', '200']) {
+  if (!remote || !branch || branch.startsWith('-')) return null;
+  const fetchOptions = [['--deepen=50'], ['--deepen=200'], ['--unshallow']];
+  for (const options of fetchOptions) {
     try {
-      execFileSync('git', ['fetch', '--no-tags', `--deepen=${deepen}`, remote, branch], {
+      execFileSync('git', ['fetch', '--no-tags', ...options, remote, branch], {
         cwd: repositoryRoot,
         stdio: 'ignore',
       });
-      return;
+      const baseRevision = tryResolve(repositoryRoot, baseRef);
+      const headRevision = tryResolve(repositoryRoot, headRef);
+      if (!baseRevision || !headRevision) continue;
+      const mergeBase = gitText(repositoryRoot, ['merge-base', baseRevision, headRevision]);
+      return { mergeBase, baseRevision, headRevision };
     } catch {
       // Continue to the next conservative recovery step.
     }
   }
-  execFileSync('git', ['fetch', '--no-tags', '--unshallow', remote, branch], {
-    cwd: repositoryRoot,
-    stdio: 'ignore',
-  });
+  return null;
 }
 
 /**
@@ -101,10 +107,12 @@ export function collectGitChanges(
     try {
       const shallow = gitText(repositoryRoot, ['rev-parse', '--is-shallow-repository']) === 'true';
       if (shallow) {
-        deepenHistory(repositoryRoot, baseRef);
-        baseRevision = tryResolve(repositoryRoot, baseRef) ?? baseRevision;
-        headRevision = tryResolve(repositoryRoot, headRef) ?? headRevision;
-        mergeBase = gitText(repositoryRoot, ['merge-base', baseRevision, headRevision]);
+        const recovered = recoverShallowMergeBase(repositoryRoot, baseRef, headRef);
+        if (recovered) {
+          baseRevision = recovered.baseRevision;
+          headRevision = recovered.headRevision;
+          mergeBase = recovered.mergeBase;
+        }
       }
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);

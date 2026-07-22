@@ -13,6 +13,7 @@ import {
   type DetectedProject,
 } from './core';
 import { collectGitChanges } from './git';
+import { selectAffectedProjects } from './projects';
 import type { AnalysisResult } from './result';
 import { selectDirectTestTargets, selectMappedTargets } from './selector';
 
@@ -71,10 +72,9 @@ export function analyzeImpact(options: AnalyzeImpactOptions): AnalysisResult {
   const changedPaths = pathsForClassification(gitChanges.changedFiles);
   const diagnostics = [...gitChanges.diagnostics];
   const detectedProjects = detectProjects(repositoryRoot, config);
-  const affectedProjects = detectedProjects
-    .filter((project) => changedPaths.some((filePath) => projectContainsPath(project, filePath)))
-    .map((project) => project.id)
-    .sort();
+  const projectSelection = selectAffectedProjects(repositoryRoot, changedPaths, detectedProjects);
+  diagnostics.push(...projectSelection.diagnostics);
+  const affectedProjects = projectSelection.projectIds;
   const affectedProjectRecords = detectedProjects.filter((project) =>
     affectedProjects.includes(project.id),
   );

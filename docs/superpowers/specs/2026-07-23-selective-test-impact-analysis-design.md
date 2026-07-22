@@ -185,7 +185,7 @@ PRで常時実行できる限定スモークentrypointを追加する。
 
 初期並列数は単一runner内の最大2プロセスとする。`dist`、report、container、network等の共有資源にresource lockを設定し、競合するtargetは直列化する。CI job matrixの乱立は避ける。
 
-初期導入ではnpm download cache、TypeScript incremental metadata、同一workflow内の検証済み生成物を対象とする。cache keyにはOS、CPU、Node、lock、build/test/schema設定のhashを含める。cache missや破損は通常実行へ戻し、成功判定を代替しない。
+初期導入ではnpm download cacheと同一workflow内の検証済み生成物を対象とする。現行buildは再現性のためTypeScript incremental出力を無効化しているため、`.tsbuildinfo`はremote cache対象にしない。cache keyにはOS、CPU、Node、lock、build/test/schema設定のhashを含める。cache missや破損は通常実行へ戻し、成功判定を代替しない。
 
 ## 2週間の比較検証
 

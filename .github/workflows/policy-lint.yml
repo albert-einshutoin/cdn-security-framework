@@ -30,6 +30,7 @@ jobs:
     outputs:
       requires-package-matrix: ${{ steps.impact_outputs.outputs.requires-package-matrix }}
       strategy: ${{ steps.impact_outputs.outputs.strategy }}
+      report-ready: ${{ steps.impact_outputs.outputs.report-ready }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -56,14 +57,25 @@ jobs:
 
       - name: Run selected validation
         if: steps.impact_analysis.outcome == 'success'
+        id: selected_execution
+        continue-on-error: true
         run: >-
           npm run impact:run --
           --analysis reports/impact/analysis.json
           --output reports/impact/execution.json
 
-      - name: Fail safe with full validation when analysis fails
-        if: steps.impact_analysis.outcome != 'success'
+      - name: Fail safe when analysis or execution planning fails
+        if: >-
+          steps.impact_analysis.outcome != 'success' ||
+          (steps.selected_execution.outcome == 'failure' &&
+          hashFiles('reports/impact/execution.json') == '')
         run: npm run test:ci
+
+      - name: Preserve selected test failures
+        if: >-
+          steps.selected_execution.outcome == 'failure' &&
+          hashFiles('reports/impact/execution.json') != ''
+        run: exit 1
 
       - name: Export impact decision
         id: impact_outputs
@@ -74,7 +86,8 @@ jobs:
           try { const r=JSON.parse(fs.readFileSync('reports/impact/analysis.json','utf8'));
           value={strategy:r.strategy,requiresPackageMatrix:r.requiresPackageMatrix}; } catch {}
           fs.appendFileSync(process.env.GITHUB_OUTPUT,
-          'strategy='+value.strategy+'\nrequires-package-matrix='+value.requiresPackageMatrix+'\n');"
+          'strategy='+value.strategy+'\nrequires-package-matrix='+value.requiresPackageMatrix+
+          '\nreport-ready='+fs.existsSync('reports/impact/execution.json')+'\n');"
 
       - name: Upload selective impact report
         if: always()
@@ -90,6 +103,8 @@ jobs:
   pr-shadow-full:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    outputs:
+      report-ready: ${{ steps.shadow_outputs.outputs.report-ready }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
         with:
@@ -117,14 +132,33 @@ jobs:
 
       - name: Run shadow full validation
         if: steps.shadow_analysis.outcome == 'success'
+        id: shadow_execution
+        continue-on-error: true
         run: >-
           npm run impact:run --
           --analysis reports/impact/analysis.json
           --output reports/impact/execution.json
 
-      - name: Fail safe when shadow planning fails
-        if: steps.shadow_analysis.outcome != 'success'
+      - name: Fail safe when shadow planning or execution fails
+        if: >-
+          steps.shadow_analysis.outcome != 'success' ||
+          (steps.shadow_execution.outcome == 'failure' &&
+          hashFiles('reports/impact/execution.json') == '')
         run: npm run test:ci
+
+      - name: Preserve shadow full-test failures
+        if: >-
+          steps.shadow_execution.outcome == 'failure' &&
+          hashFiles('reports/impact/execution.json') != ''
+        run: exit 1
+
+      - name: Export shadow report state
+        id: shadow_outputs
+        if: always()
+        run: >-
+          node -e "const fs=require('fs');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,
+          'report-ready='+fs.existsSync('reports/impact/execution.json')+'\n');"
 
       - name: Upload shadow full report
         if: always()
@@ -139,7 +173,9 @@ jobs:
     if: >-
       always() &&
       needs.pr-selective.result == 'success' &&
-      needs.pr-shadow-full.result == 'success'
+      needs.pr-shadow-full.result == 'success' &&
+      needs.pr-selective.outputs.report-ready == 'true' &&
+      needs.pr-shadow-full.outputs.report-ready == 'true'
     needs: [pr-selective, pr-shadow-full]
     runs-on: ubuntu-latest
     steps:

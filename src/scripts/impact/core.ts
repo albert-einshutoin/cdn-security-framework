@@ -214,7 +214,19 @@ export function detectProjects(repositoryRoot: string, config: ImpactConfig): De
   }
 
   visit(repositoryRoot);
-  return projects.sort((left, right) => left.root.localeCompare(right.root));
+  const projectsPerRoot = new Map<string, number>();
+  for (const project of projects) {
+    projectsPerRoot.set(project.root, (projectsPerRoot.get(project.root) ?? 0) + 1);
+  }
+  return projects
+    .map((project) => ({
+      ...project,
+      id:
+        (projectsPerRoot.get(project.root) ?? 0) > 1
+          ? `${project.id}:${project.adapter}`
+          : project.id,
+    }))
+    .sort((left, right) => left.root.localeCompare(right.root) || left.adapter.localeCompare(right.adapter));
 }
 
 export function selectAffectedModules(changedPaths: string[], config: ImpactConfig): string[] {

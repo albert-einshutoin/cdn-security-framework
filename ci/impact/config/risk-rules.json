@@ -22,7 +22,12 @@
     "patterns": [
       "tsconfig*.json",
       "vitest.config.*",
-      ".github/workflows/**",
+      ".github/**",
+      ".gitignore",
+      ".gitattributes",
+      ".npmrc",
+      "**/.env*",
+      "wrangler.toml",
       "Dockerfile*",
       "docker-compose*.yml",
       "docker-compose*.yaml"
@@ -46,13 +51,13 @@
     "id": "compiler-security-core",
     "patterns": [
       "src/scripts/lib/compile-core.ts",
-      "src/scripts/lib/template-inject.ts",
-      "src/scripts/lib/policy-io.ts",
-      "src/scripts/lib/policy-defaults.ts",
-      "src/scripts/lib/errors.ts",
+      "src/scripts/lib/**",
       "src/scripts/security-baseline-check.ts",
       "src/bin/cli.ts",
-      "templates/**"
+      "templates/**",
+      "policy/**/*.yml",
+      "policy/**/*.yaml",
+      "runtimes/**"
     ],
     "reason": "shared compiler, authentication, routing, or security core changed"
   }

@@ -18,6 +18,7 @@ import { findRelatedJavaScriptTests } from './impact/adapters/javascript';
 import { findRelatedPythonTests } from './impact/adapters/python';
 import { collectGitChanges } from './impact/git';
 import { selectMappedTargets } from './impact/selector';
+import { selectAffectedProjects } from './impact/projects';
 import { analyzeImpact } from './impact/analyzer';
 import { validateAnalysisResult } from './impact/result';
 import { materializeCommand } from './impact/runner';
@@ -142,6 +143,29 @@ function testProjectDetection(): void {
   ]);
 }
 
+function testMonorepoProjectPropagation(): void {
+  const root = mkdtempSync(path.join(tmpdir(), 'impact-monorepo-'));
+  mkdirSync(path.join(root, 'packages', 'shared', 'src'), { recursive: true });
+  mkdirSync(path.join(root, 'services', 'api'), { recursive: true });
+  mkdirSync(path.join(root, 'apps', 'web'), { recursive: true });
+  writeFileSync(
+    path.join(root, 'packages', 'shared', 'package.json'),
+    JSON.stringify({ name: '@fixture/shared' }),
+  );
+  writeFileSync(
+    path.join(root, 'services', 'api', 'package.json'),
+    JSON.stringify({ name: '@fixture/api', dependencies: { '@fixture/shared': 'workspace:*' } }),
+  );
+  writeFileSync(
+    path.join(root, 'apps', 'web', 'package.json'),
+    JSON.stringify({ name: '@fixture/web', dependencies: { '@fixture/api': 'workspace:*' } }),
+  );
+  const projects = detectProjects(root, fixtureConfig());
+  const affected = selectAffectedProjects(root, ['packages/shared/src/index.ts'], projects);
+  assert.deepEqual(affected.diagnostics, []);
+  assert.deepEqual(affected.projectIds, ['apps/web', 'packages/shared', 'services/api']);
+}
+
 function testReverseDependencySelection(): void {
   const affected = selectAffectedModules(['src/repository/users.ts'], fixtureConfig());
   assert.deepEqual(affected, ['api', 'repository', 'service']);
@@ -193,6 +217,18 @@ function testRepositoryConfiguration(): void {
   assert.ok(config.commands.some((command) => command.id === config.fullTargetId));
   assert.ok(config.smokeTargetIds?.every((id) => config.commands.some((command) => command.id === id)));
   assert.ok(config.riskRules.some((rule) => rule.id === 'impact-engine'));
+  for (const riskyPath of [
+    'src/scripts/lib/value-normalize.ts',
+    'policy/base.yml',
+    '.github/dependabot.yml',
+    '.env.example',
+  ]) {
+    assert.equal(
+      classifyRisk([{ status: 'modified', path: riskyPath, exists: true }], config).fallback,
+      true,
+      `${riskyPath} must force full validation`,
+    );
+  }
 }
 
 function git(cwd: string, args: string[]): string {
@@ -334,6 +370,7 @@ function testCommandMaterializationDoesNotUseShellInterpolation(): void {
 testNameStatusParsing();
 testGlobAndRiskClassification();
 testProjectDetection();
+testMonorepoProjectPropagation();
 testReverseDependencySelection();
 testConservativeStrategy();
 testRepositoryConfiguration();
