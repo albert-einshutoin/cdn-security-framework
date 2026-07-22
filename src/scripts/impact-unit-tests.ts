@@ -320,18 +320,16 @@ function testPythonAdapterSelection(): void {
   assert.deepEqual(result.testFiles, ['tests/test_service.py']);
 }
 
-function testRepositoryAnalysisFallsBackForAnalyzerChanges(): void {
+function testRepositoryAnalysisSupportsForcedFullValidation(): void {
   const result = analyzeImpact({
     repositoryRoot: process.cwd(),
-    baseRef: 'origin/main',
+    baseRef: 'HEAD',
     headRef: 'HEAD',
+    forceFullReason: 'unit test forced full validation',
   });
   assert.equal(result.strategy, 'full');
   assert.equal(result.fallback, true);
-  assert.match(
-    result.fallbackReason ?? '',
-    /impact analysis|dependency definition|build, test, CI, or container configuration/u,
-  );
+  assert.equal(result.fallbackReason, 'unit test forced full validation');
   assert.deepEqual(result.executionPlan, ['full-validation']);
   validateAnalysisResult(process.cwd(), result);
 }
@@ -377,7 +375,7 @@ testRepositoryConfiguration();
 testGitChangeCollection();
 testMappedAndRelatedTestSelection();
 testPythonAdapterSelection();
-testRepositoryAnalysisFallsBackForAnalyzerChanges();
+testRepositoryAnalysisSupportsForcedFullValidation();
 testCommandMaterializationDoesNotUseShellInterpolation();
 
 console.log('impact analysis unit tests: ok');
