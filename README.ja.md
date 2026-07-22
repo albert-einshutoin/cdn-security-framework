@@ -119,6 +119,7 @@ Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.
 - [サプライチェーン](docs/supply-chain.ja.md) — SLSA v1 provenance と `npm audit signatures`
 - [テンプレート注入契約](docs/template-injection-contract.ja.md) — marker-safe かつ parse-checked な runtime config 注入
 - [テスト戦略](docs/test-strategy.ja.md) — Vitest 移行方針と release gate の test workflow
+- [選択的CIテスト](docs/selective-testing.ja.md) — 変更影響分析、安全なfallback、shadow比較の運用
 - [ADR 0001: Plugin-safe emitter path](docs/adr/0001-plugin-safe-emitter-path.ja.md) — bundler-backed prototype と移行条件
 
 ---
@@ -251,7 +252,7 @@ CloudFront Functions の static token gate は生成 artifact に焼き込まれ
 * **package-lock.json**: コミットしておく（CI で `npm ci` するため）。
 * **dist/**: `.gitignore` で無視。ユーザーは `npm run build` で `dist/edge/` と `dist/infra/` を生成する。CI でドリフト検知する場合は CI 内で `npm run build` を実行しポリシーと比較する（`dist/` はコミットしない）。
 * **CI ワークフロー**:
-  * `.github/workflows/policy-lint.yml`: push/PR の品質ゲート（lint/build/runtime/unit/drift/security-baseline + package smoke tests）
+  * `.github/workflows/policy-lint.yml`: PRの選択的検証と必須shadow比較、`main`・`release/**`・手動・日次の完全検証
   * `.github/workflows/release-npm.yml`: タグ起点の npm 公開ワークフロー
 * **タグで公開する手順**:
   1. `package.json` の version を更新（例: `1.0.1`）
