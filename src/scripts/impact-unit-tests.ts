@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -13,6 +14,9 @@ import {
   type ImpactConfig,
 } from './impact/core';
 import { loadImpactConfig } from './impact/config';
+import { findRelatedJavaScriptTests } from './impact/adapters/javascript';
+import { collectGitChanges } from './impact/git';
+import { selectMappedTargets } from './impact/selector';
 
 function fixtureConfig(): ImpactConfig {
   return {
@@ -187,11 +191,88 @@ function testRepositoryConfiguration(): void {
   assert.ok(config.riskRules.some((rule) => rule.id === 'impact-engine'));
 }
 
+function git(cwd: string, args: string[]): string {
+  return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
+}
+
+function testGitChangeCollection(): void {
+  const root = mkdtempSync(path.join(tmpdir(), 'impact-git-'));
+  git(root, ['init', '-q']);
+  git(root, ['config', 'user.name', 'Impact Test']);
+  git(root, ['config', 'user.email', 'impact@example.invalid']);
+  writeFileSync(
+    path.join(root, 'original.ts'),
+    `${Array.from({ length: 20 }, (_, index) => `export const value${index} = ${index};`).join('\n')}\n`,
+  );
+  writeFileSync(path.join(root, 'deleted.ts'), 'export const deleted = true;\n');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-qm', 'base']);
+  const base = git(root, ['rev-parse', 'HEAD']);
+
+  git(root, ['mv', 'original.ts', 'renamed.ts']);
+  writeFileSync(
+    path.join(root, 'renamed.ts'),
+    `${Array.from({ length: 20 }, (_, index) => `export const value${index} = ${index === 0 ? 100 : index};`).join('\n')}\n`,
+  );
+  git(root, ['rm', '-q', 'deleted.ts']);
+  writeFileSync(path.join(root, 'added.ts'), 'export const added = true;\n');
+  git(root, ['add', '.']);
+  git(root, ['commit', '-qm', 'head']);
+  const head = git(root, ['rev-parse', 'HEAD']);
+
+  const result = collectGitChanges(root, base, head);
+  assert.equal(result.diagnostics.length, 0);
+  assert.equal(result.baseRevision, base);
+  assert.equal(result.headRevision, head);
+  assert.ok(result.changedFiles.some((file) => file.status === 'added' && file.path === 'added.ts'));
+  assert.ok(result.changedFiles.some((file) => file.status === 'deleted' && file.path === 'deleted.ts'));
+  assert.ok(
+    result.changedFiles.some(
+      (file) => file.status === 'renamed' && file.oldPath === 'original.ts' && file.path === 'renamed.ts',
+    ),
+  );
+}
+
+function testMappedAndRelatedTestSelection(): void {
+  const root = mkdtempSync(path.join(tmpdir(), 'impact-js-'));
+  mkdirSync(path.join(root, 'src', 'service'), { recursive: true });
+  mkdirSync(path.join(root, 'src', 'scripts'), { recursive: true });
+  writeFileSync(path.join(root, 'src', 'service', 'users.ts'), 'export const users = [];\n');
+  writeFileSync(
+    path.join(root, 'src', 'scripts', 'users-unit-tests.ts'),
+    "import { users } from '../service/users';\nvoid users;\n",
+  );
+
+  const related = findRelatedJavaScriptTests(root, ['src/service/users.ts']);
+  assert.deepEqual(related.diagnostics, []);
+  assert.deepEqual(related.testFiles, ['src/scripts/users-unit-tests.ts']);
+
+  const config = fixtureConfig();
+  config.commands.push({
+    id: 'users-unit',
+    category: 'unit',
+    command: 'node',
+    args: ['scripts/users-unit-tests.js'],
+  });
+  config.testMappings.push({
+    id: 'users',
+    patterns: ['src/service/users.ts'],
+    modules: ['service'],
+    targetIds: ['users-unit'],
+  });
+  assert.deepEqual(
+    selectMappedTargets(['src/service/users.ts'], ['service'], config),
+    ['users-unit'],
+  );
+}
+
 testNameStatusParsing();
 testGlobAndRiskClassification();
 testProjectDetection();
 testReverseDependencySelection();
 testConservativeStrategy();
 testRepositoryConfiguration();
+testGitChangeCollection();
+testMappedAndRelatedTestSelection();
 
 console.log('impact analysis unit tests: ok');
