@@ -18,6 +18,8 @@ import { findRelatedJavaScriptTests } from './impact/adapters/javascript';
 import { findRelatedPythonTests } from './impact/adapters/python';
 import { collectGitChanges } from './impact/git';
 import { selectMappedTargets } from './impact/selector';
+import { analyzeImpact } from './impact/analyzer';
+import { validateAnalysisResult } from './impact/result';
 
 function fixtureConfig(): ImpactConfig {
   return {
@@ -281,6 +283,19 @@ function testPythonAdapterSelection(): void {
   assert.deepEqual(result.testFiles, ['tests/test_service.py']);
 }
 
+function testRepositoryAnalysisFallsBackForAnalyzerChanges(): void {
+  const result = analyzeImpact({
+    repositoryRoot: process.cwd(),
+    baseRef: 'origin/main',
+    headRef: 'HEAD',
+  });
+  assert.equal(result.strategy, 'full');
+  assert.equal(result.fallback, true);
+  assert.match(result.fallbackReason ?? '', /impact analysis|dependency definition/u);
+  assert.deepEqual(result.executionPlan, ['full-validation']);
+  validateAnalysisResult(process.cwd(), result);
+}
+
 testNameStatusParsing();
 testGlobAndRiskClassification();
 testProjectDetection();
@@ -290,5 +305,6 @@ testRepositoryConfiguration();
 testGitChangeCollection();
 testMappedAndRelatedTestSelection();
 testPythonAdapterSelection();
+testRepositoryAnalysisFallsBackForAnalyzerChanges();
 
 console.log('impact analysis unit tests: ok');
