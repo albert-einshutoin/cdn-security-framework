@@ -48,6 +48,8 @@ export interface ImpactConfig {
   modules: ModuleRule[];
   commands: CommandConfig[];
   testMappings: TestMapping[];
+  smokeTargetIds?: string[];
+  fullTargetId?: string;
 }
 
 export interface DetectedProject {

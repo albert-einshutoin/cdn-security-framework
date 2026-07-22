@@ -12,6 +12,7 @@ import {
   selectAffectedModules,
   type ImpactConfig,
 } from './impact/core';
+import { loadImpactConfig } from './impact/config';
 
 function fixtureConfig(): ImpactConfig {
   return {
@@ -177,10 +178,20 @@ function testConservativeStrategy(): void {
   );
 }
 
+function testRepositoryConfiguration(): void {
+  const config = loadImpactConfig(process.cwd());
+  assert.equal(config.rollout.mode, 'shadow');
+  assert.equal(config.rollout.minimumDays, 14);
+  assert.ok(config.commands.some((command) => command.id === config.fullTargetId));
+  assert.ok(config.smokeTargetIds?.every((id) => config.commands.some((command) => command.id === id)));
+  assert.ok(config.riskRules.some((rule) => rule.id === 'impact-engine'));
+}
+
 testNameStatusParsing();
 testGlobAndRiskClassification();
 testProjectDetection();
 testReverseDependencySelection();
 testConservativeStrategy();
+testRepositoryConfiguration();
 
 console.log('impact analysis unit tests: ok');

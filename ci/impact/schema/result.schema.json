@@ -1,0 +1,43 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "strategy",
+    "baseRevision",
+    "headRevision",
+    "changedFiles",
+    "detectedProjects",
+    "affectedProjects",
+    "affectedModules",
+    "unitTestTargets",
+    "integrationTestTargets",
+    "e2eTestTargets",
+    "smokeTestTargets",
+    "fallback",
+    "fallbackReason",
+    "diagnostics",
+    "executionPlan",
+    "requiresPackageMatrix"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "strategy": { "enum": ["selective", "full", "failure"] },
+    "baseRevision": { "type": "string" },
+    "headRevision": { "type": "string" },
+    "changedFiles": { "type": "array", "items": { "type": "object" } },
+    "detectedProjects": { "type": "array", "items": { "type": "object" } },
+    "affectedProjects": { "type": "array", "items": { "type": "string" } },
+    "affectedModules": { "type": "array", "items": { "type": "string" } },
+    "unitTestTargets": { "type": "array", "items": { "type": "string" } },
+    "integrationTestTargets": { "type": "array", "items": { "type": "string" } },
+    "e2eTestTargets": { "type": "array", "items": { "type": "string" } },
+    "smokeTestTargets": { "type": "array", "items": { "type": "string" } },
+    "fallback": { "type": "boolean" },
+    "fallbackReason": { "type": ["string", "null"] },
+    "diagnostics": { "type": "array", "items": { "type": "string" } },
+    "executionPlan": { "type": "array", "items": { "type": "string" }, "uniqueItems": true },
+    "requiresPackageMatrix": { "type": "boolean" }
+  },
+  "additionalProperties": false
+}
