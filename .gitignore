@@ -23,6 +23,7 @@ docs/SELF-REVIEW.md
 /scripts/*.js
 /scripts/*.d.ts
 /scripts/lib/
+/scripts/impact/
 /lib/
 /parser/
 /validator/
