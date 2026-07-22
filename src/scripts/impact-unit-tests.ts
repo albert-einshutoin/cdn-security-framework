@@ -292,7 +292,10 @@ function testRepositoryAnalysisFallsBackForAnalyzerChanges(): void {
   });
   assert.equal(result.strategy, 'full');
   assert.equal(result.fallback, true);
-  assert.match(result.fallbackReason ?? '', /impact analysis|dependency definition/u);
+  assert.match(
+    result.fallbackReason ?? '',
+    /impact analysis|dependency definition|build, test, CI, or container configuration/u,
+  );
   assert.deepEqual(result.executionPlan, ['full-validation']);
   validateAnalysisResult(process.cwd(), result);
 }
