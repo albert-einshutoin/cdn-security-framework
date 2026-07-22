@@ -32,7 +32,7 @@
     "id": "build",
     "category": "build",
     "command": "npm",
-    "args": ["run", "build"],
+    "args": ["run", "build:test-fixtures"],
     "always": true,
     "resourceLocks": ["build-output"]
   },

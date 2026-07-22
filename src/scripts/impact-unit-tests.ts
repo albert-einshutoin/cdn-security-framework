@@ -20,6 +20,7 @@ import { collectGitChanges } from './impact/git';
 import { selectMappedTargets } from './impact/selector';
 import { analyzeImpact } from './impact/analyzer';
 import { validateAnalysisResult } from './impact/result';
+import { materializeCommand } from './impact/runner';
 
 function fixtureConfig(): ImpactConfig {
   return {
@@ -296,6 +297,37 @@ function testRepositoryAnalysisFallsBackForAnalyzerChanges(): void {
   validateAnalysisResult(process.cwd(), result);
 }
 
+function testCommandMaterializationDoesNotUseShellInterpolation(): void {
+  const command = materializeCommand(
+    {
+      id: 'diff-check',
+      category: 'static',
+      command: 'git',
+      args: ['diff', '--check', '{baseRevision}', '{headRevision}', '$(touch should-not-exist)'],
+    },
+    {
+      baseRevision: 'a'.repeat(40),
+      headRevision: 'b'.repeat(40),
+    },
+  );
+  assert.equal(command.command, 'git');
+  assert.deepEqual(command.args, [
+    'diff',
+    '--check',
+    'a'.repeat(40),
+    'b'.repeat(40),
+    '$(touch should-not-exist)',
+  ]);
+  assert.throws(
+    () =>
+      materializeCommand(
+        { id: 'bad', category: 'unit', command: 'node', args: ['{unknown}'] },
+        { baseRevision: 'a'.repeat(40), headRevision: 'b'.repeat(40) },
+      ),
+    /unknown command placeholder/u,
+  );
+}
+
 testNameStatusParsing();
 testGlobAndRiskClassification();
 testProjectDetection();
@@ -306,5 +338,6 @@ testGitChangeCollection();
 testMappedAndRelatedTestSelection();
 testPythonAdapterSelection();
 testRepositoryAnalysisFallsBackForAnalyzerChanges();
+testCommandMaterializationDoesNotUseShellInterpolation();
 
 console.log('impact analysis unit tests: ok');
