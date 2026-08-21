@@ -1,0 +1,51 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "type": "object",
+  "required": [
+    "schemaVersion",
+    "strategy",
+    "baseRevision",
+    "headRevision",
+    "startedAt",
+    "finishedAt",
+    "wallClockMs",
+    "totalComputeMs",
+    "estimatedCost",
+    "targetCount",
+    "successCount",
+    "failureCount",
+    "skippedCount",
+    "targets"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "strategy": { "enum": ["selective", "full"] },
+    "baseRevision": { "type": "string" },
+    "headRevision": { "type": "string" },
+    "startedAt": { "type": "string" },
+    "finishedAt": { "type": "string" },
+    "wallClockMs": { "type": "number", "minimum": 0 },
+    "totalComputeMs": { "type": "number", "minimum": 0 },
+    "estimatedCost": { "type": ["number", "null"] },
+    "targetCount": { "type": "integer", "minimum": 0 },
+    "successCount": { "type": "integer", "minimum": 0 },
+    "failureCount": { "type": "integer", "minimum": 0 },
+    "skippedCount": { "type": "integer", "minimum": 0 },
+    "targets": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "category", "status", "exitCode", "durationMs"],
+        "properties": {
+          "id": { "type": "string" },
+          "category": { "enum": ["static", "build", "unit", "integration", "e2e", "smoke", "full"] },
+          "status": { "enum": ["passed", "failed", "skipped"] },
+          "exitCode": { "type": ["integer", "null"] },
+          "durationMs": { "type": "number", "minimum": 0 }
+        },
+        "additionalProperties": false
+      }
+    }
+  },
+  "additionalProperties": false
+}

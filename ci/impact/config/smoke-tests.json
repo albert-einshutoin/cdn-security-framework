@@ -1,0 +1,182 @@
+[
+  {
+    "id": "diff-check",
+    "category": "static",
+    "command": "git",
+    "args": ["diff", "--check", "{baseRevision}", "{headRevision}"],
+    "always": true
+  },
+  {
+    "id": "dependency-audit",
+    "category": "static",
+    "command": "npm",
+    "args": ["audit", "--audit-level=high"],
+    "always": true
+  },
+  {
+    "id": "typecheck",
+    "category": "static",
+    "command": "npm",
+    "args": ["run", "typecheck"],
+    "always": true
+  },
+  {
+    "id": "policy-lint",
+    "category": "static",
+    "command": "npm",
+    "args": ["run", "lint:policy:ci"],
+    "always": true,
+    "resourceLocks": ["build-output"]
+  },
+  {
+    "id": "build",
+    "category": "build",
+    "command": "npm",
+    "args": ["run", "build:test-fixtures"],
+    "always": true,
+    "resourceLocks": ["build-output"]
+  },
+  {
+    "id": "impact-smoke",
+    "category": "smoke",
+    "command": "node",
+    "args": ["scripts/impact-smoke-tests.js"],
+    "resourceLocks": ["build-output"]
+  },
+  {
+    "id": "errors-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/errors-unit-tests.js"]
+  },
+  {
+    "id": "value-normalize-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/value-normalize-unit-tests.js"]
+  },
+  {
+    "id": "compiler-phase-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/compiler-phase-unit-tests.js"]
+  },
+  {
+    "id": "compiler-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/compile-unit-tests.js"],
+    "resourceLocks": ["build-output"]
+  },
+  {
+    "id": "infra-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/infra-unit-tests.js"],
+    "resourceLocks": ["build-output"]
+  },
+  {
+    "id": "schema-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/schema-lint-tests.js"]
+  },
+  {
+    "id": "doctor-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/doctor-unit-tests.js"]
+  },
+  {
+    "id": "waf-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/emit-waf-unit-tests.js"]
+  },
+  {
+    "id": "programmatic-api-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/programmatic-api-unit-tests.js"],
+    "resourceLocks": ["build-output"]
+  },
+  {
+    "id": "cloudflare-waf-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/cloudflare-waf-parity-unit-tests.js"]
+  },
+  {
+    "id": "fingerprint-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/fingerprint-candidates-unit-tests.js"]
+  },
+  {
+    "id": "policy-io-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/policy-io-unit-tests.js"]
+  },
+  {
+    "id": "vitest",
+    "category": "unit",
+    "command": "npx",
+    "args": ["vitest", "run"]
+  },
+  {
+    "id": "api-contract",
+    "category": "integration",
+    "command": "node",
+    "args": ["scripts/api-contract-tests.js"]
+  },
+  {
+    "id": "aws-runtime",
+    "category": "integration",
+    "command": "node",
+    "args": ["scripts/runtime-tests.js"],
+    "resourceLocks": ["build-output"]
+  },
+  {
+    "id": "cloudflare-runtime",
+    "category": "integration",
+    "command": "node",
+    "args": ["scripts/cloudflare-runtime-tests.js"],
+    "resourceLocks": ["build-output"]
+  },
+  {
+    "id": "drift-test",
+    "category": "integration",
+    "command": "node",
+    "args": ["scripts/check-drift.js"],
+    "resourceLocks": ["build-output"]
+  },
+  {
+    "id": "cloudflare-integration",
+    "category": "integration",
+    "command": "node",
+    "args": ["scripts/cloudflare-integration-tests.js"],
+    "resourceLocks": ["build-output"]
+  },
+  {
+    "id": "package-smoke",
+    "category": "smoke",
+    "command": "node",
+    "args": ["scripts/package-smoke-tests.js"],
+    "resourceLocks": ["package"]
+  },
+  {
+    "id": "edge-container",
+    "category": "e2e",
+    "command": "node",
+    "args": ["scripts/edge-container-attack-tests.js"],
+    "resourceLocks": ["container"]
+  },
+  {
+    "id": "full-validation",
+    "category": "full",
+    "command": "npm",
+    "args": ["run", "test:ci"],
+    "resourceLocks": ["build-output", "package", "container"]
+  }
+]

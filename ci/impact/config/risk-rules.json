@@ -1,0 +1,64 @@
+[
+  {
+    "id": "impact-engine",
+    "patterns": [
+      "ci/impact/**",
+      "src/scripts/impact/**",
+      "src/scripts/impact-*.ts"
+    ],
+    "reason": "impact analysis implementation or rules changed"
+  },
+  {
+    "id": "dependency-definition",
+    "patterns": [
+      "**/package.json",
+      "**/package-lock.json",
+      "**/npm-shrinkwrap.json"
+    ],
+    "reason": "dependency definition or lock file changed"
+  },
+  {
+    "id": "build-test-ci-configuration",
+    "patterns": [
+      "tsconfig*.json",
+      "vitest.config.*",
+      ".github/**",
+      ".gitignore",
+      ".gitattributes",
+      ".npmrc",
+      "**/.env*",
+      "wrangler.toml",
+      "Dockerfile*",
+      "docker-compose*.yml",
+      "docker-compose*.yaml"
+    ],
+    "reason": "build, test, CI, or container configuration changed"
+  },
+  {
+    "id": "schema-api-contract",
+    "patterns": [
+      "policy/schema.json",
+      "src/types/**",
+      "src/lib/**",
+      "src/parser/**",
+      "src/validator/**",
+      "src/emitter/**",
+      "src/scripts/api-contract-tests.ts"
+    ],
+    "reason": "shared schema, public API, or common library changed"
+  },
+  {
+    "id": "compiler-security-core",
+    "patterns": [
+      "src/scripts/lib/compile-core.ts",
+      "src/scripts/lib/**",
+      "src/scripts/security-baseline-check.ts",
+      "src/bin/cli.ts",
+      "templates/**",
+      "policy/**/*.yml",
+      "policy/**/*.yaml",
+      "runtimes/**"
+    ],
+    "reason": "shared compiler, authentication, routing, or security core changed"
+  }
+]

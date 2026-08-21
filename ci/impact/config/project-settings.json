@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "maxParallel": 2,
+  "rollout": {
+    "mode": "shadow",
+    "minimumDays": 14
+  },
+  "supportedManifests": {
+    "package.json": "javascript",
+    "pyproject.toml": "python",
+    "requirements.txt": "python",
+    "Pipfile": "python",
+    "Cargo.toml": "unsupported-rust",
+    "go.mod": "unsupported-go",
+    "pom.xml": "unsupported-java",
+    "build.gradle": "unsupported-java",
+    "build.gradle.kts": "unsupported-kotlin",
+    "Gemfile": "unsupported-ruby",
+    "composer.json": "unsupported-php"
+  },
+  "safePathPatterns": [
+    "**/*.md",
+    "docs/**",
+    "LICENSE"
+  ],
+  "smokeTargetIds": [
+    "impact-smoke"
+  ],
+  "fullTargetId": "full-validation"
+}

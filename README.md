@@ -119,6 +119,7 @@ See [IaC integration](docs/iac.md) for Terraform / CloudFormation / CDK / WAF us
 - [Supply chain](docs/supply-chain.md) — SLSA v1 provenance and `npm audit signatures`
 - [Template injection contract](docs/template-injection-contract.md) — marker-safe, parse-checked runtime config injection
 - [Test strategy](docs/test-strategy.md) — Vitest migration policy and release-gate test workflow
+- [Selective CI testing](docs/selective-testing.md) — change-impact analysis, safe fallback, and shadow comparison operations
 - [ADR 0001: Plugin-safe emitter path](docs/adr/0001-plugin-safe-emitter-path.md) — bundler-backed prototype and migration criteria
 
 ---
@@ -263,7 +264,7 @@ Use the generated files in `dist/edge/` with Terraform, CDK, or your CDN console
 * **package-lock.json**: Commit it so CI can run `npm ci`.
 * **dist/**: Ignored via `.gitignore`. Users run `npm run build` to generate `dist/edge/` and `dist/infra/`. For CI drift checks, run `npm run build` in CI and compare with policy (do not commit `dist/`).
 * **CI workflows**:
-  * `.github/workflows/policy-lint.yml`: push/PR quality gate (lint/build/runtime/unit/drift/security-baseline + package smoke tests)
+  * `.github/workflows/policy-lint.yml`: selective PR validation with required shadow comparison; exhaustive validation on `main`, `release/**`, manual, and daily runs
   * `.github/workflows/release-npm.yml`: tag-driven publish workflow
 * **Release by tag**:
   1. Bump `package.json` version (example: `1.0.1`)

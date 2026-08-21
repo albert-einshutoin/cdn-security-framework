@@ -1,0 +1,37 @@
+[
+  {
+    "id": "policy",
+    "patterns": ["policy/**/*.yml", "policy/**/*.yaml"],
+    "dependsOn": []
+  },
+  {
+    "id": "compiler",
+    "patterns": ["src/scripts/compile*.ts", "src/scripts/lib/**"],
+    "dependsOn": ["policy"]
+  },
+  {
+    "id": "cloudflare",
+    "patterns": ["src/scripts/cloudflare*.ts", "src/scripts/compile-cloudflare*.ts"],
+    "dependsOn": ["compiler"]
+  },
+  {
+    "id": "aws",
+    "patterns": ["src/scripts/runtime-tests.ts", "src/scripts/compile-infra.ts"],
+    "dependsOn": ["compiler"]
+  },
+  {
+    "id": "waf",
+    "patterns": ["src/scripts/*waf*.ts", "src/scripts/lib/waf-rule-builder.ts"],
+    "dependsOn": ["compiler"]
+  },
+  {
+    "id": "cli",
+    "patterns": ["src/bin/**", "src/scripts/cli-doctor.ts"],
+    "dependsOn": ["compiler"]
+  },
+  {
+    "id": "tooling",
+    "patterns": ["src/scripts/fingerprint-candidates.ts", "src/scripts/benchmark-compiler.ts", "src/scripts/generate-parity-doc.ts"],
+    "dependsOn": []
+  }
+]

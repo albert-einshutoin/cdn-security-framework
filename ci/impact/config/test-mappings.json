@@ -1,0 +1,48 @@
+[
+  {
+    "id": "policy-validation",
+    "patterns": ["policy/**/*.yml", "policy/**/*.yaml", "src/scripts/policy-lint.ts"],
+    "modules": ["policy"],
+    "targetIds": ["schema-unit", "compiler-unit", "drift-test"]
+  },
+  {
+    "id": "cloudflare-runtime",
+    "patterns": ["src/scripts/cloudflare*.ts", "src/scripts/compile-cloudflare*.ts"],
+    "modules": ["cloudflare"],
+    "targetIds": ["cloudflare-runtime", "cloudflare-integration"]
+  },
+  {
+    "id": "aws-runtime",
+    "patterns": ["src/scripts/runtime-tests.ts", "src/scripts/compile-infra.ts"],
+    "modules": ["aws"],
+    "targetIds": ["aws-runtime", "infra-unit"]
+  },
+  {
+    "id": "waf",
+    "patterns": ["src/scripts/*waf*.ts", "src/scripts/lib/waf-rule-builder.ts"],
+    "modules": ["waf"],
+    "targetIds": ["waf-unit", "cloudflare-waf-unit"]
+  },
+  {
+    "id": "cli",
+    "patterns": ["src/scripts/cli-doctor.ts"],
+    "modules": ["cli"],
+    "targetIds": ["doctor-unit", "package-smoke"]
+  },
+  {
+    "id": "tooling",
+    "patterns": ["src/scripts/fingerprint-candidates.ts", "src/scripts/benchmark-compiler.ts", "src/scripts/generate-parity-doc.ts"],
+    "modules": ["tooling"],
+    "targetIds": ["fingerprint-unit", "compiler-phase-unit", "cloudflare-waf-unit"]
+  },
+  {
+    "id": "changed-unit-tests",
+    "patterns": ["src/scripts/*-unit-tests.ts"],
+    "targetIds": []
+  },
+  {
+    "id": "vitest",
+    "patterns": ["test/**/*.test.ts"],
+    "targetIds": []
+  }
+]

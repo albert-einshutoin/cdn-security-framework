@@ -1,12 +1,13 @@
-# Policy lint, build, and runtime tests
-# dist/ はコミットしない。ビルドが成功し dist/edge/ が生成されることを確認する。
+# PRs use change-impact analysis; main, scheduled, and manual runs stay exhaustive.
 name: Policy Lint & Build Check
 
 on:
   push:
-    branches: [main]
+    branches: [main, 'release/**']
   pull_request:
     branches: [main]
+  schedule:
+    - cron: '17 2 * * *'
   workflow_dispatch:
 
 permissions:
@@ -16,19 +17,25 @@ concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  # CI-only fixture credentials. They are baked into generated test artifacts
+  # and must never be reused for a deployment.
+  EDGE_ADMIN_TOKEN: ci-build-token-not-for-deploy
+  ORIGIN_SECRET: ci-origin-secret-not-for-deploy
+
 jobs:
-  lint-build-test:
+  pr-selective:
+    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
-    env:
-      # CI-only token. Required because CloudFront Functions cannot read env
-      # at runtime, so static_token values are baked into the build artifact.
-      # This is not a production secret — real deployments use GitHub Secrets.
-      EDGE_ADMIN_TOKEN: ci-build-token-not-for-deploy
-      # Origin-auth secret is consumed by the microservice-origin archetype
-      # during drift checks; same CI-only convention applies.
-      ORIGIN_SECRET: ci-origin-secret-not-for-deploy
+    outputs:
+      requires-package-matrix: ${{ steps.impact_outputs.outputs.requires-package-matrix }}
+      strategy: ${{ steps.impact_outputs.outputs.strategy }}
+      report-ready: ${{ steps.impact_outputs.outputs.report-ready }}
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -39,18 +46,244 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      - name: Quality gate (single source)
+      - name: Analyze change impact
+        id: impact_analysis
+        continue-on-error: true
+        run: >-
+          npm run impact:analyze --
+          --base "origin/${{ github.base_ref }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+          --output reports/impact/analysis.json
+
+      - name: Run selected validation
+        if: steps.impact_analysis.outcome == 'success'
+        id: selected_execution
+        continue-on-error: true
+        run: >-
+          npm run impact:run --
+          --analysis reports/impact/analysis.json
+          --output reports/impact/execution.json
+
+      - name: Fail safe when analysis or execution planning fails
+        if: >-
+          steps.impact_analysis.outcome != 'success' ||
+          (steps.selected_execution.outcome == 'failure' &&
+          hashFiles('reports/impact/execution.json') == '')
         run: npm run test:ci
 
-  package-smoke-matrix:
+      - name: Preserve selected test failures
+        if: >-
+          steps.selected_execution.outcome == 'failure' &&
+          hashFiles('reports/impact/execution.json') != ''
+        run: exit 1
+
+      - name: Export impact decision
+        id: impact_outputs
+        if: always()
+        run: >-
+          node -e "const fs=require('fs');
+          let value={strategy:'full',requiresPackageMatrix:true};
+          try { const r=JSON.parse(fs.readFileSync('reports/impact/analysis.json','utf8'));
+          value={strategy:r.strategy,requiresPackageMatrix:r.requiresPackageMatrix}; } catch {}
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,
+          'strategy='+value.strategy+'\nrequires-package-matrix='+value.requiresPackageMatrix+
+          '\nreport-ready='+fs.existsSync('reports/impact/execution.json')+'\n');"
+
+      - name: Upload selective impact report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: selective-impact-report
+          path: reports/impact/
+          if-no-files-found: warn
+          retention-days: 30
+
+  # For the first 14+ days this remains a required comparison job. Graduation
+  # is a reviewed workflow/config change after full-only failures stay at zero.
+  pr-shadow-full:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    outputs:
+      report-ready: ${{ steps.shadow_outputs.outputs.report-ready }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Create shadow full-test plan
+        id: shadow_analysis
+        continue-on-error: true
+        run: >-
+          npm run impact:analyze --
+          --base "origin/${{ github.base_ref }}"
+          --head "${{ github.event.pull_request.head.sha }}"
+          --force-full "14-day shadow comparison"
+          --output reports/impact/analysis.json
+
+      - name: Run shadow full validation
+        if: steps.shadow_analysis.outcome == 'success'
+        id: shadow_execution
+        continue-on-error: true
+        run: >-
+          npm run impact:run --
+          --analysis reports/impact/analysis.json
+          --output reports/impact/execution.json
+
+      - name: Fail safe when shadow planning or execution fails
+        if: >-
+          steps.shadow_analysis.outcome != 'success' ||
+          (steps.shadow_execution.outcome == 'failure' &&
+          hashFiles('reports/impact/execution.json') == '')
+        run: npm run test:ci
+
+      - name: Preserve shadow full-test failures
+        if: >-
+          steps.shadow_execution.outcome == 'failure' &&
+          hashFiles('reports/impact/execution.json') != ''
+        run: exit 1
+
+      - name: Export shadow report state
+        id: shadow_outputs
+        if: always()
+        run: >-
+          node -e "const fs=require('fs');
+          fs.appendFileSync(process.env.GITHUB_OUTPUT,
+          'report-ready='+fs.existsSync('reports/impact/execution.json')+'\n');"
+
+      - name: Upload shadow full report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: shadow-full-impact-report
+          path: reports/impact/
+          if-no-files-found: warn
+          retention-days: 30
+
+  pr-impact-comparison:
+    if: >-
+      always() &&
+      needs.pr-selective.outputs.report-ready == 'true' &&
+      needs.pr-shadow-full.outputs.report-ready == 'true'
+    needs: [pr-selective, pr-shadow-full]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Download selective report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: selective-impact-report
+          path: reports/selective
+
+      - name: Download shadow report
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: shadow-full-impact-report
+          path: reports/full
+
+      - name: Install comparison tool
+        run: npm ci
+
+      - name: Compare selective and full validation
+        run: >-
+          node scripts/impact-compare.js
+          --analysis reports/selective/analysis.json
+          --selective reports/selective/execution.json
+          --full reports/full/execution.json
+          --output reports/comparison/comparison.json
+
+      - name: Upload comparison report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: impact-comparison-report
+          path: reports/comparison/
+          if-no-files-found: error
+          retention-days: 30
+
+  pr-package-smoke-matrix:
+    if: needs.pr-selective.outputs.requires-package-matrix == 'true'
+    needs: pr-selective
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
+      max-parallel: 2
       matrix:
         node-version: ['20.17.0', '22', '24']
-    env:
-      EDGE_ADMIN_TOKEN: ci-build-token-not-for-deploy
-      ORIGIN_SECRET: ci-origin-secret-not-for-deploy
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node-version }}
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: API contract
+        run: npm run test:api-contract
+
+      - name: Packed install smoke
+        run: npm run test:package
+
+  full-validation:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          fetch-depth: 0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Full quality gate
+        run: npm run test:ci
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: full-validation-report-${{ github.run_attempt }}
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 30
+
+  full-package-smoke-matrix:
+    if: github.event_name != 'pull_request'
+    needs: full-validation
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 2
+      matrix:
+        node-version: ['20.17.0', '22', '24']
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
