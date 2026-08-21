@@ -172,8 +172,6 @@ jobs:
   pr-impact-comparison:
     if: >-
       always() &&
-      needs.pr-selective.result == 'success' &&
-      needs.pr-shadow-full.result == 'success' &&
       needs.pr-selective.outputs.report-ready == 'true' &&
       needs.pr-shadow-full.outputs.report-ready == 'true'
     needs: [pr-selective, pr-shadow-full]

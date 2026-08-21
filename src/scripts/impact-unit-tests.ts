@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -178,6 +178,7 @@ function testConservativeStrategy(): void {
     affectedModules: ['service'],
     testTargetIds: ['service-unit'],
     smokeTargetIds: ['cli-smoke'],
+    safeOnly: false,
     diagnostics: [] as string[],
   };
 
@@ -187,7 +188,7 @@ function testConservativeStrategy(): void {
     fallbackReason: null,
   });
   assert.equal(
-    decideStrategy({ ...base, testTargetIds: [], smokeTargetIds: [] }).strategy,
+    decideStrategy({ ...base, testTargetIds: [] }).strategy,
     'full',
   );
   assert.equal(
@@ -205,9 +206,17 @@ function testConservativeStrategy(): void {
       affectedProjects: [],
       affectedModules: [],
       testTargetIds: [],
+      safeOnly: true,
     }).strategy,
     'selective',
   );
+}
+
+function testComparisonRunsWhenShadowFullFails(): void {
+  const workflow = readFileSync('.github/workflows/policy-lint.yml', 'utf8');
+  const comparisonJob = workflow.split('  pr-impact-comparison:')[1]?.split('\n  full-validation:')[0] ?? '';
+  assert.doesNotMatch(comparisonJob, /needs\.pr-shadow-full\.result == 'success'/u);
+  assert.match(comparisonJob, /needs\.pr-shadow-full\.outputs\.report-ready == 'true'/u);
 }
 
 function testRepositoryConfiguration(): void {
@@ -371,6 +380,7 @@ testProjectDetection();
 testMonorepoProjectPropagation();
 testReverseDependencySelection();
 testConservativeStrategy();
+testComparisonRunsWhenShadowFullFails();
 testRepositoryConfiguration();
 testGitChangeCollection();
 testMappedAndRelatedTestSelection();

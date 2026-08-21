@@ -65,6 +65,7 @@ export interface StrategyInput {
   affectedModules: string[];
   testTargetIds: string[];
   smokeTargetIds: string[];
+  safeOnly: boolean;
   diagnostics: string[];
   unsupportedProjects?: string[];
 }
@@ -269,7 +270,7 @@ export function decideStrategy(input: StrategyInput): StrategyDecision {
       fallbackReason: `unsupported projects detected: ${input.unsupportedProjects?.join(', ')}`,
     };
   }
-  if (input.changedFiles.length > 0 && input.testTargetIds.length + input.smokeTargetIds.length === 0) {
+  if (input.changedFiles.length > 0 && input.testTargetIds.length === 0 && !input.safeOnly) {
     return {
       strategy: 'full',
       fallback: true,

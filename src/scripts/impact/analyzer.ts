@@ -147,6 +147,7 @@ export function analyzeImpact(options: AnalyzeImpactOptions): AnalysisResult {
     affectedModules,
     testTargetIds: [...selectedTargets],
     smokeTargetIds,
+    safeOnly,
     diagnostics,
     unsupportedProjects,
   });
