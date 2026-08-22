@@ -18,6 +18,8 @@ import {
 } from './load-document';
 import { resolveOpenApiRefPath } from './ref-boundary';
 
+const RESOLVED_OPENAPI_GRAPHS = new WeakSet<object>();
+
 export { serializeResolvedOpenApiGraph } from './document-graph';
 export type {
   OpenApiNodeLocation,
@@ -35,6 +37,12 @@ export interface ResolveOpenApiReferencesOptions {
 export interface ResolvedJsonPointer {
   value: Record<string, unknown> | unknown[];
   pointer: string;
+}
+
+export function isResolvedOpenApiGraph(value: unknown): value is ResolvedOpenApiGraph {
+  return typeof value === 'object' && value !== null
+    && RESOLVED_OPENAPI_GRAPHS.has(value)
+    && Object.isFrozen(value);
 }
 
 function pointerError(
@@ -274,10 +282,12 @@ export function resolveOpenApiReferences(
     from: Object.freeze(reference.from),
     target: Object.freeze(reference.target),
   })));
-  return Object.freeze({
+  const graph = Object.freeze({
     root,
     documents: frozenDocuments,
     references: frozenReferences,
     totalByteSize,
   });
+  RESOLVED_OPENAPI_GRAPHS.add(graph);
+  return graph;
 }

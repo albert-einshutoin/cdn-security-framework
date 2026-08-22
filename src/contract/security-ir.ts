@@ -109,7 +109,7 @@ export type ApiOperationInputV1 = Omit<ApiOperationContractV1, 'routeKey' | 'met
   method: string;
 };
 
-const SECRET_PATTERN = /\b(?:Bearer|Basic)\s+\S+|\b(?:sk|pk)_[A-Za-z0-9_-]{8,}|\b(?:authorization|proxy-authorization|cookie|set-cookie|password|secret|client_secret|access_token|refresh_token|token|api[_-]?key)\s*[=:]\s*\S+/i;
+const SECRET_PATTERN = /\b(?:Bearer|Basic)\s+\S+|\b(?:sk-(?:proj-)?|ghp_|github_pat_|AKIA|(?:sk|pk)_)[A-Za-z0-9_-]{8,}|\b(?:authorization|proxy-authorization|cookie|set-cookie|password|secret|client_secret|access_token|refresh_token|token|api[_-]?key)\s*[=:]\s*\S+/i;
 const MAX_STRING_LENGTH = 16_384;
 const MAX_IR_NODES = 100_000;
 

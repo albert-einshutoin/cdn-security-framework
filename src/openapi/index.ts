@@ -7,5 +7,6 @@ export {
   type OpenApiRootDocument,
 } from './load-document';
 export * from './document-graph';
+export * from './operation-normalizer';
 export * from './ref-resolver';
 export * from './ref-boundary';

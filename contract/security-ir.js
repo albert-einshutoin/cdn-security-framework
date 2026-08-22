@@ -12,7 +12,7 @@ exports.VALUE_TYPES = ['string', 'integer', 'number', 'boolean', 'array', 'objec
 exports.AUTH_SCHEME_KINDS = [
     'basic', 'bearer', 'api-key', 'oauth2', 'openid-connect', 'mutual-tls', 'unknown',
 ];
-const SECRET_PATTERN = /\b(?:Bearer|Basic)\s+\S+|\b(?:sk|pk)_[A-Za-z0-9_-]{8,}|\b(?:authorization|proxy-authorization|cookie|set-cookie|password|secret|client_secret|access_token|refresh_token|token|api[_-]?key)\s*[=:]\s*\S+/i;
+const SECRET_PATTERN = /\b(?:Bearer|Basic)\s+\S+|\b(?:sk-(?:proj-)?|ghp_|github_pat_|AKIA|(?:sk|pk)_)[A-Za-z0-9_-]{8,}|\b(?:authorization|proxy-authorization|cookie|set-cookie|password|secret|client_secret|access_token|refresh_token|token|api[_-]?key)\s*[=:]\s*\S+/i;
 const MAX_STRING_LENGTH = 16_384;
 const MAX_IR_NODES = 100_000;
 function consume(state, count) {
