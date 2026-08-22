@@ -141,6 +141,7 @@ export function generateOpenApiBenchmarkWorkloads(
     large: 'nested-refs-10000.json',
     deep: 'deep-schema.json',
     repeated: 'repeated-refs.json',
+    repeatedComponents: 'repeated-components.json',
     rejected: 'early-document-limit.json',
   };
   writeJson(path.join(workspaceRoot, files.small), documentWithPaths(numberedPaths(normalized.small)));
@@ -171,10 +172,11 @@ export function generateOpenApiBenchmarkWorkloads(
     documentWithPaths({ '/deep': operation('getDeep', { name: 'value', in: 'query', schema: deepSchema }) }),
   );
 
-  writeJson(
-    path.join(workspaceRoot, files.repeated),
-    documentWithPaths(numberedPaths(normalized.repeated, sharedParameter), sharedComponents),
-  );
+  writeJson(path.join(workspaceRoot, files.repeatedComponents), { components: sharedComponents });
+  writeJson(path.join(workspaceRoot, files.repeated), documentWithPaths(numberedPaths(
+    normalized.repeated,
+    { $ref: `./${files.repeatedComponents}#/components/parameters/SharedId` },
+  )));
 
   writeJson(path.join(workspaceRoot, files.rejected), {
     ...documentWithPaths({}),
@@ -212,6 +214,7 @@ function runWorkload(
   let resolvedDocumentCount = 0;
   let outputBytes = 0;
   let rejection: OpenApiBenchmarkResult['rejection'];
+  let rejectionCount = 0;
 
   for (let index = 0; index < iterations; index += 1) {
     const heapStart = process.memoryUsage().heapUsed;
@@ -253,6 +256,7 @@ function runWorkload(
         || !workload.rejection
         || error.code !== workload.rejection.code) throw error;
       rejection = workload.rejection;
+      rejectionCount += 1;
       samples.push({
         mode: index === 0 ? 'cold' : 'warm',
         parseMs: elapsed(parseStart),
@@ -265,6 +269,9 @@ function runWorkload(
     }
   }
 
+  if (workload.rejection && rejectionCount !== iterations) {
+    throw new Error(`${workload.id}: expected rejection in every iteration`);
+  }
   if (!workload.rejection && operationCount !== workload.expectedOperations) {
     throw new Error(`${workload.id}: expected ${workload.expectedOperations} operations, received ${operationCount}`);
   }

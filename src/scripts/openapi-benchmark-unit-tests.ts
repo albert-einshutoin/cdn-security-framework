@@ -57,6 +57,7 @@ function main(): void {
     const repeated = report.workloads.find(({ id }) => id === 'repeated-refs');
     assert.ok(repeated);
     assert.ok(repeated.referenceCount > repeated.resolvedDocumentCount);
+    assert.strictEqual(repeated.resolvedDocumentCount, 2);
     const rejected = report.workloads.find(({ id }) => id === 'early-document-limit');
     assert.deepStrictEqual(
       { status: rejected?.status, stage: rejected?.rejection?.stage, code: rejected?.rejection?.code },

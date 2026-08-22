@@ -1,6 +1,8 @@
 name: OpenAPI Analysis Benchmark
 
 on:
+  pull_request:
+    branches: [main]
   schedule:
     - cron: '43 3 * * 1'
   workflow_dispatch:
@@ -33,11 +35,15 @@ jobs:
         run: npm ci
 
       - name: Run full benchmark and regression gate
-        run: >-
-          npm run benchmark:openapi --
-          --iterations 3
-          --output openapi-benchmark-node-${{ matrix.node }}.json
-          --baseline docs/benchmarks/openapi-analysis-baseline.json
+        run: |
+          arguments=(
+            --iterations 3
+            --output openapi-benchmark-node-${{ matrix.node }}.json
+          )
+          if [ "${{ github.event_name }}" != pull_request ]; then
+            arguments+=(--baseline docs/benchmarks/openapi-analysis-baseline.json)
+          fi
+          npm run benchmark:openapi -- "${arguments[@]}"
 
       - name: Upload benchmark report
         if: always()
