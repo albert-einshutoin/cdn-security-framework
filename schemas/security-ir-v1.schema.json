@@ -1,0 +1,258 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cdn-security.dev/schemas/security-ir-v1.schema.json",
+  "title": "CDN Security Contract IR v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "source", "capabilities", "operations"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "source": { "enum": ["openapi", "source-ast", "policy", "runtime"] },
+    "capabilities": { "$ref": "#/definitions/capabilities" },
+    "operations": {
+      "type": "array",
+      "maxItems": 100000,
+      "items": { "$ref": "#/definitions/operation" }
+    }
+  },
+  "definitions": {
+    "capabilityLevel": { "enum": ["complete", "partial", "unsupported"] },
+    "capabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["routes", "parameters", "requestBodies", "authentication"],
+      "properties": {
+        "routes": { "$ref": "#/definitions/capabilityLevel" },
+        "parameters": { "$ref": "#/definitions/capabilityLevel" },
+        "requestBodies": { "$ref": "#/definitions/capabilityLevel" },
+        "authentication": { "$ref": "#/definitions/capabilityLevel" }
+      }
+    },
+    "constraints": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type"],
+      "properties": {
+        "type": { "enum": ["string", "integer", "number", "boolean", "array", "object", "unknown"] },
+        "format": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "enum": {
+          "type": "array",
+          "maxItems": 100000,
+          "items": {
+            "anyOf": [
+              { "type": "string", "maxLength": 16384 },
+              { "type": "number" },
+              { "type": "boolean" },
+              { "type": "null" }
+            ]
+          }
+        },
+        "minimum": { "type": "number" },
+        "maximum": { "type": "number" },
+        "minLength": { "type": "integer", "minimum": 0 },
+        "maxLength": { "type": "integer", "minimum": 0 },
+        "minItems": { "type": "integer", "minimum": 0 },
+        "maxItems": { "type": "integer", "minimum": 0 },
+        "maxProperties": { "type": "integer", "minimum": 0 }
+      }
+    },
+    "parameter": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "required", "constraints", "unsupportedReasons"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "required": { "type": "boolean" },
+        "constraints": { "$ref": "#/definitions/constraints" },
+        "style": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "explode": { "type": "boolean" },
+        "unsupportedReasons": { "$ref": "#/definitions/stringSet" }
+      }
+    },
+    "requestBody": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["required", "constraints", "unsupportedReasons"],
+      "properties": {
+        "required": { "type": "boolean" },
+        "constraints": { "$ref": "#/definitions/constraints" },
+        "unsupportedReasons": { "$ref": "#/definitions/stringSet" }
+      }
+    },
+    "request": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["contentTypes", "requiredHeaders", "queryParameters", "pathParameters", "headerParameters", "cookieParameters"],
+      "properties": {
+        "contentTypes": { "$ref": "#/definitions/stringSet" },
+        "requiredHeaders": { "$ref": "#/definitions/stringSet" },
+        "queryParameters": { "type": "array", "maxItems": 100000, "items": { "$ref": "#/definitions/parameter" } },
+        "pathParameters": { "type": "array", "maxItems": 100000, "items": { "$ref": "#/definitions/parameter" } },
+        "headerParameters": { "type": "array", "maxItems": 100000, "items": { "$ref": "#/definitions/parameter" } },
+        "cookieParameters": { "type": "array", "maxItems": 100000, "items": { "$ref": "#/definitions/parameter" } },
+        "body": { "$ref": "#/definitions/requestBody" }
+      }
+    },
+    "authScheme": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "kind", "scopes", "capability"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "kind": { "enum": ["basic", "bearer", "api-key", "oauth2", "openid-connect", "mutual-tls", "unknown"] },
+        "location": { "enum": ["header", "query", "cookie"] },
+        "scopes": { "$ref": "#/definitions/stringSet" },
+        "capability": { "enum": ["supported", "unsupported"] },
+        "unsupportedReason": { "type": "string", "minLength": 1, "maxLength": 16384 }
+      }
+    },
+    "authAlternative": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["anonymous", "schemes"],
+      "properties": {
+        "anonymous": { "type": "boolean" },
+        "schemes": {
+          "type": "array",
+          "maxItems": 100000,
+          "items": { "$ref": "#/definitions/authScheme" }
+        }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "anonymous": { "const": true } } },
+          "then": { "properties": { "schemes": { "type": "array", "maxItems": 0 } } },
+          "else": { "properties": { "schemes": { "type": "array", "minItems": 1 } } }
+        }
+      ]
+    },
+    "authentication": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["mode", "alternatives"],
+      "properties": {
+        "mode": { "enum": ["none", "unknown", "alternatives"] },
+        "alternatives": { "type": "array", "maxItems": 100000, "items": { "$ref": "#/definitions/authAlternative" } }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "mode": { "const": "alternatives" } } },
+          "then": { "properties": { "alternatives": { "type": "array", "minItems": 1 } } },
+          "else": { "properties": { "alternatives": { "type": "array", "maxItems": 0 } } }
+        }
+      ]
+    },
+    "evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source", "uri", "digest", "analyzer", "capability", "complete"],
+      "properties": {
+        "source": { "enum": ["openapi", "source-ast", "policy", "runtime", "generated-artifact"] },
+        "uri": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "pointer": { "type": "string", "minLength": 1, "maxLength": 16384, "pattern": "^[^?#]+$" },
+        "digest": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "analyzer": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "capability": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "complete": { "type": "boolean" }
+      }
+    },
+    "metadata": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["deprecated", "tags"],
+      "properties": {
+        "deprecated": { "type": "boolean" },
+        "tags": { "$ref": "#/definitions/stringSet" }
+      }
+    },
+    "operation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["routeKey", "method", "path", "exposure", "auth", "request", "provenance"],
+      "properties": {
+        "routeKey": { "type": "string", "minLength": 3, "maxLength": 16392 },
+        "method": { "enum": ["CONNECT", "DELETE", "GET", "HEAD", "OPTIONS", "PATCH", "POST", "PUT", "TRACE"] },
+        "path": { "type": "string", "pattern": "^/", "maxLength": 16384 },
+        "operationId": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "exposure": { "enum": ["public", "authenticated", "privileged", "unknown"] },
+        "auth": { "$ref": "#/definitions/authentication" },
+        "request": { "$ref": "#/definitions/request" },
+        "provenance": {
+          "type": "array",
+          "minItems": 1,
+          "maxItems": 100000,
+          "items": { "$ref": "#/definitions/evidence" }
+        },
+        "metadata": { "$ref": "#/definitions/metadata" }
+      },
+      "allOf": [
+        {
+          "if": { "properties": { "exposure": { "const": "unknown" } } },
+          "then": {
+            "properties": {
+              "auth": { "type": "object", "properties": { "mode": { "const": "unknown" } } }
+            }
+          },
+          "else": {
+            "properties": {
+              "auth": { "type": "object", "properties": { "mode": { "not": { "const": "unknown" } } } }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "exposure": { "const": "public" } } },
+          "then": {
+            "properties": {
+              "auth": {
+                "anyOf": [
+                  { "type": "object", "properties": { "mode": { "const": "none" } } },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": { "const": "alternatives" },
+                      "alternatives": {
+                        "type": "array",
+                        "contains": {
+                          "type": "object",
+                          "properties": { "anonymous": { "const": true } }
+                        }
+                      }
+                    }
+                  }
+                ]
+              }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "exposure": { "enum": ["authenticated", "privileged"] } } },
+          "then": {
+            "properties": {
+              "auth": {
+                "type": "object",
+                "properties": {
+                  "mode": { "const": "alternatives" },
+                  "alternatives": {
+                    "type": "array",
+                    "not": {
+                      "contains": {
+                        "type": "object",
+                        "properties": { "anonymous": { "const": true } }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "stringSet": {
+      "type": "array",
+      "maxItems": 100000,
+      "uniqueItems": true,
+      "items": { "type": "string", "minLength": 1, "maxLength": 16384 }
+    }
+  }
+}
