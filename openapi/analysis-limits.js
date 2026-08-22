@@ -5,6 +5,7 @@ exports.validateOpenApiAnalysisLimits = validateOpenApiAnalysisLimits;
 const analysis_error_1 = require("./analysis-error");
 exports.OPENAPI_ANALYSIS_LIMIT_RANGES = Object.freeze({
     maxDocumentBytes: Object.freeze({ min: 1, max: 4 * 1024 * 1024 }),
+    maxGraphBytes: Object.freeze({ min: 1, max: 256 * 1024 * 1024 }),
     maxResolvedDocuments: Object.freeze({ min: 1, max: 64 }),
     maxRefDepth: Object.freeze({ min: 1, max: 128 }),
     maxSchemaDepth: Object.freeze({ min: 1, max: 256 }),
@@ -18,6 +19,7 @@ exports.OPENAPI_ANALYSIS_LIMIT_RANGES = Object.freeze({
 });
 exports.DEFAULT_OPENAPI_ANALYSIS_LIMITS = Object.freeze({
     maxDocumentBytes: 2 * 1024 * 1024,
+    maxGraphBytes: 64 * 1024 * 1024,
     maxResolvedDocuments: 32,
     maxRefDepth: 32,
     maxSchemaDepth: 64,

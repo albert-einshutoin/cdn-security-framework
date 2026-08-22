@@ -17,4 +17,13 @@ export interface LoadOpenApiDocumentOptions {
     workspaceRoot: string;
     limits?: Partial<OpenApiAnalysisLimits>;
 }
+export interface LoadedOpenApiSourceDocument {
+    document: unknown;
+    sourceUri: string;
+    contentDigest: string;
+    byteSize: number;
+    refStatus: 'unresolved';
+}
+export declare function isLoadedOpenApiDocument(value: unknown): value is LoadedOpenApiDocument;
+export declare function loadOpenApiSourceDocument(options: LoadOpenApiDocumentOptions): LoadedOpenApiSourceDocument;
 export declare function loadOpenApiDocument(options: LoadOpenApiDocumentOptions): LoadedOpenApiDocument;

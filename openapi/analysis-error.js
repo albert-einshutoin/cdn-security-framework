@@ -15,6 +15,11 @@ exports.OPENAPI_ANALYSIS_ERROR_CODES = [
     'OPENAPI_REF_OUTSIDE_ROOT',
     'OPENAPI_REMOTE_REF_DISABLED',
     'OPENAPI_REF_CYCLE_LIMIT',
+    'OPENAPI_REF_NOT_FOUND',
+    'OPENAPI_REF_POINTER_INVALID',
+    'OPENAPI_REF_DEPTH_LIMIT',
+    'OPENAPI_DOCUMENT_COUNT_LIMIT',
+    'OPENAPI_GRAPH_SIZE_LIMIT',
     'OPENAPI_NODE_LIMIT',
     'OPENAPI_INVALID_LIMITS',
 ];
@@ -28,6 +33,11 @@ const SAFE_MESSAGES = {
     OPENAPI_REF_OUTSIDE_ROOT: 'OpenAPI reference is outside the workspace root.',
     OPENAPI_REMOTE_REF_DISABLED: 'Remote OpenAPI references are disabled.',
     OPENAPI_REF_CYCLE_LIMIT: 'OpenAPI reference cycle or depth limit was exceeded.',
+    OPENAPI_REF_NOT_FOUND: 'OpenAPI reference target was not found.',
+    OPENAPI_REF_POINTER_INVALID: 'OpenAPI reference pointer is invalid.',
+    OPENAPI_REF_DEPTH_LIMIT: 'OpenAPI reference depth limit was exceeded.',
+    OPENAPI_DOCUMENT_COUNT_LIMIT: 'OpenAPI resolved document limit was exceeded.',
+    OPENAPI_GRAPH_SIZE_LIMIT: 'OpenAPI resolved graph size limit was exceeded.',
     OPENAPI_NODE_LIMIT: 'OpenAPI analysis node limit was exceeded.',
     OPENAPI_INVALID_LIMITS: 'OpenAPI analysis limits are invalid.',
 };

@@ -14,7 +14,11 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.loadOpenApiDocument = void 0;
 __exportStar(require("./analysis-error"), exports);
 __exportStar(require("./analysis-limits"), exports);
-__exportStar(require("./load-document"), exports);
+var load_document_1 = require("./load-document");
+Object.defineProperty(exports, "loadOpenApiDocument", { enumerable: true, get: function () { return load_document_1.loadOpenApiDocument; } });
+__exportStar(require("./document-graph"), exports);
+__exportStar(require("./ref-resolver"), exports);
 __exportStar(require("./ref-boundary"), exports);

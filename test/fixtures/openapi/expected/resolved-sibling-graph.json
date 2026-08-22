@@ -1,0 +1,221 @@
+{
+  "documents": [
+    {
+      "byteSize": 228,
+      "contentDigest": "sha256:ec796849028e11162c96cb9574b59a5aac1442f8629664fd517025e7858ee9fb",
+      "document": {
+        "parameters": {
+          "OrderId": {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        },
+        "securitySchemes": {
+          "sharedKey": {
+            "in": "header",
+            "name": "X-Shared-Key",
+            "type": "apiKey"
+          }
+        }
+      },
+      "sourceUri": "refs/components.json"
+    },
+    {
+      "byteSize": 139,
+      "contentDigest": "sha256:f3366c76dd2332de06c456cee0a14f36d38e2ce0336dc2bf09db3a82580ab728",
+      "document": {
+        "components": {
+          "schemas": {
+            "NodeA": {
+              "properties": {
+                "child": {
+                  "$ref": "./cycle-b.yaml#/components/schemas/NodeB"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      },
+      "sourceUri": "refs/cycle-a.yaml"
+    },
+    {
+      "byteSize": 140,
+      "contentDigest": "sha256:fad91ede91ab89197657bedb7d6384083ad253bb18fc6f59c295bbac49884f11",
+      "document": {
+        "components": {
+          "schemas": {
+            "NodeB": {
+              "properties": {
+                "parent": {
+                  "$ref": "./cycle-a.yaml#/components/schemas/NodeA"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      },
+      "sourceUri": "refs/cycle-b.yaml"
+    },
+    {
+      "byteSize": 170,
+      "contentDigest": "sha256:3b9c6f475d2af9b69c9492a9533ae7f4c8cc1b15bb639102066a77d2ff56b810",
+      "document": {
+        "components": {
+          "schemas": {
+            "Order": {
+              "properties": {
+                "id": {
+                  "type": "string"
+                },
+                "parent": {
+                  "$ref": "../cycle-a.yaml#/components/schemas/NodeA"
+                }
+              },
+              "type": "object"
+            }
+          }
+        }
+      },
+      "sourceUri": "refs/nested/common.yaml"
+    },
+    {
+      "byteSize": 509,
+      "contentDigest": "sha256:c5b2b7ec92aa35139121ed58343bcd9c20f8a4280c102fe7de357dddfa8108dc",
+      "document": {
+        "components": {
+          "securitySchemes": {
+            "sharedKey": {
+              "$ref": "./components.json#/securitySchemes/sharedKey"
+            }
+          }
+        },
+        "info": {
+          "title": "Sibling and nested refs",
+          "version": "1.0.0"
+        },
+        "openapi": "3.0.3",
+        "paths": {
+          "/orders/{id}": {
+            "get": {
+              "parameters": [
+                {
+                  "$ref": "./components.json#/parameters/OrderId"
+                }
+              ],
+              "responses": {
+                "200": {
+                  "content": {
+                    "application/json": {
+                      "schema": {
+                        "$ref": "./nested/common.yaml#/components/schemas/Order"
+                      }
+                    }
+                  },
+                  "description": "OK"
+                }
+              },
+              "security": [
+                {
+                  "sharedKey": []
+                }
+              ]
+            }
+          }
+        }
+      },
+      "sourceUri": "refs/sibling.yaml"
+    }
+  ],
+  "references": [
+    {
+      "from": {
+        "id": "refs/cycle-a.yaml#/components/schemas/NodeA/properties/child",
+        "pointer": "/components/schemas/NodeA/properties/child",
+        "sourceUri": "refs/cycle-a.yaml"
+      },
+      "ref": "./cycle-b.yaml#/components/schemas/NodeB",
+      "target": {
+        "id": "refs/cycle-b.yaml#/components/schemas/NodeB",
+        "pointer": "/components/schemas/NodeB",
+        "sourceUri": "refs/cycle-b.yaml"
+      }
+    },
+    {
+      "from": {
+        "id": "refs/cycle-b.yaml#/components/schemas/NodeB/properties/parent",
+        "pointer": "/components/schemas/NodeB/properties/parent",
+        "sourceUri": "refs/cycle-b.yaml"
+      },
+      "ref": "./cycle-a.yaml#/components/schemas/NodeA",
+      "target": {
+        "id": "refs/cycle-a.yaml#/components/schemas/NodeA",
+        "pointer": "/components/schemas/NodeA",
+        "sourceUri": "refs/cycle-a.yaml"
+      }
+    },
+    {
+      "from": {
+        "id": "refs/nested/common.yaml#/components/schemas/Order/properties/parent",
+        "pointer": "/components/schemas/Order/properties/parent",
+        "sourceUri": "refs/nested/common.yaml"
+      },
+      "ref": "../cycle-a.yaml#/components/schemas/NodeA",
+      "target": {
+        "id": "refs/cycle-a.yaml#/components/schemas/NodeA",
+        "pointer": "/components/schemas/NodeA",
+        "sourceUri": "refs/cycle-a.yaml"
+      }
+    },
+    {
+      "from": {
+        "id": "refs/sibling.yaml#/components/securitySchemes/sharedKey",
+        "pointer": "/components/securitySchemes/sharedKey",
+        "sourceUri": "refs/sibling.yaml"
+      },
+      "ref": "./components.json#/securitySchemes/sharedKey",
+      "target": {
+        "id": "refs/components.json#/securitySchemes/sharedKey",
+        "pointer": "/securitySchemes/sharedKey",
+        "sourceUri": "refs/components.json"
+      }
+    },
+    {
+      "from": {
+        "id": "refs/sibling.yaml#/paths/~1orders~1{id}/get/parameters/0",
+        "pointer": "/paths/~1orders~1{id}/get/parameters/0",
+        "sourceUri": "refs/sibling.yaml"
+      },
+      "ref": "./components.json#/parameters/OrderId",
+      "target": {
+        "id": "refs/components.json#/parameters/OrderId",
+        "pointer": "/parameters/OrderId",
+        "sourceUri": "refs/components.json"
+      }
+    },
+    {
+      "from": {
+        "id": "refs/sibling.yaml#/paths/~1orders~1{id}/get/responses/200/content/application~1json/schema",
+        "pointer": "/paths/~1orders~1{id}/get/responses/200/content/application~1json/schema",
+        "sourceUri": "refs/sibling.yaml"
+      },
+      "ref": "./nested/common.yaml#/components/schemas/Order",
+      "target": {
+        "id": "refs/nested/common.yaml#/components/schemas/Order",
+        "pointer": "/components/schemas/Order",
+        "sourceUri": "refs/nested/common.yaml"
+      }
+    }
+  ],
+  "root": {
+    "id": "refs/sibling.yaml#",
+    "pointer": "",
+    "sourceUri": "refs/sibling.yaml"
+  },
+  "totalByteSize": 1186
+}
