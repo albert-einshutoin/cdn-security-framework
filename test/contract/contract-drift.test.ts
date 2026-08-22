@@ -141,6 +141,18 @@ describe('OpenAPI and Policy contract drift', () => {
     ));
     expect(inertPrefix.some(({ ruleId }) => ruleId === 'SC-EXPOSURE-003')).toBe(false);
 
+    const unreachablePrefix = comparePathMethodContracts(input(
+      contract([operation('GET', '/health')]),
+      policy({
+        request: { allow_methods: [] },
+        routes: [{
+          name: 'unreachable', match: { path_prefixes: ['/admin'] },
+          auth_gate: { type: 'basic_auth' },
+        }],
+      }),
+    ));
+    expect(unreachablePrefix.some(({ ruleId }) => ruleId === 'SC-EXPOSURE-003')).toBe(false);
+
     const renamedParameter = comparePathMethodContracts(input(
       contract([operation('GET', '/users/{openapiId}')]),
       policy({ routes: [{

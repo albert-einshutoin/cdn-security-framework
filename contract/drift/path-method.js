@@ -94,7 +94,8 @@ function comparePathMethodContracts(input) {
                     remediation: { summary: 'Declare the route or remove the exact Policy rule.', safeAutoFix: false },
                 }));
             }
-            else if (!rule.auth.exactPath) {
+            else if (!rule.auth.exactPath
+                && (allowed.defaults.requestDecision !== 'block' || allowed.defaults.methods.length > 0)) {
                 const relations = declared.operations.map((operation) => (0, shared_1.pathRelation)(operation, prefix, allowed));
                 findings.push((0, shared_1.makeFinding)({
                     ruleId: 'SC-EXPOSURE-003',
