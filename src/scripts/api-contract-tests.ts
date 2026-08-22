@@ -44,6 +44,7 @@ test('package metadata exposes typed root api and bounded exports', () => {
     './emitter',
     './openapi',
     './parser',
+    './recommendation',
     './schemas/security-ir-v1.schema.json',
     './validator',
   ]);
@@ -58,6 +59,7 @@ test('package metadata exposes typed root api and bounded exports', () => {
   assert.strictEqual(pkg.exports['./contract'].require, './contract/index.js');
   assert.strictEqual(pkg.exports['./contract/security-ir'].types, './contract/security-ir.d.ts');
   assert.strictEqual(pkg.exports['./openapi'].require, './openapi/index.js');
+  assert.strictEqual(pkg.exports['./recommendation'].require, './recommendation/index.js');
   assert.strictEqual(
     pkg.exports['./schemas/security-ir-v1.schema.json'],
     './schemas/security-ir-v1.schema.json',
@@ -71,6 +73,7 @@ test('phase subpath exports expose public compiler contracts', () => {
   const emitter = require(path.join(repoRoot, 'emitter'));
   const contract = require(path.join(repoRoot, 'contract'));
   const openapi = require(path.join(repoRoot, 'openapi'));
+  const recommendation = require(path.join(repoRoot, 'recommendation'));
   assert.strictEqual(typeof parser.parsePolicyFile, 'function');
   assert.strictEqual(typeof validator.validatePolicy, 'function');
   assert.strictEqual(typeof emitter.compileArtifacts, 'function');
@@ -79,6 +82,7 @@ test('phase subpath exports expose public compiler contracts', () => {
   assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
   assert.strictEqual(typeof openapi.serializeResolvedOpenApiGraph, 'function');
   assert.strictEqual(typeof openapi.normalizeOpenApiOperations, 'function');
+  assert.strictEqual(typeof recommendation.recommendRequestLimits, 'function');
 
   const phaseDeclarations = [
     ['parser/index.d.ts', 'parsePolicyFile'],

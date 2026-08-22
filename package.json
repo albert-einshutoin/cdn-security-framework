@@ -40,6 +40,11 @@
       "require": "./openapi/index.js",
       "default": "./openapi/index.js"
     },
+    "./recommendation": {
+      "types": "./recommendation/index.d.ts",
+      "require": "./recommendation/index.js",
+      "default": "./recommendation/index.js"
+    },
     "./schemas/security-ir-v1.schema.json": "./schemas/security-ir-v1.schema.json",
     "./bin/cli": "./bin/cli.js",
     "./bin/cli.js": "./bin/cli.js"
@@ -104,6 +109,7 @@
     "contract/",
     "schemas/",
     "openapi/",
+    "recommendation/",
     "emitter/",
     "lib/",
     "parser/",

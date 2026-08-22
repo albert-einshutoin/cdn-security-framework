@@ -15,6 +15,7 @@ exports.AUTH_SCHEME_KINDS = [
 const SECRET_PATTERN = /\b(?:Bearer|Basic)\s+\S+|\b(?:sk-(?:proj-)?|ghp_|github_pat_|AKIA|(?:sk|pk)_)[A-Za-z0-9_-]{8,}|\b(?:authorization|proxy-authorization|cookie|set-cookie|password|secret|client_secret|access_token|refresh_token|token|api[_-]?key)\s*[=:]\s*\S+/i;
 const MAX_STRING_LENGTH = 16_384;
 const MAX_IR_NODES = 100_000;
+const MAX_CONSTRAINT_DEPTH = 256;
 function consume(state, count) {
     state.nodes += count;
     if (state.nodes > MAX_IR_NODES)
@@ -43,10 +44,16 @@ function sortedSet(values, field, state, transform = (value) => value) {
     consume(state, values.length);
     return [...new Set(values.map((value) => nonEmpty(transform(nonEmpty(value, field)), field)))].sort(compareText);
 }
-function normalizeConstraints(input, state) {
+function normalizeConstraints(input, state, depth = 0, ancestors = new Set()) {
     if (!input || typeof input !== 'object' || !exports.VALUE_TYPES.includes(input.type)) {
         throw new Error('invalid value constraints');
     }
+    if (depth >= MAX_CONSTRAINT_DEPTH)
+        throw new Error('value constraints exceed depth limit');
+    if (ancestors.has(input))
+        throw new Error('cyclic value constraints are not allowed');
+    consume(state, 1);
+    const nextAncestors = new Set(ancestors).add(input);
     const output = { type: input.type };
     if (input.format !== undefined)
         output.format = nonEmpty(input.format, 'constraint format');
@@ -91,6 +98,37 @@ function normalizeConstraints(input, state) {
         if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
             throw new Error('invalid constraint range');
         }
+    }
+    if (input.properties !== undefined) {
+        if (input.type !== 'object' || !input.properties || typeof input.properties !== 'object'
+            || Array.isArray(input.properties))
+            throw new Error('invalid constraint properties');
+        const entries = Object.entries(input.properties).sort(([left], [right]) => compareText(left, right));
+        consume(state, entries.length);
+        const properties = Object.fromEntries(entries.map(([name, constraints]) => [
+            nonEmpty(name, 'constraint property'), normalizeConstraints(constraints, state, depth + 1, nextAncestors),
+        ]));
+        output.properties = properties;
+    }
+    if (input.requiredProperties !== undefined) {
+        if (input.type !== 'object')
+            throw new Error('invalid constraint required properties');
+        output.requiredProperties = sortedSet(input.requiredProperties, 'constraint required property', state);
+        const properties = output.properties;
+        if (properties && output.requiredProperties.some((name) => !(name in properties))) {
+            throw new Error('invalid constraint required properties');
+        }
+    }
+    if (input.additionalProperties !== undefined) {
+        if (input.type !== 'object' || typeof input.additionalProperties !== 'boolean') {
+            throw new Error('invalid constraint additional properties');
+        }
+        output.additionalProperties = input.additionalProperties;
+    }
+    if (input.items !== undefined) {
+        if (input.type !== 'array')
+            throw new Error('invalid constraint items');
+        output.items = normalizeConstraints(input.items, state, depth + 1, nextAncestors);
     }
     return output;
 }

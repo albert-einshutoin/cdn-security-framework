@@ -1,0 +1,157 @@
+{
+  "schemaVersion": 1,
+  "routes": [
+    {
+      "path": "/items/{id}",
+      "allowedMethods": {
+        "value": [
+          "POST"
+        ],
+        "basis": [
+          "/paths/~1items~1{id}/post"
+        ],
+        "estimateKind": "exact",
+        "margin": null,
+        "confidence": "high",
+        "unsupportedReasons": []
+      },
+      "operations": [
+        {
+          "routeKey": "POST /items/{id}",
+          "requiredHeaders": {
+            "value": [
+              "x-tenant"
+            ],
+            "basis": [
+              "/paths/~1items~1{id}/post"
+            ],
+            "estimateKind": "exact",
+            "margin": null,
+            "confidence": "high",
+            "unsupportedReasons": []
+          },
+          "allowedContentTypes": {
+            "value": [
+              "application/json"
+            ],
+            "basis": [
+              "/paths/~1items~1{id}/post"
+            ],
+            "estimateKind": "exact",
+            "margin": null,
+            "confidence": "high",
+            "unsupportedReasons": []
+          },
+          "maxQueryParams": {
+            "value": 3,
+            "basis": [
+              "/paths/~1items~1{id}/post"
+            ],
+            "estimateKind": "upper-bound",
+            "margin": {
+              "absolute": 0,
+              "ratio": 0,
+              "before": 3,
+              "after": 3
+            },
+            "confidence": "medium",
+            "unsupportedReasons": []
+          },
+          "maxQueryLength": {
+            "value": 91,
+            "basis": [
+              "/paths/~1items~1{id}/post"
+            ],
+            "estimateKind": "upper-bound",
+            "margin": {
+              "absolute": 0,
+              "ratio": 0,
+              "before": 91,
+              "after": 91
+            },
+            "confidence": "medium",
+            "unsupportedReasons": []
+          },
+          "maxUriLength": {
+            "value": 41,
+            "basis": [
+              "/paths/~1items~1{id}/post"
+            ],
+            "estimateKind": "upper-bound",
+            "margin": {
+              "absolute": 0,
+              "ratio": 0,
+              "before": 41,
+              "after": 41
+            },
+            "confidence": "medium",
+            "unsupportedReasons": []
+          },
+          "maxBodyBytes": {
+            "value": 79,
+            "basis": [
+              "/paths/~1items~1{id}/post"
+            ],
+            "estimateKind": "partial",
+            "margin": {
+              "absolute": 0,
+              "ratio": 0,
+              "before": 79,
+              "after": 79
+            },
+            "confidence": "medium",
+            "unsupportedReasons": [
+              "body:json-whitespace-unbounded"
+            ]
+          },
+          "parameterConstraints": {
+            "value": [
+              {
+                "name": "a",
+                "location": "query",
+                "required": true,
+                "constraints": {
+                  "type": "string",
+                  "maxLength": 2
+                }
+              },
+              {
+                "name": "optional",
+                "location": "query",
+                "required": false,
+                "constraints": {
+                  "type": "boolean"
+                }
+              },
+              {
+                "name": "検索",
+                "location": "query",
+                "required": false,
+                "constraints": {
+                  "type": "string",
+                  "maxLength": 1
+                }
+              },
+              {
+                "name": "id",
+                "location": "path",
+                "required": true,
+                "constraints": {
+                  "type": "string",
+                  "maxLength": 2
+                }
+              }
+            ],
+            "basis": [
+              "/paths/~1items~1{id}/post"
+            ],
+            "estimateKind": "exact",
+            "margin": null,
+            "confidence": "high",
+            "unsupportedReasons": []
+          }
+        }
+      ]
+    }
+  ]
+}

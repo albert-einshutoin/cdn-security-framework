@@ -27,6 +27,10 @@ export interface ValueConstraintsV1 {
     minItems?: number;
     maxItems?: number;
     maxProperties?: number;
+    properties?: Record<string, ValueConstraintsV1>;
+    requiredProperties?: string[];
+    additionalProperties?: boolean;
+    items?: ValueConstraintsV1;
 }
 export interface ApiParameterContractV1 {
     name: string;
