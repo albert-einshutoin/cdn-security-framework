@@ -6,8 +6,8 @@ function comparePathMethodContracts(input) {
     (0, shared_1.validateComparisonInput)(input);
     const { declared, allowed } = input;
     const findings = [];
-    const methodsPointer = allowed.defaults.methodSource === 'runtime-default'
-        ? '/request' : '/request/allow_methods';
+    const methodsPointer = allowed.defaults.methodSource === 'configured'
+        ? '/request/allow_methods' : '/request';
     const operationsByPath = new Map();
     for (const operation of declared.operations) {
         const operations = operationsByPath.get(operation.path) ?? [];
