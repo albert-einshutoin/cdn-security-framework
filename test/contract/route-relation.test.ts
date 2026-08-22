@@ -63,6 +63,16 @@ describe('route relation', () => {
       { kind: 'prefix', value: '/users' },
       normalized,
     )).toBe('unknown');
+    expect(relatePath(
+      { kind: 'template', value: '/{id}/../admin' },
+      { kind: 'exact', value: '/admin' },
+      normalized,
+    )).toBe('unknown');
+    expect(relatePath(
+      { kind: 'template', value: '/{group}/../{id}' },
+      { kind: 'exact', value: '/admin' },
+      normalized,
+    )).toBe('unknown');
   });
 
   test('only proves the deliberately small literal regex subset', () => {

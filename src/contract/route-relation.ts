@@ -174,6 +174,9 @@ export function relatePath(
   policy: PolicyPathMatcher,
   options: RouteRelationOptions,
 ): RouteRelation {
+  const rawTemplate = source.kind === 'template' ? templateParts(source.value) : undefined;
+  if (source.kind === 'template' && (!rawTemplate
+    || rawTemplate.parts.some((part) => part === '.' || part === '..'))) return 'unknown';
   const sourcePath = normalizePath(source.value, options, true);
   let policyKind: 'exact' | 'prefix';
   let policyValue: string | undefined;
@@ -191,14 +194,14 @@ export function relatePath(
   const relation = relateNormalizedPath(source.kind, sourcePath, policyKind, policyValue);
   if (source.kind !== 'template' || !options.removeDotSegments) return relation;
 
-  const parsed = templateParts(sourcePath);
-  if (!parsed) return 'unknown';
-  const indexes = parsed.parts.flatMap((part, index) => TEMPLATE_SEGMENT.test(part) ? [index] : []);
+  const indexes = rawTemplate!.parts.flatMap(
+    (part, index) => TEMPLATE_SEGMENT.test(part) ? [index] : [],
+  );
   if (indexes.length === 0) return relation;
   if (indexes.length > 1) return 'unknown';
 
   const alternatives = ['.', '..'].map((replacement) => {
-    const parts = [...parsed.parts];
+    const parts = [...rawTemplate!.parts];
     parts[indexes[0]] = replacement;
     const normalizedAlternative = normalizePath(`/${parts.join('/')}`, options, true);
     return normalizedAlternative
