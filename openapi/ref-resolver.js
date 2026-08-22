@@ -16,6 +16,11 @@ const load_document_1 = require("./load-document");
 const ref_boundary_1 = require("./ref-boundary");
 const RESOLVED_OPENAPI_GRAPHS = new WeakSet();
 const LITERAL_VALUE_KEYS = new Set(['const', 'default', 'enum', 'example', 'value']);
+const NAMED_OBJECT_MAP_KEYS = new Set([
+    '$defs', 'callbacks', 'content', 'definitions', 'dependentSchemas', 'encoding', 'examples',
+    'headers', 'links', 'parameters', 'pathItems', 'paths', 'patternProperties', 'properties',
+    'requestBodies', 'responses', 'schemas', 'securitySchemes', 'webhooks',
+]);
 var document_graph_1 = require("./document-graph");
 Object.defineProperty(exports, "serializeResolvedOpenApiGraph", { enumerable: true, get: function () { return document_graph_1.serializeResolvedOpenApiGraph; } });
 function isResolvedOpenApiGraph(value) {
@@ -207,7 +212,7 @@ function resolveOpenApiReferences(options) {
             target.id,
         ]));
     };
-    const walk = (value, document, pointer, depth, ancestors) => {
+    const walk = (value, document, pointer, depth, ancestors, namedEntries = false) => {
         resolutionVisits += 1;
         if (resolutionVisits > limits.maxNodes) {
             throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_NODE_LIMIT', {
@@ -223,10 +228,10 @@ function resolveOpenApiReferences(options) {
         for (const [key, child] of Object.entries(value)) {
             if (key === '$ref')
                 continue;
-            if (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
-                || (key === 'examples' && Array.isArray(child)))
+            if (!namedEntries && (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
+                || (key === 'examples' && Array.isArray(child))))
                 continue;
-            walk(child, document, `${pointer}/${encodePointerToken(key)}`, depth, ancestors);
+            walk(child, document, `${pointer}/${encodePointerToken(key)}`, depth, ancestors, !namedEntries && NAMED_OBJECT_MAP_KEYS.has(key) && !Array.isArray(child));
         }
     };
     walk(options.root.document, options.root, '', 0, new Set());

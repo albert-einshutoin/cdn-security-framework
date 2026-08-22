@@ -22,6 +22,11 @@ import { resolveOpenApiRefPath } from './ref-boundary';
 
 const RESOLVED_OPENAPI_GRAPHS = new WeakSet<object>();
 const LITERAL_VALUE_KEYS = new Set(['const', 'default', 'enum', 'example', 'value']);
+const NAMED_OBJECT_MAP_KEYS = new Set([
+  '$defs', 'callbacks', 'content', 'definitions', 'dependentSchemas', 'encoding', 'examples',
+  'headers', 'links', 'parameters', 'pathItems', 'paths', 'patternProperties', 'properties',
+  'requestBodies', 'responses', 'schemas', 'securitySchemes', 'webhooks',
+]);
 
 export { serializeResolvedOpenApiGraph } from './document-graph';
 export type {
@@ -266,6 +271,7 @@ export function resolveOpenApiReferences(
     pointer: string,
     depth: number,
     ancestors: ReadonlySet<string>,
+    namedEntries = false,
   ): void => {
     resolutionVisits += 1;
     if (resolutionVisits > limits.maxNodes) {
@@ -286,9 +292,16 @@ export function resolveOpenApiReferences(
     }
     for (const [key, child] of Object.entries(value)) {
       if (key === '$ref') continue;
-      if (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
-        || (key === 'examples' && Array.isArray(child))) continue;
-      walk(child, document, `${pointer}/${encodePointerToken(key)}`, depth, ancestors);
+      if (!namedEntries && (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
+        || (key === 'examples' && Array.isArray(child)))) continue;
+      walk(
+        child,
+        document,
+        `${pointer}/${encodePointerToken(key)}`,
+        depth,
+        ancestors,
+        !namedEntries && NAMED_OBJECT_MAP_KEYS.has(key) && !Array.isArray(child),
+      );
     }
   };
 

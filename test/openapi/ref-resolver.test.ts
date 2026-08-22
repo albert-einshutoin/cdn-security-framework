@@ -146,8 +146,12 @@ describe('resolveOpenApiReferences', () => {
     fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
       openapi: '3.1.0',
       paths: {},
-      components: { schemas: { Sample: {
-        type: 'string',
+      components: { schemas: {
+        Target: { type: 'string' },
+        default: { $ref: '#/components/schemas/Target' },
+        Sample: {
+        type: 'object',
+        properties: { value: { $ref: '#/components/schemas/Target' } },
         example: { $ref: '#/components/schemas/Sample/default' },
         default: { $ref: '#/components/schemas/Sample/example' },
         enum: [{ $ref: '#/components/schemas/Sample/type' }],
@@ -158,7 +162,10 @@ describe('resolveOpenApiReferences', () => {
       workspaceRoot: workspace,
       limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
     });
-    expect(graph.references).toEqual([]);
+    expect(graph.references.map(({ from }) => from.pointer)).toEqual([
+      '/components/schemas/Sample/properties/value',
+      '/components/schemas/default',
+    ]);
   });
 
   test('caches sibling documents and keeps cycles as reference identity', () => {
