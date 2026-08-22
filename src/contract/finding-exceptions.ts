@@ -236,15 +236,22 @@ function matches(
   context: FindingExceptionContext,
 ): boolean {
   const selector = exception.selector;
-  if (exception.rule_id !== finding.ruleId
-    || (selector.target !== undefined && selector.target !== context.target)
-    || (selector.environment !== undefined && selector.environment !== context.environment)) return false;
+  if (exception.rule_id !== finding.ruleId || !appliesToContext(exception, context)) return false;
   if (selector.instance_id) return selector.instance_id === finding.instanceId;
   if (selector.method
     && (!finding.route?.method
       || !globMatches(selector.method.toUpperCase(), finding.route.method.toUpperCase()))) return false;
   if (selector.path && (!finding.route?.path || !globMatches(selector.path, finding.route.path))) return false;
   return true;
+}
+
+function appliesToContext(
+  exception: FindingExceptionV1,
+  context: FindingExceptionContext,
+): boolean {
+  return (exception.selector.target === undefined || exception.selector.target === context.target)
+    && (exception.selector.environment === undefined
+      || exception.selector.environment === context.environment);
 }
 
 function specificity(exception: FindingExceptionV1): readonly number[] {
@@ -276,23 +283,30 @@ function exceptionDigest(set: FindingExceptionSetV1): string {
   return `sha256:${createHash('sha256').update(JSON.stringify(set)).digest('hex')}`;
 }
 
+function evidenceUri(sourceUri?: string): string {
+  const uri = sourceUri ?? 'finding-exceptions.yml';
+  if (path.isAbsolute(uri)) return path.basename(uri);
+  if (path.win32.isAbsolute(uri)) return path.win32.basename(uri);
+  return uri;
+}
+
 function governanceFinding(
   ruleId: 'SC-GOV-001' | 'SC-GOV-002' | 'SC-GOV-003',
   severity: 'error' | 'warning',
   title: string,
   message: string,
   actual: Record<string, unknown>,
-  set: FindingExceptionSetV1,
+  digest: string,
   context: FindingExceptionContext,
 ): SecurityFindingV1 {
   return createFinding({
     ruleId, severity, confidence: 'deterministic', category: 'governance', title, message, actual,
     evidence: [{
-      source: 'policy', uri: context.sourceUri ?? 'finding-exceptions.yml',
+      source: 'policy', uri: evidenceUri(context.sourceUri),
       pointer: `/exceptions/${encodeURIComponent(String(
         actual.exceptionId ?? actual.findingInstanceId ?? ruleId,
       ))}`,
-      digest: exceptionDigest(set), analyzer: 'finding-exceptions@1',
+      digest, analyzer: 'finding-exceptions@1',
       capability: 'finding-exceptions-v1', complete: true,
     }],
     remediation: { summary: 'Update or remove the exception and retain the audit record.', safeAutoFix: false },
@@ -399,6 +413,7 @@ export function applyFindingExceptions(
 ): FindingExceptionReportV1 {
   const validation = validateFindingExceptionSet(set, context);
   if (!validation.valid) throw new Error(`invalid Finding exception set: ${validation.errors.join('; ')}`);
+  const digest = exceptionDigest(set);
   const budget = { visits: set.exceptions.length };
   for (const finding of findings) {
     consumeFindingNodes(finding, budget);
@@ -412,7 +427,7 @@ export function applyFindingExceptions(
     governance.push(governanceFinding(
       'SC-GOV-001', 'error', 'Finding exception has expired',
       'An expired exception does not suppress its matching Finding.',
-      { exceptionId: exception.id, owner: exception.owner, expiresAt: exception.expires_at }, set, context,
+      { exceptionId: exception.id, owner: exception.owner, expiresAt: exception.expires_at }, digest, context,
     ));
     return false;
   });
@@ -421,7 +436,8 @@ export function applyFindingExceptions(
   const active: SecurityFindingV1[] = [];
   const suppressed: SecurityFindingV1[] = [];
   const byRule = new Map<string, FindingExceptionV1[]>();
-  for (const exception of live) {
+  const applicableLive = live.filter((exception) => appliesToContext(exception, context));
+  for (const exception of applicableLive) {
     const rules = byRule.get(exception.rule_id) ?? [];
     rules.push(exception);
     byRule.set(exception.rule_id, rules);
@@ -448,15 +464,15 @@ export function applyFindingExceptions(
       'SC-GOV-003', 'warning', 'Multiple exceptions match one Finding',
       'The most specific exception was applied; remove redundant matching exceptions.',
       { findingInstanceId: finding.instanceId, selectedExceptionId: selected.id, matchCount: candidates.length },
-      set, context,
+      digest, context,
     ));
   }
 
-  for (const exception of live) {
+  for (const exception of applicableLive) {
     if (!matchedIds.has(exception.id)) governance.push(governanceFinding(
       'SC-GOV-002', 'warning', 'Finding exception is unused',
       'No current Finding matches this live exception; remove it if the underlying issue is gone.',
-      { exceptionId: exception.id, owner: exception.owner, expiresAt: exception.expires_at }, set, context,
+      { exceptionId: exception.id, owner: exception.owner, expiresAt: exception.expires_at }, digest, context,
     ));
   }
   return {

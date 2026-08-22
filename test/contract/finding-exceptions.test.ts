@@ -65,9 +65,15 @@ describe('Finding Exception Contract v1', () => {
         reason: 'Temporary exception while the client migration completes.',
         owner: 'api-team', expires_at: '2026-12-01',
       },
+      {
+        id: 'EXC-2026-005', rule_id: 'SC-AUTHN-001',
+        selector: { method: 'GET', path: '/other-target', target: 'aws' },
+        reason: 'This exception is evaluated only in its selected target.',
+        owner: 'api-team', expires_at: '2026-12-01',
+      },
     ]), {
       currentDate: '2026-08-23', target: 'cloudflare', environment: 'production',
-      sourceUri: 'policy/finding-exceptions.yml',
+      sourceUri: path.join(process.cwd(), 'policy/finding-exceptions.yml'),
     });
 
     expect(result.suppressedFindings).toEqual([auth]);
@@ -76,6 +82,8 @@ describe('Finding Exception Contract v1', () => {
       'SC-GOV-001', 'SC-REQUEST-002', 'SC-GOV-002', 'SC-GOV-003',
     ]);
     expect(result.summary).toEqual({ before: 2, after: 1, suppressed: 1, governance: 3 });
+    expect(result.findings.filter(({ category }) => category === 'governance')
+      .every(({ evidence }) => evidence[0]?.uri === 'finding-exceptions.yml')).toBe(true);
     expect(JSON.stringify(result)).not.toContain('signed webhook payload');
   });
 
