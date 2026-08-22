@@ -29,7 +29,11 @@ export function canonicalizePath(routePath: string): string {
     throw new Error('invalid route path');
   }
   const canonical = `/${trimmed}`.replace(/\/{2,}/g, '/');
-  return canonical.length > 1 && canonical.endsWith('/') ? canonical.slice(0, -1) : canonical;
+  const withoutTrailingSlash = canonical.length > 1 && canonical.endsWith('/')
+    ? canonical.slice(0, -1)
+    : canonical;
+  if (withoutTrailingSlash.length > MAX_ROUTE_STRING_LENGTH) throw new Error('invalid route path');
+  return withoutTrailingSlash;
 }
 
 export function createRouteKey(method: string, routePath: string): string {

@@ -113,6 +113,7 @@ describe('Security IR canonical routes', () => {
     expect(() => canonicalizePath('/users/../admin')).toThrow('invalid route path');
     expect(() => canonicalizePath('/%2e%2e/admin')).toThrow('invalid route path');
     expect(() => canonicalizePath('/admin%2Fsettings')).toThrow('invalid route path');
+    expect(() => canonicalizePath('x'.repeat(16_384))).toThrow('invalid route path');
   });
 });
 

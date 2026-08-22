@@ -31,7 +31,12 @@ function canonicalizePath(routePath) {
         throw new Error('invalid route path');
     }
     const canonical = `/${trimmed}`.replace(/\/{2,}/g, '/');
-    return canonical.length > 1 && canonical.endsWith('/') ? canonical.slice(0, -1) : canonical;
+    const withoutTrailingSlash = canonical.length > 1 && canonical.endsWith('/')
+        ? canonical.slice(0, -1)
+        : canonical;
+    if (withoutTrailingSlash.length > MAX_ROUTE_STRING_LENGTH)
+        throw new Error('invalid route path');
+    return withoutTrailingSlash;
 }
 function createRouteKey(method, routePath) {
     return `${normalizeHttpMethod(method)} ${canonicalizePath(routePath)}`;
