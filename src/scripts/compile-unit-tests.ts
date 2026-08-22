@@ -1057,6 +1057,12 @@ test('validateJwksUrl enforces allowed_hosts when provided', () => {
   assert.match(r.reason, /firewall\.jwks\.allowed_hosts/);
 });
 
+test('validateJwksUrl rejects an explicitly configured allowlist that normalizes empty', () => {
+  const r = validateJwksUrl('https://idp.example.com/jwks.json', [' ']);
+  assert.strictEqual(r.ok, false);
+  assert.match(r.reason, /firewall\.jwks\.allowed_hosts/);
+});
+
 test('validateAuthGates rejects jwks_url in private/loopback ranges', () => {
   const policy = {
     routes: [

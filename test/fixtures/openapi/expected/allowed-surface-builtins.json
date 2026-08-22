@@ -1,0 +1,2062 @@
+{
+  "policy/archetypes/admin-panel.yml": {
+    "defaults": {
+      "authenticationDecision": "block",
+      "configuredMethods": [
+        "GET",
+        "HEAD",
+        "POST"
+      ],
+      "corsOptionsBypass": false,
+      "corsPreflight": {
+        "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
+        "bypassScope": "none",
+        "method": "OPTIONS",
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
+      },
+      "hosts": {
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
+        "kind": "any",
+        "unsupportedConfiguredValues": [],
+        "values": [],
+        "wildcard": "leading-subdomain-only"
+      },
+      "limits": {
+        "maxHeaderCount": 64,
+        "maxHeaderSize": 0,
+        "maxQueryLength": 512,
+        "maxQueryParams": 20,
+        "maxUriLength": 1024
+      },
+      "methods": [
+        "GET",
+        "HEAD",
+        "POST"
+      ],
+      "mode": "enforce",
+      "pathNormalization": {
+        "collapseSlashes": false,
+        "removeDotSegments": false,
+        "routeMatchPhase": "normalized-path"
+      },
+      "requestDecision": "block",
+      "response": {
+        "adminCacheControl": "no-store",
+        "adminPathMatch": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/"
+          ]
+        },
+        "authProtectedCacheControlOverride": {
+          "pathMatch": {
+            "algorithm": "equal-or-prefix-plus-slash",
+            "boundary": "path-segment",
+            "comparison": "literal-no-percent-decoding",
+            "kind": "prefix",
+            "phase": "normalized-path",
+            "values": [
+              "/"
+            ]
+          },
+          "value": "no-store, no-cache, must-revalidate, private",
+          "when": "force-vary-auth-and-auth-protected-path"
+        },
+        "cspAdmin": "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';",
+        "cspNonce": false,
+        "cspPublic": "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';",
+        "forceVaryAuth": true,
+        "headers": {
+          "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=()",
+          "referrer-policy": "no-referrer",
+          "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+          "x-content-type-options": "nosniff"
+        }
+      }
+    },
+    "orderedRules": [
+      {
+        "auth": {
+          "credentialEnvironmentNames": [
+            "EDGE_ADMIN_TOKEN"
+          ],
+          "exactPath": false,
+          "kind": "static_token",
+          "matching": {
+            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "cloudflare": "all-matching-rules-in-policy-order"
+          },
+          "preAuthBypassCondition": "none",
+          "preAuthBypassMethods": [],
+          "typeSource": "explicit",
+          "verifiability": {
+            "aws": "enforced",
+            "cloudflare": "enforced"
+          }
+        },
+        "index": 0,
+        "match": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "authEffectiveValues": [
+            "/"
+          ],
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/"
+          ]
+        },
+        "methods": {
+          "configuredButNotEnforced": [
+            "GET",
+            "HEAD",
+            "POST"
+          ],
+          "effective": [
+            "GET",
+            "HEAD",
+            "POST"
+          ],
+          "source": "global"
+        },
+        "mode": {
+          "authenticationDecision": "block",
+          "requestDecision": "block"
+        },
+        "name": "admin",
+        "pointer": "/routes/0",
+        "requestLimits": {
+          "source": "global"
+        },
+        "response": {
+          "cacheControl": "no-store",
+          "selectedBaseCacheControl": "no-store",
+          "selection": "first-auth-or-cache-rule"
+        }
+      }
+    ],
+    "policyDigest": "sha256:4c1f097a56d04414b4b563d3ab2b7e4313204db22ea22c1a080b1c433a29eb54",
+    "provenance": [
+      {
+        "analyzer": "allowed-surface@1",
+        "capability": "policy-projection-v1",
+        "complete": true,
+        "digest": "sha256:4c1f097a56d04414b4b563d3ab2b7e4313204db22ea22c1a080b1c433a29eb54",
+        "source": "policy",
+        "uri": "policy/archetypes/admin-panel.yml"
+      }
+    ],
+    "schemaVersion": 1,
+    "targetCapabilities": {
+      "aws": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "partial"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "warning-only"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "warning-only"
+        }
+      ],
+      "cloudflare": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "supported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "supported"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "supported"
+        }
+      ]
+    }
+  },
+  "policy/archetypes/microservice-origin.yml": {
+    "defaults": {
+      "authenticationDecision": "block",
+      "configuredMethods": [
+        "DELETE",
+        "GET",
+        "HEAD",
+        "PATCH",
+        "POST",
+        "PUT"
+      ],
+      "corsOptionsBypass": false,
+      "corsPreflight": {
+        "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
+        "bypassScope": "none",
+        "method": "OPTIONS",
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
+      },
+      "hosts": {
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
+        "kind": "any",
+        "unsupportedConfiguredValues": [],
+        "values": [],
+        "wildcard": "leading-subdomain-only"
+      },
+      "limits": {
+        "maxHeaderCount": 40,
+        "maxHeaderSize": 0,
+        "maxQueryLength": 512,
+        "maxQueryParams": 20,
+        "maxUriLength": 1024
+      },
+      "methods": [
+        "DELETE",
+        "GET",
+        "HEAD",
+        "PATCH",
+        "POST",
+        "PUT"
+      ],
+      "mode": "enforce",
+      "pathNormalization": {
+        "collapseSlashes": false,
+        "removeDotSegments": false,
+        "routeMatchPhase": "normalized-path"
+      },
+      "requestDecision": "block",
+      "response": {
+        "adminCacheControl": "no-store",
+        "adminPathMatch": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/admin",
+            "/docs",
+            "/swagger"
+          ]
+        },
+        "cspAdmin": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+        "cspNonce": false,
+        "cspPublic": "default-src 'none'; frame-ancestors 'none';",
+        "forceVaryAuth": true,
+        "headers": {
+          "permissions-policy": "camera=(), microphone=(), geolocation=()",
+          "referrer-policy": "no-referrer",
+          "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+          "x-content-type-options": "nosniff"
+        }
+      }
+    },
+    "orderedRules": [],
+    "policyDigest": "sha256:9e6a5e8ab8515525eb1bec3ac073e5e405afd90a2387833854e3cc24b03a3c0d",
+    "provenance": [
+      {
+        "analyzer": "allowed-surface@1",
+        "capability": "policy-projection-v1",
+        "complete": true,
+        "digest": "sha256:9e6a5e8ab8515525eb1bec3ac073e5e405afd90a2387833854e3cc24b03a3c0d",
+        "source": "policy",
+        "uri": "policy/archetypes/microservice-origin.yml"
+      }
+    ],
+    "schemaVersion": 1,
+    "targetCapabilities": {
+      "aws": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "partial"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "warning-only"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "warning-only"
+        }
+      ],
+      "cloudflare": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "supported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "supported"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "supported"
+        }
+      ]
+    }
+  },
+  "policy/archetypes/rest-api.yml": {
+    "defaults": {
+      "authenticationDecision": "block",
+      "configuredMethods": [
+        "DELETE",
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "PATCH",
+        "POST",
+        "PUT"
+      ],
+      "corsOptionsBypass": true,
+      "corsPreflight": {
+        "allowedOriginDecision": "early-204-before-request-validation",
+        "allowedOriginResponseCacheControl": "no-store",
+        "bypassScope": "all-request-validation-including-host-and-auth",
+        "method": "OPTIONS",
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "allowlist",
+          "values": [
+            "https://app.example.com"
+          ],
+          "wildcard": "asterisk-matches-any-origin"
+        }
+      },
+      "hosts": {
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
+        "kind": "any",
+        "unsupportedConfiguredValues": [],
+        "values": [],
+        "wildcard": "leading-subdomain-only"
+      },
+      "limits": {
+        "maxHeaderCount": 48,
+        "maxHeaderSize": 0,
+        "maxQueryLength": 1024,
+        "maxQueryParams": 30,
+        "maxUriLength": 2048
+      },
+      "methods": [
+        "DELETE",
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "PATCH",
+        "POST",
+        "PUT"
+      ],
+      "mode": "enforce",
+      "pathNormalization": {
+        "collapseSlashes": false,
+        "removeDotSegments": false,
+        "routeMatchPhase": "normalized-path"
+      },
+      "requestDecision": "block",
+      "response": {
+        "adminCacheControl": "no-store",
+        "adminPathMatch": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/api"
+          ]
+        },
+        "authProtectedCacheControlOverride": {
+          "pathMatch": {
+            "algorithm": "equal-or-prefix-plus-slash",
+            "boundary": "path-segment",
+            "comparison": "literal-no-percent-decoding",
+            "kind": "prefix",
+            "phase": "normalized-path",
+            "values": [
+              "/api"
+            ]
+          },
+          "value": "no-store, no-cache, must-revalidate, private",
+          "when": "force-vary-auth-and-auth-protected-path"
+        },
+        "cspAdmin": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+        "cspNonce": false,
+        "cspPublic": "default-src 'none'; frame-ancestors 'none';",
+        "forceVaryAuth": true,
+        "headers": {
+          "permissions-policy": "camera=(), microphone=(), geolocation=()",
+          "referrer-policy": "no-referrer",
+          "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+          "x-content-type-options": "nosniff"
+        }
+      }
+    },
+    "orderedRules": [
+      {
+        "auth": {
+          "configuredAlgorithm": "RS256",
+          "credentialEnvironmentNames": [],
+          "effectiveAlgorithm": "RS256",
+          "exactPath": false,
+          "kind": "jwt",
+          "matching": {
+            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "cloudflare": "all-matching-rules-in-policy-order"
+          },
+          "preAuthBypassCondition": "allowed-cors-origin-preflight",
+          "preAuthBypassMethods": [
+            "OPTIONS"
+          ],
+          "typeSource": "explicit",
+          "verifiability": {
+            "aws": "enforced",
+            "cloudflare": "enforced"
+          }
+        },
+        "index": 0,
+        "match": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "authEffectiveValues": [
+            "/api"
+          ],
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/api"
+          ]
+        },
+        "methods": {
+          "configuredButNotEnforced": [
+            "DELETE",
+            "GET",
+            "HEAD",
+            "OPTIONS",
+            "PATCH",
+            "POST",
+            "PUT"
+          ],
+          "effective": [
+            "DELETE",
+            "GET",
+            "HEAD",
+            "OPTIONS",
+            "PATCH",
+            "POST",
+            "PUT"
+          ],
+          "source": "global"
+        },
+        "mode": {
+          "authenticationDecision": "block",
+          "requestDecision": "block"
+        },
+        "name": "api",
+        "pointer": "/routes/0",
+        "requestLimits": {
+          "source": "global"
+        },
+        "response": {
+          "cacheControl": "no-store",
+          "selectedBaseCacheControl": "no-store",
+          "selection": "first-auth-or-cache-rule"
+        }
+      }
+    ],
+    "policyDigest": "sha256:5687d14823dc7b7b7226311747d760144909941998b16788ef045293237f326b",
+    "provenance": [
+      {
+        "analyzer": "allowed-surface@1",
+        "capability": "policy-projection-v1",
+        "complete": true,
+        "digest": "sha256:5687d14823dc7b7b7226311747d760144909941998b16788ef045293237f326b",
+        "source": "policy",
+        "uri": "policy/archetypes/rest-api.yml"
+      }
+    ],
+    "schemaVersion": 1,
+    "targetCapabilities": {
+      "aws": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "partial"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "warning-only"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "warning-only"
+        }
+      ],
+      "cloudflare": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "supported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "supported"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "supported"
+        }
+      ]
+    }
+  },
+  "policy/archetypes/spa-static-site.yml": {
+    "defaults": {
+      "authenticationDecision": "block",
+      "configuredMethods": [
+        "GET",
+        "HEAD"
+      ],
+      "corsOptionsBypass": false,
+      "corsPreflight": {
+        "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
+        "bypassScope": "none",
+        "method": "OPTIONS",
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
+      },
+      "hosts": {
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
+        "kind": "any",
+        "unsupportedConfiguredValues": [],
+        "values": [],
+        "wildcard": "leading-subdomain-only"
+      },
+      "limits": {
+        "maxHeaderCount": 64,
+        "maxHeaderSize": 0,
+        "maxQueryLength": 512,
+        "maxQueryParams": 20,
+        "maxUriLength": 1024
+      },
+      "methods": [
+        "GET",
+        "HEAD"
+      ],
+      "mode": "enforce",
+      "pathNormalization": {
+        "collapseSlashes": false,
+        "removeDotSegments": false,
+        "routeMatchPhase": "normalized-path"
+      },
+      "requestDecision": "block",
+      "response": {
+        "adminCacheControl": "no-store",
+        "adminPathMatch": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/admin",
+            "/docs",
+            "/swagger"
+          ]
+        },
+        "cspAdmin": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+        "cspNonce": false,
+        "cspPublic": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
+        "forceVaryAuth": true,
+        "headers": {
+          "permissions-policy": "camera=(), microphone=(), geolocation=()",
+          "referrer-policy": "strict-origin-when-cross-origin",
+          "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+          "x-content-type-options": "nosniff"
+        }
+      }
+    },
+    "orderedRules": [],
+    "policyDigest": "sha256:c41ee49d4f3950b532bafd5b61094ff4bb85bddda3d3c84ba0482849632014bb",
+    "provenance": [
+      {
+        "analyzer": "allowed-surface@1",
+        "capability": "policy-projection-v1",
+        "complete": true,
+        "digest": "sha256:c41ee49d4f3950b532bafd5b61094ff4bb85bddda3d3c84ba0482849632014bb",
+        "source": "policy",
+        "uri": "policy/archetypes/spa-static-site.yml"
+      }
+    ],
+    "schemaVersion": 1,
+    "targetCapabilities": {
+      "aws": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "partial"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "warning-only"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "warning-only"
+        }
+      ],
+      "cloudflare": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "supported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "supported"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "supported"
+        }
+      ]
+    }
+  },
+  "policy/base.yml": {
+    "defaults": {
+      "authenticationDecision": "block",
+      "configuredMethods": [
+        "GET",
+        "HEAD",
+        "POST"
+      ],
+      "corsOptionsBypass": false,
+      "corsPreflight": {
+        "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
+        "bypassScope": "none",
+        "method": "OPTIONS",
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
+      },
+      "hosts": {
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
+        "kind": "any",
+        "unsupportedConfiguredValues": [],
+        "values": [],
+        "wildcard": "leading-subdomain-only"
+      },
+      "limits": {
+        "maxHeaderCount": 64,
+        "maxHeaderSize": 0,
+        "maxQueryLength": 1024,
+        "maxQueryParams": 30,
+        "maxUriLength": 2048
+      },
+      "methods": [
+        "GET",
+        "HEAD",
+        "POST"
+      ],
+      "mode": "enforce",
+      "pathNormalization": {
+        "collapseSlashes": false,
+        "removeDotSegments": false,
+        "routeMatchPhase": "normalized-path"
+      },
+      "requestDecision": "block",
+      "response": {
+        "adminCacheControl": "no-store",
+        "adminPathMatch": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/admin",
+            "/docs",
+            "/swagger"
+          ]
+        },
+        "authProtectedCacheControlOverride": {
+          "pathMatch": {
+            "algorithm": "equal-or-prefix-plus-slash",
+            "boundary": "path-segment",
+            "comparison": "literal-no-percent-decoding",
+            "kind": "prefix",
+            "phase": "normalized-path",
+            "values": [
+              "/admin",
+              "/docs",
+              "/swagger"
+            ]
+          },
+          "value": "no-store, no-cache, must-revalidate, private",
+          "when": "force-vary-auth-and-auth-protected-path"
+        },
+        "cspAdmin": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+        "cspNonce": false,
+        "cspPublic": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
+        "forceVaryAuth": true,
+        "headers": {
+          "permissions-policy": "camera=(), microphone=(), geolocation=()",
+          "referrer-policy": "strict-origin-when-cross-origin",
+          "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+          "x-content-type-options": "nosniff"
+        }
+      }
+    },
+    "orderedRules": [
+      {
+        "auth": {
+          "credentialEnvironmentNames": [
+            "EDGE_ADMIN_TOKEN"
+          ],
+          "exactPath": false,
+          "kind": "static_token",
+          "matching": {
+            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "cloudflare": "all-matching-rules-in-policy-order"
+          },
+          "preAuthBypassCondition": "none",
+          "preAuthBypassMethods": [],
+          "typeSource": "explicit",
+          "verifiability": {
+            "aws": "enforced",
+            "cloudflare": "enforced"
+          }
+        },
+        "index": 0,
+        "match": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "authEffectiveValues": [
+            "/admin",
+            "/docs",
+            "/swagger"
+          ],
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/admin",
+            "/docs",
+            "/swagger"
+          ]
+        },
+        "methods": {
+          "configuredButNotEnforced": [
+            "GET",
+            "HEAD",
+            "POST"
+          ],
+          "effective": [
+            "GET",
+            "HEAD",
+            "POST"
+          ],
+          "source": "global"
+        },
+        "mode": {
+          "authenticationDecision": "block",
+          "requestDecision": "block"
+        },
+        "name": "admin",
+        "pointer": "/routes/0",
+        "requestLimits": {
+          "source": "global"
+        },
+        "response": {
+          "cacheControl": "no-store",
+          "selectedBaseCacheControl": "no-store",
+          "selection": "first-auth-or-cache-rule"
+        }
+      }
+    ],
+    "policyDigest": "sha256:5402a27057656c00922dcaf3a9b62199abc6eae2366e5df38f36182d64e25a94",
+    "provenance": [
+      {
+        "analyzer": "allowed-surface@1",
+        "capability": "policy-projection-v1",
+        "complete": true,
+        "digest": "sha256:5402a27057656c00922dcaf3a9b62199abc6eae2366e5df38f36182d64e25a94",
+        "source": "policy",
+        "uri": "policy/base.yml"
+      }
+    ],
+    "schemaVersion": 1,
+    "targetCapabilities": {
+      "aws": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "partial"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "warning-only"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "warning-only"
+        }
+      ],
+      "cloudflare": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "supported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "supported"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "supported"
+        }
+      ]
+    }
+  },
+  "policy/profiles/balanced.yml": {
+    "defaults": {
+      "authenticationDecision": "block",
+      "configuredMethods": [
+        "GET",
+        "HEAD",
+        "POST"
+      ],
+      "corsOptionsBypass": false,
+      "corsPreflight": {
+        "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
+        "bypassScope": "none",
+        "method": "OPTIONS",
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
+      },
+      "hosts": {
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
+        "kind": "any",
+        "unsupportedConfiguredValues": [],
+        "values": [],
+        "wildcard": "leading-subdomain-only"
+      },
+      "limits": {
+        "maxHeaderCount": 64,
+        "maxHeaderSize": 0,
+        "maxQueryLength": 1024,
+        "maxQueryParams": 30,
+        "maxUriLength": 2048
+      },
+      "methods": [
+        "GET",
+        "HEAD",
+        "POST"
+      ],
+      "mode": "enforce",
+      "pathNormalization": {
+        "collapseSlashes": false,
+        "removeDotSegments": false,
+        "routeMatchPhase": "normalized-path"
+      },
+      "requestDecision": "block",
+      "response": {
+        "adminCacheControl": "no-store",
+        "adminPathMatch": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/admin",
+            "/docs",
+            "/swagger"
+          ]
+        },
+        "authProtectedCacheControlOverride": {
+          "pathMatch": {
+            "algorithm": "equal-or-prefix-plus-slash",
+            "boundary": "path-segment",
+            "comparison": "literal-no-percent-decoding",
+            "kind": "prefix",
+            "phase": "normalized-path",
+            "values": [
+              "/admin",
+              "/docs",
+              "/swagger"
+            ]
+          },
+          "value": "no-store, no-cache, must-revalidate, private",
+          "when": "force-vary-auth-and-auth-protected-path"
+        },
+        "cspAdmin": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+        "cspNonce": false,
+        "cspPublic": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
+        "forceVaryAuth": true,
+        "headers": {
+          "permissions-policy": "camera=(), microphone=(), geolocation=()",
+          "referrer-policy": "strict-origin-when-cross-origin",
+          "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+          "x-content-type-options": "nosniff"
+        }
+      }
+    },
+    "orderedRules": [
+      {
+        "auth": {
+          "credentialEnvironmentNames": [
+            "EDGE_ADMIN_TOKEN"
+          ],
+          "exactPath": false,
+          "kind": "static_token",
+          "matching": {
+            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "cloudflare": "all-matching-rules-in-policy-order"
+          },
+          "preAuthBypassCondition": "none",
+          "preAuthBypassMethods": [],
+          "typeSource": "explicit",
+          "verifiability": {
+            "aws": "enforced",
+            "cloudflare": "enforced"
+          }
+        },
+        "index": 0,
+        "match": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "authEffectiveValues": [
+            "/admin",
+            "/docs",
+            "/swagger"
+          ],
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/admin",
+            "/docs",
+            "/swagger"
+          ]
+        },
+        "methods": {
+          "configuredButNotEnforced": [
+            "GET",
+            "HEAD",
+            "POST"
+          ],
+          "effective": [
+            "GET",
+            "HEAD",
+            "POST"
+          ],
+          "source": "global"
+        },
+        "mode": {
+          "authenticationDecision": "block",
+          "requestDecision": "block"
+        },
+        "name": "admin",
+        "pointer": "/routes/0",
+        "requestLimits": {
+          "source": "global"
+        },
+        "response": {
+          "cacheControl": "no-store",
+          "selectedBaseCacheControl": "no-store",
+          "selection": "first-auth-or-cache-rule"
+        }
+      }
+    ],
+    "policyDigest": "sha256:2853c95012a877356c44149bc84c11f6a7fc24f0f89e3ee2a0dddc73d759538f",
+    "provenance": [
+      {
+        "analyzer": "allowed-surface@1",
+        "capability": "policy-projection-v1",
+        "complete": true,
+        "digest": "sha256:2853c95012a877356c44149bc84c11f6a7fc24f0f89e3ee2a0dddc73d759538f",
+        "source": "policy",
+        "uri": "policy/profiles/balanced.yml"
+      }
+    ],
+    "schemaVersion": 1,
+    "targetCapabilities": {
+      "aws": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "partial"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "warning-only"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "warning-only"
+        }
+      ],
+      "cloudflare": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "supported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "supported"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "supported"
+        }
+      ]
+    }
+  },
+  "policy/profiles/permissive.yml": {
+    "defaults": {
+      "authenticationDecision": "block",
+      "configuredMethods": [
+        "DELETE",
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "PATCH",
+        "POST",
+        "PUT"
+      ],
+      "corsOptionsBypass": false,
+      "corsPreflight": {
+        "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
+        "bypassScope": "none",
+        "method": "OPTIONS",
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
+      },
+      "hosts": {
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
+        "kind": "any",
+        "unsupportedConfiguredValues": [],
+        "values": [],
+        "wildcard": "leading-subdomain-only"
+      },
+      "limits": {
+        "maxHeaderCount": 64,
+        "maxHeaderSize": 0,
+        "maxQueryLength": 2048,
+        "maxQueryParams": 50,
+        "maxUriLength": 4096
+      },
+      "methods": [
+        "DELETE",
+        "GET",
+        "HEAD",
+        "OPTIONS",
+        "PATCH",
+        "POST",
+        "PUT"
+      ],
+      "mode": "enforce",
+      "pathNormalization": {
+        "collapseSlashes": false,
+        "removeDotSegments": false,
+        "routeMatchPhase": "normalized-path"
+      },
+      "requestDecision": "block",
+      "response": {
+        "adminCacheControl": "no-store",
+        "adminPathMatch": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/admin",
+            "/docs",
+            "/swagger"
+          ]
+        },
+        "authProtectedCacheControlOverride": {
+          "pathMatch": {
+            "algorithm": "equal-or-prefix-plus-slash",
+            "boundary": "path-segment",
+            "comparison": "literal-no-percent-decoding",
+            "kind": "prefix",
+            "phase": "normalized-path",
+            "values": [
+              "/admin",
+              "/docs",
+              "/swagger"
+            ]
+          },
+          "value": "no-store, no-cache, must-revalidate, private",
+          "when": "force-vary-auth-and-auth-protected-path"
+        },
+        "cspAdmin": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
+        "cspNonce": false,
+        "cspPublic": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
+        "forceVaryAuth": true,
+        "headers": {
+          "permissions-policy": "camera=(), microphone=(), geolocation=()",
+          "referrer-policy": "strict-origin-when-cross-origin",
+          "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+          "x-content-type-options": "nosniff"
+        }
+      }
+    },
+    "orderedRules": [
+      {
+        "auth": {
+          "credentialEnvironmentNames": [
+            "EDGE_ADMIN_TOKEN"
+          ],
+          "exactPath": false,
+          "kind": "static_token",
+          "matching": {
+            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "cloudflare": "all-matching-rules-in-policy-order"
+          },
+          "preAuthBypassCondition": "none",
+          "preAuthBypassMethods": [],
+          "typeSource": "explicit",
+          "verifiability": {
+            "aws": "enforced",
+            "cloudflare": "enforced"
+          }
+        },
+        "index": 0,
+        "match": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "authEffectiveValues": [
+            "/admin",
+            "/docs",
+            "/swagger"
+          ],
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/admin",
+            "/docs",
+            "/swagger"
+          ]
+        },
+        "methods": {
+          "configuredButNotEnforced": [
+            "DELETE",
+            "GET",
+            "HEAD",
+            "OPTIONS",
+            "PATCH",
+            "POST",
+            "PUT"
+          ],
+          "effective": [
+            "DELETE",
+            "GET",
+            "HEAD",
+            "OPTIONS",
+            "PATCH",
+            "POST",
+            "PUT"
+          ],
+          "source": "global"
+        },
+        "mode": {
+          "authenticationDecision": "block",
+          "requestDecision": "block"
+        },
+        "name": "admin",
+        "pointer": "/routes/0",
+        "requestLimits": {
+          "source": "global"
+        },
+        "response": {
+          "cacheControl": "no-store",
+          "selectedBaseCacheControl": "no-store",
+          "selection": "first-auth-or-cache-rule"
+        }
+      }
+    ],
+    "policyDigest": "sha256:df410fb2ea4f4ed67dc4e1c9cfe959cacdb299ee9dbc173830de9080666e4127",
+    "provenance": [
+      {
+        "analyzer": "allowed-surface@1",
+        "capability": "policy-projection-v1",
+        "complete": true,
+        "digest": "sha256:df410fb2ea4f4ed67dc4e1c9cfe959cacdb299ee9dbc173830de9080666e4127",
+        "source": "policy",
+        "uri": "policy/profiles/permissive.yml"
+      }
+    ],
+    "schemaVersion": 1,
+    "targetCapabilities": {
+      "aws": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "partial"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "warning-only"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "warning-only"
+        }
+      ],
+      "cloudflare": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "supported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "supported"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "supported"
+        }
+      ]
+    }
+  },
+  "policy/profiles/strict.yml": {
+    "defaults": {
+      "authenticationDecision": "block",
+      "configuredMethods": [
+        "GET",
+        "HEAD",
+        "POST"
+      ],
+      "corsOptionsBypass": false,
+      "corsPreflight": {
+        "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
+        "bypassScope": "none",
+        "method": "OPTIONS",
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
+      },
+      "hosts": {
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
+        "kind": "any",
+        "unsupportedConfiguredValues": [],
+        "values": [],
+        "wildcard": "leading-subdomain-only"
+      },
+      "limits": {
+        "maxHeaderCount": 64,
+        "maxHeaderSize": 0,
+        "maxQueryLength": 512,
+        "maxQueryParams": 20,
+        "maxUriLength": 1024
+      },
+      "methods": [
+        "GET",
+        "HEAD",
+        "POST"
+      ],
+      "mode": "enforce",
+      "pathNormalization": {
+        "collapseSlashes": false,
+        "removeDotSegments": false,
+        "routeMatchPhase": "normalized-path"
+      },
+      "requestDecision": "block",
+      "response": {
+        "adminCacheControl": "no-store",
+        "adminPathMatch": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/admin",
+            "/api/admin",
+            "/docs",
+            "/internal",
+            "/swagger"
+          ]
+        },
+        "authProtectedCacheControlOverride": {
+          "pathMatch": {
+            "algorithm": "equal-or-prefix-plus-slash",
+            "boundary": "path-segment",
+            "comparison": "literal-no-percent-decoding",
+            "kind": "prefix",
+            "phase": "normalized-path",
+            "values": [
+              "/admin",
+              "/api/admin",
+              "/docs",
+              "/internal",
+              "/swagger"
+            ]
+          },
+          "value": "no-store, no-cache, must-revalidate, private",
+          "when": "force-vary-auth-and-auth-protected-path"
+        },
+        "cspAdmin": "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';",
+        "cspNonce": false,
+        "cspPublic": "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self';",
+        "forceVaryAuth": true,
+        "headers": {
+          "permissions-policy": "camera=(), microphone=(), geolocation=(), payment=()",
+          "referrer-policy": "no-referrer",
+          "strict-transport-security": "max-age=31536000; includeSubDomains; preload",
+          "x-content-type-options": "nosniff"
+        }
+      }
+    },
+    "orderedRules": [
+      {
+        "auth": {
+          "credentialEnvironmentNames": [
+            "EDGE_ADMIN_TOKEN"
+          ],
+          "exactPath": false,
+          "kind": "static_token",
+          "matching": {
+            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "cloudflare": "all-matching-rules-in-policy-order"
+          },
+          "preAuthBypassCondition": "none",
+          "preAuthBypassMethods": [],
+          "typeSource": "explicit",
+          "verifiability": {
+            "aws": "enforced",
+            "cloudflare": "enforced"
+          }
+        },
+        "index": 0,
+        "match": {
+          "algorithm": "equal-or-prefix-plus-slash",
+          "authEffectiveValues": [
+            "/admin",
+            "/api/admin",
+            "/docs",
+            "/internal",
+            "/swagger"
+          ],
+          "boundary": "path-segment",
+          "comparison": "literal-no-percent-decoding",
+          "kind": "prefix",
+          "phase": "normalized-path",
+          "values": [
+            "/admin",
+            "/api/admin",
+            "/docs",
+            "/internal",
+            "/swagger"
+          ]
+        },
+        "methods": {
+          "configuredButNotEnforced": [
+            "GET",
+            "HEAD",
+            "POST"
+          ],
+          "effective": [
+            "GET",
+            "HEAD",
+            "POST"
+          ],
+          "source": "global"
+        },
+        "mode": {
+          "authenticationDecision": "block",
+          "requestDecision": "block"
+        },
+        "name": "admin",
+        "pointer": "/routes/0",
+        "requestLimits": {
+          "source": "global"
+        },
+        "response": {
+          "cacheControl": "no-store",
+          "selectedBaseCacheControl": "no-store",
+          "selection": "first-auth-or-cache-rule"
+        }
+      }
+    ],
+    "policyDigest": "sha256:de118c7b5e27bb5ba2a0678b276613aded67fedb48bfcb7a0fcdfd44b9e46cde",
+    "provenance": [
+      {
+        "analyzer": "allowed-surface@1",
+        "capability": "policy-projection-v1",
+        "complete": true,
+        "digest": "sha256:de118c7b5e27bb5ba2a0678b276613aded67fedb48bfcb7a0fcdfd44b9e46cde",
+        "source": "policy",
+        "uri": "policy/profiles/strict.yml"
+      }
+    ],
+    "schemaVersion": 1,
+    "targetCapabilities": {
+      "aws": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "partial"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "warning-only"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "warning-only"
+        }
+      ],
+      "cloudflare": [
+        {
+          "id": "request.allow_methods",
+          "status": "supported"
+        },
+        {
+          "id": "request.allowed_hosts",
+          "status": "supported"
+        },
+        {
+          "id": "routes.request.allow_methods",
+          "status": "unsupported"
+        },
+        {
+          "id": "request.uri_query_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.header_limits",
+          "status": "supported"
+        },
+        {
+          "id": "request.path_normalization",
+          "status": "supported"
+        },
+        {
+          "id": "auth.route_gates",
+          "status": "supported"
+        },
+        {
+          "id": "routes.response.cache_control",
+          "status": "supported"
+        },
+        {
+          "id": "response.security_headers",
+          "status": "supported"
+        },
+        {
+          "id": "response.csp_nonce",
+          "status": "supported"
+        },
+        {
+          "id": "request.graphql_guard",
+          "status": "supported"
+        },
+        {
+          "id": "response.response_dlp",
+          "status": "supported"
+        }
+      ]
+    }
+  }
+}

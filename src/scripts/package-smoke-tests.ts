@@ -107,6 +107,8 @@ function assertPackageContents(pack: PackResult) {
     'lib/lint.d.ts',
     'contract/index.js',
     'contract/index.d.ts',
+    'contract/allowed-surface.js',
+    'contract/allowed-surface.d.ts',
     'contract/security-ir.js',
     'contract/security-ir.d.ts',
     'schemas/security-ir-v1.schema.json',
@@ -189,6 +191,7 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof pkg.compile, 'function');
       assert.strictEqual(typeof pkg.lintPolicy, 'function');
       assert.strictEqual(typeof contract.createSecurityContract, 'function');
+      assert.strictEqual(typeof contract.projectPolicyToAllowedSurface, 'function');
       assert.strictEqual(typeof securityIr.serializeSecurityContract, 'function');
       assert.strictEqual(schema.properties.schemaVersion.const, 1);
       assert.strictEqual(inspectionSchema.properties.schemaVersion.const, 1);
