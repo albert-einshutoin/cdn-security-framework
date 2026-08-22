@@ -126,6 +126,86 @@ describe('resolveOpenApiReferences', () => {
     expect(graph.references[0]?.target.sourceUri).toBe('defs%23v1.json');
     expect(graph.documents.find(({ sourceUri }) => sourceUri === 'defs%23v1.json')?.document)
       .toEqual({ Never: false });
+
+    fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
+      openapi: '3.1.0',
+      paths: {},
+      components: {
+        schemas: { Never: false },
+        responses: { Invalid: { $ref: '#/components/schemas/Never' } },
+      },
+    }));
+    expect(() => resolveOpenApiReferences({
+      root: loadOpenApiDocument({ inputPath: 'root.json', workspaceRoot: workspace }),
+      workspaceRoot: workspace,
+      limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
+    })).toThrow(expect.objectContaining({ code: 'OPENAPI_REF_NOT_FOUND' }));
+
+    fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
+      openapi: '3.0.3',
+      paths: {},
+      components: { schemas: { Invalid: { $ref: 'defs%23v1.json#/Never' } } },
+    }));
+    expect(() => resolveOpenApiReferences({
+      root: loadOpenApiDocument({ inputPath: 'root.json', workspaceRoot: workspace }),
+      workspaceRoot: workspace,
+      limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
+    })).toThrow(expect.objectContaining({ code: 'OPENAPI_REF_NOT_FOUND' }));
+
+    fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
+      openapi: '3.1.0',
+      paths: {},
+      components: { schemas: { Invalid: { $ref: 'defs%23v1.json#/Count' } } },
+    }));
+    fs.writeFileSync(path.join(workspace, 'defs#v1.json'), JSON.stringify({ Count: 1 }));
+    expect(() => resolveOpenApiReferences({
+      root: loadOpenApiDocument({ inputPath: 'root.json', workspaceRoot: workspace }),
+      workspaceRoot: workspace,
+      limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
+    })).toThrow(expect.objectContaining({ code: 'OPENAPI_REF_NOT_FOUND' }));
+  });
+
+  test('ignores literal ref keys in schema example values', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'openapi-literal-ref-'));
+    temporaryDirectories.push(workspace);
+    fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
+      openapi: '3.1.0',
+      paths: { '/items': { get: { responses: { 200: { links: { next: {
+        $ref: '#/components/links/Alias',
+      } } } } } } },
+      components: { schemas: {
+        Target: { type: 'string' },
+        default: { $ref: '#/components/schemas/Target' },
+        Sample: {
+        type: 'object',
+        properties: { value: { $ref: '#/components/schemas/Target' } },
+        example: { $ref: '#/components/schemas/Sample/default' },
+        default: { $ref: '#/components/schemas/Sample/example' },
+        enum: [{ $ref: '#/components/schemas/Sample/type' }],
+        customAnnotation: { $ref: '#/components/schemas/Target/type' },
+        schemas: { nested: { $ref: '#/components/schemas/Target/type' } },
+      } }, headers: {
+        schema: { schema: { $ref: '#/components/schemas/Target' } },
+      }, links: {
+        Alias: { $ref: '#/components/links/TargetLink' },
+        TargetLink: {
+          parameters: { id: { $ref: '#/components/schemas/Target/type' } },
+          requestBody: { $ref: '#/components/schemas/Target/type' },
+        },
+      } },
+    }));
+    const graph = resolveOpenApiReferences({
+      root: loadOpenApiDocument({ inputPath: 'root.json', workspaceRoot: workspace }),
+      workspaceRoot: workspace,
+      limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
+    });
+    expect(graph.references.map(({ from }) => from.pointer)).toEqual([
+      '/components/headers/schema/schema',
+      '/components/links/Alias',
+      '/components/schemas/Sample/properties/value',
+      '/components/schemas/default',
+      '/paths/~1items/get/responses/200/links/next',
+    ]);
   });
 
   test('caches sibling documents and keeps cycles as reference identity', () => {
@@ -225,7 +305,7 @@ describe('resolveOpenApiReferences', () => {
         schemas: {
           A: {
             type: 'object',
-            properties: Object.fromEntries(Array.from({ length: 10 }, (_, index) => [
+            properties: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [
               `p${index}`,
               { type: 'string' },
             ])),

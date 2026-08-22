@@ -21,6 +21,21 @@ import {
 import { resolveOpenApiRefPath } from './ref-boundary';
 
 const RESOLVED_OPENAPI_GRAPHS = new WeakSet<object>();
+const LITERAL_VALUE_KEYS = new Set(['const', 'default', 'enum', 'example', 'value']);
+const NAMED_OBJECT_MAP_KEYS = new Set([
+  '$defs', 'callbacks', 'content', 'definitions', 'dependentSchemas', 'encoding', 'examples',
+  'headers', 'links', 'parameters', 'pathItems', 'paths', 'patternProperties', 'properties',
+  'requestBodies', 'responses', 'schemas', 'securitySchemes', 'webhooks',
+]);
+const SCHEMA_MAP_KEYS = new Set([
+  '$defs', 'definitions', 'dependentSchemas', 'patternProperties', 'properties',
+]);
+const SCHEMA_NAMED_MAP_KEYS = new Set([...SCHEMA_MAP_KEYS, 'schemas']);
+const SCHEMA_SINGLE_KEYS = new Set([
+  'additionalProperties', 'contains', 'contentSchema', 'else', 'if', 'items', 'not',
+  'propertyNames', 'then', 'unevaluatedItems', 'unevaluatedProperties',
+]);
+const SCHEMA_ARRAY_KEYS = new Set(['allOf', 'anyOf', 'oneOf', 'prefixItems']);
 
 export { serializeResolvedOpenApiGraph } from './document-graph';
 export type {
@@ -211,6 +226,8 @@ export function resolveOpenApiReferences(
     fromPointer: string,
     depth: number,
     ancestors: ReadonlySet<string>,
+    linkObject = false,
+    schemaObject = false,
   ): void => {
     if (depth >= limits.maxRefDepth) {
       throw new OpenApiAnalysisError('OPENAPI_REF_DEPTH_LIMIT', {
@@ -238,6 +255,11 @@ export function resolveOpenApiReferences(
       });
     const targetDocument = rawPath === '' ? fromDocument : loadDocument(targetPath);
     const resolved = resolveJsonPointerValue(targetDocument.document, fragment, targetDocument.sourceUri);
+    if (resolved.value === null || (typeof resolved.value !== 'object'
+      && !(schemaObject && options.root.version === '3.1'
+        && typeof resolved.value === 'boolean'))) {
+      pointerError('OPENAPI_REF_NOT_FOUND', targetDocument.sourceUri, resolved.pointer);
+    }
     const target = location(targetDocument.sourceUri, resolved.pointer);
     const refLocation = `${fromDocument.sourceUri}#${fromPointer}`;
     if (!seenReferenceLocations.has(refLocation)) {
@@ -252,7 +274,7 @@ export function resolveOpenApiReferences(
     walk(resolved.value, targetDocument, resolved.pointer, depth + 1, new Set([
       ...ancestors,
       target.id,
-    ]));
+    ]), undefined, linkObject, schemaObject);
   };
 
   const walk = (
@@ -261,6 +283,10 @@ export function resolveOpenApiReferences(
     pointer: string,
     depth: number,
     ancestors: ReadonlySet<string>,
+    namedMap?: string,
+    linkObject = false,
+    schemaObject = false,
+    schemaArray = false,
   ): void => {
     resolutionVisits += 1;
     if (resolutionVisits > limits.maxNodes) {
@@ -277,11 +303,35 @@ export function resolveOpenApiReferences(
         pointer,
         depth,
         ancestors,
+        linkObject,
+        schemaObject,
       );
     }
     for (const [key, child] of Object.entries(value)) {
       if (key === '$ref') continue;
-      walk(child, document, `${pointer}/${encodePointerToken(key)}`, depth, ancestors);
+      if (schemaObject && !SCHEMA_MAP_KEYS.has(key)
+        && !SCHEMA_SINGLE_KEYS.has(key) && !SCHEMA_ARRAY_KEYS.has(key)) continue;
+      if (linkObject && (key === 'parameters' || key === 'requestBody')) continue;
+      if (!namedMap && (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
+        || (key === 'examples' && Array.isArray(child)))) continue;
+      const childNamedMap = !namedMap && NAMED_OBJECT_MAP_KEYS.has(key) && !Array.isArray(child)
+        ? key
+        : undefined;
+      walk(
+        child,
+        document,
+        `${pointer}/${encodePointerToken(key)}`,
+        depth,
+        ancestors,
+        childNamedMap,
+        namedMap === 'links',
+        schemaArray
+          || (namedMap !== undefined && SCHEMA_NAMED_MAP_KEYS.has(namedMap))
+          || (!schemaObject && namedMap === undefined && key === 'schema')
+          || (schemaObject && SCHEMA_SINGLE_KEYS.has(key) && !Array.isArray(child)),
+        schemaObject && (SCHEMA_ARRAY_KEYS.has(key)
+          || (key === 'items' && Array.isArray(child))),
+      );
     }
   };
 
