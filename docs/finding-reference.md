@@ -55,10 +55,10 @@ would block only in enforce mode is not reported as an enforce-mode Error.
 | `SC-AUTHN-002` | Error | An explicitly public operation is definitely covered by an enforced Edge auth gate. |
 | `SC-AUTHN-003` | Warning | Credential kind, location, or name is provably incompatible. |
 | `SC-AUTHN-004` | Info | Auth compatibility cannot be proved. |
-| `SC-LIMIT-001` | Error; Warning in monitor mode | An effective limit is below a finite exact or upper-bound recommendation. |
+| `SC-LIMIT-001` | Error; Warning in monitor mode or for conditional CORS preflight | An effective limit is below a finite exact or upper-bound recommendation. |
 | `SC-LIMIT-002` | Warning | An effective limit is more than `materiallyBroaderRatio` times a positive finite recommendation. The default ratio is `2`; the recommendation already includes its documented safety margin. |
 | `SC-REQUEST-001` | Info | An OpenAPI-required header is not required at Edge. |
-| `SC-REQUEST-002` | Error; Warning in monitor mode | Edge requires a header missing from a complete OpenAPI parameter contract. Effective runtime defaults are included. |
+| `SC-REQUEST-002` | Error; Warning in monitor mode or for conditional CORS preflight | Edge requires a header missing from a complete OpenAPI parameter contract. Effective runtime defaults are included. |
 | `SC-REQUEST-003` | Info | OpenAPI declares request content types, but the current Policy schema has no Edge content-type allowlist. |
 
 ### Authentication compatibility

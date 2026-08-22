@@ -303,10 +303,22 @@ describe('OpenAPI and Policy contract drift', () => {
           headerParameters: [], cookieParameters: [],
         },
       })]),
-      policy({ response_headers: { cors: { allow_origins: ['https://client.example'] } } }),
+      policy({
+        request: { block: { header_missing: ['x-policy'] } },
+        response_headers: { cors: { allow_origins: ['https://client.example'] } },
+      }),
     ));
-    expect(corsRequest.some(({ ruleId }) => ['SC-LIMIT-001', 'SC-LIMIT-002', 'SC-REQUEST-002']
-      .includes(ruleId))).toBe(false);
+    expect(corsRequest.find(({ ruleId }) => ruleId === 'SC-REQUEST-002')?.severity).toBe('warning');
+    expect(corsRequest.some(({ severity }) => severity === 'error')).toBe(false);
+
+    const emptyCorsRequest = compareRequestContracts(input(
+      contract([operation('OPTIONS', '/items')]),
+      policy({
+        request: { block: { header_missing: ['x-policy'] } },
+        response_headers: { cors: { allow_origins: [] } },
+      }),
+    ));
+    expect(emptyCorsRequest.find(({ ruleId }) => ruleId === 'SC-REQUEST-002')?.severity).toBe('error');
   });
 
   test('is deterministic, validates the comparison boundary, and matches the golden contract', () => {
@@ -366,6 +378,23 @@ describe('OpenAPI and Policy contract drift', () => {
     authOverBudget.declared.operations[0].auth.alternatives[0].schemes = Array(1001).fill(scheme);
     authOverBudget.allowed.orderedRules = Array(1000).fill(authOverBudget.allowed.orderedRules[0]);
     expect(() => compareAuthContracts(authOverBudget))
+      .toThrow('contract drift comparison exceeds visit budget');
+
+    const alternativeOverBudget = structuredClone(legacyAuthInput);
+    const anonymous = { anonymous: true, schemes: [] };
+    alternativeOverBudget.declared.operations[0].auth.alternatives = Array(1000).fill(anonymous);
+    alternativeOverBudget.declared.operations = Array(1001)
+      .fill(alternativeOverBudget.declared.operations[0]);
+    expect(() => compareAuthContracts(alternativeOverBudget))
+      .toThrow('contract drift comparison exceeds visit budget');
+
+    const emptyOperationOverBudget = structuredClone(comparison);
+    emptyOperationOverBudget.allowed.defaults.methods = [];
+    emptyOperationOverBudget.allowed.defaults.requiredHeaders = undefined;
+    emptyOperationOverBudget.allowed.orderedRules = [];
+    emptyOperationOverBudget.declared.operations = Array(1_000_001)
+      .fill(emptyOperationOverBudget.declared.operations[0]);
+    expect(() => compareAuthContracts(emptyOperationOverBudget))
       .toThrow('contract drift comparison exceeds visit budget');
     assertGolden('contract-drift-rules', {
       pathMethod: comparePathMethodContracts(input(

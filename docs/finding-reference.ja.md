@@ -53,10 +53,10 @@ Policy Capabilityの実効範囲が異なるため、Targetは必須です。Mon
 | `SC-AUTHN-002` | Error | 明示Public OperationをEnforce済みEdge Auth Gateが確実に覆う。 |
 | `SC-AUTHN-003` | Warning | CredentialのKind、Location、Nameが確実に非互換である。 |
 | `SC-AUTHN-004` | Info | Auth互換性を証明できない。 |
-| `SC-LIMIT-001` | Error、MonitorではWarning | 実効Limitが有限のExactまたはUpper-bound Recommendation未満である。 |
+| `SC-LIMIT-001` | Error、Monitorまたは条件付きCORSプリフライトではWarning | 実効Limitが有限のExactまたはUpper-bound Recommendation未満である。 |
 | `SC-LIMIT-002` | Warning | 実効Limitが正の有限Recommendationの`materiallyBroaderRatio`倍を超える。既定値は`2`で、Recommendationには既定Safety Marginが既に含まれる。 |
 | `SC-REQUEST-001` | Info | OpenAPI必須HeaderをEdgeで必須化していない。 |
-| `SC-REQUEST-002` | Error、MonitorではWarning | 完全なOpenAPI Parameter ContractにないHeaderをEdgeが要求する。Runtime Defaultも実効値に含む。 |
+| `SC-REQUEST-002` | Error、Monitorまたは条件付きCORSプリフライトではWarning | 完全なOpenAPI Parameter ContractにないHeaderをEdgeが要求する。Runtime Defaultも実効値に含む。 |
 | `SC-REQUEST-003` | Info | OpenAPIはRequest Content Typeを宣言するが、現行Policy SchemaにはEdge Content-Type Allowlistがない。 |
 
 ### Authentication Compatibility
