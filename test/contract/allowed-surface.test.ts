@@ -225,6 +225,7 @@ describe('Allowed Surface Model v1', () => {
         ipv6LiteralSupport: 'unsupported',
       },
       pathNormalization: { routeMatchPhase: 'normalized-path' },
+      requiredHeaders: { values: ['user-agent'], source: 'runtime-default' },
       response: { adminPathMatch: { algorithm: 'equal-or-prefix-plus-slash' } },
     });
     expect(projected.orderedRules.map(({ name }) => name)).toEqual([
@@ -245,6 +246,7 @@ describe('Allowed Surface Model v1', () => {
         preAuthBypassMethods: [],
         preAuthBypassCondition: 'none',
         credentialEnvironmentNames: ['FIRST_TOKEN'],
+        credential: { location: 'header', names: ['x-first'] },
       },
       response: {
         selection: 'first-auth-or-cache-rule',
@@ -274,6 +276,9 @@ describe('Allowed Surface Model v1', () => {
     });
     expect(projected.targetCapabilities.cloudflare).toContainEqual({
       id: 'response.csp_nonce', status: 'supported',
+    });
+    expect(projected.targetCapabilities.aws).toContainEqual({
+      id: 'request.content_type', status: 'unsupported',
     });
 
     input.firewall = { jwks: { allowed_hosts: ['id.example'] } };

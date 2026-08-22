@@ -10,6 +10,7 @@ const TARGET_CAPABILITIES = {
         { id: 'routes.request.allow_methods', status: 'unsupported' },
         { id: 'request.uri_query_limits', status: 'supported' },
         { id: 'request.header_limits', status: 'partial' },
+        { id: 'request.content_type', status: 'unsupported' },
         { id: 'request.path_normalization', status: 'supported' },
         { id: 'auth.route_gates', status: 'supported' },
         { id: 'routes.response.cache_control', status: 'supported' },
@@ -24,6 +25,7 @@ const TARGET_CAPABILITIES = {
         { id: 'routes.request.allow_methods', status: 'unsupported' },
         { id: 'request.uri_query_limits', status: 'supported' },
         { id: 'request.header_limits', status: 'supported' },
+        { id: 'request.content_type', status: 'unsupported' },
         { id: 'request.path_normalization', status: 'supported' },
         { id: 'auth.route_gates', status: 'supported' },
         { id: 'routes.response.cache_control', status: 'supported' },
@@ -49,6 +51,20 @@ function credentialEnvironmentNames(route) {
         case 'basic_auth': return [gate.credentials_env || 'BASIC_AUTH_CREDS'];
         case 'jwt': return gate.secret_env ? [gate.secret_env] : [];
         case 'signed_url': return [gate.secret_env || 'URL_SIGNING_SECRET'];
+    }
+}
+function credentialDescriptor(route, kind) {
+    const gate = route.auth_gate;
+    switch (kind) {
+        case 'static_token': return { location: 'header', names: [(gate?.header || 'x-edge-token').toLowerCase()] };
+        case 'basic_auth':
+        case 'jwt': return { location: 'header', names: ['authorization'] };
+        case 'signed_url': return {
+            location: 'query',
+            names: [gate?.expires_param || 'exp', gate?.signature_param || 'sig', gate?.nonce_param]
+                .filter((name) => Boolean(name)).sort(),
+        };
+        case 'none': return { location: 'header', names: [] };
     }
 }
 function typeSource(route) {
@@ -116,6 +132,9 @@ function projectPolicyToAllowedSurface(policy, options) {
         ? stablePrefixes(cors.allow_origins)
         : [];
     const configuredHosts = stablePrefixes(request.allowedHosts);
+    const effectiveRequiredHeaders = Array.isArray(request.requiredHeaders)
+        ? request.requiredHeaders.filter((header) => typeof header === 'string')
+        : [];
     const unsupportedHosts = configuredHosts.filter((host) => host.includes(':'));
     const effectiveHosts = configuredHosts.filter((host) => !host.includes(':'));
     const methods = stableMethods(corsOptionsBypass ? [...configuredMethods, 'OPTIONS'] : configuredMethods);
@@ -165,6 +184,10 @@ function projectPolicyToAllowedSurface(policy, options) {
                 maxUriLength: request.maxUriLength,
                 maxHeaderSize: request.maxHeaderSize,
                 maxHeaderCount: request.maxHeaderCount,
+            },
+            requiredHeaders: {
+                values: stablePrefixes(effectiveRequiredHeaders.map((header) => header.toLowerCase())),
+                source: policy.request.block?.header_missing === undefined ? 'runtime-default' : 'configured',
             },
             pathNormalization: {
                 ...request.normalizePath,
@@ -255,6 +278,7 @@ function projectPolicyToAllowedSurface(policy, options) {
                     preAuthBypassMethods: corsOptionsBypass ? ['OPTIONS'] : [],
                     preAuthBypassCondition: corsOptionsBypass ? 'allowed-cors-origin-preflight' : 'none',
                     credentialEnvironmentNames: credentialEnvironmentNames(route),
+                    credential: credentialDescriptor(route, authKind),
                     ...algorithms,
                     verifiability: verification,
                 },

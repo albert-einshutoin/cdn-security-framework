@@ -71,6 +71,10 @@ export interface AllowedDefaultsV1 {
         maxHeaderSize: number;
         maxHeaderCount: number;
     };
+    requiredHeaders?: {
+        values: string[];
+        source: 'configured' | 'runtime-default';
+    };
     pathNormalization: {
         collapseSlashes: boolean;
         removeDotSegments: boolean;
@@ -107,6 +111,10 @@ export interface AllowedRouteRuleV1 {
         preAuthBypassMethods: string[];
         preAuthBypassCondition: 'allowed-cors-origin-preflight' | 'none';
         credentialEnvironmentNames: string[];
+        credential?: {
+            location: 'header' | 'query';
+            names: string[];
+        };
         configuredAlgorithm?: string;
         effectiveAlgorithm?: 'HS256' | 'RS256' | 'HMAC-SHA256';
         verifiability: Record<AllowedSurfaceTarget, AuthVerifiability>;

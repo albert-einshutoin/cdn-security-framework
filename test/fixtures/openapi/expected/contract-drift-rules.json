@@ -1,0 +1,380 @@
+{
+  "authentication": [
+    {
+      "actual": {
+        "auth": [
+          {
+            "credential": {
+              "location": "header",
+              "names": [
+                "x-edge-key"
+              ]
+            },
+            "kind": "static_token",
+            "policyRule": "private",
+            "verifiability": "enforced"
+          }
+        ],
+        "mode": "enforce"
+      },
+      "category": "authentication",
+      "confidence": "deterministic",
+      "evidence": [
+        {
+          "analyzer": "openapi@1",
+          "capability": "openapi-operations-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/paths/~1private/get",
+          "source": "openapi",
+          "uri": "spec/openapi.yaml"
+        },
+        {
+          "analyzer": "allowed-surface@1",
+          "capability": "authentication-drift-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/routes/0/auth_gate",
+          "source": "policy",
+          "uri": "policy/security.yml"
+        }
+      ],
+      "expected": {
+        "alternatives": [
+          {
+            "anonymous": false,
+            "schemes": [
+              {
+                "capability": "supported",
+                "kind": "api-key",
+                "location": "header",
+                "name": "key",
+                "parameterName": "x-client-key",
+                "scopes": []
+              }
+            ]
+          }
+        ]
+      },
+      "instanceId": "44c708122e0d5d157f461127e32dfde17e5148f3dce54f2483b06bc99915e035",
+      "message": "Credential kind, location, or parameter name differs between OpenAPI and the selected Edge target. This compares the selected Edge contract only; Application authentication is not evaluated.",
+      "remediation": {
+        "safeAutoFix": false,
+        "summary": "Align credential shape without exposing credential values."
+      },
+      "route": {
+        "method": "GET",
+        "path": "/private"
+      },
+      "ruleId": "SC-AUTHN-003",
+      "schemaVersion": 1,
+      "severity": "warning",
+      "title": "OpenAPI and Edge authentication shapes are incompatible"
+    }
+  ],
+  "pathMethod": [
+    {
+      "actual": {
+        "extraMethods": [
+          "DELETE",
+          "GET"
+        ],
+        "methods": [
+          "DELETE",
+          "GET"
+        ]
+      },
+      "category": "exposure",
+      "confidence": "deterministic",
+      "evidence": [
+        {
+          "analyzer": "openapi@1",
+          "capability": "openapi-operations-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/paths/~1users/post",
+          "source": "openapi",
+          "uri": "spec/openapi.yaml"
+        },
+        {
+          "analyzer": "allowed-surface@1",
+          "capability": "path-method-drift-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/request/allow_methods",
+          "source": "policy",
+          "uri": "policy/security.yml"
+        }
+      ],
+      "expected": {
+        "methods": [
+          "POST"
+        ]
+      },
+      "instanceId": "8cdeb1b5ae8356ec35fd956f97aa9184bc2ba85fd021f318c35d08b13f8e77e4",
+      "message": "The global Edge method allowlist includes methods not declared for this OpenAPI route.",
+      "remediation": {
+        "safeAutoFix": false,
+        "summary": "Remove undeclared methods or declare the intended operations."
+      },
+      "route": {
+        "path": "/users"
+      },
+      "ruleId": "SC-EXPOSURE-001",
+      "schemaVersion": 1,
+      "severity": "error",
+      "title": "Policy allows undeclared methods on a declared route"
+    },
+    {
+      "actual": {
+        "decision": "block",
+        "methods": [
+          "DELETE",
+          "GET"
+        ]
+      },
+      "category": "exposure",
+      "confidence": "deterministic",
+      "evidence": [
+        {
+          "analyzer": "openapi@1",
+          "capability": "openapi-operations-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/paths/~1users/post",
+          "source": "openapi",
+          "uri": "spec/openapi.yaml"
+        },
+        {
+          "analyzer": "allowed-surface@1",
+          "capability": "path-method-drift-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/request/allow_methods",
+          "source": "policy",
+          "uri": "policy/security.yml"
+        }
+      ],
+      "expected": {
+        "methods": [
+          "POST"
+        ]
+      },
+      "instanceId": "3f74c9a256156f594fda17ea2f43b8ad07401d86c58c8ef6fd21228ac58209db",
+      "message": "The selected Edge target rejects an operation declared by OpenAPI.",
+      "remediation": {
+        "safeAutoFix": false,
+        "summary": "Align the effective Policy method set with the declared operation."
+      },
+      "route": {
+        "method": "POST",
+        "path": "/users"
+      },
+      "ruleId": "SC-EXPOSURE-002",
+      "schemaVersion": 1,
+      "severity": "error",
+      "title": "Declared operation blocked by Policy"
+    }
+  ],
+  "request": [
+    {
+      "actual": {
+        "decision": "block",
+        "edgeRequiredHeaders": [
+          "x-policy"
+        ],
+        "source": "configured",
+        "undeclared": [
+          "x-policy"
+        ]
+      },
+      "category": "misconfiguration",
+      "confidence": "deterministic",
+      "evidence": [
+        {
+          "analyzer": "openapi@1",
+          "capability": "openapi-operations-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/paths/~1content/get",
+          "source": "openapi",
+          "uri": "spec/openapi.yaml"
+        },
+        {
+          "analyzer": "allowed-surface@1",
+          "capability": "request-drift-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/request/block/header_missing",
+          "source": "policy",
+          "uri": "policy/security.yml"
+        }
+      ],
+      "expected": {
+        "requiredHeaders": [
+          "x-contract"
+        ]
+      },
+      "instanceId": "8ab995f9e12a27b9a3e895fbf97d33170f0f4079e61d062de24d2e6addd0508c",
+      "message": "The effective Edge header requirement is absent from the OpenAPI client contract.",
+      "remediation": {
+        "safeAutoFix": false,
+        "summary": "Declare the client header or remove the Edge requirement."
+      },
+      "route": {
+        "method": "GET",
+        "path": "/content"
+      },
+      "ruleId": "SC-REQUEST-002",
+      "schemaVersion": 1,
+      "severity": "error",
+      "title": "Policy requires an undeclared header"
+    },
+    {
+      "actual": {
+        "control": "max_uri_length",
+        "value": 2048
+      },
+      "category": "resource-limit",
+      "confidence": "deterministic",
+      "evidence": [
+        {
+          "analyzer": "openapi@1",
+          "capability": "openapi-operations-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/paths/~1content/get",
+          "source": "openapi",
+          "uri": "spec/openapi.yaml"
+        },
+        {
+          "analyzer": "allowed-surface@1",
+          "capability": "request-drift-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/request/limits/max_uri_length",
+          "source": "policy",
+          "uri": "policy/security.yml"
+        }
+      ],
+      "expected": {
+        "control": "max_uri_length",
+        "materiallyBroaderRatio": 2,
+        "recommended": 25
+      },
+      "instanceId": "79e61f944c2d4fa67a01d24b681a5f39c2856f850e2a3f9113845d6cebe8b22d",
+      "message": "The effective Edge max_uri_length limit exceeds the finite recommendation by more than the configured 2x threshold.",
+      "remediation": {
+        "safeAutoFix": false,
+        "summary": "Reduce the limit while retaining the documented recommendation margin."
+      },
+      "route": {
+        "method": "GET",
+        "path": "/content"
+      },
+      "ruleId": "SC-LIMIT-002",
+      "schemaVersion": 1,
+      "severity": "warning",
+      "title": "Policy limit is materially broader than the finite recommendation"
+    },
+    {
+      "actual": {
+        "edgeRequiredHeaders": [
+          "x-policy"
+        ],
+        "unchecked": [
+          "x-contract"
+        ]
+      },
+      "category": "misconfiguration",
+      "confidence": "deterministic",
+      "evidence": [
+        {
+          "analyzer": "openapi@1",
+          "capability": "openapi-operations-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/paths/~1content/get",
+          "source": "openapi",
+          "uri": "spec/openapi.yaml"
+        },
+        {
+          "analyzer": "allowed-surface@1",
+          "capability": "request-drift-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/request/block/header_missing",
+          "source": "policy",
+          "uri": "policy/security.yml"
+        }
+      ],
+      "expected": {
+        "requiredHeaders": [
+          "x-contract"
+        ]
+      },
+      "instanceId": "53da707693009f66c1271b91741e108ff1af9b8f2f62422f48ca7c108aee6b0b",
+      "message": "The selected Edge target does not require one or more declared headers. Application validation is not evaluated.",
+      "remediation": {
+        "safeAutoFix": false,
+        "summary": "Decide whether these headers belong at Edge or only in Application validation."
+      },
+      "route": {
+        "method": "GET",
+        "path": "/content"
+      },
+      "ruleId": "SC-REQUEST-001",
+      "schemaVersion": 1,
+      "severity": "info",
+      "title": "Required OpenAPI header is not checked at Edge"
+    },
+    {
+      "actual": {
+        "capability": "request.content_type",
+        "status": "unsupported",
+        "target": "aws"
+      },
+      "category": "misconfiguration",
+      "confidence": "deterministic",
+      "evidence": [
+        {
+          "analyzer": "openapi@1",
+          "capability": "openapi-operations-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/paths/~1content/get",
+          "source": "openapi",
+          "uri": "spec/openapi.yaml"
+        },
+        {
+          "analyzer": "allowed-surface@1",
+          "capability": "request-drift-v1",
+          "complete": true,
+          "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "pointer": "/request",
+          "source": "policy",
+          "uri": "policy/security.yml"
+        }
+      ],
+      "expected": {
+        "contentTypes": [
+          "application/json"
+        ]
+      },
+      "instanceId": "54ca8fc24be4d3d1bfe964fa1fa6da12ef84afbe4cd0c6296786a50181e924da",
+      "message": "The current Policy schema has no request Content-Type allowlist, so compatibility cannot be enforced at Edge. Application validation is not evaluated.",
+      "remediation": {
+        "safeAutoFix": false,
+        "summary": "Keep Content-Type validation in the Application until Edge support exists."
+      },
+      "route": {
+        "method": "GET",
+        "path": "/content"
+      },
+      "ruleId": "SC-REQUEST-003",
+      "schemaVersion": 1,
+      "severity": "info",
+      "title": "Content-Type compatibility is not enforced by the selected Edge target"
+    }
+  ]
+}
