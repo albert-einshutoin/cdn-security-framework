@@ -93,7 +93,9 @@ function compareRequestContracts(input, options = {}) {
         ]);
         const requiredHeaders = input.allowed.defaults.requiredHeaders;
         const policyHeaders = new Set(requiredHeaders?.values ?? []);
-        const checkedHeaders = new Set(policyHeaders);
+        const checkedHeaders = new Set(preflightBypassesValidation ? [] : policyHeaders);
+        const requiredHeadersPointer = requiredHeaders?.source === 'runtime-default'
+            ? '/request' : '/request/block/header_missing';
         if (!preflightBypassesValidation) {
             for (const { rule, relation } of (0, shared_1.matchingAuthRules)(operation, input.allowed)) {
                 if (relation === 'definitely-covered' && rule.auth.verifiability[input.target] === 'enforced'
@@ -114,7 +116,7 @@ function compareRequestContracts(input, options = {}) {
                 route: { method: operation.method, path: operation.path, operationId: operation.operationId },
                 expected: { requiredHeaders: [...declaredHeaders].sort() },
                 actual: { edgeRequiredHeaders: [...checkedHeaders].sort(), unchecked },
-                evidence: (0, shared_1.evidenceFor)(operation, input.allowed, '/request/block/header_missing', 'request-drift-v1'),
+                evidence: (0, shared_1.evidenceFor)(operation, input.allowed, requiredHeadersPointer, 'request-drift-v1'),
                 remediation: { summary: 'Decide whether these headers belong at Edge or only in Application validation.', safeAutoFix: false },
             }));
         const undeclared = [...policyHeaders].filter((header) => !declaredHeaders.has(header)).sort();
@@ -140,7 +142,7 @@ function compareRequestContracts(input, options = {}) {
                     decision: input.allowed.defaults.requestDecision,
                     ...(preflightBypassesValidation ? { conditionalPreflightBypass: true } : {}),
                 },
-                evidence: (0, shared_1.evidenceFor)(operation, input.allowed, '/request/block/header_missing', 'request-drift-v1'),
+                evidence: (0, shared_1.evidenceFor)(operation, input.allowed, requiredHeadersPointer, 'request-drift-v1'),
                 remediation: { summary: 'Declare the client header or remove the Edge requirement.', safeAutoFix: false },
             }));
         }

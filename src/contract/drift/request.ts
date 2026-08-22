@@ -117,7 +117,9 @@ export function compareRequestContracts(
     ]);
     const requiredHeaders = input.allowed.defaults.requiredHeaders;
     const policyHeaders = new Set(requiredHeaders?.values ?? []);
-    const checkedHeaders = new Set(policyHeaders);
+    const checkedHeaders = new Set(preflightBypassesValidation ? [] : policyHeaders);
+    const requiredHeadersPointer = requiredHeaders?.source === 'runtime-default'
+      ? '/request' : '/request/block/header_missing';
     if (!preflightBypassesValidation) {
       for (const { rule, relation } of matchingAuthRules(operation, input.allowed)) {
         if (relation === 'definitely-covered' && rule.auth.verifiability[input.target] === 'enforced'
@@ -137,7 +139,7 @@ export function compareRequestContracts(
       route: { method: operation.method, path: operation.path, operationId: operation.operationId },
       expected: { requiredHeaders: [...declaredHeaders].sort() },
       actual: { edgeRequiredHeaders: [...checkedHeaders].sort(), unchecked },
-      evidence: evidenceFor(operation, input.allowed, '/request/block/header_missing', 'request-drift-v1'),
+      evidence: evidenceFor(operation, input.allowed, requiredHeadersPointer, 'request-drift-v1'),
       remediation: { summary: 'Decide whether these headers belong at Edge or only in Application validation.', safeAutoFix: false },
     }));
 
@@ -164,7 +166,7 @@ export function compareRequestContracts(
           decision: input.allowed.defaults.requestDecision,
           ...(preflightBypassesValidation ? { conditionalPreflightBypass: true } : {}),
         },
-        evidence: evidenceFor(operation, input.allowed, '/request/block/header_missing', 'request-drift-v1'),
+        evidence: evidenceFor(operation, input.allowed, requiredHeadersPointer, 'request-drift-v1'),
         remediation: { summary: 'Declare the client header or remove the Edge requirement.', safeAutoFix: false },
       }));
     }

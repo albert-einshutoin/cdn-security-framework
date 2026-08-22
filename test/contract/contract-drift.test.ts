@@ -358,6 +358,20 @@ describe('OpenAPI and Policy contract drift', () => {
     expect(corsRequest.find(({ ruleId }) => ruleId === 'SC-REQUEST-002')?.severity).toBe('warning');
     expect(corsRequest.some(({ severity }) => severity === 'error')).toBe(false);
 
+    const declaredCorsHeader = compareRequestContracts(input(
+      contract([operation('OPTIONS', '/items', {
+        request: {
+          contentTypes: [], requiredHeaders: ['x-policy'], queryParameters: [], pathParameters: [],
+          headerParameters: [], cookieParameters: [],
+        },
+      })]),
+      policy({
+        request: { block: { header_missing: ['x-policy'] } },
+        response_headers: { cors: { allow_origins: ['https://client.example'] } },
+      }),
+    ));
+    expect(declaredCorsHeader.some(({ ruleId }) => ruleId === 'SC-REQUEST-001')).toBe(true);
+
     const authHeaderRequest = compareRequestContracts(input(
       contract([operation('GET', '/key', {
         exposure: 'authenticated',
@@ -431,6 +445,12 @@ describe('OpenAPI and Policy contract drift', () => {
       }),
     ));
     expect(emptyCorsRequest.find(({ ruleId }) => ruleId === 'SC-REQUEST-002')?.severity).toBe('error');
+
+    const runtimeDefault = compareRequestContracts(input(
+      contract([operation('GET', '/items')]), policy({ request: { allow_methods: ['GET'] } }),
+    ));
+    expect(runtimeDefault.find(({ ruleId }) => ruleId === 'SC-REQUEST-002')
+      ?.evidence.at(-1)?.pointer).toBe('/request');
   });
 
   test('is deterministic, validates the comparison boundary, and matches the golden contract', () => {
