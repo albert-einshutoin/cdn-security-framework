@@ -104,10 +104,23 @@ export function validateComparisonInput(input: ContractDriftInput): void {
       throw new Error('contract drift comparison exceeds visit budget');
     }
   }
-  const operations = input.declared.operations.length;
-  if (operations > MAX_COMPARISON_VISITS
-    || operations > Math.floor(MAX_COMPARISON_VISITS / Math.max(1, comparisonWidth))) {
-    throw new Error('contract drift comparison exceeds visit budget');
+  let visits = 0;
+  const ruleCount = Math.max(1, input.allowed.orderedRules.length);
+  for (const operation of input.declared.operations) {
+    if (!Array.isArray(operation.auth?.alternatives)) throw new Error('invalid contract drift input');
+    let schemes = 0;
+    for (const alternative of operation.auth.alternatives) {
+      if (!Array.isArray(alternative.schemes)) throw new Error('invalid contract drift input');
+      schemes += alternative.schemes.length;
+      if (!Number.isSafeInteger(schemes)) {
+        throw new Error('contract drift comparison exceeds visit budget');
+      }
+    }
+    const remaining = MAX_COMPARISON_VISITS - visits - comparisonWidth;
+    if (remaining < 0 || schemes > Math.floor(remaining / ruleCount)) {
+      throw new Error('contract drift comparison exceeds visit budget');
+    }
+    visits += comparisonWidth + schemes * ruleCount;
   }
 }
 

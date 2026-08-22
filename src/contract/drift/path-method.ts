@@ -43,10 +43,7 @@ export function comparePathMethodContracts(input: ContractDriftInput): SecurityF
   for (const [routePath, operations] of operationsByPath) {
     const declaredMethods = [...new Set(operations.map(({ method }) => method))].sort();
     const declaredMethodSet = new Set<string>(declaredMethods);
-    const extraMethods = allowed.defaults.methods.filter((method) => (
-      !declaredMethodSet.has(method)
-      && !(method === 'OPTIONS' && allowed.defaults.corsOptionsBypass)
-    ));
+    const extraMethods = allowed.defaults.methods.filter((method) => !declaredMethodSet.has(method));
     if (extraMethods.length > 0 && declared.capabilities.routes === 'complete') {
       findings.push(makeFinding({
         ruleId: 'SC-EXPOSURE-001',
@@ -68,7 +65,12 @@ export function comparePathMethodContracts(input: ContractDriftInput): SecurityF
   for (const rule of allowed.orderedRules) {
     const policyPaths = rule.auth.exactPath ? rule.match.authEffectiveValues : rule.match.values;
     for (const prefix of policyPaths) {
-      if (rule.auth.exactPath && !declaredShapes.has(normalizedPathShape(prefix))) {
+      const exactRelations = rule.auth.exactPath
+        ? declared.operations.map((operation) => pathRelation(operation, prefix, allowed, 'exact'))
+        : [];
+      if (rule.auth.exactPath
+        && !declaredShapes.has(normalizedPathShape(prefix))
+        && exactRelations.every((relation) => relation === 'definitely-disjoint')) {
         findings.push(makeFinding({
           ruleId: 'SC-INVENTORY-002',
           severity: declared.capabilities.routes === 'complete' ? 'error' : 'warning',

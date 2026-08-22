@@ -143,7 +143,16 @@ describe('OpenAPI and Policy contract drift', () => {
       contract([operation('GET', '/cors')]),
       policy({ response_headers: { cors: { allow_origins: ['https://client.example'] } } }),
     ));
-    expect(corsMethods.some(({ ruleId }) => ruleId === 'SC-EXPOSURE-001')).toBe(false);
+    expect(corsMethods.some(({ ruleId }) => ruleId === 'SC-EXPOSURE-001')).toBe(true);
+
+    const concreteExact = comparePathMethodContracts(input(
+      contract([operation('GET', '/download/{filename}')]),
+      policy({ routes: [{
+        name: 'concrete-download', match: { path_prefixes: ['/download/report.pdf'] },
+        auth_gate: { type: 'signed_url', exact_path: true, secret_env: 'SIGNED_URL_SECRET' },
+      }] }),
+    ));
+    expect(concreteExact.some(({ ruleId }) => ruleId === 'SC-INVENTORY-002')).toBe(false);
   });
 
   test('preserves auth alternatives and refuses Bearer-to-JWT inference', () => {
@@ -350,6 +359,13 @@ describe('OpenAPI and Policy contract drift', () => {
       },
     }];
     expect(() => comparePathMethodContracts(overBudget))
+      .toThrow('contract drift comparison exceeds visit budget');
+
+    const authOverBudget = structuredClone(legacyAuthInput);
+    const scheme = authOverBudget.declared.operations[0].auth.alternatives[0].schemes[0];
+    authOverBudget.declared.operations[0].auth.alternatives[0].schemes = Array(1001).fill(scheme);
+    authOverBudget.allowed.orderedRules = Array(1000).fill(authOverBudget.allowed.orderedRules[0]);
+    expect(() => compareAuthContracts(authOverBudget))
       .toThrow('contract drift comparison exceeds visit budget');
     assertGolden('contract-drift-rules', {
       pathMethod: comparePathMethodContracts(input(
