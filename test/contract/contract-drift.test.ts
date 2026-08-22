@@ -471,7 +471,7 @@ describe('OpenAPI and Policy contract drift', () => {
     ))
       ?.evidence.at(-1)?.pointer).toBe('/request/limits/max_query_params');
 
-    const defaultLimit = compareRequestContracts(input(
+    const defaultLimitInput = input(
       contract([operation('GET', '/default-limit', {
         request: {
           contentTypes: [], requiredHeaders: [],
@@ -483,10 +483,16 @@ describe('OpenAPI and Policy contract drift', () => {
         },
       })]),
       policy({ request: { allow_methods: ['GET'] } }),
-    ), { materiallyBroaderRatio: 1.5 });
+    );
+    const defaultLimit = compareRequestContracts(defaultLimitInput, { materiallyBroaderRatio: 1.5 });
     expect(defaultLimit.find(({ ruleId, actual }) => (
       ruleId === 'SC-LIMIT-002' && actual.control === 'max_uri_length'
     ))?.evidence.at(-1)?.pointer).toBe('/request');
+    delete defaultLimitInput.allowed.defaults.limitSources;
+    expect(compareRequestContracts(defaultLimitInput, { materiallyBroaderRatio: 1.5 })
+      .find(({ ruleId, actual }) => (
+        ruleId === 'SC-LIMIT-002' && actual.control === 'max_uri_length'
+      ))?.evidence.at(-1)?.pointer).toBe('/request');
 
     const emptyCorsRequest = compareRequestContracts(input(
       contract([operation('OPTIONS', '/items')]),

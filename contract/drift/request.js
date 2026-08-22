@@ -24,8 +24,8 @@ function limitFinding(input, operation, name, recommendation, ratio, conditional
     const policyName = name[0].toLowerCase() + name.slice(1);
     const policyValue = input.allowed.defaults.limits[policyName];
     const pointerName = name.replace(/[A-Z]/g, (letter) => `_${letter.toLowerCase()}`);
-    const pointer = input.allowed.defaults.limitSources?.[policyName] === 'runtime-default'
-        ? '/request' : `/request/limits/${pointerName}`;
+    const pointer = input.allowed.defaults.limitSources?.[policyName] === 'configured'
+        ? `/request/limits/${pointerName}` : '/request';
     const evidence = (0, shared_1.evidenceFor)(operation, input.allowed, pointer, 'request-drift-v1');
     if (policyValue < candidate.value) {
         const monitor = input.allowed.defaults.requestDecision === 'would-block';
