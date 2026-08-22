@@ -71,6 +71,7 @@ export interface AllowedDefaultsV1 {
         maxHeaderSize: number;
         maxHeaderCount: number;
     };
+    limitSources?: Partial<Record<keyof AllowedDefaultsV1['limits'], 'configured' | 'runtime-default'>>;
     requiredHeaders?: {
         values: string[];
         source: 'configured' | 'runtime-default';

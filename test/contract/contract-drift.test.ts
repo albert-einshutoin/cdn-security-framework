@@ -263,6 +263,16 @@ describe('OpenAPI and Policy contract drift', () => {
       }] }),
     ));
     expect(exactPathFindings.map(({ ruleId }) => ruleId)).toEqual(['SC-AUTHN-001']);
+    expect(exactPathFindings[0]?.evidence.at(-1)?.pointer).toBe('/routes');
+
+    const publicOverlap = compareAuthContracts(input(
+      contract([operation('GET', '/users/{id}')]),
+      policy({ routes: [{
+        name: 'exact-user', match: { path_prefixes: ['/users/me'] },
+        auth_gate: { type: 'signed_url', exact_path: true },
+      }] }),
+    ));
+    expect(publicOverlap.map(({ ruleId }) => ruleId)).toEqual(['SC-AUTHN-004']);
 
     const uncertainGateFindings = compareAuthContracts(input(
       contract([operation('GET', '/mixed', { exposure: 'authenticated', auth: apiKeyAuth })]),
@@ -426,6 +436,25 @@ describe('OpenAPI and Policy contract drift', () => {
       contract([operation('GET', '/ratio', {
         request: {
           contentTypes: [], requiredHeaders: [],
+          queryParameters: Array.from({ length: 4 }, (_, index) => ({
+            name: `q${index}`, required: false, constraints: { type: 'string', maxLength: 1 },
+            unsupportedReasons: [],
+          })),
+          pathParameters: [], headerParameters: [], cookieParameters: [],
+        },
+      })]),
+      policy({ request: { limits: { max_query_params: 8, max_query_length: 1024, max_uri_length: 2048 } } }),
+    ), { materiallyBroaderRatio: 1.5 });
+    expect(fractionalRatio.some(({ ruleId }) => ruleId === 'SC-LIMIT-002')).toBe(true);
+    expect(fractionalRatio.find(({ ruleId, actual }) => (
+      ruleId === 'SC-LIMIT-002' && actual.control === 'max_query_params'
+    ))
+      ?.evidence.at(-1)?.pointer).toBe('/request/limits/max_query_params');
+
+    const defaultLimit = compareRequestContracts(input(
+      contract([operation('GET', '/default-limit', {
+        request: {
+          contentTypes: [], requiredHeaders: [],
           queryParameters: [{
             name: 'q', required: false, constraints: { type: 'string', maxLength: 5 },
             unsupportedReasons: [],
@@ -433,9 +462,11 @@ describe('OpenAPI and Policy contract drift', () => {
           pathParameters: [], headerParameters: [], cookieParameters: [],
         },
       })]),
-      policy({ request: { limits: { max_query_params: 30, max_query_length: 8, max_uri_length: 2048 } } }),
+      policy({ request: { allow_methods: ['GET'] } }),
     ), { materiallyBroaderRatio: 1.5 });
-    expect(fractionalRatio.some(({ ruleId }) => ruleId === 'SC-LIMIT-002')).toBe(true);
+    expect(defaultLimit.find(({ ruleId, actual }) => (
+      ruleId === 'SC-LIMIT-002' && actual.control === 'max_uri_length'
+    ))?.evidence.at(-1)?.pointer).toBe('/request');
 
     const emptyCorsRequest = compareRequestContracts(input(
       contract([operation('OPTIONS', '/items')]),

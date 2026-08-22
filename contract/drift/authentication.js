@@ -73,7 +73,7 @@ function compareAuthContracts(input) {
             || rule.auth.verifiability[target] !== 'enforced'
             || bypassesAuth(rule));
         const pointer = definiteRules[0]?.pointer ?? uncertainRules[0]?.rule.pointer ?? '/routes';
-        const evidence = (0, shared_1.evidenceFor)(operation, allowed, `${pointer}/auth_gate`, 'authentication-drift-v1');
+        const evidence = (0, shared_1.evidenceFor)(operation, allowed, pointer === '/routes' ? pointer : `${pointer}/auth_gate`, 'authentication-drift-v1');
         if (operation.exposure === 'public') {
             if (definiteRules.length > 0)
                 findings.push((0, shared_1.makeFinding)({
@@ -88,6 +88,20 @@ function compareAuthContracts(input) {
                     actual: { auth: actualAuth(definiteRules, target), decision: allowed.defaults.authenticationDecision },
                     evidence,
                     remediation: { summary: 'Remove the Edge gate or change the declared operation contract.', safeAutoFix: false },
+                }));
+            else if (uncertainRules.length > 0)
+                findings.push((0, shared_1.makeFinding)({
+                    ruleId: 'SC-AUTHN-004',
+                    severity: 'info',
+                    confidence: 'heuristic',
+                    category: 'authentication',
+                    title: 'Analyzer cannot prove authentication compatibility',
+                    message: `A possibly overlapping or unsupported Edge auth gate may affect this explicitly public operation. ${SCOPE_DISCLAIMER}`,
+                    route: { method: operation.method, path: operation.path, operationId: operation.operationId },
+                    expected: { auth: operation.auth },
+                    actual: { auth: actualAuth(uncertainRules.map(({ rule }) => rule), target), target },
+                    evidence,
+                    remediation: { summary: 'Review the overlapping route and intended public access boundary.', safeAutoFix: false },
                 }));
             continue;
         }

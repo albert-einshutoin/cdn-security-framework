@@ -30,6 +30,13 @@
         "values": [],
         "wildcard": "leading-subdomain-only"
       },
+      "limitSources": {
+        "maxHeaderCount": "runtime-default",
+        "maxHeaderSize": "runtime-default",
+        "maxQueryLength": "configured",
+        "maxQueryParams": "configured",
+        "maxUriLength": "configured"
+      },
       "limits": {
         "maxHeaderCount": 64,
         "maxHeaderSize": 0,
@@ -319,6 +326,13 @@
         "values": [],
         "wildcard": "leading-subdomain-only"
       },
+      "limitSources": {
+        "maxHeaderCount": "configured",
+        "maxHeaderSize": "runtime-default",
+        "maxQueryLength": "configured",
+        "maxQueryParams": "configured",
+        "maxUriLength": "configured"
+      },
       "limits": {
         "maxHeaderCount": 40,
         "maxHeaderSize": 0,
@@ -533,6 +547,13 @@
         "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
+      },
+      "limitSources": {
+        "maxHeaderCount": "configured",
+        "maxHeaderSize": "runtime-default",
+        "maxQueryLength": "configured",
+        "maxQueryParams": "configured",
+        "maxUriLength": "configured"
       },
       "limits": {
         "maxHeaderCount": 48,
@@ -833,6 +854,13 @@
         "values": [],
         "wildcard": "leading-subdomain-only"
       },
+      "limitSources": {
+        "maxHeaderCount": "runtime-default",
+        "maxHeaderSize": "runtime-default",
+        "maxQueryLength": "configured",
+        "maxQueryParams": "configured",
+        "maxUriLength": "configured"
+      },
       "limits": {
         "maxHeaderCount": 64,
         "maxHeaderSize": 0,
@@ -1037,6 +1065,13 @@
         "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
+      },
+      "limitSources": {
+        "maxHeaderCount": "runtime-default",
+        "maxHeaderSize": "runtime-default",
+        "maxQueryLength": "configured",
+        "maxQueryParams": "configured",
+        "maxUriLength": "configured"
       },
       "limits": {
         "maxHeaderCount": 64,
@@ -1331,6 +1366,13 @@
         "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
+      },
+      "limitSources": {
+        "maxHeaderCount": "runtime-default",
+        "maxHeaderSize": "runtime-default",
+        "maxQueryLength": "configured",
+        "maxQueryParams": "configured",
+        "maxUriLength": "configured"
       },
       "limits": {
         "maxHeaderCount": 64,
@@ -1629,6 +1671,13 @@
         "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
+      },
+      "limitSources": {
+        "maxHeaderCount": "runtime-default",
+        "maxHeaderSize": "runtime-default",
+        "maxQueryLength": "configured",
+        "maxQueryParams": "configured",
+        "maxUriLength": "configured"
       },
       "limits": {
         "maxHeaderCount": 64,
@@ -1935,6 +1984,13 @@
         "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
+      },
+      "limitSources": {
+        "maxHeaderCount": "runtime-default",
+        "maxHeaderSize": "runtime-default",
+        "maxQueryLength": "configured",
+        "maxQueryParams": "configured",
+        "maxUriLength": "configured"
       },
       "limits": {
         "maxHeaderCount": 64,

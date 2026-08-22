@@ -185,6 +185,13 @@ function projectPolicyToAllowedSurface(policy, options) {
                 maxHeaderSize: request.maxHeaderSize,
                 maxHeaderCount: request.maxHeaderCount,
             },
+            limitSources: {
+                maxQueryLength: policy.request.limits?.max_query_length === undefined ? 'runtime-default' : 'configured',
+                maxQueryParams: policy.request.limits?.max_query_params === undefined ? 'runtime-default' : 'configured',
+                maxUriLength: policy.request.limits?.max_uri_length === undefined ? 'runtime-default' : 'configured',
+                maxHeaderSize: policy.request.limits?.max_header_size === undefined ? 'runtime-default' : 'configured',
+                maxHeaderCount: policy.request.limits?.max_header_count === undefined ? 'runtime-default' : 'configured',
+            },
             requiredHeaders: {
                 values: stablePrefixes(effectiveRequiredHeaders.map((header) => header.toLowerCase())),
                 source: policy.request.block?.header_missing === undefined ? 'runtime-default' : 'configured',

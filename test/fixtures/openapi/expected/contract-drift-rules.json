@@ -252,7 +252,7 @@
           "capability": "request-drift-v1",
           "complete": true,
           "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
-          "pointer": "/request/limits/max_uri_length",
+          "pointer": "/request",
           "source": "policy",
           "uri": "policy/security.yml"
         }
@@ -262,7 +262,7 @@
         "materiallyBroaderRatio": 2,
         "recommended": 25
       },
-      "instanceId": "79e61f944c2d4fa67a01d24b681a5f39c2856f850e2a3f9113845d6cebe8b22d",
+      "instanceId": "60fff21c747d27704f16f9a061d11904c3af1ccb6a53d26ca688b37a0cb0f03a",
       "message": "The effective Edge max_uri_length limit exceeds the finite recommendation by more than the configured 2x threshold.",
       "remediation": {
         "safeAutoFix": false,

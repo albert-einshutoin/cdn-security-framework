@@ -86,6 +86,7 @@ export interface AllowedDefaultsV1 {
     maxHeaderSize: number;
     maxHeaderCount: number;
   };
+  limitSources?: Partial<Record<keyof AllowedDefaultsV1['limits'], 'configured' | 'runtime-default'>>;
   requiredHeaders?: {
     values: string[];
     source: 'configured' | 'runtime-default';
@@ -362,6 +363,13 @@ export function projectPolicyToAllowedSurface(
         maxUriLength: request.maxUriLength,
         maxHeaderSize: request.maxHeaderSize,
         maxHeaderCount: request.maxHeaderCount,
+      },
+      limitSources: {
+        maxQueryLength: policy.request.limits?.max_query_length === undefined ? 'runtime-default' : 'configured',
+        maxQueryParams: policy.request.limits?.max_query_params === undefined ? 'runtime-default' : 'configured',
+        maxUriLength: policy.request.limits?.max_uri_length === undefined ? 'runtime-default' : 'configured',
+        maxHeaderSize: policy.request.limits?.max_header_size === undefined ? 'runtime-default' : 'configured',
+        maxHeaderCount: policy.request.limits?.max_header_count === undefined ? 'runtime-default' : 'configured',
       },
       requiredHeaders: {
         values: stablePrefixes(effectiveRequiredHeaders.map((header) => header.toLowerCase())),
