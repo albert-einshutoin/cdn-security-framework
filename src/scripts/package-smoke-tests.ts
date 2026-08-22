@@ -103,6 +103,11 @@ function assertPackageContents(pack: PackResult) {
     'lib/compile.d.ts',
     'lib/lint.js',
     'lib/lint.d.ts',
+    'contract/index.js',
+    'contract/index.d.ts',
+    'contract/security-ir.js',
+    'contract/security-ir.d.ts',
+    'schemas/security-ir-v1.schema.json',
     'scripts/compile.js',
     'scripts/compile.d.ts',
     'scripts/policy-lint.js',
@@ -151,8 +156,14 @@ function smokeInstalledPackage(tarballPath: string) {
       const assert = require('assert');
       const path = require('path');
       const pkg = require(${JSON.stringify(packageName)});
+      const contract = require(${JSON.stringify(`${packageName}/contract`)});
+      const securityIr = require(${JSON.stringify(`${packageName}/contract/security-ir`)});
+      const schema = require(${JSON.stringify(`${packageName}/schemas/security-ir-v1.schema.json`)});
       assert.strictEqual(typeof pkg.compile, 'function');
       assert.strictEqual(typeof pkg.lintPolicy, 'function');
+      assert.strictEqual(typeof contract.createSecurityContract, 'function');
+      assert.strictEqual(typeof securityIr.serializeSecurityContract, 'function');
+      assert.strictEqual(schema.properties.schemaVersion.const, 1);
       const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const result = pkg.lintPolicy({
         policyPath: path.join(pkgRoot, 'policy', 'base.yml'),

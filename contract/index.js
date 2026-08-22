@@ -16,3 +16,5 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
 Object.defineProperty(exports, "__esModule", { value: true });
 __exportStar(require("./finding"), exports);
 __exportStar(require("./finding-order"), exports);
+__exportStar(require("./canonical-route"), exports);
+__exportStar(require("./security-ir"), exports);

@@ -25,6 +25,17 @@
       "require": "./validator/index.js",
       "default": "./validator/index.js"
     },
+    "./contract": {
+      "types": "./contract/index.d.ts",
+      "require": "./contract/index.js",
+      "default": "./contract/index.js"
+    },
+    "./contract/security-ir": {
+      "types": "./contract/security-ir.d.ts",
+      "require": "./contract/security-ir.js",
+      "default": "./contract/security-ir.js"
+    },
+    "./schemas/security-ir-v1.schema.json": "./schemas/security-ir-v1.schema.json",
     "./bin/cli": "./bin/cli.js",
     "./bin/cli.js": "./bin/cli.js"
   },
@@ -86,6 +97,7 @@
   "files": [
     "bin/",
     "contract/",
+    "schemas/",
     "openapi/",
     "emitter/",
     "lib/",

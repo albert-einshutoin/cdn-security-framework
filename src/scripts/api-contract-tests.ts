@@ -39,8 +39,11 @@ test('package metadata exposes typed root api and bounded exports', () => {
     '.',
     './bin/cli',
     './bin/cli.js',
+    './contract',
+    './contract/security-ir',
     './emitter',
     './parser',
+    './schemas/security-ir-v1.schema.json',
     './validator',
   ]);
   assert.strictEqual(pkg.exports['.'].types, './lib/index.d.ts');
@@ -51,6 +54,12 @@ test('package metadata exposes typed root api and bounded exports', () => {
   assert.strictEqual(pkg.exports['./validator'].require, './validator/index.js');
   assert.strictEqual(pkg.exports['./emitter'].types, './emitter/index.d.ts');
   assert.strictEqual(pkg.exports['./emitter'].require, './emitter/index.js');
+  assert.strictEqual(pkg.exports['./contract'].require, './contract/index.js');
+  assert.strictEqual(pkg.exports['./contract/security-ir'].types, './contract/security-ir.d.ts');
+  assert.strictEqual(
+    pkg.exports['./schemas/security-ir-v1.schema.json'],
+    './schemas/security-ir-v1.schema.json',
+  );
   assert.strictEqual(pkg.exports['./bin/cli.js'], './bin/cli.js');
 });
 
@@ -58,9 +67,11 @@ test('phase subpath exports expose public compiler contracts', () => {
   const parser = require(path.join(repoRoot, 'parser'));
   const validator = require(path.join(repoRoot, 'validator'));
   const emitter = require(path.join(repoRoot, 'emitter'));
+  const contract = require(path.join(repoRoot, 'contract'));
   assert.strictEqual(typeof parser.parsePolicyFile, 'function');
   assert.strictEqual(typeof validator.validatePolicy, 'function');
   assert.strictEqual(typeof emitter.compileArtifacts, 'function');
+  assert.strictEqual(typeof contract.createSecurityContract, 'function');
 
   const phaseDeclarations = [
     ['parser/index.d.ts', 'parsePolicyFile'],
