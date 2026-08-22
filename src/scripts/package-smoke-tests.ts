@@ -107,6 +107,8 @@ function assertPackageContents(pack: PackResult) {
     'lib/lint.d.ts',
     'contract/index.js',
     'contract/index.d.ts',
+    'contract/finding-exceptions.js',
+    'contract/finding-exceptions.d.ts',
     'contract/allowed-surface.js',
     'contract/allowed-surface.d.ts',
     'contract/drift/index.js',
@@ -125,6 +127,7 @@ function assertPackageContents(pack: PackResult) {
     'contract/security-ir.d.ts',
     'schemas/security-ir-v1.schema.json',
     'schemas/openapi-inspection-v1.schema.json',
+    'schemas/finding-exceptions-v1.schema.json',
     'openapi/index.js',
     'openapi/index.d.ts',
     'openapi/load-document.js',
@@ -143,6 +146,8 @@ function assertPackageContents(pack: PackResult) {
     'docs/openapi-policy-candidates.ja.md',
     'docs/openapi-integration.md',
     'docs/openapi-integration.ja.md',
+    'docs/finding-exceptions.md',
+    'docs/finding-exceptions.ja.md',
     'examples/openapi/README.md',
     'examples/openapi/README.ja.md',
     'examples/openapi/openapi.yaml',
@@ -198,6 +203,7 @@ function smokeInstalledPackage(tarballPath: string) {
       const securityIr = require(${JSON.stringify(`${packageName}/contract/security-ir`)});
       const schema = require(${JSON.stringify(`${packageName}/schemas/security-ir-v1.schema.json`)});
       const inspectionSchema = require(${JSON.stringify(`${packageName}/schemas/openapi-inspection-v1.schema.json`)});
+      const exceptionSchema = require(${JSON.stringify(`${packageName}/schemas/finding-exceptions-v1.schema.json`)});
       const openapi = require(${JSON.stringify(`${packageName}/openapi`)});
       const recommendation = require(${JSON.stringify(`${packageName}/recommendation`)});
       assert.strictEqual(typeof pkg.compile, 'function');
@@ -207,6 +213,9 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof securityIr.serializeSecurityContract, 'function');
       assert.strictEqual(schema.properties.schemaVersion.const, 1);
       assert.strictEqual(inspectionSchema.properties.schemaVersion.const, 1);
+      assert.strictEqual(exceptionSchema.properties.version.const, 1);
+      assert.strictEqual(typeof contract.loadFindingExceptions, 'function');
+      assert.strictEqual(typeof contract.applyFindingExceptions, 'function');
       assert.strictEqual(typeof openapi.loadOpenApiDocument, 'function');
       assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
       assert.strictEqual(typeof openapi.normalizeOpenApiOperations, 'function');
