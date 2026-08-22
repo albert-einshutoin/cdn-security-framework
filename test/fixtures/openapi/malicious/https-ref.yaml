@@ -1,0 +1,11 @@
+openapi: 3.0.3
+info: { title: Remote ref, version: 1.0.0 }
+paths:
+  /remote:
+    get:
+      responses:
+        '200':
+          description: Must reject
+          content:
+            application/json:
+              schema: { $ref: 'https://example.test/schema.json#/User' }

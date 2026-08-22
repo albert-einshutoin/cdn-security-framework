@@ -1,0 +1,6 @@
+components:
+  schemas:
+    NodeB:
+      type: object
+      properties:
+        parent: { $ref: './cycle-a.yaml#/components/schemas/NodeA' }

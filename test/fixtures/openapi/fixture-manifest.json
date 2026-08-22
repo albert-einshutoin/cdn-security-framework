@@ -1,0 +1,193 @@
+{
+  "fixtures": [
+    {
+      "file": "valid/openapi-3.0.yaml",
+      "category": "valid",
+      "expected": "parse-ok",
+      "purpose": "OpenAPI 3.0 YAML with auth overrides, parameter locations, content types, constraints, and metadata",
+      "relatedIssue": 274
+    },
+    {
+      "file": "valid/openapi-3.0.json",
+      "category": "valid",
+      "expected": "parse-ok",
+      "purpose": "Minimal public OpenAPI 3.0 JSON operation",
+      "relatedIssue": 274
+    },
+    {
+      "file": "valid/openapi-3.1.json",
+      "category": "valid",
+      "expected": "parse-ok",
+      "purpose": "OpenAPI 3.1 JSON with a nullable enum parameter",
+      "relatedIssue": 274
+    },
+    {
+      "file": "valid/openapi-3.1.yaml",
+      "category": "valid",
+      "expected": "parse-ok",
+      "purpose": "OpenAPI 3.1 YAML with a bounded text request body",
+      "relatedIssue": 274
+    },
+    {
+      "file": "refs/same-document.yaml",
+      "category": "refs",
+      "expected": "parse-ok",
+      "purpose": "Same-document reusable path parameter reference",
+      "relatedIssue": 274
+    },
+    {
+      "file": "refs/sibling.yaml",
+      "category": "refs",
+      "expected": "parse-ok",
+      "purpose": "Sibling JSON and nested YAML references with reused security metadata",
+      "relatedIssue": 274
+    },
+    {
+      "file": "refs/components.json",
+      "category": "refs",
+      "expected": "parse-ok",
+      "purpose": "Reusable sibling parameter and security scheme document",
+      "relatedIssue": 274
+    },
+    {
+      "file": "refs/nested/common.yaml",
+      "category": "refs",
+      "expected": "parse-ok",
+      "purpose": "Nested schema document that reaches the legal cycle fixture",
+      "relatedIssue": 274
+    },
+    {
+      "file": "refs/cycle-a.yaml",
+      "category": "refs",
+      "expected": "parse-ok",
+      "purpose": "First half of a legal recursive schema reference",
+      "relatedIssue": 274
+    },
+    {
+      "file": "refs/cycle-b.yaml",
+      "category": "refs",
+      "expected": "parse-ok",
+      "purpose": "Second half of a legal recursive schema reference",
+      "relatedIssue": 274
+    },
+    {
+      "file": "limits/too-many-operations.fixture.json",
+      "category": "limits",
+      "expected": "generated",
+      "purpose": "Generator recipe for the operation-count boundary",
+      "relatedIssue": 274
+    },
+    {
+      "file": "limits/too-many-parameters.fixture.json",
+      "category": "limits",
+      "expected": "generated",
+      "purpose": "Generator recipe for the parameter-count boundary",
+      "relatedIssue": 274
+    },
+    {
+      "file": "limits/excessive-schema-depth.fixture.json",
+      "category": "limits",
+      "expected": "generated",
+      "purpose": "Generator recipe for excessive nested schema depth",
+      "relatedIssue": 274
+    },
+    {
+      "file": "limits/alias-expansion.fixture.json",
+      "category": "limits",
+      "expected": "generated",
+      "purpose": "Generator recipe for YAML alias expansion limits",
+      "relatedIssue": 274
+    },
+    {
+      "file": "invalid/invalid-json.json",
+      "category": "invalid",
+      "expected": "parse-error",
+      "purpose": "Truncated JSON document must fail basic parsing",
+      "relatedIssue": 274
+    },
+    {
+      "file": "invalid/invalid-yaml.yaml",
+      "category": "invalid",
+      "expected": "parse-error",
+      "purpose": "Unterminated YAML flow sequence must fail basic parsing",
+      "relatedIssue": 274
+    },
+    {
+      "file": "invalid/missing-openapi.yaml",
+      "category": "invalid",
+      "expected": "semantic-invalid",
+      "purpose": "Syntactically valid document missing the OpenAPI version",
+      "relatedIssue": 274
+    },
+    {
+      "file": "invalid/unsupported-version.yaml",
+      "category": "invalid",
+      "expected": "semantic-invalid",
+      "purpose": "Unsupported OpenAPI major version must be rejected",
+      "relatedIssue": 274
+    },
+    {
+      "file": "invalid/ambiguous-operation.yaml",
+      "category": "invalid",
+      "expected": "parse-error",
+      "purpose": "Duplicate method keys create an ambiguous operation representation",
+      "relatedIssue": 274
+    },
+    {
+      "file": "malicious/traversal.yaml",
+      "category": "malicious",
+      "expected": "reject-ref",
+      "purpose": "Relative reference escaping the workspace root",
+      "relatedIssue": 274
+    },
+    {
+      "file": "malicious/absolute-ref.yaml",
+      "category": "malicious",
+      "expected": "reject-ref",
+      "purpose": "Absolute filesystem reference outside the workspace",
+      "relatedIssue": 274
+    },
+    {
+      "file": "malicious/file-uri.yaml",
+      "category": "malicious",
+      "expected": "reject-ref",
+      "purpose": "File URI reference must never be loaded",
+      "relatedIssue": 274
+    },
+    {
+      "file": "malicious/https-ref.yaml",
+      "category": "malicious",
+      "expected": "reject-ref",
+      "purpose": "Remote HTTPS reference must never trigger network access",
+      "relatedIssue": 274
+    },
+    {
+      "file": "malicious/cycle-bomb.fixture.json",
+      "category": "malicious",
+      "expected": "generated",
+      "purpose": "Generator recipe for a recursive reference exhaustion attack",
+      "relatedIssue": 274
+    },
+    {
+      "file": "malicious/large-document.fixture.json",
+      "category": "malicious",
+      "expected": "generated",
+      "purpose": "Generator recipe for an oversized document without a committed binary",
+      "relatedIssue": 274
+    },
+    {
+      "file": "malicious/secret-values.yaml",
+      "category": "malicious",
+      "expected": "sensitive",
+      "purpose": "Secret-like descriptions and examples must not enter snapshots",
+      "relatedIssue": 274
+    },
+    {
+      "file": "malicious/symlink-escape.yaml",
+      "category": "malicious",
+      "expected": "root-reject",
+      "purpose": "Symlink resolving outside the fixture root must be rejected",
+      "relatedIssue": 274
+    }
+  ]
+}

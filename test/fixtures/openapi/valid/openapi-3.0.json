@@ -1,0 +1,12 @@
+{
+  "openapi": "3.0.3",
+  "info": { "title": "OpenAPI 3.0 JSON", "version": "1.0.0" },
+  "paths": {
+    "/health": {
+      "get": {
+        "operationId": "health",
+        "responses": { "200": { "description": "OK" } }
+      }
+    }
+  }
+}

@@ -1,0 +1,53 @@
+openapi: 3.0.3
+info:
+  title: Comprehensive security fixture
+  version: 1.0.0
+security:
+  - bearerAuth: []
+paths:
+  /public:
+    get:
+      operationId: publicStatus
+      security: []
+      tags: [status]
+      responses:
+        '200': { description: OK }
+  /users/{userId}:
+    post:
+      operationId: updateUser
+      deprecated: true
+      tags: [users, write]
+      security:
+        - apiKeyHeader: []
+          oauth: [users:write]
+        - basicAuth: []
+      parameters:
+        - { name: userId, in: path, required: true, schema: { type: string, maxLength: 64 } }
+        - { name: page, in: query, required: false, schema: { type: integer, minimum: 1 } }
+        - { name: X-Tenant-ID, in: header, required: true, schema: { type: string } }
+        - { name: session, in: cookie, required: false, schema: { type: string } }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [roles]
+              properties:
+                roles: { type: array, maxItems: 10, items: { type: string, enum: [reader, writer] } }
+          multipart/form-data: { schema: { type: object } }
+          application/x-www-form-urlencoded: { schema: { type: object } }
+          text/plain: { schema: { type: string, maxLength: 1024 } }
+      responses:
+        '204': { description: Updated }
+components:
+  securitySchemes:
+    apiKeyHeader: { type: apiKey, in: header, name: X-API-Key }
+    basicAuth: { type: http, scheme: basic }
+    bearerAuth: { type: http, scheme: bearer, bearerFormat: JWT }
+    oauth:
+      type: oauth2
+      flows:
+        clientCredentials:
+          tokenUrl: https://auth.example.test/token
+          scopes: { 'users:write': Update users }
