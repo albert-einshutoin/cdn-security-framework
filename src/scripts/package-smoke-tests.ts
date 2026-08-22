@@ -109,6 +109,8 @@ function assertPackageContents(pack: PackResult) {
     'contract/index.d.ts',
     'contract/allowed-surface.js',
     'contract/allowed-surface.d.ts',
+    'contract/route-relation.js',
+    'contract/route-relation.d.ts',
     'contract/security-ir.js',
     'contract/security-ir.d.ts',
     'schemas/security-ir-v1.schema.json',
