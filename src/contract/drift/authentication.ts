@@ -72,6 +72,8 @@ export function compareAuthContracts(input: ContractDriftInput): SecurityFinding
     || (allowed.defaults.corsPreflight.origins.kind === 'allowlist'
       && allowed.defaults.corsPreflight.origins.values.length > 0);
   for (const operation of declared.operations) {
+    if (allowed.defaults.requestDecision === 'block'
+      && !allowed.defaults.methods.includes(operation.method)) continue;
     const matches = matchingAuthRules(operation, allowed);
     const bypassesAuth = (rule: AllowedRouteRuleV1) => corsOriginCanMatch
       && rule.auth.preAuthBypassMethods.includes(operation.method);

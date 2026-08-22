@@ -293,11 +293,14 @@ describe('OpenAPI and Policy contract drift', () => {
         operation('GET', '/download/child'),
         operation('POST', '/download/child', { exposure: 'authenticated', auth: apiKeyAuth }),
       ]),
-      policy({ routes: [{
-        name: 'exact-download',
-        match: { path_prefixes: ['/download'] },
-        auth_gate: { type: 'signed_url', exact_path: true, secret_env: 'SIGNED_URL_SECRET' },
-      }] }),
+      policy({
+        request: { allow_methods: ['GET', 'POST'] },
+        routes: [{
+          name: 'exact-download',
+          match: { path_prefixes: ['/download'] },
+          auth_gate: { type: 'signed_url', exact_path: true, secret_env: 'SIGNED_URL_SECRET' },
+        }],
+      }),
     ));
     expect(exactPathFindings.map(({ ruleId }) => ruleId)).toEqual(['SC-AUTHN-001']);
     expect(exactPathFindings[0]?.evidence.at(-1)?.pointer).toBe('/request');
@@ -310,6 +313,18 @@ describe('OpenAPI and Policy contract drift', () => {
       }] }),
     ));
     expect(publicOverlap.map(({ ruleId }) => ruleId)).toEqual(['SC-AUTHN-004']);
+
+    const blockedBeforeAuth = compareAuthContracts(input(
+      contract([operation('GET', '/blocked')]),
+      policy({
+        request: { allow_methods: [] },
+        routes: [{
+          name: 'blocked', match: { path_prefixes: ['/blocked'] },
+          auth_gate: { type: 'basic_auth' },
+        }],
+      }),
+    ));
+    expect(blockedBeforeAuth).toEqual([]);
 
     const uncertainGateFindings = compareAuthContracts(input(
       contract([operation('GET', '/mixed', { exposure: 'authenticated', auth: apiKeyAuth })]),
