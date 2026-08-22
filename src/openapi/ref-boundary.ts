@@ -32,6 +32,7 @@ export interface ResolveOpenApiRefPathOptions {
   sourcePath: string;
   ref: string;
   realpath?: (inputPath: string) => string;
+  fragmentSeparated?: boolean;
 }
 
 export function resolveOpenApiRefPath(options: ResolveOpenApiRefPathOptions): string {
@@ -40,7 +41,7 @@ export function resolveOpenApiRefPath(options: ResolveOpenApiRefPathOptions): st
   if (/^https?:\/\//i.test(ref)) {
     throw new OpenApiAnalysisError('OPENAPI_REMOTE_REF_DISABLED', { sourceUri: sourcePath });
   }
-  const refPath = ref.split('#', 1)[0];
+  const refPath = options.fragmentSeparated ? ref : ref.split('#', 1)[0];
   if (/^file:/i.test(refPath)
     || path.isAbsolute(refPath)
     || path.win32.isAbsolute(refPath)) {

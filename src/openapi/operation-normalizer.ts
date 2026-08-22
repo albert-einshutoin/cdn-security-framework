@@ -19,7 +19,7 @@ import {
   type OpenApiAnalysisLimits,
 } from './analysis-limits';
 import type { ResolvedOpenApiGraph } from './document-graph';
-import { isResolvedOpenApiGraph, resolveJsonPointer } from './ref-resolver';
+import { isResolvedOpenApiGraph, resolveJsonPointerValue } from './ref-resolver';
 
 export interface NormalizationOptions {
   limits?: Partial<OpenApiAnalysisLimits>;
@@ -38,6 +38,13 @@ interface ConstraintResult {
 
 const METHOD_KEYS = new Set(HTTP_METHODS.map((method) => method.toLowerCase()));
 const PARAMETER_LOCATIONS = new Set(['path', 'query', 'header', 'cookie']);
+const RESERVED_HEADER_PARAMETERS = new Set(['accept', 'content-type', 'authorization']);
+const UNSUPPORTED_SCHEMA_KEYWORDS = new Set([
+  'const', 'contains', 'dependentRequired', 'dependentSchemas', 'else', 'exclusiveMaximum',
+  'exclusiveMinimum', 'if', 'maxContains', 'minContains', 'minProperties', 'multipleOf',
+  'pattern', 'patternProperties', 'prefixItems', 'propertyNames', 'then', 'unevaluatedItems',
+  'unevaluatedProperties', 'uniqueItems',
+]);
 
 function fail(
   location?: LocatedValue,
@@ -106,6 +113,10 @@ function normalizeConstraints(
       !['$ref', 'description', 'summary', 'example', 'default'].includes(key)
     ))) reasons.add('schema:ref-siblings');
   });
+  if (typeof resolved.value === 'boolean') {
+    reasons.add('schema:boolean');
+    return { constraints: { type: 'unknown' }, unsupportedReasons: [...reasons].sort(compareText) };
+  }
   const resolvedId = `${resolved.sourceUri}#${resolved.pointer}`;
   const depth = shapeOptions?.depth ?? 0;
   if (shapeOptions?.ancestors?.has(resolvedId)) {
@@ -115,6 +126,14 @@ function normalizeConstraints(
     return { constraints: { type: 'unknown' }, unsupportedReasons: ['schema:max-depth'] };
   }
   const schema = asObject(resolved);
+  for (const key of Object.keys(schema)) {
+    if (UNSUPPORTED_SCHEMA_KEYWORDS.has(key)) reasons.add(`schema:${key}`);
+  }
+  if (!shapeOptions) {
+    for (const key of ['additionalProperties', 'items', 'properties', 'required']) {
+      if (schema[key] !== undefined) reasons.add(`schema:${key}`);
+    }
+  }
   const constraints: ValueConstraintsV1 = { type: normalizeType(schema.type, reasons) };
   if (schema.nullable === true) reasons.add('schema:nullable');
   for (const composition of ['allOf', 'anyOf', 'oneOf', 'not'] as const) {
@@ -199,6 +218,14 @@ export function normalizeOpenApiOperations(
     ...DEFAULT_OPENAPI_ANALYSIS_LIMITS,
     ...(options.limits ?? {}),
   });
+  let graphNodes = 0;
+  const countGraphNodes = (value: unknown): void => {
+    graphNodes += 1;
+    if (graphNodes > limits.maxNodes) fail(undefined, 'OPENAPI_NODE_LIMIT');
+    if (value === null || typeof value !== 'object') return;
+    for (const child of Object.values(value)) countGraphNodes(child);
+  };
+  for (const document of graph.documents) countGraphNodes(document.document);
   const documents = new Map(graph.documents.map((document) => [document.sourceUri, document]));
   const rootDocument = documents.get(graph.root.sourceUri);
   if (!rootDocument) fail();
@@ -224,7 +251,7 @@ export function normalizeOpenApiOperations(
       const document = documents.get(edge.target.sourceUri);
       if (!document) fail(current);
       current = {
-        value: resolveJsonPointer(
+        value: resolveJsonPointerValue(
           document.document,
           `#${edge.target.pointer.replace(/%/g, '%25')}`,
           document.sourceUri,
@@ -239,16 +266,29 @@ export function normalizeOpenApiOperations(
   let parameterCapability: 'complete' | 'partial' = 'complete';
   let bodyCapability: 'complete' | 'partial' = 'complete';
 
-  const normalizeParameter = (input: LocatedValue): { key: string; parameter: ApiParameterContractV1 } => {
+  const normalizeParameter = (input: LocatedValue): {
+    key: string;
+    parameter: ApiParameterContractV1;
+    ignored?: true;
+  } => {
     const resolved = materialize(input);
     const parameter = asObject(resolved);
     if (typeof parameter.name !== 'string' || !parameter.name.trim()
-      || typeof parameter.in !== 'string' || !PARAMETER_LOCATIONS.has(parameter.in)
-      || (parameter.required !== undefined && typeof parameter.required !== 'boolean')
-      || (parameter.style !== undefined && (typeof parameter.style !== 'string' || !parameter.style.trim()))
-      || (parameter.explode !== undefined && typeof parameter.explode !== 'boolean')) fail(resolved);
+      || typeof parameter.in !== 'string' || !PARAMETER_LOCATIONS.has(parameter.in)) fail(resolved);
     const parameterLocation = parameter.in as 'path' | 'query' | 'header' | 'cookie';
     const name = parameterLocation === 'header' ? parameter.name.trim().toLowerCase() : parameter.name.trim();
+    if (parameterLocation === 'header' && RESERVED_HEADER_PARAMETERS.has(name)) {
+      return {
+        key: `${parameterLocation}:${name}`,
+        parameter: {
+          name, required: false, constraints: { type: 'unknown' }, unsupportedReasons: [],
+        },
+        ignored: true,
+      };
+    }
+    if ((parameter.required !== undefined && typeof parameter.required !== 'boolean')
+      || (parameter.style !== undefined && (typeof parameter.style !== 'string' || !parameter.style.trim()))
+      || (parameter.explode !== undefined && typeof parameter.explode !== 'boolean')) fail(resolved);
     const required = parameter.required === true;
     if (parameterLocation === 'path' && !required) fail(resolved);
     const constraintResult = normalizeConstraints(
@@ -257,7 +297,6 @@ export function normalizeOpenApiOperations(
     );
     const unsupportedReasons = [...constraintResult.unsupportedReasons];
     if (parameter.content !== undefined) unsupportedReasons.push('parameter:content');
-    if (unsupportedReasons.length > 0) parameterCapability = 'partial';
     return {
       key: `${parameterLocation}:${name}`,
       parameter: {
@@ -278,6 +317,8 @@ export function normalizeOpenApiOperations(
     for (let index = 0; index < input.length; index += 1) {
       const parameters = locatedChild(owner, 'parameters', input);
       const normalized = normalizeParameter(locatedChild(parameters, String(index), input[index]));
+      if (normalized.ignored) continue;
+      if (normalized.parameter.unsupportedReasons.length > 0) parameterCapability = 'partial';
       if (result.has(normalized.key)) fail(owner);
       result.set(normalized.key, normalized.parameter);
     }

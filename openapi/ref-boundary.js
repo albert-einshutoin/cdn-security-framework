@@ -29,7 +29,7 @@ function resolveOpenApiRefPath(options) {
     if (/^https?:\/\//i.test(ref)) {
         throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_REMOTE_REF_DISABLED', { sourceUri: sourcePath });
     }
-    const refPath = ref.split('#', 1)[0];
+    const refPath = options.fragmentSeparated ? ref : ref.split('#', 1)[0];
     if (/^file:/i.test(refPath)
         || node_path_1.default.isAbsolute(refPath)
         || node_path_1.default.win32.isAbsolute(refPath)) {

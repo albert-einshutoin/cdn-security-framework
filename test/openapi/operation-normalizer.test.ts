@@ -263,6 +263,44 @@ describe('normalizeOpenApiOperations', () => {
     expect(JSON.stringify(contract)).not.toContain('secret-example');
   });
 
+  test('marks boolean and unrepresented schema constraints partial and ignores reserved headers', () => {
+    const graph = temporaryGraph({
+      openapi: '3.1.0',
+      paths: { '/items': { post: {
+        parameters: [
+          { name: 'q', in: 'query', schema: { type: 'string', pattern: '^[a-z]+$' } },
+          { name: 'flag', in: 'query', schema: true },
+          {
+            name: 'Authorization', in: 'header', required: 'ignored',
+            schema: { type: 'string', enum: ['Bearer ignored-secret'] },
+          },
+          { name: 'X-Keep', in: 'header', required: true, schema: { type: 'string' } },
+        ],
+        requestBody: { content: { 'application/json': { schema: false } } },
+        responses: {},
+      } } },
+    });
+    const contract = normalizeOpenApiOperations(graph);
+    expect(contract.capabilities).toMatchObject({ parameters: 'partial', requestBodies: 'partial' });
+    expect(contract.operations[0].request.queryParameters).toEqual([
+      expect.objectContaining({ name: 'flag', unsupportedReasons: ['schema:boolean'] }),
+      expect.objectContaining({ name: 'q', unsupportedReasons: ['schema:pattern'] }),
+    ]);
+    expect(contract.operations[0].request.requiredHeaders).toEqual(['x-keep']);
+    expect(contract.operations[0].request.body?.unsupportedReasons).toEqual(['schema:boolean']);
+  });
+
+  test('enforces the normalization node budget for inline graphs', () => {
+    const graph = temporaryGraph({
+      openapi: '3.1.0',
+      paths: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [
+        `/items/${index}`, { get: { responses: {} } },
+      ])),
+    });
+    expect(() => normalizeOpenApiOperations(graph, { limits: { maxNodes: 10 } }))
+      .toThrow(expect.objectContaining({ code: 'OPENAPI_NODE_LIMIT' }));
+  });
+
   test('rejects duplicate canonical route keys and secret-like enum values', () => {
     const duplicate = temporaryGraph({
       openapi: '3.1.0',

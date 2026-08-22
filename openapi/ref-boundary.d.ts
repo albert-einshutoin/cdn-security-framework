@@ -5,5 +5,6 @@ export interface ResolveOpenApiRefPathOptions {
     sourcePath: string;
     ref: string;
     realpath?: (inputPath: string) => string;
+    fragmentSeparated?: boolean;
 }
 export declare function resolveOpenApiRefPath(options: ResolveOpenApiRefPathOptions): string;

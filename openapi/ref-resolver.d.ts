@@ -12,6 +12,11 @@ export interface ResolvedJsonPointer {
     value: Record<string, unknown> | unknown[];
     pointer: string;
 }
+export interface ResolvedJsonPointerValue {
+    value: unknown;
+    pointer: string;
+}
 export declare function isResolvedOpenApiGraph(value: unknown): value is ResolvedOpenApiGraph;
 export declare function resolveJsonPointer(document: unknown, fragment: string, sourceUri: string): ResolvedJsonPointer;
+export declare function resolveJsonPointerValue(document: unknown, fragment: string, sourceUri: string): ResolvedJsonPointerValue;
 export declare function resolveOpenApiReferences(options: ResolveOpenApiReferencesOptions): ResolvedOpenApiGraph;

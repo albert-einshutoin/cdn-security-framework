@@ -36,6 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.loadedOpenApiDocumentMetadata = loadedOpenApiDocumentMetadata;
+exports.validateLoadedOpenApiDocumentLimits = validateLoadedOpenApiDocumentLimits;
 exports.isLoadedOpenApiDocument = isLoadedOpenApiDocument;
 exports.loadOpenApiSourceDocument = loadOpenApiSourceDocument;
 exports.loadOpenApiDocument = loadOpenApiDocument;
@@ -48,6 +50,7 @@ const analysis_limits_1 = require("./analysis-limits");
 const ref_boundary_1 = require("./ref-boundary");
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const LOADED_OPENAPI_ROOTS = new WeakSet();
+const LOADED_OPENAPI_METADATA = new WeakMap();
 function freezeValue(value, seen = new WeakSet()) {
     if (value === null || typeof value !== 'object' || seen.has(value))
         return;
@@ -56,10 +59,23 @@ function freezeValue(value, seen = new WeakSet()) {
         freezeValue(child, seen);
     Object.freeze(value);
 }
-function markLoaded(value, kind) {
+function markLoaded(value, kind, metadata) {
     if (kind === 'root')
         LOADED_OPENAPI_ROOTS.add(value);
+    LOADED_OPENAPI_METADATA.set(value, metadata);
     return Object.freeze(value);
+}
+function loadedOpenApiDocumentMetadata(value) {
+    const metadata = LOADED_OPENAPI_METADATA.get(value);
+    if (!metadata)
+        throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_INVALID_ROOT');
+    return metadata;
+}
+function validateLoadedOpenApiDocumentLimits(value, limits) {
+    if (value.byteSize > limits.maxDocumentBytes) {
+        throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_DOCUMENT_TOO_LARGE', { sourceUri: value.sourceUri });
+    }
+    validateSafeValue(value.document, limits, { nodes: 0 }, new Set());
 }
 function isLoadedOpenApiDocument(value) {
     return typeof value === 'object' && value !== null
@@ -259,14 +275,17 @@ function loadOpenApiSourceDocument(options) {
         contentDigest: `sha256:${(0, node_crypto_1.createHash)('sha256').update(bytes).digest('hex')}`,
         byteSize: bytes.length,
         refStatus: 'unresolved',
-    }, 'source');
+    }, 'source', { workspaceRoot: rootRealPath, sourcePath: resolvedPath });
 }
 function loadOpenApiDocument(options) {
     const loaded = loadOpenApiSourceDocument(options);
+    const metadata = LOADED_OPENAPI_METADATA.get(loaded);
+    if (!metadata)
+        throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_INVALID_ROOT');
     const document = asRootDocument(loaded.document);
     return markLoaded({
         ...loaded,
         document,
         version: detectVersion(document.openapi),
-    }, 'root');
+    }, 'root', metadata);
 }

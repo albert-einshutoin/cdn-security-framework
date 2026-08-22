@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.serializeResolvedOpenApiGraph = void 0;
 exports.isResolvedOpenApiGraph = isResolvedOpenApiGraph;
 exports.resolveJsonPointer = resolveJsonPointer;
+exports.resolveJsonPointerValue = resolveJsonPointerValue;
 exports.resolveOpenApiReferences = resolveOpenApiReferences;
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
@@ -25,6 +26,13 @@ function pointerError(code, sourceUri, pointer) {
     throw new analysis_error_1.OpenApiAnalysisError(code, { sourceUri, pointer });
 }
 function resolveJsonPointer(document, fragment, sourceUri) {
+    const resolved = resolveJsonPointerValue(document, fragment, sourceUri);
+    if (resolved.value === null || typeof resolved.value !== 'object') {
+        pointerError('OPENAPI_REF_NOT_FOUND', sourceUri, resolved.pointer);
+    }
+    return resolved;
+}
+function resolveJsonPointerValue(document, fragment, sourceUri) {
     if (!fragment.startsWith('#'))
         pointerError('OPENAPI_REF_POINTER_INVALID', sourceUri, fragment);
     let decoded;
@@ -50,10 +58,7 @@ function resolveJsonPointer(document, fragment, sourceUri) {
         }
         value = value[token];
     }
-    if (value === null || typeof value !== 'object') {
-        pointerError('OPENAPI_REF_NOT_FOUND', sourceUri, decoded);
-    }
-    return { value: value, pointer: decoded };
+    return { value, pointer: decoded };
 }
 function encodePointerToken(token) {
     return token.replace(/~/g, '~0').replace(/\//g, '~1');
@@ -103,11 +108,19 @@ function resolveOpenApiReferences(options) {
     catch {
         throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_INPUT_NOT_FOUND');
     }
+    const rootMetadata = (0, load_document_1.loadedOpenApiDocumentMetadata)(options.root);
+    if (rootMetadata.workspaceRoot !== workspaceRoot) {
+        throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_INVALID_ROOT');
+    }
+    (0, load_document_1.validateLoadedOpenApiDocumentLimits)(options.root, limits);
     const rootSourcePath = (0, ref_boundary_1.resolveOpenApiRefPath)({
         workspaceRoot,
         sourcePath: sourcePath(workspaceRoot, options.root.sourceUri),
         ref: '#',
     });
+    if (rootMetadata.sourcePath !== rootSourcePath) {
+        throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_INVALID_ROOT');
+    }
     const documents = new Map();
     documents.set(options.root.sourceUri, options.root);
     const documentsByPath = new Map();
@@ -167,9 +180,11 @@ function resolveOpenApiReferences(options) {
         const currentPath = sourcePath(workspaceRoot, fromDocument.sourceUri);
         const targetPath = rawPath === ''
             ? currentPath
-            : (0, ref_boundary_1.resolveOpenApiRefPath)({ workspaceRoot, sourcePath: currentPath, ref: refPath });
+            : (0, ref_boundary_1.resolveOpenApiRefPath)({
+                workspaceRoot, sourcePath: currentPath, ref: refPath, fragmentSeparated: true,
+            });
         const targetDocument = rawPath === '' ? fromDocument : loadDocument(targetPath);
-        const resolved = resolveJsonPointer(targetDocument.document, fragment, targetDocument.sourceUri);
+        const resolved = resolveJsonPointerValue(targetDocument.document, fragment, targetDocument.sourceUri);
         const target = location(targetDocument.sourceUri, resolved.pointer);
         const refLocation = `${fromDocument.sourceUri}#${fromPointer}`;
         if (!seenReferenceLocations.has(refLocation)) {
