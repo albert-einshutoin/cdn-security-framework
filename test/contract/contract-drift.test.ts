@@ -109,7 +109,10 @@ describe('OpenAPI and Policy contract drift', () => {
             match: { path_prefixes: ['/ghost'] },
             auth_gate: { type: 'signed_url', exact_path: true },
           },
-          { name: 'broad-admin', match: { path_prefixes: ['/admin'] } },
+          {
+            name: 'broad-admin', match: { path_prefixes: ['/admin'] },
+            auth_gate: { type: 'basic_auth' },
+          },
         ],
       }),
     ));
@@ -131,6 +134,12 @@ describe('OpenAPI and Policy contract drift', () => {
     expect(defaultAuthPrefixes.find(({ ruleId, route }) => (
       ruleId === 'SC-EXPOSURE-003' && route?.path === '/admin'
     ))?.evidence.at(-1)?.pointer).toBe('/routes/0/auth_gate');
+
+    const inertPrefix = comparePathMethodContracts(input(
+      contract([operation('GET', '/health')]),
+      policy({ routes: [{ name: 'placeholder', match: { path_prefixes: ['/internal'] } }] }),
+    ));
+    expect(inertPrefix.some(({ ruleId }) => ruleId === 'SC-EXPOSURE-003')).toBe(false);
 
     const renamedParameter = comparePathMethodContracts(input(
       contract([operation('GET', '/users/{openapiId}')]),

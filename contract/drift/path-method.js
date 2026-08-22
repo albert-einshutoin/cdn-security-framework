@@ -66,6 +66,8 @@ function comparePathMethodContracts(input) {
     }
     const declaredShapes = new Set(declared.operations.map(({ path }) => (0, shared_1.normalizedPathShape)(path)));
     for (const rule of allowed.orderedRules) {
+        if (rule.auth.kind === 'none')
+            continue;
         const policyPaths = rule.auth.exactPath
             ? rule.match.authEffectiveValues
             : [...new Set([...rule.match.values, ...rule.match.authEffectiveValues])].sort();
