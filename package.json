@@ -85,6 +85,7 @@
   },
   "files": [
     "bin/",
+    "contract/",
     "emitter/",
     "lib/",
     "parser/",
