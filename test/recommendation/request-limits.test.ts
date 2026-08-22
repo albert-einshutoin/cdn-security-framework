@@ -89,7 +89,11 @@ describe('request limit recommendations', () => {
       },
     };
     expect(recommendRequestLimits(contract(fixedObject), { margin: { absolute: 0, ratio: 0 } })
-      .routes[0].operations[0].maxBodyBytes.value).toBe(160);
+      .routes[0].operations[0].maxBodyBytes).toMatchObject({
+        value: 160,
+        estimateKind: 'partial',
+        unsupportedReasons: ['body:json-whitespace-unbounded'],
+      });
 
     const boundedArray: ValueConstraintsV1 = {
       type: 'array', maxItems: 3, items: { type: 'boolean' },
@@ -143,6 +147,24 @@ describe('request limit recommendations', () => {
       .routes[0].operations[0].maxQueryParams.value).toBe(7);
     exploded.operations[0].request.queryParameters[3].constraints.maxItems = undefined;
     expect(recommendRequestLimits(exploded).routes[0].operations[0].maxQueryParams.value).toBeNull();
+
+    const queryAuth = contract();
+    queryAuth.operations[0].exposure = 'authenticated';
+    queryAuth.operations[0].auth = {
+      mode: 'alternatives',
+      alternatives: [{ anonymous: false, schemes: [{
+        name: 'apiKey', kind: 'api-key', location: 'query', parameterName: 'api_key',
+        scopes: [], capability: 'supported',
+      }] }],
+    };
+    const authRecommendation = recommendRequestLimits(queryAuth, { margin: { absolute: 0, ratio: 0 } })
+      .routes[0].operations[0];
+    expect(authRecommendation.maxQueryParams.value).toBe(4);
+    expect(authRecommendation.maxQueryLength).toMatchObject({
+      value: null,
+      estimateKind: 'unknown',
+      unsupportedReasons: ['query-auth:api_key:unbounded'],
+    });
   });
 
   test('keeps the complete candidate calculation stable', async () => {

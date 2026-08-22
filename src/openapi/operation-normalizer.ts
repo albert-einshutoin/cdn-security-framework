@@ -155,16 +155,17 @@ function normalizeConstraints(
           || Array.isArray(schema.properties)) reasons.add('schema:properties');
         else {
           const properties = schema.properties as Record<string, unknown>;
-          constraints.properties = {};
+          const normalizedProperties: Array<[string, ValueConstraintsV1]> = [];
           for (const name of Object.keys(properties).sort(compareText)) {
             const child = normalizeConstraints(
               locatedChild(locatedChild(resolved, 'properties', properties), name, properties[name]),
               materialize,
               nestedOptions,
             );
-            constraints.properties[name] = child.constraints;
+            normalizedProperties.push([name, child.constraints]);
             child.unsupportedReasons.forEach((reason) => reasons.add(reason));
           }
+          constraints.properties = Object.fromEntries(normalizedProperties);
         }
       }
       if (schema.required !== undefined) {

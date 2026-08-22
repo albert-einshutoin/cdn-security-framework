@@ -278,6 +278,23 @@ describe('Security IR v1', () => {
       required: true, constraints: deep, unsupportedReasons: [],
     };
     expect(() => createSecurityContract(deepInput)).toThrow('value constraints exceed depth limit');
+
+    const protoInput = structuredClone(baseInput);
+    protoInput.operations[0].request.body = {
+      required: true,
+      constraints: {
+        type: 'object',
+        additionalProperties: false,
+        properties: Object.fromEntries([['__proto__', { type: 'boolean' }]]),
+      },
+      unsupportedReasons: [],
+    };
+    const protoContract = createSecurityContract(protoInput);
+    expect(Object.prototype.hasOwnProperty.call(
+      protoContract.operations.find(({ routeKey }) => routeKey === 'POST /users')
+        ?.request.body?.constraints.properties,
+      '__proto__',
+    )).toBe(true);
   });
 
   test('sorts 1000 operations and rejects a duplicate deterministically', () => {

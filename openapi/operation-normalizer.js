@@ -119,12 +119,13 @@ function normalizeConstraints(schemaLocation, materialize, shapeOptions) {
                     reasons.add('schema:properties');
                 else {
                     const properties = schema.properties;
-                    constraints.properties = {};
+                    const normalizedProperties = [];
                     for (const name of Object.keys(properties).sort(compareText)) {
                         const child = normalizeConstraints(locatedChild(locatedChild(resolved, 'properties', properties), name, properties[name]), materialize, nestedOptions);
-                        constraints.properties[name] = child.constraints;
+                        normalizedProperties.push([name, child.constraints]);
                         child.unsupportedReasons.forEach((reason) => reasons.add(reason));
                     }
+                    constraints.properties = Object.fromEntries(normalizedProperties);
                 }
             }
             if (schema.required !== undefined) {

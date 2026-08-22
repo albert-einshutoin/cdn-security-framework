@@ -286,24 +286,54 @@ function uriLength(operation: ApiOperationContractV1): { value: number | null; r
   return { value: reasons.length > 0 ? null : total, reasons };
 }
 
-function bodyLength(operation: ApiOperationContractV1): { value: number | null; reasons: string[] } {
+function bodyLength(operation: ApiOperationContractV1): {
+  value: number | null;
+  kind: EstimateKind;
+  reasons: string[];
+} {
   const { body, contentTypes } = operation.request;
-  if (!body) return { value: 0, reasons: [] };
+  if (!body) return { value: 0, kind: 'exact', reasons: [] };
   if (contentTypes.some((value) => value === 'multipart/form-data')) {
-    return { value: null, reasons: ['body:multipart'] };
+    return { value: null, kind: 'unknown', reasons: ['body:multipart'] };
   }
   if (contentTypes.some((value) => value !== 'application/json' && !value.endsWith('+json'))) {
-    return { value: null, reasons: ['body:unsupported-content-type'] };
+    return { value: null, kind: 'unknown', reasons: ['body:unsupported-content-type'] };
   }
-  if (body.unsupportedReasons.length > 0) return { value: null, reasons: body.unsupportedReasons };
+  if (body.unsupportedReasons.length > 0) {
+    return { value: null, kind: 'unknown', reasons: body.unsupportedReasons };
+  }
   const value = jsonValueLength(body.constraints);
-  if (value !== null) return { value, reasons: [] };
+  if (value !== null) {
+    return { value, kind: 'partial', reasons: ['body:json-whitespace-unbounded'] };
+  }
   const reason = body.constraints.type === 'array' && body.constraints.maxItems === undefined
     ? 'body:unbounded-array'
     : body.constraints.type === 'object' && body.constraints.additionalProperties !== false
       ? 'body:free-form-object'
       : 'body:unsupported-or-unbounded-schema';
-  return { value: null, reasons: [reason] };
+  return { value: null, kind: 'unknown', reasons: [reason] };
+}
+
+function queryAuthentication(operation: ApiOperationContractV1): {
+  additionalCount: number;
+  names: string[];
+} {
+  const declared = new Set(operation.request.queryParameters.map(({ name }) => name));
+  let additionalCount = 0;
+  const names = new Set<string>();
+  for (const alternative of operation.auth.alternatives) {
+    let unnamed = 0;
+    const alternativeNames = new Set<string>();
+    for (const scheme of alternative.schemes) {
+      if (scheme.kind !== 'api-key' || scheme.location !== 'query') continue;
+      if (scheme.parameterName) {
+        names.add(scheme.parameterName);
+        if (!declared.has(scheme.parameterName)) alternativeNames.add(scheme.parameterName);
+      } else unnamed += 1;
+    }
+    additionalCount = Math.max(additionalCount, alternativeNames.size + unnamed);
+  }
+  return { additionalCount, names: [...names].sort(compareText) };
 }
 
 function operationRecommendation(
@@ -314,6 +344,20 @@ function operationRecommendation(
   const basis = basisFor(operation);
   const queryCount = queryParameterCount(operation.request.queryParameters);
   const query = queryLength(operation.request.queryParameters);
+  const queryAuth = queryAuthentication(operation);
+  const queryAuthReasons = queryAuth.additionalCount > 0
+    ? queryAuth.names.length > 0
+      ? queryAuth.names.map((name) => `query-auth:${name}:unbounded`)
+      : ['query-auth:unknown-name']
+    : [];
+  if (queryAuthReasons.length > 0) {
+    query.value = null;
+    query.reasons.push(...queryAuthReasons);
+  }
+  if (queryCount.value !== null) {
+    queryCount.value = safeAdd(queryCount.value, queryAuth.additionalCount);
+    if (queryCount.value === null) queryCount.reasons.push('query:count-overflow');
+  }
   const uri = uriLength(operation);
   const body = bodyLength(operation);
   const parameterConstraints = ([
@@ -328,20 +372,22 @@ function operationRecommendation(
     constraints: parameter.constraints,
   })));
   const parametersComplete = contract.capabilities.parameters === 'complete';
+  const querySurfaceComplete = parametersComplete && contract.capabilities.authentication === 'complete';
   const bodiesComplete = contract.capabilities.requestBodies === 'complete';
   return {
     routeKey: operation.routeKey,
     requiredHeaders: categorical(operation.request.requiredHeaders, basis, parametersComplete),
     allowedContentTypes: categorical(operation.request.contentTypes, basis, bodiesComplete),
     maxQueryParams: numeric(queryCount.value, basis,
-      queryCount.value === null ? 'unknown' : parametersComplete ? 'upper-bound' : 'partial',
+      queryCount.value === null ? 'unknown' : querySurfaceComplete ? 'upper-bound' : 'partial',
       margin, queryCount.reasons),
     maxQueryLength: numeric(query.value, basis,
-      query.value === null ? 'unknown' : parametersComplete ? 'upper-bound' : 'partial', margin, query.reasons),
+      query.value === null ? 'unknown' : querySurfaceComplete ? 'upper-bound' : 'partial', margin, query.reasons),
     maxUriLength: numeric(uri.value, basis,
       uri.value === null ? 'unknown' : parametersComplete ? 'upper-bound' : 'partial', margin, uri.reasons),
     maxBodyBytes: numeric(body.value, basis,
-      body.value === null ? 'unknown' : bodiesComplete ? 'upper-bound' : 'partial', margin, body.reasons),
+      body.value === null ? 'unknown' : body.kind === 'exact' && bodiesComplete ? 'exact' : 'partial',
+      margin, body.reasons),
     parameterConstraints: categorical(parameterConstraints, basis, parametersComplete,
       parameterConstraints.flatMap(({ name, constraints }) => constraints.type === 'unknown'
         ? [`parameter:${name}:unknown`] : [])),

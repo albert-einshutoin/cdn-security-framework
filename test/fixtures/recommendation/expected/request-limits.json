@@ -92,7 +92,7 @@
             "basis": [
               "/paths/~1items~1{id}/post"
             ],
-            "estimateKind": "upper-bound",
+            "estimateKind": "partial",
             "margin": {
               "absolute": 0,
               "ratio": 0,
@@ -100,7 +100,9 @@
               "after": 79
             },
             "confidence": "medium",
-            "unsupportedReasons": []
+            "unsupportedReasons": [
+              "body:json-whitespace-unbounded"
+            ]
           },
           "parameterConstraints": {
             "value": [
