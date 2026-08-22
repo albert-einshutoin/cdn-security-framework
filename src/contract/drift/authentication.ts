@@ -2,9 +2,9 @@ import type { ApiAuthSchemeV1, ApiOperationContractV1 } from '../security-ir';
 import type { AllowedRouteRuleV1 } from '../allowed-surface';
 import type { SecurityFindingV1 } from '../finding';
 import {
-  evidenceFor,
   makeFinding,
   matchingAuthRules,
+  policyEvidence,
   stableFindings,
   validateComparisonInput,
   type ContractDriftInput,
@@ -83,13 +83,18 @@ export function compareAuthContracts(input: ContractDriftInput): SecurityFinding
     const uncertainRules = matches.filter(({ relation, rule }) => relation !== 'definitely-covered'
       || rule.auth.verifiability[target] !== 'enforced'
       || bypassesAuth(rule));
-    const pointer = definiteRules[0]?.pointer ?? uncertainRules[0]?.rule.pointer ?? '/routes';
-    const evidence = evidenceFor(
-      operation,
-      allowed,
-      pointer === '/routes' ? pointer : `${pointer}/auth_gate`,
-      'authentication-drift-v1',
-    );
+    const evidenceRules = [
+      ...definiteRules,
+      ...uncertainRules.map(({ rule }) => rule),
+    ];
+    const evidence = [
+      ...operation.provenance,
+      ...(evidenceRules.length > 0
+        ? evidenceRules.map((rule) => policyEvidence(
+          allowed, `${rule.pointer}/auth_gate`, 'authentication-drift-v1',
+        ))
+        : [policyEvidence(allowed, '/request', 'authentication-drift-v1')]),
+    ];
 
     if (operation.exposure === 'public') {
       if (definiteRules.length > 0) findings.push(makeFinding({

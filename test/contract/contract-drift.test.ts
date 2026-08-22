@@ -257,6 +257,10 @@ describe('OpenAPI and Policy contract drift', () => {
     expect(findings.find(({ ruleId }) => ruleId === 'SC-AUTHN-004')?.severity).toBe('info');
     expect(findings.find(({ ruleId }) => ruleId === 'SC-AUTHN-002')?.message)
       .toContain('Application authentication is not evaluated');
+    expect(findings.find(({ ruleId, route }) => (
+      ruleId === 'SC-AUTHN-003' && route?.path === '/stacked'
+    ))?.evidence.filter(({ source }) => source === 'policy').map(({ pointer }) => pointer))
+      .toEqual(['/routes/4/auth_gate', '/routes/5/auth_gate']);
 
     const exactPathFindings = compareAuthContracts(input(
       contract([
@@ -270,7 +274,7 @@ describe('OpenAPI and Policy contract drift', () => {
       }] }),
     ));
     expect(exactPathFindings.map(({ ruleId }) => ruleId)).toEqual(['SC-AUTHN-001']);
-    expect(exactPathFindings[0]?.evidence.at(-1)?.pointer).toBe('/routes');
+    expect(exactPathFindings[0]?.evidence.at(-1)?.pointer).toBe('/request');
 
     const publicOverlap = compareAuthContracts(input(
       contract([operation('GET', '/users/{id}')]),

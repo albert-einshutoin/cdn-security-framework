@@ -72,8 +72,16 @@ function compareAuthContracts(input) {
         const uncertainRules = matches.filter(({ relation, rule }) => relation !== 'definitely-covered'
             || rule.auth.verifiability[target] !== 'enforced'
             || bypassesAuth(rule));
-        const pointer = definiteRules[0]?.pointer ?? uncertainRules[0]?.rule.pointer ?? '/routes';
-        const evidence = (0, shared_1.evidenceFor)(operation, allowed, pointer === '/routes' ? pointer : `${pointer}/auth_gate`, 'authentication-drift-v1');
+        const evidenceRules = [
+            ...definiteRules,
+            ...uncertainRules.map(({ rule }) => rule),
+        ];
+        const evidence = [
+            ...operation.provenance,
+            ...(evidenceRules.length > 0
+                ? evidenceRules.map((rule) => (0, shared_1.policyEvidence)(allowed, `${rule.pointer}/auth_gate`, 'authentication-drift-v1'))
+                : [(0, shared_1.policyEvidence)(allowed, '/request', 'authentication-drift-v1')]),
+        ];
         if (operation.exposure === 'public') {
             if (definiteRules.length > 0)
                 findings.push((0, shared_1.makeFinding)({
