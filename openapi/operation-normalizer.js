@@ -232,6 +232,141 @@ function normalizeOpenApiOperations(graph, options = {}) {
         pointer: '',
     };
     const root = asObject(rootLocation);
+    const evidenceFor = (location, capability, complete = true) => {
+        const digest = documents.get(location.sourceUri)?.contentDigest;
+        if (!digest)
+            fail(location);
+        return {
+            source: 'openapi',
+            uri: location.sourceUri,
+            pointer: location.pointer,
+            digest,
+            analyzer: 'openapi-auth-normalizer-v1',
+            capability,
+            complete,
+        };
+    };
+    let authenticationCapability = 'complete';
+    const componentsLocation = locatedChild(rootLocation, 'components', root.components ?? {});
+    const components = asObject(componentsLocation);
+    const securitySchemesLocation = locatedChild(componentsLocation, 'securitySchemes', components.securitySchemes ?? {});
+    const securitySchemes = asObject(securitySchemesLocation);
+    if (Object.keys(securitySchemes).length > limits.maxSecuritySchemes)
+        fail(securitySchemesLocation);
+    const schemeDefinitions = new Map();
+    for (const name of Object.keys(securitySchemes).sort(compareText)) {
+        const definitionLocation = materialize(locatedChild(securitySchemesLocation, name, securitySchemes[name]));
+        const definition = asObject(definitionLocation);
+        if (typeof definition.type !== 'string' || !definition.type.trim())
+            fail(definitionLocation);
+        let scheme;
+        if (definition.type === 'http') {
+            if (typeof definition.scheme !== 'string' || !definition.scheme.trim())
+                fail(definitionLocation);
+            const httpScheme = definition.scheme.trim().toLowerCase();
+            scheme = httpScheme === 'basic' || httpScheme === 'bearer'
+                ? { name, kind: httpScheme, capability: 'supported' }
+                : { name, kind: 'unknown', capability: 'unsupported', unsupportedReason: `http-scheme:${httpScheme}` };
+        }
+        else if (definition.type === 'apiKey') {
+            if (typeof definition.name !== 'string' || !definition.name.trim()
+                || typeof definition.in !== 'string' || !PARAMETER_LOCATIONS.has(definition.in)
+                || definition.in === 'path')
+                fail(definitionLocation);
+            const location = definition.in;
+            scheme = {
+                name,
+                kind: 'api-key',
+                location,
+                parameterName: location === 'header' ? definition.name.trim().toLowerCase() : definition.name.trim(),
+                capability: 'supported',
+            };
+        }
+        else if (definition.type === 'oauth2') {
+            const flowsLocation = locatedChild(definitionLocation, 'flows', definition.flows);
+            const flows = asObject(flowsLocation);
+            const names = ['authorizationCode', 'clientCredentials', 'implicit', 'password']
+                .filter((flow) => flows[flow] !== undefined);
+            if (names.length === 0)
+                fail(flowsLocation);
+            for (const flow of names) {
+                const flowLocation = locatedChild(flowsLocation, flow, flows[flow]);
+                const value = asObject(flowLocation);
+                const requiredUrls = flow === 'implicit' ? ['authorizationUrl']
+                    : flow === 'authorizationCode' ? ['authorizationUrl', 'tokenUrl'] : ['tokenUrl'];
+                if (requiredUrls.some((field) => typeof value[field] !== 'string' || !value[field].trim())) {
+                    fail(flowLocation);
+                }
+                const scopes = asObject(locatedChild(flowLocation, 'scopes', value.scopes));
+                if (Object.values(scopes).some((description) => typeof description !== 'string'))
+                    fail(flowLocation);
+            }
+            scheme = { name, kind: 'oauth2', flows: names.sort(compareText), capability: 'supported' };
+        }
+        else if (definition.type === 'openIdConnect') {
+            if (typeof definition.openIdConnectUrl !== 'string' || !definition.openIdConnectUrl.trim()) {
+                fail(definitionLocation);
+            }
+            scheme = { name, kind: 'openid-connect', capability: 'supported' };
+        }
+        else if (definition.type === 'mutualTLS') {
+            scheme = { name, kind: 'mutual-tls', capability: 'supported' };
+        }
+        else {
+            scheme = {
+                name,
+                kind: 'unknown',
+                capability: 'unsupported',
+                unsupportedReason: `security-scheme:type:${definition.type.trim().toLowerCase()}`,
+            };
+        }
+        if (scheme.capability === 'unsupported')
+            authenticationCapability = 'partial';
+        schemeDefinitions.set(name, {
+            scheme,
+            evidence: evidenceFor(definitionLocation, 'openapi-security-scheme-v1', scheme.capability === 'supported'),
+        });
+    }
+    const normalizeAuthentication = (input, location) => {
+        if (location === undefined) {
+            authenticationCapability = 'partial';
+            return { auth: { mode: 'unknown', alternatives: [] }, exposure: 'unknown', evidence: [] };
+        }
+        if (!Array.isArray(input) || input.length > limits.maxSecuritySchemes)
+            fail(location);
+        const evidence = [evidenceFor(location, 'openapi-auth-requirement-v1')];
+        if (input.length === 0) {
+            return { auth: { mode: 'none', alternatives: [] }, exposure: 'public', evidence };
+        }
+        const alternatives = input.map((value, index) => {
+            const requirementLocation = locatedChild(location, String(index), value);
+            const requirement = asObject(requirementLocation);
+            const names = Object.keys(requirement).sort(compareText);
+            if (names.length > limits.maxSecuritySchemes)
+                fail(requirementLocation);
+            const schemes = names.map((name) => {
+                const scopes = requirement[name];
+                const definition = schemeDefinitions.get(name);
+                if (!definition || !Array.isArray(scopes)
+                    || scopes.some((scope) => typeof scope !== 'string' || !scope.trim()))
+                    fail(requirementLocation);
+                if (!['oauth2', 'openid-connect', 'unknown'].includes(definition.scheme.kind) && scopes.length > 0) {
+                    fail(requirementLocation);
+                }
+                evidence.push(definition.evidence);
+                return { ...definition.scheme, scopes };
+            });
+            return { anonymous: schemes.length === 0, schemes };
+        });
+        return {
+            auth: { mode: 'alternatives', alternatives },
+            exposure: alternatives.some(({ anonymous }) => anonymous) ? 'public' : 'authenticated',
+            evidence,
+        };
+    };
+    const rootSecurityLocation = Object.prototype.hasOwnProperty.call(root, 'security')
+        ? locatedChild(rootLocation, 'security', root.security)
+        : undefined;
     const pathsLocation = locatedChild(rootLocation, 'paths', root.paths ?? {});
     const paths = asObject(pathsLocation);
     const operations = [];
@@ -279,13 +414,19 @@ function normalizeOpenApiOperations(graph, options = {}) {
             const digest = documents.get(operationLocation.sourceUri)?.contentDigest;
             if (!digest)
                 fail(operationLocation);
+            const operationSecurityLocation = Object.prototype.hasOwnProperty.call(operation, 'security')
+                ? locatedChild(operationLocation, 'security', operation.security)
+                : undefined;
+            const authentication = normalizeAuthentication(operationSecurityLocation === undefined
+                ? rootSecurityLocation?.value
+                : operationSecurityLocation.value, operationSecurityLocation ?? rootSecurityLocation);
             operations.push({
                 method: methodKey,
                 path: canonicalPath,
                 ...(typeof operation.operationId === 'string' && operation.operationId.trim()
                     ? { operationId: operation.operationId.trim() } : {}),
-                exposure: 'unknown',
-                auth: { mode: 'unknown', alternatives: [] },
+                exposure: authentication.exposure,
+                auth: authentication.auth,
                 request: {
                     contentTypes: body?.contentTypes ?? [],
                     requiredHeaders: headerParameters.filter(({ required }) => required).map(({ name }) => name),
@@ -303,7 +444,7 @@ function normalizeOpenApiOperations(graph, options = {}) {
                         analyzer: 'openapi-operation-normalizer-v1',
                         capability: 'request-surface-v1',
                         complete: true,
-                    }],
+                    }, ...authentication.evidence],
                 metadata: {
                     deprecated: operation.deprecated === true,
                     tags: Array.isArray(operation.tags)
@@ -319,7 +460,7 @@ function normalizeOpenApiOperations(graph, options = {}) {
                 routes: 'complete',
                 parameters: parameterCapability,
                 requestBodies: bodyCapability,
-                authentication: 'unsupported',
+                authentication: authenticationCapability,
             },
             operations,
         });

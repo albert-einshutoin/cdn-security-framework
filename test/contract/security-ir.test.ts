@@ -226,6 +226,19 @@ describe('Security IR v1', () => {
     const pointerQuery = structuredClone(baseInput);
     pointerQuery.operations[0].provenance[0].pointer = '/paths/~1users?session=credential';
     expect(() => createSecurityContract(pointerQuery)).toThrow('invalid provenance pointer');
+
+    for (const auth of [
+      { name: 'unknown', kind: 'unknown', scopes: [], capability: 'supported' },
+      { name: 'oauth', kind: 'oauth2', scopes: [], flows: [], capability: 'supported' },
+      { name: 'key', kind: 'api-key', scopes: [], capability: 'supported' },
+    ]) {
+      const invalidAuth = structuredClone(baseInput) as any;
+      invalidAuth.operations[0].exposure = 'authenticated';
+      invalidAuth.operations[0].auth = {
+        mode: 'alternatives', alternatives: [{ anonymous: false, schemes: [auth] }],
+      };
+      expect(() => createSecurityContract(invalidAuth)).toThrow('invalid authentication scheme');
+    }
   });
 
   test('sorts 1000 operations and rejects a duplicate deterministically', () => {

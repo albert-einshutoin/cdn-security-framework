@@ -8,7 +8,7 @@
         "routes": "complete",
         "parameters": "complete",
         "requestBodies": "complete",
-        "authentication": "unsupported"
+        "authentication": "partial"
       },
       "operations": [
         {
@@ -57,7 +57,7 @@
         "routes": "complete",
         "parameters": "complete",
         "requestBodies": "partial",
-        "authentication": "unsupported"
+        "authentication": "complete"
       },
       "operations": [
         {
@@ -65,9 +65,9 @@
           "method": "GET",
           "path": "/public",
           "operationId": "publicStatus",
-          "exposure": "unknown",
+          "exposure": "public",
           "auth": {
-            "mode": "unknown",
+            "mode": "none",
             "alternatives": []
           },
           "request": {
@@ -79,6 +79,15 @@
             "cookieParameters": []
           },
           "provenance": [
+            {
+              "source": "openapi",
+              "uri": "valid/openapi-3.0.yaml",
+              "pointer": "/paths/~1public/get/security",
+              "digest": "sha256:083ddfb67e3616074e16538ede359da045e0f7fc137f12a1337d668ff080b061",
+              "analyzer": "openapi-auth-normalizer-v1",
+              "capability": "openapi-auth-requirement-v1",
+              "complete": true
+            },
             {
               "source": "openapi",
               "uri": "valid/openapi-3.0.yaml",
@@ -101,10 +110,46 @@
           "method": "POST",
           "path": "/users/{userId}",
           "operationId": "updateUser",
-          "exposure": "unknown",
+          "exposure": "authenticated",
           "auth": {
-            "mode": "unknown",
-            "alternatives": []
+            "mode": "alternatives",
+            "alternatives": [
+              {
+                "anonymous": false,
+                "schemes": [
+                  {
+                    "name": "oauth",
+                    "kind": "oauth2",
+                    "scopes": [
+                      "users:write"
+                    ],
+                    "flows": [
+                      "clientCredentials"
+                    ],
+                    "capability": "supported"
+                  },
+                  {
+                    "name": "apiKeyHeader",
+                    "kind": "api-key",
+                    "location": "header",
+                    "parameterName": "x-api-key",
+                    "scopes": [],
+                    "capability": "supported"
+                  }
+                ]
+              },
+              {
+                "anonymous": false,
+                "schemes": [
+                  {
+                    "name": "basicAuth",
+                    "kind": "basic",
+                    "scopes": [],
+                    "capability": "supported"
+                  }
+                ]
+              }
+            ]
           },
           "request": {
             "contentTypes": [
@@ -172,6 +217,42 @@
             {
               "source": "openapi",
               "uri": "valid/openapi-3.0.yaml",
+              "pointer": "/paths/~1users~1{userId}/post/security",
+              "digest": "sha256:083ddfb67e3616074e16538ede359da045e0f7fc137f12a1337d668ff080b061",
+              "analyzer": "openapi-auth-normalizer-v1",
+              "capability": "openapi-auth-requirement-v1",
+              "complete": true
+            },
+            {
+              "source": "openapi",
+              "uri": "valid/openapi-3.0.yaml",
+              "pointer": "/components/securitySchemes/apiKeyHeader",
+              "digest": "sha256:083ddfb67e3616074e16538ede359da045e0f7fc137f12a1337d668ff080b061",
+              "analyzer": "openapi-auth-normalizer-v1",
+              "capability": "openapi-security-scheme-v1",
+              "complete": true
+            },
+            {
+              "source": "openapi",
+              "uri": "valid/openapi-3.0.yaml",
+              "pointer": "/components/securitySchemes/basicAuth",
+              "digest": "sha256:083ddfb67e3616074e16538ede359da045e0f7fc137f12a1337d668ff080b061",
+              "analyzer": "openapi-auth-normalizer-v1",
+              "capability": "openapi-security-scheme-v1",
+              "complete": true
+            },
+            {
+              "source": "openapi",
+              "uri": "valid/openapi-3.0.yaml",
+              "pointer": "/components/securitySchemes/oauth",
+              "digest": "sha256:083ddfb67e3616074e16538ede359da045e0f7fc137f12a1337d668ff080b061",
+              "analyzer": "openapi-auth-normalizer-v1",
+              "capability": "openapi-security-scheme-v1",
+              "complete": true
+            },
+            {
+              "source": "openapi",
+              "uri": "valid/openapi-3.0.yaml",
               "pointer": "/paths/~1users~1{userId}/post",
               "digest": "sha256:083ddfb67e3616074e16538ede359da045e0f7fc137f12a1337d668ff080b061",
               "analyzer": "openapi-operation-normalizer-v1",
@@ -199,7 +280,7 @@
         "routes": "complete",
         "parameters": "partial",
         "requestBodies": "complete",
-        "authentication": "unsupported"
+        "authentication": "partial"
       },
       "operations": [
         {
@@ -263,7 +344,7 @@
         "routes": "complete",
         "parameters": "complete",
         "requestBodies": "complete",
-        "authentication": "unsupported"
+        "authentication": "partial"
       },
       "operations": [
         {
