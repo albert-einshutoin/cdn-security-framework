@@ -21,6 +21,7 @@ import {
 import { resolveOpenApiRefPath } from './ref-boundary';
 
 const RESOLVED_OPENAPI_GRAPHS = new WeakSet<object>();
+const LITERAL_VALUE_KEYS = new Set(['const', 'default', 'enum', 'example', 'value']);
 
 export { serializeResolvedOpenApiGraph } from './document-graph';
 export type {
@@ -285,6 +286,8 @@ export function resolveOpenApiReferences(
     }
     for (const [key, child] of Object.entries(value)) {
       if (key === '$ref') continue;
+      if (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
+        || (key === 'examples' && Array.isArray(child))) continue;
       walk(child, document, `${pointer}/${encodePointerToken(key)}`, depth, ancestors);
     }
   };

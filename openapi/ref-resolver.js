@@ -15,6 +15,7 @@ const analysis_limits_1 = require("./analysis-limits");
 const load_document_1 = require("./load-document");
 const ref_boundary_1 = require("./ref-boundary");
 const RESOLVED_OPENAPI_GRAPHS = new WeakSet();
+const LITERAL_VALUE_KEYS = new Set(['const', 'default', 'enum', 'example', 'value']);
 var document_graph_1 = require("./document-graph");
 Object.defineProperty(exports, "serializeResolvedOpenApiGraph", { enumerable: true, get: function () { return document_graph_1.serializeResolvedOpenApiGraph; } });
 function isResolvedOpenApiGraph(value) {
@@ -221,6 +222,9 @@ function resolveOpenApiReferences(options) {
         }
         for (const [key, child] of Object.entries(value)) {
             if (key === '$ref')
+                continue;
+            if (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
+                || (key === 'examples' && Array.isArray(child)))
                 continue;
             walk(child, document, `${pointer}/${encodePointerToken(key)}`, depth, ancestors);
         }

@@ -140,6 +140,27 @@ describe('resolveOpenApiReferences', () => {
     })).toThrow(expect.objectContaining({ code: 'OPENAPI_REF_NOT_FOUND' }));
   });
 
+  test('ignores literal ref keys in schema example values', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'openapi-literal-ref-'));
+    temporaryDirectories.push(workspace);
+    fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
+      openapi: '3.1.0',
+      paths: {},
+      components: { schemas: { Sample: {
+        type: 'string',
+        example: { $ref: '#/components/schemas/Sample/default' },
+        default: { $ref: '#/components/schemas/Sample/example' },
+        enum: [{ $ref: '#/components/schemas/Sample/type' }],
+      } } },
+    }));
+    const graph = resolveOpenApiReferences({
+      root: loadOpenApiDocument({ inputPath: 'root.json', workspaceRoot: workspace }),
+      workspaceRoot: workspace,
+      limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
+    });
+    expect(graph.references).toEqual([]);
+  });
+
   test('caches sibling documents and keeps cycles as reference identity', () => {
     const root = loadFixture('refs/sibling.yaml');
     const open = vi.spyOn(fs, 'openSync');
