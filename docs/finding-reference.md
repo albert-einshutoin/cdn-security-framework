@@ -60,6 +60,11 @@ would block only in enforce mode is not reported as an enforce-mode Error.
 | `SC-REQUEST-001` | Info | An OpenAPI-required header is not required at Edge. |
 | `SC-REQUEST-002` | Error; Warning in monitor mode or for conditional CORS preflight | Edge requires a header missing from a complete OpenAPI parameter contract. Effective runtime defaults are included. |
 | `SC-REQUEST-003` | Info | OpenAPI declares request content types, but the current Policy schema has no Edge content-type allowlist. |
+| `SC-GOV-001` | Error | An expired exception remains in the exception set and suppresses nothing. |
+| `SC-GOV-002` | Warning | A live exception matches no current Finding. |
+| `SC-GOV-003` | Warning | Multiple live exceptions match one Finding; only the most specific is applied. |
+
+See [Finding Exceptions](finding-exceptions.md) for the exception lifecycle and audit procedure.
 
 ### Authentication compatibility
 

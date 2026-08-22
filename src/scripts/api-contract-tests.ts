@@ -45,6 +45,7 @@ test('package metadata exposes typed root api and bounded exports', () => {
     './openapi',
     './parser',
     './recommendation',
+    './schemas/finding-exceptions-v1.schema.json',
     './schemas/openapi-inspection-v1.schema.json',
     './schemas/security-ir-v1.schema.json',
     './validator',
@@ -61,6 +62,10 @@ test('package metadata exposes typed root api and bounded exports', () => {
   assert.strictEqual(pkg.exports['./contract/security-ir'].types, './contract/security-ir.d.ts');
   assert.strictEqual(pkg.exports['./openapi'].require, './openapi/index.js');
   assert.strictEqual(pkg.exports['./recommendation'].require, './recommendation/index.js');
+  assert.strictEqual(
+    pkg.exports['./schemas/finding-exceptions-v1.schema.json'],
+    './schemas/finding-exceptions-v1.schema.json',
+  );
   assert.strictEqual(
     pkg.exports['./schemas/security-ir-v1.schema.json'],
     './schemas/security-ir-v1.schema.json',
@@ -86,6 +91,8 @@ test('phase subpath exports expose public compiler contracts', () => {
   assert.strictEqual(typeof contract.projectPolicyToAllowedSurface, 'function');
   assert.strictEqual(typeof contract.relateRoute, 'function');
   assert.strictEqual(typeof contract.compareSecurityContracts, 'function');
+  assert.strictEqual(typeof contract.loadFindingExceptions, 'function');
+  assert.strictEqual(typeof contract.applyFindingExceptions, 'function');
   assert.strictEqual(typeof openapi.loadOpenApiDocument, 'function');
   assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
   assert.strictEqual(typeof openapi.serializeResolvedOpenApiGraph, 'function');

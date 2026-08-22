@@ -58,6 +58,11 @@ Policy Capabilityの実効範囲が異なるため、Targetは必須です。Mon
 | `SC-REQUEST-001` | Info | OpenAPI必須HeaderをEdgeで必須化していない。 |
 | `SC-REQUEST-002` | Error、Monitorまたは条件付きCORSプリフライトではWarning | 完全なOpenAPI Parameter ContractにないHeaderをEdgeが要求する。Runtime Defaultも実効値に含む。 |
 | `SC-REQUEST-003` | Info | OpenAPIはRequest Content Typeを宣言するが、現行Policy SchemaにはEdge Content-Type Allowlistがない。 |
+| `SC-GOV-001` | Error | 期限切れExceptionが残っている。Findingは抑制しない。 |
+| `SC-GOV-002` | Warning | 有効期限内のExceptionが現在のFindingに一致しない。 |
+| `SC-GOV-003` | Warning | 1件のFindingに複数Exceptionが一致し、最も限定的な1件だけを適用した。 |
+
+Exceptionの更新・期限延長・削除・監査手順は[Finding Exception運用ガイド](finding-exceptions.ja.md)を参照してください。
 
 ### Authentication Compatibility
 
