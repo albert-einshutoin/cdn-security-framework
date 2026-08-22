@@ -57,16 +57,21 @@ function compareAuthContracts(input) {
     (0, shared_1.validateComparisonInput)(input);
     const { declared, allowed, target } = input;
     const findings = [];
+    const corsOriginCanMatch = allowed.defaults.corsPreflight.origins.kind === 'any'
+        || (allowed.defaults.corsPreflight.origins.kind === 'allowlist'
+            && allowed.defaults.corsPreflight.origins.values.length > 0);
     for (const operation of declared.operations) {
         const matches = (0, shared_1.matchingAuthRules)(operation, allowed);
+        const bypassesAuth = (rule) => corsOriginCanMatch
+            && rule.auth.preAuthBypassMethods.includes(operation.method);
         const definiteRules = matches
             .filter(({ relation, rule }) => relation === 'definitely-covered'
             && rule.auth.verifiability[target] === 'enforced'
-            && !rule.auth.preAuthBypassMethods.includes(operation.method))
+            && !bypassesAuth(rule))
             .map(({ rule }) => rule);
         const uncertainRules = matches.filter(({ relation, rule }) => relation !== 'definitely-covered'
             || rule.auth.verifiability[target] !== 'enforced'
-            || rule.auth.preAuthBypassMethods.includes(operation.method));
+            || bypassesAuth(rule));
         const pointer = definiteRules[0]?.pointer ?? uncertainRules[0]?.rule.pointer ?? '/routes';
         const evidence = (0, shared_1.evidenceFor)(operation, allowed, `${pointer}/auth_gate`, 'authentication-drift-v1');
         if (operation.exposure === 'public') {

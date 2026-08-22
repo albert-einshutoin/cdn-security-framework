@@ -45,7 +45,7 @@ Policy Capabilityの実効範囲が異なるため、Targetは必須です。Mon
 
 | Rule | Severity | Deterministicな条件 |
 | --- | --- | --- |
-| `SC-EXPOSURE-001` | Error | 完全なRoute宣言にないMethodをGlobalの実効Method集合が許可する。 |
+| `SC-EXPOSURE-001` | Error、MonitorではWarning | 実効Method Surfaceが完全なRoute宣言にないMethodを許可する。MonitorではMethod拒否を記録するがRequestを通す。 |
 | `SC-EXPOSURE-002` | Error、MonitorではWarning | OpenAPI Operationが実効Method集合の外にある。 |
 | `SC-INVENTORY-002` | Error、Route InventoryがPartialならWarning | Exact Policy Routeと同ShapeのOpenAPI Routeがない。Parameter名はShape一致に影響しない。 |
 | `SC-EXPOSURE-003` | Warning | Broad Prefix Ruleが宣言Surfaceを超える可能性がある。Unknown overlapをErrorへ昇格しない。 |

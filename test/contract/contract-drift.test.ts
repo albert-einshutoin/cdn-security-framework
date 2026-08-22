@@ -139,6 +139,13 @@ describe('OpenAPI and Policy contract drift', () => {
     expect(monitorFindings.find(({ ruleId }) => ruleId === 'SC-EXPOSURE-002')?.severity)
       .toBe('warning');
 
+    const monitorSurface = comparePathMethodContracts(input(
+      contract([operation('GET', '/users')]),
+      policy({ defaults: { mode: 'monitor' } }),
+    ));
+    expect(monitorSurface.find(({ ruleId }) => ruleId === 'SC-EXPOSURE-001'))
+      .toMatchObject({ severity: 'warning' });
+
     const corsMethods = comparePathMethodContracts(input(
       contract([operation('GET', '/cors')]),
       policy({ response_headers: { cors: { allow_origins: ['https://client.example'] } } }),
@@ -264,6 +271,27 @@ describe('OpenAPI and Policy contract drift', () => {
       }),
     ));
     expect(corsAuth.map(({ ruleId }) => ruleId)).toEqual(['SC-AUTHN-004']);
+
+    const emptyCorsAuth = compareAuthContracts(input(
+      contract([
+        operation('OPTIONS', '/private', { exposure: 'authenticated', auth: apiKeyAuth }),
+        operation('OPTIONS', '/public'),
+      ]),
+      policy({
+        routes: [
+          {
+            name: 'private', match: { path_prefixes: ['/private'] },
+            auth_gate: { type: 'static_token', header: 'x-api-key' },
+          },
+          {
+            name: 'public', match: { path_prefixes: ['/public'] },
+            auth_gate: { type: 'static_token', header: 'x-api-key' },
+          },
+        ],
+        response_headers: { cors: { allow_origins: [] } },
+      }),
+    ));
+    expect(emptyCorsAuth.map(({ ruleId }) => ruleId)).toEqual(['SC-AUTHN-002']);
   });
 
   test('compares only finite request estimates and reports unsupported content types', () => {

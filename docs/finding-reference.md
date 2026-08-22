@@ -47,7 +47,7 @@ would block only in enforce mode is not reported as an enforce-mode Error.
 
 | Rule | Severity | Deterministic condition |
 | --- | --- | --- |
-| `SC-EXPOSURE-001` | Error | The global effective method set allows a method absent from a completely declared route. |
+| `SC-EXPOSURE-001` | Error; Warning in monitor mode | The effective method surface allows a method absent from a completely declared route. Monitor mode observes method rejection but permits the request. |
 | `SC-EXPOSURE-002` | Error; Warning in monitor mode | An OpenAPI operation is outside the effective method set. |
 | `SC-INVENTORY-002` | Error; Warning for partial route inventory | An exact Policy route has no same-shape OpenAPI route. Parameter names do not affect shape equality. |
 | `SC-EXPOSURE-003` | Warning | A broad prefix rule may extend beyond the declared surface. Unknown overlap is never promoted to Error. |

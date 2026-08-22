@@ -44,17 +44,29 @@ export function comparePathMethodContracts(input: ContractDriftInput): SecurityF
     const declaredMethods = [...new Set(operations.map(({ method }) => method))].sort();
     const declaredMethodSet = new Set<string>(declaredMethods);
     const extraMethods = allowed.defaults.methods.filter((method) => !declaredMethodSet.has(method));
-    if (extraMethods.length > 0 && declared.capabilities.routes === 'complete') {
+    const monitor = allowed.defaults.requestDecision === 'would-block';
+    if ((extraMethods.length > 0 || monitor) && declared.capabilities.routes === 'complete') {
       findings.push(makeFinding({
         ruleId: 'SC-EXPOSURE-001',
-        severity: 'error',
+        severity: monitor ? 'warning' : 'error',
         confidence: 'deterministic',
         category: 'exposure',
-        title: 'Policy allows undeclared methods on a declared route',
-        message: 'The global Edge method allowlist includes methods not declared for this OpenAPI route.',
+        title: monitor
+          ? 'Monitor mode permits undeclared methods on a declared route'
+          : 'Policy allows undeclared methods on a declared route',
+        message: monitor
+          ? 'Method rejections are observed but not blocked in monitor mode, so the Edge method surface is not restricted.'
+          : 'The global Edge method allowlist includes methods not declared for this OpenAPI route.',
         route: { path: routePath },
         expected: { methods: declaredMethods },
-        actual: { methods: allowed.defaults.methods, extraMethods },
+        actual: {
+          methods: allowed.defaults.methods,
+          extraMethods,
+          ...(monitor ? {
+            decision: allowed.defaults.requestDecision,
+            methodSurface: 'unrestricted-by-edge-in-monitor-mode',
+          } : {}),
+        },
         evidence: evidenceFor(operations[0], allowed, '/request/allow_methods', 'path-method-drift-v1'),
         remediation: { summary: 'Remove undeclared methods or declare the intended operations.', safeAutoFix: false },
       }));
