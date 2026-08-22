@@ -29,7 +29,7 @@ function limitDiagnostic(metric, used, limit) {
     };
 }
 function escapeTerminalText(value) {
-    return value.replace(/[\p{Cc}\p{Cf}]/gu, (character) => (`\\u{${character.codePointAt(0)?.toString(16).padStart(4, '0')}}`));
+    return value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (`\\u{${character.codePointAt(0)?.toString(16).padStart(4, '0')}}`));
 }
 function inspectOpenApiForCli(options) {
     const limits = (0, analysis_limits_1.validateOpenApiAnalysisLimits)({

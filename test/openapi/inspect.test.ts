@@ -86,12 +86,14 @@ describe('inspectOpenApi', () => {
     expect(text).toContain('content-types=application/json,application/x-www-form-urlencoded,multipart/form-data,text/plain');
     expect(text).toContain('parameters=4');
 
-    report.contract.operations[0].routeKey += '\u001b[31m';
+    report.contract.operations[0].routeKey += '\u001b[31m\u2028spoofed';
     report.contract.operations[0].request.contentTypes.push('text/plain\u202e');
     const escapedText = formatOpenApiInspectionText(report);
     expect(escapedText).not.toContain('\u001b');
     expect(escapedText).not.toContain('\u202e');
+    expect(escapedText).not.toContain('\u2028');
     expect(escapedText).toContain('\\u{001b}');
+    expect(escapedText).toContain('\\u{2028}spoofed');
     expect(escapedText).toContain('text/plain\\u{202e}');
   });
 
