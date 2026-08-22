@@ -48,8 +48,9 @@ export interface AllowedDefaultsV1 {
   corsOptionsBypass: boolean;
   corsPreflight: {
     method: 'OPTIONS';
-    allowedOriginDecision: 'early-204-before-auth' | 'not-configured';
+    allowedOriginDecision: 'early-204-before-request-validation' | 'not-configured';
     nonMatchingOriginDecision: 'continue';
+    bypassScope: 'all-request-validation-including-host-and-auth' | 'none';
   };
   hosts: {
     kind: 'any' | 'allowlist';
@@ -93,7 +94,10 @@ export interface AllowedRouteRuleV1 {
   auth: {
     kind: AuthKind;
     typeSource: 'absent' | 'explicit' | 'compiler-default';
-    matching: 'all-matching-rules-in-order';
+    matching: {
+      aws: 'static-and-basic-in-policy-order-then-jwt-then-signed-url';
+      cloudflare: 'all-matching-rules-in-policy-order';
+    };
     exactPath: boolean;
     preAuthBypassMethods: string[];
     preAuthBypassCondition: 'allowed-cors-origin-preflight' | 'none';
@@ -105,7 +109,14 @@ export interface AllowedRouteRuleV1 {
   requestLimits: { source: 'global' };
   response: {
     cacheControl?: string;
-    effectiveCacheControl?: string;
+    effectiveCacheControl?: {
+      base: string;
+      authProtectedOverride?: {
+        when: 'force-vary-auth-and-auth-protected-path';
+        value: string;
+        pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
+      };
+    };
     selection: 'first-auth-or-cache-rule' | 'not-selected';
   };
   mode: {
@@ -161,8 +172,8 @@ const TARGET_CAPABILITIES: AllowedSurfaceModelV1['targetCapabilities'] = {
 
 const AUTH_PROTECTED_CACHE_CONTROL = 'no-store, no-cache, must-revalidate, private';
 
-function normalizedMethods(methods: readonly string[]): string[] {
-  return [...new Set(methods.map((method) => method.trim().toUpperCase()).filter(Boolean))].sort();
+function stableMethods(methods: readonly string[]): string[] {
+  return [...new Set(methods)].sort();
 }
 
 function stablePrefixes(prefixes: readonly string[]): string[] {
@@ -250,9 +261,9 @@ export function projectPolicyToAllowedSurface(
   const request = buildRequestCfgBase(policy);
   const gates = routes.filter((route) => route.auth_gate).map(buildAuthGateBase);
   const compilerResponse: CompilerResponseConfig = buildResponseCfgBase(policy, gates);
-  const configuredMethods = normalizedMethods(Array.isArray(request.allowMethods) ? request.allowMethods : []);
+  const configuredMethods = stableMethods(Array.isArray(request.allowMethods) ? request.allowMethods : []);
   const corsOptionsBypass = request.cors !== null;
-  const methods = normalizedMethods(corsOptionsBypass ? [...configuredMethods, 'OPTIONS'] : configuredMethods);
+  const methods = stableMethods(corsOptionsBypass ? [...configuredMethods, 'OPTIONS'] : configuredMethods);
   const mode = request.mode === 'monitor' ? 'monitor' : 'enforce';
   const requestDecision = mode === 'monitor' ? 'would-block' : 'block';
   const selectedResponseRule = routes.findIndex((route) => (
@@ -272,8 +283,11 @@ export function projectPolicyToAllowedSurface(
       corsOptionsBypass,
       corsPreflight: {
         method: 'OPTIONS',
-        allowedOriginDecision: corsOptionsBypass ? 'early-204-before-auth' : 'not-configured',
+        allowedOriginDecision: corsOptionsBypass
+          ? 'early-204-before-request-validation'
+          : 'not-configured',
         nonMatchingOriginDecision: 'continue',
+        bypassScope: corsOptionsBypass ? 'all-request-validation-including-host-and-auth' : 'none',
       },
       hosts: {
         kind: request.allowedHosts.length === 0 ? 'any' : 'allowlist',
@@ -336,13 +350,16 @@ export function projectPolicyToAllowedSurface(
           source: 'global',
           effective: methods,
           ...(route.request?.allow_methods === undefined ? {} : {
-            configuredButNotEnforced: normalizedMethods(route.request.allow_methods),
+            configuredButNotEnforced: stableMethods(route.request.allow_methods),
           }),
         },
         auth: {
           kind: authKind,
           typeSource: typeSource(route),
-          matching: 'all-matching-rules-in-order',
+          matching: {
+            aws: 'static-and-basic-in-policy-order-then-jwt-then-signed-url',
+            cloudflare: 'all-matching-rules-in-policy-order',
+          },
           exactPath: authKind === 'signed_url' && gate?.exact_path === true,
           preAuthBypassMethods: corsOptionsBypass ? ['OPTIONS'] : [],
           preAuthBypassCondition: corsOptionsBypass ? 'allowed-cors-origin-preflight' : 'none',
@@ -356,9 +373,23 @@ export function projectPolicyToAllowedSurface(
             cacheControl: route.response.cache_control,
           }),
           ...(index === selectedResponseRule ? {
-            effectiveCacheControl: compilerResponse.forceVaryAuth && route.auth_gate
-              ? AUTH_PROTECTED_CACHE_CONTROL
-              : compilerResponse.adminCacheControl,
+            effectiveCacheControl: {
+              base: compilerResponse.adminCacheControl,
+              ...(compilerResponse.forceVaryAuth ? {
+                authProtectedOverride: {
+                  when: 'force-vary-auth-and-auth-protected-path' as const,
+                  value: AUTH_PROTECTED_CACHE_CONTROL,
+                  pathMatch: {
+                    kind: 'prefix' as const,
+                    values: stablePrefixes(compilerResponse.authProtectedPrefixes),
+                    boundary: 'path-segment' as const,
+                    algorithm: 'equal-or-prefix-plus-slash' as const,
+                    comparison: 'literal-no-percent-decoding' as const,
+                    phase: 'normalized-path' as const,
+                  },
+                },
+              } : {}),
+            },
           } : {}),
           selection: index === selectedResponseRule ? 'first-auth-or-cache-rule' : 'not-selected',
         },

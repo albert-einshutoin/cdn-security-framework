@@ -111,14 +111,16 @@ describe('current runtime route semantics', () => {
 
   test('CORS bypasses the global method allowlist and auth for allowed-origin preflight', () => {
     const input = policy();
+    (input.request as Record<string, unknown>).allowed_hosts = ['allowed.example'];
     (input.response_headers as Record<string, unknown>).cors = {
       allow_origins: ['https://client.example'],
       allow_methods: ['GET'],
     };
     const handler = compileViewer(input);
-    expect(isAllowed(handler(request('OPTIONS', '/public')))).toBe(true);
+    expect(isAllowed(handler(request('OPTIONS', '/public', { host: 'allowed.example' })))).toBe(true);
     expect(handler(request('OPTIONS', '/admin', {
       origin: 'https://client.example',
+      host: 'blocked.example',
     })).statusCode).toBe(204);
   });
 
@@ -162,6 +164,12 @@ describe('current runtime route semantics', () => {
       (entry) => entry.replace(/\s/g, ''),
     )).toEqual(['"algorithm":"HS256"', '"algorithm":"RS256"']);
   });
+
+  test('preserves method casing because runtimes compare configured values exactly', () => {
+    const input = policy();
+    (input.request as Record<string, unknown>).allow_methods = ['get'];
+    expect(compileViewer(input)(request('GET', '/public')).statusCode).toBe(405);
+  });
 });
 
 describe('Allowed Surface Model v1', () => {
@@ -196,7 +204,7 @@ describe('Allowed Surface Model v1', () => {
       methods: ['GET'],
       configuredMethods: ['GET'],
       corsOptionsBypass: false,
-      corsPreflight: { allowedOriginDecision: 'not-configured' },
+      corsPreflight: { allowedOriginDecision: 'not-configured', bypassScope: 'none' },
       hosts: { kind: 'any', values: [] },
       pathNormalization: { routeMatchPhase: 'normalized-path' },
       response: { adminPathMatch: { algorithm: 'equal-or-prefix-plus-slash' } },
@@ -212,14 +220,22 @@ describe('Allowed Surface Model v1', () => {
       auth: {
         kind: 'static_token',
         typeSource: 'explicit',
-        matching: 'all-matching-rules-in-order',
+        matching: {
+          aws: 'static-and-basic-in-policy-order-then-jwt-then-signed-url',
+          cloudflare: 'all-matching-rules-in-policy-order',
+        },
         preAuthBypassMethods: [],
         preAuthBypassCondition: 'none',
         credentialEnvironmentNames: ['FIRST_TOKEN'],
       },
       response: {
         selection: 'first-auth-or-cache-rule',
-        effectiveCacheControl: 'no-store, no-cache, must-revalidate, private',
+        effectiveCacheControl: {
+          base: 'no-store',
+          authProtectedOverride: {
+            value: 'no-store, no-cache, must-revalidate, private',
+          },
+        },
       },
     });
     expect(projected.orderedRules[2].auth).toMatchObject({ kind: 'none', typeSource: 'absent' });
@@ -261,7 +277,10 @@ describe('Allowed Surface Model v1', () => {
       methods: ['GET', 'OPTIONS'],
       configuredMethods: ['GET'],
       corsOptionsBypass: true,
-      corsPreflight: { allowedOriginDecision: 'early-204-before-auth' },
+      corsPreflight: {
+        allowedOriginDecision: 'early-204-before-request-validation',
+        bypassScope: 'all-request-validation-including-host-and-auth',
+      },
     });
     expect(projectPolicyToAllowedSurface(input, {
       policyDigest: digest,
@@ -309,14 +328,49 @@ describe('Allowed Surface Model v1', () => {
       sourceUri: 'policy/security.yml',
     }).orderedRules[0].response).toMatchObject({
       cacheControl: 'private, max-age=300',
-      effectiveCacheControl: 'no-store, no-cache, must-revalidate, private',
+      effectiveCacheControl: {
+        base: 'private, max-age=300',
+        authProtectedOverride: {
+          value: 'no-store, no-cache, must-revalidate, private',
+          pathMatch: { values: ['/admin', '/admin/users'] },
+        },
+      },
     });
 
     input.response_headers.force_vary_auth = false;
     expect(projectPolicyToAllowedSurface(input, {
       policyDigest: digest,
       sourceUri: 'policy/security.yml',
-    }).orderedRules[0].response.effectiveCacheControl).toBe('private, max-age=300');
+    }).orderedRules[0].response.effectiveCacheControl).toEqual({ base: 'private, max-age=300' });
+  });
+
+  test('preserves runtime method casing and exposes auth cache overrides without route containment', () => {
+    const input = policy() as CDNSecurityFrameworkPolicy;
+    input.request.allow_methods = ['get'];
+    input.routes = [
+      {
+        name: 'cache-only',
+        match: { path_prefixes: ['/admin'] },
+        response: { cache_control: 'private, max-age=300' },
+      },
+      {
+        name: 'auth',
+        match: { path_prefixes: ['/admin'] },
+        auth_gate: { type: 'static_token', token_env: 'FIRST_TOKEN' },
+      },
+    ];
+    const projected = projectPolicyToAllowedSurface(input, {
+      policyDigest: digest,
+      sourceUri: 'policy/security.yml',
+    });
+    expect(projected.defaults.methods).toEqual(['get']);
+    expect(projected.orderedRules[0].response.effectiveCacheControl).toMatchObject({
+      base: 'private, max-age=300',
+      authProtectedOverride: {
+        value: 'no-store, no-cache, must-revalidate, private',
+        pathMatch: { values: ['/admin'] },
+      },
+    });
   });
 
   test('is pure, ignores credential values, and rejects unsafe evidence metadata', () => {

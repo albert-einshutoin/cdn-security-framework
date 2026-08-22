@@ -34,8 +34,8 @@ const TARGET_CAPABILITIES = {
     ],
 };
 const AUTH_PROTECTED_CACHE_CONTROL = 'no-store, no-cache, must-revalidate, private';
-function normalizedMethods(methods) {
-    return [...new Set(methods.map((method) => method.trim().toUpperCase()).filter(Boolean))].sort();
+function stableMethods(methods) {
+    return [...new Set(methods)].sort();
 }
 function stablePrefixes(prefixes) {
     return [...new Set(prefixes)].sort();
@@ -109,9 +109,9 @@ function projectPolicyToAllowedSurface(policy, options) {
     const request = (0, edge_cfg_1.buildRequestCfgBase)(policy);
     const gates = routes.filter((route) => route.auth_gate).map(edge_cfg_1.buildAuthGateBase);
     const compilerResponse = (0, edge_cfg_1.buildResponseCfgBase)(policy, gates);
-    const configuredMethods = normalizedMethods(Array.isArray(request.allowMethods) ? request.allowMethods : []);
+    const configuredMethods = stableMethods(Array.isArray(request.allowMethods) ? request.allowMethods : []);
     const corsOptionsBypass = request.cors !== null;
-    const methods = normalizedMethods(corsOptionsBypass ? [...configuredMethods, 'OPTIONS'] : configuredMethods);
+    const methods = stableMethods(corsOptionsBypass ? [...configuredMethods, 'OPTIONS'] : configuredMethods);
     const mode = request.mode === 'monitor' ? 'monitor' : 'enforce';
     const requestDecision = mode === 'monitor' ? 'would-block' : 'block';
     const selectedResponseRule = routes.findIndex((route) => ((route.match.path_prefixes || []).length > 0
@@ -128,8 +128,11 @@ function projectPolicyToAllowedSurface(policy, options) {
             corsOptionsBypass,
             corsPreflight: {
                 method: 'OPTIONS',
-                allowedOriginDecision: corsOptionsBypass ? 'early-204-before-auth' : 'not-configured',
+                allowedOriginDecision: corsOptionsBypass
+                    ? 'early-204-before-request-validation'
+                    : 'not-configured',
                 nonMatchingOriginDecision: 'continue',
+                bypassScope: corsOptionsBypass ? 'all-request-validation-including-host-and-auth' : 'none',
             },
             hosts: {
                 kind: request.allowedHosts.length === 0 ? 'any' : 'allowlist',
@@ -190,13 +193,16 @@ function projectPolicyToAllowedSurface(policy, options) {
                     source: 'global',
                     effective: methods,
                     ...(route.request?.allow_methods === undefined ? {} : {
-                        configuredButNotEnforced: normalizedMethods(route.request.allow_methods),
+                        configuredButNotEnforced: stableMethods(route.request.allow_methods),
                     }),
                 },
                 auth: {
                     kind: authKind,
                     typeSource: typeSource(route),
-                    matching: 'all-matching-rules-in-order',
+                    matching: {
+                        aws: 'static-and-basic-in-policy-order-then-jwt-then-signed-url',
+                        cloudflare: 'all-matching-rules-in-policy-order',
+                    },
                     exactPath: authKind === 'signed_url' && gate?.exact_path === true,
                     preAuthBypassMethods: corsOptionsBypass ? ['OPTIONS'] : [],
                     preAuthBypassCondition: corsOptionsBypass ? 'allowed-cors-origin-preflight' : 'none',
@@ -210,9 +216,23 @@ function projectPolicyToAllowedSurface(policy, options) {
                         cacheControl: route.response.cache_control,
                     }),
                     ...(index === selectedResponseRule ? {
-                        effectiveCacheControl: compilerResponse.forceVaryAuth && route.auth_gate
-                            ? AUTH_PROTECTED_CACHE_CONTROL
-                            : compilerResponse.adminCacheControl,
+                        effectiveCacheControl: {
+                            base: compilerResponse.adminCacheControl,
+                            ...(compilerResponse.forceVaryAuth ? {
+                                authProtectedOverride: {
+                                    when: 'force-vary-auth-and-auth-protected-path',
+                                    value: AUTH_PROTECTED_CACHE_CONTROL,
+                                    pathMatch: {
+                                        kind: 'prefix',
+                                        values: stablePrefixes(compilerResponse.authProtectedPrefixes),
+                                        boundary: 'path-segment',
+                                        algorithm: 'equal-or-prefix-plus-slash',
+                                        comparison: 'literal-no-percent-decoding',
+                                        phase: 'normalized-path',
+                                    },
+                                },
+                            } : {}),
+                        },
                     } : {}),
                     selection: index === selectedResponseRule ? 'first-auth-or-cache-rule' : 'not-selected',
                 },

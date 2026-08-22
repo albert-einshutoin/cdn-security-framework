@@ -10,6 +10,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
       },
@@ -70,7 +71,10 @@
           ],
           "exactPath": false,
           "kind": "static_token",
-          "matching": "all-matching-rules-in-order",
+          "matching": {
+            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "cloudflare": "all-matching-rules-in-policy-order"
+          },
           "preAuthBypassCondition": "none",
           "preAuthBypassMethods": [],
           "typeSource": "explicit",
@@ -117,7 +121,23 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": "no-store, no-cache, must-revalidate, private",
+          "effectiveCacheControl": {
+            "authProtectedOverride": {
+              "pathMatch": {
+                "algorithm": "equal-or-prefix-plus-slash",
+                "boundary": "path-segment",
+                "comparison": "literal-no-percent-decoding",
+                "kind": "prefix",
+                "phase": "normalized-path",
+                "values": [
+                  "/"
+                ]
+              },
+              "value": "no-store, no-cache, must-revalidate, private",
+              "when": "force-vary-auth-and-auth-protected-path"
+            },
+            "base": "no-store"
+          },
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -251,6 +271,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
       },
@@ -438,7 +459,8 @@
       ],
       "corsOptionsBypass": true,
       "corsPreflight": {
-        "allowedOriginDecision": "early-204-before-auth",
+        "allowedOriginDecision": "early-204-before-request-validation",
+        "bypassScope": "all-request-validation-including-host-and-auth",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
       },
@@ -503,7 +525,10 @@
           "effectiveAlgorithm": "RS256",
           "exactPath": false,
           "kind": "jwt",
-          "matching": "all-matching-rules-in-order",
+          "matching": {
+            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "cloudflare": "all-matching-rules-in-policy-order"
+          },
           "preAuthBypassCondition": "allowed-cors-origin-preflight",
           "preAuthBypassMethods": [
             "OPTIONS"
@@ -560,7 +585,23 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": "no-store, no-cache, must-revalidate, private",
+          "effectiveCacheControl": {
+            "authProtectedOverride": {
+              "pathMatch": {
+                "algorithm": "equal-or-prefix-plus-slash",
+                "boundary": "path-segment",
+                "comparison": "literal-no-percent-decoding",
+                "kind": "prefix",
+                "phase": "normalized-path",
+                "values": [
+                  "/api"
+                ]
+              },
+              "value": "no-store, no-cache, must-revalidate, private",
+              "when": "force-vary-auth-and-auth-protected-path"
+            },
+            "base": "no-store"
+          },
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -690,6 +731,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
       },
@@ -870,6 +912,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
       },
@@ -932,7 +975,10 @@
           ],
           "exactPath": false,
           "kind": "static_token",
-          "matching": "all-matching-rules-in-order",
+          "matching": {
+            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "cloudflare": "all-matching-rules-in-policy-order"
+          },
           "preAuthBypassCondition": "none",
           "preAuthBypassMethods": [],
           "typeSource": "explicit",
@@ -983,7 +1029,25 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": "no-store, no-cache, must-revalidate, private",
+          "effectiveCacheControl": {
+            "authProtectedOverride": {
+              "pathMatch": {
+                "algorithm": "equal-or-prefix-plus-slash",
+                "boundary": "path-segment",
+                "comparison": "literal-no-percent-decoding",
+                "kind": "prefix",
+                "phase": "normalized-path",
+                "values": [
+                  "/admin",
+                  "/docs",
+                  "/swagger"
+                ]
+              },
+              "value": "no-store, no-cache, must-revalidate, private",
+              "when": "force-vary-auth-and-auth-protected-path"
+            },
+            "base": "no-store"
+          },
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -1114,6 +1178,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
       },
@@ -1176,7 +1241,10 @@
           ],
           "exactPath": false,
           "kind": "static_token",
-          "matching": "all-matching-rules-in-order",
+          "matching": {
+            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "cloudflare": "all-matching-rules-in-policy-order"
+          },
           "preAuthBypassCondition": "none",
           "preAuthBypassMethods": [],
           "typeSource": "explicit",
@@ -1227,7 +1295,25 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": "no-store, no-cache, must-revalidate, private",
+          "effectiveCacheControl": {
+            "authProtectedOverride": {
+              "pathMatch": {
+                "algorithm": "equal-or-prefix-plus-slash",
+                "boundary": "path-segment",
+                "comparison": "literal-no-percent-decoding",
+                "kind": "prefix",
+                "phase": "normalized-path",
+                "values": [
+                  "/admin",
+                  "/docs",
+                  "/swagger"
+                ]
+              },
+              "value": "no-store, no-cache, must-revalidate, private",
+              "when": "force-vary-auth-and-auth-protected-path"
+            },
+            "base": "no-store"
+          },
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -1362,6 +1448,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
       },
@@ -1428,7 +1515,10 @@
           ],
           "exactPath": false,
           "kind": "static_token",
-          "matching": "all-matching-rules-in-order",
+          "matching": {
+            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "cloudflare": "all-matching-rules-in-policy-order"
+          },
           "preAuthBypassCondition": "none",
           "preAuthBypassMethods": [],
           "typeSource": "explicit",
@@ -1487,7 +1577,25 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": "no-store, no-cache, must-revalidate, private",
+          "effectiveCacheControl": {
+            "authProtectedOverride": {
+              "pathMatch": {
+                "algorithm": "equal-or-prefix-plus-slash",
+                "boundary": "path-segment",
+                "comparison": "literal-no-percent-decoding",
+                "kind": "prefix",
+                "phase": "normalized-path",
+                "values": [
+                  "/admin",
+                  "/docs",
+                  "/swagger"
+                ]
+              },
+              "value": "no-store, no-cache, must-revalidate, private",
+              "when": "force-vary-auth-and-auth-protected-path"
+            },
+            "base": "no-store"
+          },
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -1618,6 +1726,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
       },
@@ -1682,7 +1791,10 @@
           ],
           "exactPath": false,
           "kind": "static_token",
-          "matching": "all-matching-rules-in-order",
+          "matching": {
+            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "cloudflare": "all-matching-rules-in-policy-order"
+          },
           "preAuthBypassCondition": "none",
           "preAuthBypassMethods": [],
           "typeSource": "explicit",
@@ -1737,7 +1849,27 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": "no-store, no-cache, must-revalidate, private",
+          "effectiveCacheControl": {
+            "authProtectedOverride": {
+              "pathMatch": {
+                "algorithm": "equal-or-prefix-plus-slash",
+                "boundary": "path-segment",
+                "comparison": "literal-no-percent-decoding",
+                "kind": "prefix",
+                "phase": "normalized-path",
+                "values": [
+                  "/admin",
+                  "/api/admin",
+                  "/docs",
+                  "/internal",
+                  "/swagger"
+                ]
+              },
+              "value": "no-store, no-cache, must-revalidate, private",
+              "when": "force-vary-auth-and-auth-protected-path"
+            },
+            "base": "no-store"
+          },
           "selection": "first-auth-or-cache-rule"
         }
       }

@@ -33,8 +33,9 @@ export interface AllowedDefaultsV1 {
     corsOptionsBypass: boolean;
     corsPreflight: {
         method: 'OPTIONS';
-        allowedOriginDecision: 'early-204-before-auth' | 'not-configured';
+        allowedOriginDecision: 'early-204-before-request-validation' | 'not-configured';
         nonMatchingOriginDecision: 'continue';
+        bypassScope: 'all-request-validation-including-host-and-auth' | 'none';
     };
     hosts: {
         kind: 'any' | 'allowlist';
@@ -77,7 +78,10 @@ export interface AllowedRouteRuleV1 {
     auth: {
         kind: AuthKind;
         typeSource: 'absent' | 'explicit' | 'compiler-default';
-        matching: 'all-matching-rules-in-order';
+        matching: {
+            aws: 'static-and-basic-in-policy-order-then-jwt-then-signed-url';
+            cloudflare: 'all-matching-rules-in-policy-order';
+        };
         exactPath: boolean;
         preAuthBypassMethods: string[];
         preAuthBypassCondition: 'allowed-cors-origin-preflight' | 'none';
@@ -91,7 +95,14 @@ export interface AllowedRouteRuleV1 {
     };
     response: {
         cacheControl?: string;
-        effectiveCacheControl?: string;
+        effectiveCacheControl?: {
+            base: string;
+            authProtectedOverride?: {
+                when: 'force-vary-auth-and-auth-protected-path';
+                value: string;
+                pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
+            };
+        };
         selection: 'first-auth-or-cache-rule' | 'not-selected';
     };
     mode: {
