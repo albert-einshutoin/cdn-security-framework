@@ -8,6 +8,7 @@ import {
   serializeSecurityContract,
   type ApiOperationContractV1,
   type SecurityContractInputV1,
+  type ValueConstraintsV1,
 } from '../../src/contract/security-ir';
 import {
   canonicalizePath,
@@ -259,6 +260,24 @@ describe('Security IR v1', () => {
     for (const contract of legacyContracts) {
       expect(validate(contract), JSON.stringify(validate.errors)).toBe(true);
     }
+  });
+
+  test('rejects cyclic and excessively deep constraint shapes deterministically', () => {
+    const cyclic: ValueConstraintsV1 = { type: 'array' };
+    cyclic.items = cyclic;
+    const cyclicInput = structuredClone(baseInput);
+    cyclicInput.operations[0].request.body = {
+      required: true, constraints: cyclic, unsupportedReasons: [],
+    };
+    expect(() => createSecurityContract(cyclicInput)).toThrow('cyclic value constraints');
+
+    let deep: ValueConstraintsV1 = { type: 'boolean' };
+    for (let index = 0; index < 256; index += 1) deep = { type: 'array', items: deep, maxItems: 1 };
+    const deepInput = structuredClone(baseInput);
+    deepInput.operations[0].request.body = {
+      required: true, constraints: deep, unsupportedReasons: [],
+    };
+    expect(() => createSecurityContract(deepInput)).toThrow('value constraints exceed depth limit');
   });
 
   test('sorts 1000 operations and rejects a duplicate deterministically', () => {

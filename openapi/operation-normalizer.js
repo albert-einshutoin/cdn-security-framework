@@ -19,6 +19,9 @@ function compareText(left, right) {
 function pointerChild(pointer, token) {
     return `${pointer}/${token.replace(/~/g, '~0').replace(/\//g, '~1')}`;
 }
+function locatedChild(parent, key, value) {
+    return { value, sourceUri: parent.sourceUri, pointer: pointerChild(parent.pointer, key) };
+}
 function asObject(location) {
     if (location.value === null || typeof location.value !== 'object' || Array.isArray(location.value)) {
         fail(location);
@@ -49,7 +52,7 @@ function normalizeType(value, reasons) {
         reasons.add('schema:type');
     return 'unknown';
 }
-function normalizeConstraints(schemaLocation, materialize) {
+function normalizeConstraints(schemaLocation, materialize, shapeOptions) {
     if (!schemaLocation)
         return { constraints: { type: 'unknown' }, unsupportedReasons: ['schema:missing'] };
     const reasons = new Set();
@@ -57,6 +60,14 @@ function normalizeConstraints(schemaLocation, materialize) {
         if (Object.keys(reference).some((key) => (!['$ref', 'description', 'summary', 'example', 'default'].includes(key))))
             reasons.add('schema:ref-siblings');
     });
+    const resolvedId = `${resolved.sourceUri}#${resolved.pointer}`;
+    const depth = shapeOptions?.depth ?? 0;
+    if (shapeOptions?.ancestors?.has(resolvedId)) {
+        return { constraints: { type: 'unknown' }, unsupportedReasons: ['schema:recursive'] };
+    }
+    if (shapeOptions && depth >= shapeOptions.maxDepth) {
+        return { constraints: { type: 'unknown' }, unsupportedReasons: ['schema:max-depth'] };
+    }
     const schema = asObject(resolved);
     const constraints = { type: normalizeType(schema.type, reasons) };
     if (schema.nullable === true)
@@ -94,6 +105,51 @@ function normalizeConstraints(schemaLocation, materialize) {
         }
         else
             reasons.add(`schema:${field}`);
+    }
+    if (shapeOptions) {
+        const nestedOptions = {
+            maxDepth: shapeOptions.maxDepth,
+            depth: depth + 1,
+            ancestors: new Set(shapeOptions.ancestors).add(resolvedId),
+        };
+        if (constraints.type === 'object') {
+            if (schema.properties !== undefined) {
+                if (schema.properties === null || typeof schema.properties !== 'object'
+                    || Array.isArray(schema.properties))
+                    reasons.add('schema:properties');
+                else {
+                    const properties = schema.properties;
+                    constraints.properties = {};
+                    for (const name of Object.keys(properties).sort(compareText)) {
+                        const child = normalizeConstraints(locatedChild(locatedChild(resolved, 'properties', properties), name, properties[name]), materialize, nestedOptions);
+                        constraints.properties[name] = child.constraints;
+                        child.unsupportedReasons.forEach((reason) => reasons.add(reason));
+                    }
+                }
+            }
+            if (schema.required !== undefined) {
+                if (!Array.isArray(schema.required)
+                    || schema.required.some((name) => typeof name !== 'string' || !name.trim())) {
+                    reasons.add('schema:required');
+                }
+                else
+                    constraints.requiredProperties = [...new Set(schema.required)].sort(compareText);
+            }
+            if (typeof schema.additionalProperties === 'boolean') {
+                constraints.additionalProperties = schema.additionalProperties;
+            }
+            else if (schema.additionalProperties !== undefined)
+                reasons.add('schema:additionalProperties');
+        }
+        if (constraints.type === 'array') {
+            if (schema.items === undefined)
+                reasons.add('schema:items');
+            else {
+                const child = normalizeConstraints(locatedChild(resolved, 'items', schema.items), materialize, nestedOptions);
+                constraints.items = child.constraints;
+                child.unsupportedReasons.forEach((reason) => reasons.add(reason));
+            }
+        }
     }
     return { constraints, unsupportedReasons: [...reasons].sort(compareText) };
 }
@@ -137,11 +193,6 @@ function normalizeOpenApiOperations(graph, options = {}) {
         }
         return current;
     };
-    const locatedChild = (parent, key, value) => ({
-        value,
-        sourceUri: parent.sourceUri,
-        pointer: pointerChild(parent.pointer, key),
-    });
     let parameterCapability = 'complete';
     let bodyCapability = 'complete';
     const normalizeParameter = (input) => {
@@ -206,7 +257,7 @@ function normalizeOpenApiOperations(graph, options = {}) {
             const contentLocation = locatedChild(resolved, 'content', content);
             const mediaLocation = locatedChild(contentLocation, mediaType, content[mediaType]);
             const media = asObject(mediaLocation);
-            return normalizeConstraints(media.schema === undefined ? undefined : locatedChild(mediaLocation, 'schema', media.schema), materialize);
+            return normalizeConstraints(media.schema === undefined ? undefined : locatedChild(mediaLocation, 'schema', media.schema), materialize, { maxDepth: limits.maxSchemaDepth });
         });
         let normalized = schemas[0] ?? {
             constraints: { type: 'unknown' },

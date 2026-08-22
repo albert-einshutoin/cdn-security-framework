@@ -170,6 +170,7 @@ function smokeInstalledPackage(tarballPath: string) {
       const securityIr = require(${JSON.stringify(`${packageName}/contract/security-ir`)});
       const schema = require(${JSON.stringify(`${packageName}/schemas/security-ir-v1.schema.json`)});
       const openapi = require(${JSON.stringify(`${packageName}/openapi`)});
+      const recommendation = require(${JSON.stringify(`${packageName}/recommendation`)});
       assert.strictEqual(typeof pkg.compile, 'function');
       assert.strictEqual(typeof pkg.lintPolicy, 'function');
       assert.strictEqual(typeof contract.createSecurityContract, 'function');
@@ -178,6 +179,7 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof openapi.loadOpenApiDocument, 'function');
       assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
       assert.strictEqual(typeof openapi.normalizeOpenApiOperations, 'function');
+      assert.strictEqual(typeof recommendation.recommendRequestLimits, 'function');
       const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const result = pkg.lintPolicy({
         policyPath: path.join(pkgRoot, 'policy', 'base.yml'),

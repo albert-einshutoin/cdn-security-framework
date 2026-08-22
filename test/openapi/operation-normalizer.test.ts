@@ -140,6 +140,50 @@ describe('normalizeOpenApiOperations', () => {
       .toEqual(['schema:ref-siblings']);
   });
 
+  test('retains only bounded body shape needed for size recommendations', () => {
+    const graph = temporaryGraph({
+      openapi: '3.1.0',
+      paths: { '/items': { post: {
+        requestBody: { required: true, content: { 'application/json': { schema: {
+          type: 'object',
+          additionalProperties: false,
+          required: ['name'],
+          properties: {
+            name: { type: 'string', maxLength: 8 },
+            flags: { type: 'array', maxItems: 2, items: { type: 'boolean' } },
+          },
+        } } } },
+        responses: {},
+      } } },
+    });
+    expect(normalizeOpenApiOperations(graph).operations[0].request.body?.constraints).toEqual({
+      type: 'object',
+      properties: {
+        flags: { type: 'array', maxItems: 2, items: { type: 'boolean' } },
+        name: { type: 'string', maxLength: 8 },
+      },
+      requiredProperties: ['name'],
+      additionalProperties: false,
+    });
+  });
+
+  test('marks recursive request bodies unsupported without retaining a cycle', () => {
+    const graph = temporaryGraph({
+      openapi: '3.1.0',
+      components: { schemas: { Node: {
+        type: 'object', additionalProperties: false,
+        properties: { child: { $ref: '#/components/schemas/Node' } },
+      } } },
+      paths: { '/nodes': { post: {
+        requestBody: { content: { 'application/json': { schema: { $ref: '#/components/schemas/Node' } } } },
+        responses: {},
+      } } },
+    });
+    const body = normalizeOpenApiOperations(graph).operations[0].request.body;
+    expect(body?.unsupportedReasons).toContain('schema:recursive');
+    expect(body?.constraints.properties?.child).toEqual({ type: 'unknown' });
+  });
+
   test('does not decode an already-resolved percent sequence twice', () => {
     const graph = temporaryGraph({
       openapi: '3.1.0',

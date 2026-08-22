@@ -33,6 +33,10 @@ export interface ValueConstraintsV1 {
   minItems?: number;
   maxItems?: number;
   maxProperties?: number;
+  properties?: Record<string, ValueConstraintsV1>;
+  requiredProperties?: string[];
+  additionalProperties?: boolean;
+  items?: ValueConstraintsV1;
 }
 
 export interface ApiParameterContractV1 {
@@ -114,6 +118,7 @@ export type ApiOperationInputV1 = Omit<ApiOperationContractV1, 'routeKey' | 'met
 const SECRET_PATTERN = /\b(?:Bearer|Basic)\s+\S+|\b(?:sk-(?:proj-)?|ghp_|github_pat_|AKIA|(?:sk|pk)_)[A-Za-z0-9_-]{8,}|\b(?:authorization|proxy-authorization|cookie|set-cookie|password|secret|client_secret|access_token|refresh_token|token|api[_-]?key)\s*[=:]\s*\S+/i;
 const MAX_STRING_LENGTH = 16_384;
 const MAX_IR_NODES = 100_000;
+const MAX_CONSTRAINT_DEPTH = 256;
 
 interface NormalizationState { nodes: number }
 
@@ -151,10 +156,19 @@ function sortedSet(
   return [...new Set(values.map((value) => nonEmpty(transform(nonEmpty(value, field)), field)))].sort(compareText);
 }
 
-function normalizeConstraints(input: ValueConstraintsV1, state: NormalizationState): ValueConstraintsV1 {
+function normalizeConstraints(
+  input: ValueConstraintsV1,
+  state: NormalizationState,
+  depth = 0,
+  ancestors = new Set<object>(),
+): ValueConstraintsV1 {
   if (!input || typeof input !== 'object' || !VALUE_TYPES.includes(input.type)) {
     throw new Error('invalid value constraints');
   }
+  if (depth >= MAX_CONSTRAINT_DEPTH) throw new Error('value constraints exceed depth limit');
+  if (ancestors.has(input)) throw new Error('cyclic value constraints are not allowed');
+  consume(state, 1);
+  const nextAncestors = new Set(ancestors).add(input);
   const output: ValueConstraintsV1 = { type: input.type };
   if (input.format !== undefined) output.format = nonEmpty(input.format, 'constraint format');
   if (input.enum !== undefined) {
@@ -196,6 +210,34 @@ function normalizeConstraints(input: ValueConstraintsV1, state: NormalizationSta
     if (minimum !== undefined && maximum !== undefined && minimum > maximum) {
       throw new Error('invalid constraint range');
     }
+  }
+  if (input.properties !== undefined) {
+    if (input.type !== 'object' || !input.properties || typeof input.properties !== 'object'
+      || Array.isArray(input.properties)) throw new Error('invalid constraint properties');
+    const entries = Object.entries(input.properties).sort(([left], [right]) => compareText(left, right));
+    consume(state, entries.length);
+    const properties = Object.fromEntries(entries.map(([name, constraints]) => [
+      nonEmpty(name, 'constraint property'), normalizeConstraints(constraints, state, depth + 1, nextAncestors),
+    ]));
+    output.properties = properties;
+  }
+  if (input.requiredProperties !== undefined) {
+    if (input.type !== 'object') throw new Error('invalid constraint required properties');
+    output.requiredProperties = sortedSet(input.requiredProperties, 'constraint required property', state);
+    const properties = output.properties;
+    if (properties && output.requiredProperties.some((name) => !(name in properties))) {
+      throw new Error('invalid constraint required properties');
+    }
+  }
+  if (input.additionalProperties !== undefined) {
+    if (input.type !== 'object' || typeof input.additionalProperties !== 'boolean') {
+      throw new Error('invalid constraint additional properties');
+    }
+    output.additionalProperties = input.additionalProperties;
+  }
+  if (input.items !== undefined) {
+    if (input.type !== 'array') throw new Error('invalid constraint items');
+    output.items = normalizeConstraints(input.items, state, depth + 1, nextAncestors);
   }
   return output;
 }

@@ -30,6 +30,7 @@
     },
     "constraints": {
       "type": "object",
+      "maxProperties": 14,
       "additionalProperties": false,
       "required": ["type"],
       "properties": {
@@ -53,7 +54,15 @@
         "maxLength": { "type": "integer", "minimum": 0 },
         "minItems": { "type": "integer", "minimum": 0 },
         "maxItems": { "type": "integer", "minimum": 0 },
-        "maxProperties": { "type": "integer", "minimum": 0 }
+        "maxProperties": { "type": "integer", "minimum": 0 },
+        "properties": {
+          "type": "object",
+          "maxProperties": 100000,
+          "additionalProperties": { "$ref": "#/definitions/constraints" }
+        },
+        "requiredProperties": { "$ref": "#/definitions/stringSet" },
+        "additionalProperties": { "type": "boolean" },
+        "items": { "$ref": "#/definitions/constraints" }
       }
     },
     "parameter": {
