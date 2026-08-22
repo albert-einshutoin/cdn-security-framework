@@ -59,14 +59,18 @@ function compareRequestContracts(input, options = {}) {
         const recommendation = byRouteKey.get(operation.routeKey);
         if (!recommendation)
             continue;
-        for (const name of ['maxQueryParams', 'maxQueryLength', 'maxUriLength']) {
-            findings.push(...limitFinding(input, operation, name, recommendation, ratio));
+        const preflightBypassesValidation = operation.method === 'OPTIONS'
+            && input.allowed.defaults.corsPreflight.bypassScope === 'all-request-validation-including-host-and-auth';
+        if (!preflightBypassesValidation) {
+            for (const name of ['maxQueryParams', 'maxQueryLength', 'maxUriLength']) {
+                findings.push(...limitFinding(input, operation, name, recommendation, ratio));
+            }
         }
         const declaredHeaders = new Set(operation.request.requiredHeaders.map((header) => header.toLowerCase()));
         const requiredHeaders = input.allowed.defaults.requiredHeaders;
         const policyHeaders = new Set(requiredHeaders?.values ?? []);
         const unchecked = [...declaredHeaders].filter((header) => !policyHeaders.has(header)).sort();
-        if (requiredHeaders && unchecked.length > 0)
+        if (!preflightBypassesValidation && requiredHeaders && unchecked.length > 0)
             findings.push((0, shared_1.makeFinding)({
                 ruleId: 'SC-REQUEST-001',
                 severity: 'info',
@@ -81,7 +85,7 @@ function compareRequestContracts(input, options = {}) {
                 remediation: { summary: 'Decide whether these headers belong at Edge or only in Application validation.', safeAutoFix: false },
             }));
         const undeclared = [...policyHeaders].filter((header) => !declaredHeaders.has(header)).sort();
-        if (requiredHeaders && undeclared.length > 0
+        if (!preflightBypassesValidation && requiredHeaders && undeclared.length > 0
             && input.declared.capabilities.parameters === 'complete') {
             const monitor = input.allowed.defaults.requestDecision === 'would-block';
             findings.push((0, shared_1.makeFinding)({

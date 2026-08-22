@@ -72,10 +72,12 @@ export function compareAuthContracts(input: ContractDriftInput): SecurityFinding
     const matches = matchingAuthRules(operation, allowed);
     const definiteRules = matches
       .filter(({ relation, rule }) => relation === 'definitely-covered'
-        && rule.auth.verifiability[target] === 'enforced')
+        && rule.auth.verifiability[target] === 'enforced'
+        && !rule.auth.preAuthBypassMethods.includes(operation.method))
       .map(({ rule }) => rule);
     const uncertainRules = matches.filter(({ relation, rule }) => relation !== 'definitely-covered'
-      || rule.auth.verifiability[target] !== 'enforced');
+      || rule.auth.verifiability[target] !== 'enforced'
+      || rule.auth.preAuthBypassMethods.includes(operation.method));
     const pointer = definiteRules[0]?.pointer ?? uncertainRules[0]?.rule.pointer ?? '/routes';
     const evidence = evidenceFor(operation, allowed, `${pointer}/auth_gate`, 'authentication-drift-v1');
 

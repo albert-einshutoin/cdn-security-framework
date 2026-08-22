@@ -33,7 +33,8 @@ function comparePathMethodContracts(input) {
     for (const [routePath, operations] of operationsByPath) {
         const declaredMethods = [...new Set(operations.map(({ method }) => method))].sort();
         const declaredMethodSet = new Set(declaredMethods);
-        const extraMethods = allowed.defaults.methods.filter((method) => !declaredMethodSet.has(method));
+        const extraMethods = allowed.defaults.methods.filter((method) => (!declaredMethodSet.has(method)
+            && !(method === 'OPTIONS' && allowed.defaults.corsOptionsBypass)));
         if (extraMethods.length > 0 && declared.capabilities.routes === 'complete') {
             findings.push((0, shared_1.makeFinding)({
                 ruleId: 'SC-EXPOSURE-001',

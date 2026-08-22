@@ -138,6 +138,12 @@ describe('OpenAPI and Policy contract drift', () => {
     ));
     expect(monitorFindings.find(({ ruleId }) => ruleId === 'SC-EXPOSURE-002')?.severity)
       .toBe('warning');
+
+    const corsMethods = comparePathMethodContracts(input(
+      contract([operation('GET', '/cors')]),
+      policy({ response_headers: { cors: { allow_origins: ['https://client.example'] } } }),
+    ));
+    expect(corsMethods.some(({ ruleId }) => ruleId === 'SC-EXPOSURE-001')).toBe(false);
   });
 
   test('preserves auth alternatives and refuses Bearer-to-JWT inference', () => {
@@ -237,6 +243,18 @@ describe('OpenAPI and Policy contract drift', () => {
       ] }),
     ));
     expect(uncertainGateFindings.map(({ ruleId }) => ruleId)).toEqual(['SC-AUTHN-004']);
+
+    const corsAuth = compareAuthContracts(input(
+      contract([operation('OPTIONS', '/private', { exposure: 'authenticated', auth: apiKeyAuth })]),
+      policy({
+        routes: [{
+          name: 'private', match: { path_prefixes: ['/private'] },
+          auth_gate: { type: 'static_token', header: 'x-api-key' },
+        }],
+        response_headers: { cors: { allow_origins: ['https://client.example'] } },
+      }),
+    ));
+    expect(corsAuth.map(({ ruleId }) => ruleId)).toEqual(['SC-AUTHN-004']);
   });
 
   test('compares only finite request estimates and reports unsupported content types', () => {
@@ -268,6 +286,18 @@ describe('OpenAPI and Policy contract drift', () => {
     expect(() => compareRequestContracts(input(declared, policy()), {
       materiallyBroaderRatio: 0,
     })).toThrow('invalid materially broader ratio');
+
+    const corsRequest = compareRequestContracts(input(
+      contract([operation('OPTIONS', '/items', {
+        request: {
+          contentTypes: [], requiredHeaders: [], queryParameters: [], pathParameters: [],
+          headerParameters: [], cookieParameters: [],
+        },
+      })]),
+      policy({ response_headers: { cors: { allow_origins: ['https://client.example'] } } }),
+    ));
+    expect(corsRequest.some(({ ruleId }) => ['SC-LIMIT-001', 'SC-LIMIT-002', 'SC-REQUEST-002']
+      .includes(ruleId))).toBe(false);
   });
 
   test('is deterministic, validates the comparison boundary, and matches the golden contract', () => {

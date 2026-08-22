@@ -77,15 +77,19 @@ export function compareRequestContracts(
   for (const operation of input.declared.operations) {
     const recommendation = byRouteKey.get(operation.routeKey);
     if (!recommendation) continue;
-    for (const name of ['maxQueryParams', 'maxQueryLength', 'maxUriLength'] as const) {
-      findings.push(...limitFinding(input, operation, name, recommendation, ratio));
+    const preflightBypassesValidation = operation.method === 'OPTIONS'
+      && input.allowed.defaults.corsPreflight.bypassScope === 'all-request-validation-including-host-and-auth';
+    if (!preflightBypassesValidation) {
+      for (const name of ['maxQueryParams', 'maxQueryLength', 'maxUriLength'] as const) {
+        findings.push(...limitFinding(input, operation, name, recommendation, ratio));
+      }
     }
 
     const declaredHeaders = new Set(operation.request.requiredHeaders.map((header) => header.toLowerCase()));
     const requiredHeaders = input.allowed.defaults.requiredHeaders;
     const policyHeaders = new Set(requiredHeaders?.values ?? []);
     const unchecked = [...declaredHeaders].filter((header) => !policyHeaders.has(header)).sort();
-    if (requiredHeaders && unchecked.length > 0) findings.push(makeFinding({
+    if (!preflightBypassesValidation && requiredHeaders && unchecked.length > 0) findings.push(makeFinding({
       ruleId: 'SC-REQUEST-001',
       severity: 'info',
       confidence: 'deterministic',
@@ -100,7 +104,7 @@ export function compareRequestContracts(
     }));
 
     const undeclared = [...policyHeaders].filter((header) => !declaredHeaders.has(header)).sort();
-    if (requiredHeaders && undeclared.length > 0
+    if (!preflightBypassesValidation && requiredHeaders && undeclared.length > 0
       && input.declared.capabilities.parameters === 'complete') {
       const monitor = input.allowed.defaults.requestDecision === 'would-block';
       findings.push(makeFinding({
