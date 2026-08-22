@@ -145,7 +145,10 @@ describe('resolveOpenApiReferences', () => {
     temporaryDirectories.push(workspace);
     fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
       openapi: '3.1.0',
-      paths: {},
+      paths: { '/items': { get: { responses: { 200: { links: { next: {
+        parameters: { id: { $ref: '#/components/schemas/Target/type' } },
+        requestBody: { $ref: '#/components/schemas/Target/type' },
+      } } } } } } },
       components: { schemas: {
         Target: { type: 'string' },
         default: { $ref: '#/components/schemas/Target' },

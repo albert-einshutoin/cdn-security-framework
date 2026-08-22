@@ -212,7 +212,7 @@ function resolveOpenApiReferences(options) {
             target.id,
         ]));
     };
-    const walk = (value, document, pointer, depth, ancestors, namedEntries = false) => {
+    const walk = (value, document, pointer, depth, ancestors, namedMap, linkObject = false) => {
         resolutionVisits += 1;
         if (resolutionVisits > limits.maxNodes) {
             throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_NODE_LIMIT', {
@@ -228,10 +228,12 @@ function resolveOpenApiReferences(options) {
         for (const [key, child] of Object.entries(value)) {
             if (key === '$ref')
                 continue;
-            if (!namedEntries && (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
+            if (linkObject && (key === 'parameters' || key === 'requestBody'))
+                continue;
+            if (!namedMap && (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
                 || (key === 'examples' && Array.isArray(child))))
                 continue;
-            walk(child, document, `${pointer}/${encodePointerToken(key)}`, depth, ancestors, !namedEntries && NAMED_OBJECT_MAP_KEYS.has(key) && !Array.isArray(child));
+            walk(child, document, `${pointer}/${encodePointerToken(key)}`, depth, ancestors, !namedMap && NAMED_OBJECT_MAP_KEYS.has(key) && !Array.isArray(child) ? key : undefined, namedMap === 'links');
         }
     };
     walk(options.root.document, options.root, '', 0, new Set());

@@ -271,7 +271,8 @@ export function resolveOpenApiReferences(
     pointer: string,
     depth: number,
     ancestors: ReadonlySet<string>,
-    namedEntries = false,
+    namedMap?: string,
+    linkObject = false,
   ): void => {
     resolutionVisits += 1;
     if (resolutionVisits > limits.maxNodes) {
@@ -292,7 +293,8 @@ export function resolveOpenApiReferences(
     }
     for (const [key, child] of Object.entries(value)) {
       if (key === '$ref') continue;
-      if (!namedEntries && (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
+      if (linkObject && (key === 'parameters' || key === 'requestBody')) continue;
+      if (!namedMap && (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
         || (key === 'examples' && Array.isArray(child)))) continue;
       walk(
         child,
@@ -300,7 +302,8 @@ export function resolveOpenApiReferences(
         `${pointer}/${encodePointerToken(key)}`,
         depth,
         ancestors,
-        !namedEntries && NAMED_OBJECT_MAP_KEYS.has(key) && !Array.isArray(child),
+        !namedMap && NAMED_OBJECT_MAP_KEYS.has(key) && !Array.isArray(child) ? key : undefined,
+        namedMap === 'links',
       );
     }
   };
