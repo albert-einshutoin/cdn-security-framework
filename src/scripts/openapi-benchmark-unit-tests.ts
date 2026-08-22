@@ -73,6 +73,7 @@ function main(): void {
     const baselinePath = path.join(root, 'failing-baseline.json');
     const outputPath = path.join(root, 'failed-report.json');
     fs.writeFileSync(baselinePath, JSON.stringify({
+      environment: { platform: process.platform, arch: process.arch },
       maxTimeRegressionPercent: 0,
       maxHeapRegressionPercent: 0,
       nodes: {

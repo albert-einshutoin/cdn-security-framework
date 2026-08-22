@@ -23,13 +23,13 @@ JSON report は cold/warm を分離し、parse・ref 解決・正規化・合計
 
 ## 代表 baseline
 
-Apple Silicon、macOS arm64、各 workload 2 sample。表は warm 合計 ms です。個別 machine 名は記録しません。
+GitHub-hosted `ubuntu-latest`、Linux x64、各 workload 3 sample。表は最後の warm 合計 ms です。個別 runner 名は記録しません。
 
 | Node | 100 ops | 1,000 shared refs | 10,000 nested refs | Deep | Repeated refs | Early reject |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 20.17.0 | 5.597 | 44.564 | 596.136 | 0.446 | 31.844 | 0.106 |
-| 22.23.2 | 5.057 | 40.093 | 521.080 | 0.461 | 27.449 | 0.123 |
-| 24.19.0 | 3.796 | 35.140 | 523.620 | 0.454 | 29.599 | 0.103 |
+| 20.17.0 | 14.688 | 123.433 | 1555.160 | 1.029 | 124.049 | 0.098 |
+| 22.23.2 | 16.036 | 91.280 | 1299.522 | 1.458 | 102.501 | 0.087 |
+| 24.19.0 | 5.337 | 57.655 | 844.849 | 0.903 | 60.573 | 0.036 |
 
 時間と heap の完全な baseline は `openapi-analysis-baseline.json` にあります。
 

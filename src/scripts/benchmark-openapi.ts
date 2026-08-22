@@ -342,10 +342,14 @@ function parseArguments(argv: string[]): {
 
 function enforceRegressionBaseline(report: OpenApiBenchmarkReport, baselinePath: string): void {
   const baseline = JSON.parse(fs.readFileSync(baselinePath, 'utf8')) as {
+    environment: { platform: string; arch: string };
     maxTimeRegressionPercent: number;
     maxHeapRegressionPercent: number;
     nodes: Record<string, Record<string, { warmTotalMs: number; peakHeapDeltaBytes: number }>>;
   };
+  if (baseline.environment.platform !== process.platform || baseline.environment.arch !== process.arch) {
+    throw new Error(`OpenAPI benchmark baseline requires ${baseline.environment.platform}/${baseline.environment.arch}`);
+  }
   const nodeMajor = process.versions.node.split('.')[0];
   const expected = baseline.nodes[nodeMajor];
   if (!expected) throw new Error(`No OpenAPI benchmark baseline for Node ${nodeMajor}`);

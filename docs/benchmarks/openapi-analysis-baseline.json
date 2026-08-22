@@ -1,32 +1,33 @@
 {
   "schemaVersion": 1,
-  "description": "Representative Apple Silicon baseline; dedicated CI applies percentage gates only.",
+  "description": "GitHub-hosted ubuntu-latest x64 baseline; dedicated CI applies percentage gates only.",
+  "environment": { "platform": "linux", "arch": "x64", "runner": "ubuntu-latest" },
   "maxTimeRegressionPercent": 50,
   "maxHeapRegressionPercent": 100,
   "nodes": {
     "20": {
-      "operations-100": { "warmTotalMs": 5.597, "peakHeapDeltaBytes": 2143728 },
-      "shared-refs-1000": { "warmTotalMs": 44.564, "peakHeapDeltaBytes": 5726120 },
-      "nested-refs-10000": { "warmTotalMs": 596.136, "peakHeapDeltaBytes": 113130216 },
-      "deep-schema": { "warmTotalMs": 0.446, "peakHeapDeltaBytes": 500000 },
-      "repeated-refs": { "warmTotalMs": 31.844, "peakHeapDeltaBytes": 12816920 },
-      "early-document-limit": { "warmTotalMs": 0.106, "peakHeapDeltaBytes": 41792 }
+      "operations-100": { "warmTotalMs": 14.688, "peakHeapDeltaBytes": 2121304 },
+      "shared-refs-1000": { "warmTotalMs": 123.433, "peakHeapDeltaBytes": 11058248 },
+      "nested-refs-10000": { "warmTotalMs": 1555.16, "peakHeapDeltaBytes": 120217088 },
+      "deep-schema": { "warmTotalMs": 1.029, "peakHeapDeltaBytes": 450216 },
+      "repeated-refs": { "warmTotalMs": 124.049, "peakHeapDeltaBytes": 11840608 },
+      "early-document-limit": { "warmTotalMs": 0.098, "peakHeapDeltaBytes": 21488 }
     },
     "22": {
-      "operations-100": { "warmTotalMs": 5.057, "peakHeapDeltaBytes": 3883360 },
-      "shared-refs-1000": { "warmTotalMs": 40.093, "peakHeapDeltaBytes": 11056504 },
-      "nested-refs-10000": { "warmTotalMs": 521.08, "peakHeapDeltaBytes": 137822344 },
-      "deep-schema": { "warmTotalMs": 0.461, "peakHeapDeltaBytes": 486640 },
-      "repeated-refs": { "warmTotalMs": 27.449, "peakHeapDeltaBytes": 17282816 },
-      "early-document-limit": { "warmTotalMs": 0.123, "peakHeapDeltaBytes": 46240 }
+      "operations-100": { "warmTotalMs": 16.036, "peakHeapDeltaBytes": 3839096 },
+      "shared-refs-1000": { "warmTotalMs": 91.28, "peakHeapDeltaBytes": 10632944 },
+      "nested-refs-10000": { "warmTotalMs": 1299.522, "peakHeapDeltaBytes": 142321176 },
+      "deep-schema": { "warmTotalMs": 1.458, "peakHeapDeltaBytes": 439096 },
+      "repeated-refs": { "warmTotalMs": 102.501, "peakHeapDeltaBytes": 9259232 },
+      "early-document-limit": { "warmTotalMs": 0.087, "peakHeapDeltaBytes": 23944 }
     },
     "24": {
-      "operations-100": { "warmTotalMs": 3.796, "peakHeapDeltaBytes": 2385880 },
-      "shared-refs-1000": { "warmTotalMs": 35.14, "peakHeapDeltaBytes": 13684432 },
-      "nested-refs-10000": { "warmTotalMs": 523.62, "peakHeapDeltaBytes": 122217096 },
-      "deep-schema": { "warmTotalMs": 0.454, "peakHeapDeltaBytes": 515312 },
-      "repeated-refs": { "warmTotalMs": 29.599, "peakHeapDeltaBytes": 43007592 },
-      "early-document-limit": { "warmTotalMs": 0.103, "peakHeapDeltaBytes": 45856 }
+      "operations-100": { "warmTotalMs": 5.337, "peakHeapDeltaBytes": 3536232 },
+      "shared-refs-1000": { "warmTotalMs": 57.655, "peakHeapDeltaBytes": 12858104 },
+      "nested-refs-10000": { "warmTotalMs": 844.849, "peakHeapDeltaBytes": 137093776 },
+      "deep-schema": { "warmTotalMs": 0.903, "peakHeapDeltaBytes": 452448 },
+      "repeated-refs": { "warmTotalMs": 60.573, "peakHeapDeltaBytes": 30567456 },
+      "early-document-limit": { "warmTotalMs": 0.036, "peakHeapDeltaBytes": 24968 }
     }
   }
 }
