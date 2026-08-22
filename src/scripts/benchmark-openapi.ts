@@ -226,6 +226,7 @@ function runWorkload(
       : workload.id === 'deep-schema'
         ? { ...BENCHMARK_LIMITS, maxSchemaDepth: DEFAULT_OPENAPI_ANALYSIS_LIMITS.maxSchemaDepth }
         : BENCHMARK_LIMITS;
+    let stage: 'parse' | 'resolve' | 'normalize' = 'parse';
     try {
       const loaded = loadOpenApiDocument({
         inputPath: absoluteInput,
@@ -234,10 +235,12 @@ function runWorkload(
       });
       const parseMs = elapsed(parseStart);
       heapPeak = Math.max(heapPeak, process.memoryUsage().heapUsed);
+      stage = 'resolve';
       const resolveStart = performance.now();
       const graph = resolveOpenApiReferences({ root: loaded, workspaceRoot, limits });
       const resolveMs = elapsed(resolveStart);
       heapPeak = Math.max(heapPeak, process.memoryUsage().heapUsed);
+      stage = 'normalize';
       const normalizeStart = performance.now();
       const contract = normalizeOpenApiOperations(graph, { limits });
       const normalizeMs = elapsed(normalizeStart);
@@ -259,6 +262,7 @@ function runWorkload(
     } catch (error: unknown) {
       if (!(error instanceof OpenApiAnalysisError)
         || !workload.rejection
+        || stage !== workload.rejection.stage
         || error.code !== workload.rejection.code) throw error;
       rejection = workload.rejection;
       rejectionCount += 1;
