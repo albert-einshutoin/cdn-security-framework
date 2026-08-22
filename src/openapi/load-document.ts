@@ -32,7 +32,35 @@ export interface LoadOpenApiDocumentOptions {
   limits?: Partial<OpenApiAnalysisLimits>;
 }
 
+export interface LoadedOpenApiSourceDocument {
+  document: unknown;
+  sourceUri: string;
+  contentDigest: string;
+  byteSize: number;
+  refStatus: 'unresolved';
+}
+
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const LOADED_OPENAPI_ROOTS = new WeakSet<object>();
+
+function freezeValue(value: unknown, seen = new WeakSet<object>()): void {
+  if (value === null || typeof value !== 'object' || seen.has(value)) return;
+  seen.add(value);
+  for (const child of Object.values(value)) freezeValue(child, seen);
+  Object.freeze(value);
+}
+
+function markLoaded<T extends object>(value: T, kind: 'root' | 'source'): T {
+  if (kind === 'root') LOADED_OPENAPI_ROOTS.add(value);
+  return Object.freeze(value);
+}
+
+export function isLoadedOpenApiDocument(value: unknown): value is LoadedOpenApiDocument {
+  return typeof value === 'object' && value !== null
+    && LOADED_OPENAPI_ROOTS.has(value)
+    && Object.isFrozen(value)
+    && Object.isFrozen((value as Partial<LoadedOpenApiDocument>).document);
+}
 
 function parseError(sourceUri: string, error?: unknown): OpenApiAnalysisError {
   const mark = error instanceof yaml.YAMLException ? error.mark : undefined;
@@ -92,6 +120,9 @@ function validateSafeValue(
     if (value.length > limits.maxStringLength) throw new OpenApiAnalysisError('OPENAPI_NODE_LIMIT');
     return;
   }
+  if (typeof value === 'number' && !Number.isFinite(value)) {
+    throw new OpenApiAnalysisError('OPENAPI_PARSE_ERROR');
+  }
   if (value === null || typeof value !== 'object') return;
   if (ancestors.has(value)) throw new OpenApiAnalysisError('OPENAPI_REF_CYCLE_LIMIT');
 
@@ -132,7 +163,9 @@ function detectVersion(version: string): '3.0' | '3.1' {
   return match[1] === '0' ? '3.0' : '3.1';
 }
 
-export function loadOpenApiDocument(options: LoadOpenApiDocumentOptions): LoadedOpenApiDocument {
+export function loadOpenApiSourceDocument(
+  options: LoadOpenApiDocumentOptions,
+): LoadedOpenApiSourceDocument {
   if (!options || typeof options.inputPath !== 'string' || typeof options.workspaceRoot !== 'string') {
     throw new OpenApiAnalysisError('OPENAPI_INPUT_NOT_FOUND');
   }
@@ -223,13 +256,22 @@ export function loadOpenApiDocument(options: LoadOpenApiDocumentOptions): Loaded
   validateSafeValue(parsed, limits, {
     nodes: 0,
   }, new Set<object>());
-  const document = asRootDocument(parsed);
-  return {
-    document,
+  freezeValue(parsed);
+  return markLoaded({
+    document: parsed,
     sourceUri,
     contentDigest: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
-    version: detectVersion(document.openapi),
     byteSize: bytes.length,
     refStatus: 'unresolved',
-  };
+  }, 'source');
+}
+
+export function loadOpenApiDocument(options: LoadOpenApiDocumentOptions): LoadedOpenApiDocument {
+  const loaded = loadOpenApiSourceDocument(options);
+  const document = asRootDocument(loaded.document);
+  return markLoaded({
+    ...loaded,
+    document,
+    version: detectVersion(document.openapi),
+  }, 'root');
 }

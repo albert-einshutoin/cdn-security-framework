@@ -25,7 +25,8 @@ Defaults are explicit workload envelopes established before selecting a parser:
 | Limit | Default | Hard maximum | Basis |
 | --- | ---: | ---: | --- |
 | `maxDocumentBytes` | 2 MiB | 4 MiB | Bound each pre-parse read |
-| `maxResolvedDocuments` | 32 | 64 | Default aggregate raw input is at most 64 MiB |
+| `maxGraphBytes` | 64 MiB | 256 MiB | Bound aggregate raw bytes across resolved documents |
+| `maxResolvedDocuments` | 32 | 64 | Bound document graph breadth and parser invocations |
 | `maxRefDepth` | 32 | 128 | Bound chained local references independently of cycle detection |
 | `maxSchemaDepth` | 64 | 256 | Bound recursive schema traversal |
 | `maxNodes` | 250,000 | 1,000,000 | Global traversal stop independent of object type |

@@ -25,7 +25,8 @@ Parser選定前に、既定値を明示的なWorkload Envelopeとして固定し
 | Limit | Default | Hard maximum | Basis |
 | --- | ---: | ---: | --- |
 | `maxDocumentBytes` | 2 MiB | 4 MiB | Parse前の各Readを制限 |
-| `maxResolvedDocuments` | 32 | 64 | 既定のRaw Input合計を最大64 MiBに制限 |
+| `maxGraphBytes` | 64 MiB | 256 MiB | 解決した全DocumentのRaw Byte合計を制限 |
+| `maxResolvedDocuments` | 32 | 64 | Document Graphの幅とParser実行回数を制限 |
 | `maxRefDepth` | 32 | 128 | Cycle検出とは別にLocal Ref Chainを制限 |
 | `maxSchemaDepth` | 64 | 256 | Recursive Schema走査を制限 |
 | `maxNodes` | 250,000 | 1,000,000 | Object種別によらない全体Traversal停止条件 |

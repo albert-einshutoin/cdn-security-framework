@@ -132,6 +132,17 @@ describe('loadOpenApiDocument', () => {
     },
   );
 
+  test('rejects non-finite JSON numbers before canonical serialization', () => {
+    const fixture = temporaryFile(
+      'non-finite.json',
+      '{"openapi":"3.1.0","paths":{},"example":1e400}',
+    );
+    expect(() => loadOpenApiDocument({
+      inputPath: fixture.inputPath,
+      workspaceRoot: fixture.root,
+    })).toThrow(expect.objectContaining({ code: 'OPENAPI_PARSE_ERROR' }));
+  });
+
   test('rejects duplicate and prototype-pollution keys', () => {
     for (const content of [
       '{"openapi":"3.1.0","paths":{},"paths":{}}',

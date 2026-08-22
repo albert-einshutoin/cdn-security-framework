@@ -112,6 +112,10 @@ function assertPackageContents(pack: PackResult) {
     'openapi/index.d.ts',
     'openapi/load-document.js',
     'openapi/load-document.d.ts',
+    'openapi/document-graph.js',
+    'openapi/document-graph.d.ts',
+    'openapi/ref-resolver.js',
+    'openapi/ref-resolver.d.ts',
     'scripts/compile.js',
     'scripts/compile.d.ts',
     'scripts/policy-lint.js',
@@ -170,6 +174,7 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof securityIr.serializeSecurityContract, 'function');
       assert.strictEqual(schema.properties.schemaVersion.const, 1);
       assert.strictEqual(typeof openapi.loadOpenApiDocument, 'function');
+      assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
       const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const result = pkg.lintPolicy({
         policyPath: path.join(pkgRoot, 'policy', 'base.yml'),

@@ -2,6 +2,7 @@ import { OpenApiAnalysisError } from './analysis-error';
 
 export interface OpenApiAnalysisLimits {
   maxDocumentBytes: number;
+  maxGraphBytes: number;
   maxResolvedDocuments: number;
   maxRefDepth: number;
   maxSchemaDepth: number;
@@ -20,6 +21,7 @@ export const OPENAPI_ANALYSIS_LIMIT_RANGES: Readonly<
   Record<OpenApiAnalysisLimitName, Readonly<{ min: number; max: number }>>
 > = Object.freeze({
   maxDocumentBytes: Object.freeze({ min: 1, max: 4 * 1024 * 1024 }),
+  maxGraphBytes: Object.freeze({ min: 1, max: 256 * 1024 * 1024 }),
   maxResolvedDocuments: Object.freeze({ min: 1, max: 64 }),
   maxRefDepth: Object.freeze({ min: 1, max: 128 }),
   maxSchemaDepth: Object.freeze({ min: 1, max: 256 }),
@@ -34,6 +36,7 @@ export const OPENAPI_ANALYSIS_LIMIT_RANGES: Readonly<
 
 export const DEFAULT_OPENAPI_ANALYSIS_LIMITS: Readonly<OpenApiAnalysisLimits> = Object.freeze({
   maxDocumentBytes: 2 * 1024 * 1024,
+  maxGraphBytes: 64 * 1024 * 1024,
   maxResolvedDocuments: 32,
   maxRefDepth: 32,
   maxSchemaDepth: 64,

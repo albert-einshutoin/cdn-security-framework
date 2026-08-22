@@ -41,7 +41,7 @@ describe('OpenAPI analysis limits', () => {
     expect(
       DEFAULT_OPENAPI_ANALYSIS_LIMITS.maxDocumentBytes
       * DEFAULT_OPENAPI_ANALYSIS_LIMITS.maxResolvedDocuments,
-    ).toBe(64 * 1024 * 1024);
+    ).toBe(DEFAULT_OPENAPI_ANALYSIS_LIMITS.maxGraphBytes);
     expect(
       DEFAULT_OPENAPI_ANALYSIS_LIMITS.maxOperations
       * DEFAULT_OPENAPI_ANALYSIS_LIMITS.maxParametersPerOperation,

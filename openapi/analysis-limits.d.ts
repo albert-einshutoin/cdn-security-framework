@@ -1,5 +1,6 @@
 export interface OpenApiAnalysisLimits {
     maxDocumentBytes: number;
+    maxGraphBytes: number;
     maxResolvedDocuments: number;
     maxRefDepth: number;
     maxSchemaDepth: number;

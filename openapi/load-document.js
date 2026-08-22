@@ -36,6 +36,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.isLoadedOpenApiDocument = isLoadedOpenApiDocument;
+exports.loadOpenApiSourceDocument = loadOpenApiSourceDocument;
 exports.loadOpenApiDocument = loadOpenApiDocument;
 const node_crypto_1 = require("node:crypto");
 const node_fs_1 = __importDefault(require("node:fs"));
@@ -45,6 +47,26 @@ const analysis_error_1 = require("./analysis-error");
 const analysis_limits_1 = require("./analysis-limits");
 const ref_boundary_1 = require("./ref-boundary");
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+const LOADED_OPENAPI_ROOTS = new WeakSet();
+function freezeValue(value, seen = new WeakSet()) {
+    if (value === null || typeof value !== 'object' || seen.has(value))
+        return;
+    seen.add(value);
+    for (const child of Object.values(value))
+        freezeValue(child, seen);
+    Object.freeze(value);
+}
+function markLoaded(value, kind) {
+    if (kind === 'root')
+        LOADED_OPENAPI_ROOTS.add(value);
+    return Object.freeze(value);
+}
+function isLoadedOpenApiDocument(value) {
+    return typeof value === 'object' && value !== null
+        && LOADED_OPENAPI_ROOTS.has(value)
+        && Object.isFrozen(value)
+        && Object.isFrozen(value.document);
+}
 function parseError(sourceUri, error) {
     const mark = error instanceof yaml.YAMLException ? error.mark : undefined;
     const reason = error instanceof yaml.YAMLException ? error.reason : '';
@@ -90,6 +112,9 @@ function validateSafeValue(value, limits, state, ancestors, depth = 0) {
             throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_NODE_LIMIT');
         return;
     }
+    if (typeof value === 'number' && !Number.isFinite(value)) {
+        throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_PARSE_ERROR');
+    }
     if (value === null || typeof value !== 'object')
         return;
     if (ancestors.has(value))
@@ -130,7 +155,7 @@ function detectVersion(version) {
         throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_UNSUPPORTED_VERSION');
     return match[1] === '0' ? '3.0' : '3.1';
 }
-function loadOpenApiDocument(options) {
+function loadOpenApiSourceDocument(options) {
     if (!options || typeof options.inputPath !== 'string' || typeof options.workspaceRoot !== 'string') {
         throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_INPUT_NOT_FOUND');
     }
@@ -227,13 +252,21 @@ function loadOpenApiDocument(options) {
     validateSafeValue(parsed, limits, {
         nodes: 0,
     }, new Set());
-    const document = asRootDocument(parsed);
-    return {
-        document,
+    freezeValue(parsed);
+    return markLoaded({
+        document: parsed,
         sourceUri,
         contentDigest: `sha256:${(0, node_crypto_1.createHash)('sha256').update(bytes).digest('hex')}`,
-        version: detectVersion(document.openapi),
         byteSize: bytes.length,
         refStatus: 'unresolved',
-    };
+    }, 'source');
+}
+function loadOpenApiDocument(options) {
+    const loaded = loadOpenApiSourceDocument(options);
+    const document = asRootDocument(loaded.document);
+    return markLoaded({
+        ...loaded,
+        document,
+        version: detectVersion(document.openapi),
+    }, 'root');
 }
