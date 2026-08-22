@@ -323,9 +323,9 @@ function normalizeAuth(input: ApiAuthenticationContractV1, state: NormalizationS
           unsupportedReason: nonEmpty(scheme.unsupportedReason, 'unsupported reason'),
         }),
       };
-      if ((normalized.kind === 'api-key') !== ('parameterName' in normalized)
-        || (normalized.kind === 'api-key') !== ('location' in normalized)
-        || (normalized.kind === 'oauth2') !== ('flows' in normalized)
+      if (('parameterName' in normalized
+          && (normalized.kind !== 'api-key' || !('location' in normalized)))
+        || ('flows' in normalized && normalized.kind !== 'oauth2')
         || (normalized.flows !== undefined && normalized.flows.length === 0)
         || (normalized.kind === 'unknown' && normalized.capability !== 'unsupported')
         || ((normalized.capability === 'unsupported') !== ('unsupportedReason' in normalized))) {

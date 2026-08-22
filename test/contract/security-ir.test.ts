@@ -230,7 +230,6 @@ describe('Security IR v1', () => {
     for (const auth of [
       { name: 'unknown', kind: 'unknown', scopes: [], capability: 'supported' },
       { name: 'oauth', kind: 'oauth2', scopes: [], flows: [], capability: 'supported' },
-      { name: 'key', kind: 'api-key', scopes: [], capability: 'supported' },
     ]) {
       const invalidAuth = structuredClone(baseInput) as any;
       invalidAuth.operations[0].exposure = 'authenticated';
@@ -238,6 +237,27 @@ describe('Security IR v1', () => {
         mode: 'alternatives', alternatives: [{ anonymous: false, schemes: [auth] }],
       };
       expect(() => createSecurityContract(invalidAuth)).toThrow('invalid authentication scheme');
+    }
+
+    const legacyContracts = [];
+    for (const auth of [
+      { name: 'key', kind: 'api-key', location: 'header', scopes: [], capability: 'supported' },
+      { name: 'oauth', kind: 'oauth2', scopes: [], capability: 'supported' },
+    ]) {
+      const legacy = structuredClone(baseInput) as any;
+      legacy.operations[0].exposure = 'authenticated';
+      legacy.operations[0].auth = {
+        mode: 'alternatives', alternatives: [{ anonymous: false, schemes: [auth] }],
+      };
+      legacyContracts.push(createSecurityContract(legacy));
+    }
+    const schema = JSON.parse(fs.readFileSync(
+      path.join(process.cwd(), 'schemas/security-ir-v1.schema.json'),
+      'utf8',
+    ));
+    const validate = new Ajv({ allErrors: true }).compile(schema);
+    for (const contract of legacyContracts) {
+      expect(validate(contract), JSON.stringify(validate.errors)).toBe(true);
     }
   });
 

@@ -109,14 +109,20 @@
       },
       "allOf": [
         {
-          "if": { "properties": { "kind": { "const": "api-key" } } },
-          "then": { "required": ["location", "parameterName"] },
-          "else": { "not": { "anyOf": [{ "required": ["location"] }, { "required": ["parameterName"] }] } }
+          "if": { "required": ["parameterName"] },
+          "then": {
+            "required": ["location"],
+            "properties": { "kind": { "const": "api-key" } }
+          }
         },
         {
-          "if": { "properties": { "kind": { "const": "oauth2" } } },
-          "then": { "required": ["flows"], "properties": { "flows": { "type": "array", "minItems": 1 } } },
-          "else": { "not": { "required": ["flows"] } }
+          "if": { "required": ["flows"] },
+          "then": {
+            "properties": {
+              "kind": { "const": "oauth2" },
+              "flows": { "type": "array", "minItems": 1 }
+            }
+          }
         },
         {
           "if": { "properties": { "kind": { "const": "unknown" } } },
