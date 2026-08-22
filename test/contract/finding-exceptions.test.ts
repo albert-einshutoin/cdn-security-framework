@@ -84,6 +84,12 @@ describe('Finding Exception Contract v1', () => {
     expect(result.summary).toEqual({ before: 2, after: 1, suppressed: 1, governance: 3 });
     expect(result.findings.filter(({ category }) => category === 'governance')
       .every(({ evidence }) => evidence[0]?.uri === 'finding-exceptions.yml')).toBe(true);
+    expect(result.findings.find(({ ruleId }) => ruleId === 'SC-GOV-001')?.evidence[0]?.pointer)
+      .toBe('/exceptions/2');
+    expect(result.findings.find(({ ruleId }) => ruleId === 'SC-GOV-002')?.evidence[0]?.pointer)
+      .toBe('/exceptions/3');
+    expect(result.findings.find(({ ruleId }) => ruleId === 'SC-GOV-003')?.evidence[0]?.pointer)
+      .toBeUndefined();
     expect(JSON.stringify(result)).not.toContain('signed webhook payload');
   });
 

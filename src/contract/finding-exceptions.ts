@@ -298,14 +298,13 @@ function governanceFinding(
   actual: Record<string, unknown>,
   digest: string,
   context: FindingExceptionContext,
+  exceptionIndex?: number,
 ): SecurityFindingV1 {
   return createFinding({
     ruleId, severity, confidence: 'deterministic', category: 'governance', title, message, actual,
     evidence: [{
       source: 'policy', uri: evidenceUri(context.sourceUri),
-      pointer: `/exceptions/${encodeURIComponent(String(
-        actual.exceptionId ?? actual.findingInstanceId ?? ruleId,
-      ))}`,
+      ...(exceptionIndex === undefined ? {} : { pointer: `/exceptions/${exceptionIndex}` }),
       digest, analyzer: 'finding-exceptions@1',
       capability: 'finding-exceptions-v1', complete: true,
     }],
@@ -422,12 +421,14 @@ export function applyFindingExceptions(
   const canonicalFindings = canonicalizeFindings(findings);
 
   const governance: SecurityFindingV1[] = [];
-  const live = set.exceptions.filter((exception) => {
+  const exceptionIndexes = new Map(set.exceptions.map((exception, index) => [exception.id, index]));
+  const live = set.exceptions.filter((exception, exceptionIndex) => {
     if (exception.expires_at >= context.currentDate) return true;
     governance.push(governanceFinding(
       'SC-GOV-001', 'error', 'Finding exception has expired',
       'An expired exception does not suppress its matching Finding.',
-      { exceptionId: exception.id, owner: exception.owner, expiresAt: exception.expires_at }, digest, context,
+      { exceptionId: exception.id, owner: exception.owner, expiresAt: exception.expires_at },
+      digest, context, exceptionIndex,
     ));
     return false;
   });
@@ -472,7 +473,8 @@ export function applyFindingExceptions(
     if (!matchedIds.has(exception.id)) governance.push(governanceFinding(
       'SC-GOV-002', 'warning', 'Finding exception is unused',
       'No current Finding matches this live exception; remove it if the underlying issue is gone.',
-      { exceptionId: exception.id, owner: exception.owner, expiresAt: exception.expires_at }, digest, context,
+      { exceptionId: exception.id, owner: exception.owner, expiresAt: exception.expires_at },
+      digest, context, exceptionIndexes.get(exception.id),
     ));
   }
   return {
