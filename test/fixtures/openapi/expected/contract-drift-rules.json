@@ -249,7 +249,7 @@
         },
         {
           "analyzer": "allowed-surface@1",
-          "capability": "request-drift-v1",
+          "capability": "request-max_uri_length-drift-v1",
           "complete": true,
           "digest": "sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
           "pointer": "/request",
@@ -262,7 +262,7 @@
         "materiallyBroaderRatio": 2,
         "recommended": 25
       },
-      "instanceId": "60fff21c747d27704f16f9a061d11904c3af1ccb6a53d26ca688b37a0cb0f03a",
+      "instanceId": "8452d893bf4859a956299470330697d9c6c6501699ad22a8cb77b43c880012c7",
       "message": "The effective Edge max_uri_length limit exceeds the finite recommendation by more than the configured 2x threshold.",
       "remediation": {
         "safeAutoFix": false,

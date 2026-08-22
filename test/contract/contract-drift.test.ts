@@ -531,6 +531,10 @@ describe('OpenAPI and Policy contract drift', () => {
       policy({ request: { allow_methods: ['GET'] } }),
     );
     const defaultLimit = compareRequestContracts(defaultLimitInput, { materiallyBroaderRatio: 1.5 });
+    expect(defaultLimit.filter(({ ruleId }) => ruleId === 'SC-LIMIT-002')
+      .map(({ actual }) => actual.control).sort()).toEqual([
+        'max_query_length', 'max_query_params', 'max_uri_length',
+      ]);
     expect(defaultLimit.find(({ ruleId, actual }) => (
       ruleId === 'SC-LIMIT-002' && actual.control === 'max_uri_length'
     ))?.evidence.at(-1)?.pointer).toBe('/request');
