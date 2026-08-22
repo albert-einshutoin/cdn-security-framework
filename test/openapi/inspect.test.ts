@@ -174,6 +174,23 @@ describe('cdn-security openapi inspect', () => {
     expect(referencedOutput.status).toBe(1);
     expect(referencedOutput.stderr).toContain('OPENAPI_OUTPUT_PROTECTED');
     expect(fs.readFileSync(referencedInput, 'utf8')).toBe(referencedBefore);
+
+    fs.rmSync(path.join(workspace, 'policy'), { recursive: true });
+    const policyTarget = path.join(workspace, 'protected-policy');
+    fs.mkdirSync(policyTarget);
+    const policyTargetFile = path.join(policyTarget, 'security.yml');
+    fs.writeFileSync(policyTargetFile, 'version: 1\n');
+    fs.symlinkSync('protected-policy', path.join(workspace, 'policy'), 'dir');
+    const symlinkedPolicyOutput = childProcess.spawnSync(
+      process.execPath,
+      [
+        cli, ...args, '--out', 'protected-policy/security.yml', '--force',
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(symlinkedPolicyOutput.status).toBe(1);
+    expect(symlinkedPolicyOutput.stderr).toContain('OPENAPI_OUTPUT_PROTECTED');
+    expect(fs.readFileSync(policyTargetFile, 'utf8')).toBe('version: 1\n');
   });
 
   test('returns stable safe errors for invalid input and unsafe output paths', () => {

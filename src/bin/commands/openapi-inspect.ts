@@ -71,6 +71,17 @@ function outputPath(options: OpenApiInspectCliOptions, sourcePaths: readonly str
   const lexicalOutput = path.isAbsolute(options.out as string)
     ? path.resolve(options.out as string)
     : path.resolve(workspaceRoot, options.out as string);
+  const protectedDirectories = ['policy', 'dist'].map((directory) => (
+    path.join(workspaceRoot, directory)
+  ));
+  const protectedRealDirectories = protectedDirectories.flatMap((directory) => {
+    try {
+      const resolved = fs.realpathSync(directory);
+      return fs.statSync(resolved).isDirectory() ? [resolved] : [];
+    } catch {
+      return [];
+    }
+  });
   const input = path.isAbsolute(options.input)
     ? path.resolve(options.input)
     : path.resolve(workspaceRoot, options.input);
@@ -81,9 +92,7 @@ function outputPath(options: OpenApiInspectCliOptions, sourcePaths: readonly str
     );
   }
   if (lexicalOutput === input
-    || ['policy', 'dist'].some((directory) => (
-      isPathWithinWorkspace(path.join(workspaceRoot, directory), lexicalOutput)
-    ))) {
+    || protectedDirectories.some((directory) => isPathWithinWorkspace(directory, lexicalOutput))) {
     throw new OpenApiInspectCliError(
       'OPENAPI_OUTPUT_PROTECTED',
       'OpenAPI input, policy, and dist paths cannot be used as report output.',
@@ -111,9 +120,8 @@ function outputPath(options: OpenApiInspectCliOptions, sourcePaths: readonly str
     return { device: stats.dev, inode: stats.ino };
   });
   if (sourceRealPaths.includes(requested)
-    || ['policy', 'dist'].some((directory) => (
-      isPathWithinWorkspace(path.join(workspaceRoot, directory), requested)
-    ))) {
+    || [...protectedDirectories, ...protectedRealDirectories]
+      .some((directory) => isPathWithinWorkspace(directory, requested))) {
     throw new OpenApiInspectCliError(
       'OPENAPI_OUTPUT_PROTECTED',
       'OpenAPI input, policy, and dist paths cannot be used as report output.',
