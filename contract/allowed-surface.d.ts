@@ -45,6 +45,7 @@ export interface AllowedDefaultsV1 {
     corsPreflight: {
         method: 'OPTIONS';
         allowedOriginDecision: 'early-204-before-request-validation' | 'not-configured';
+        allowedOriginResponseCacheControl: 'no-store' | 'not-configured';
         nonMatchingOriginDecision: 'continue';
         bypassScope: 'all-request-validation-including-host-and-auth' | 'none';
     };

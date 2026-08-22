@@ -131,6 +131,7 @@ function projectPolicyToAllowedSurface(policy, options) {
                 allowedOriginDecision: corsOptionsBypass
                     ? 'early-204-before-request-validation'
                     : 'not-configured',
+                allowedOriginResponseCacheControl: corsOptionsBypass ? 'no-store' : 'not-configured',
                 nonMatchingOriginDecision: 'continue',
                 bypassScope: corsOptionsBypass ? 'all-request-validation-including-host-and-auth' : 'none',
             },

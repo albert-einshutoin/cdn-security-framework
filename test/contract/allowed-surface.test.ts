@@ -204,7 +204,11 @@ describe('Allowed Surface Model v1', () => {
       methods: ['GET'],
       configuredMethods: ['GET'],
       corsOptionsBypass: false,
-      corsPreflight: { allowedOriginDecision: 'not-configured', bypassScope: 'none' },
+      corsPreflight: {
+        allowedOriginDecision: 'not-configured',
+        allowedOriginResponseCacheControl: 'not-configured',
+        bypassScope: 'none',
+      },
       hosts: { kind: 'any', values: [] },
       pathNormalization: { routeMatchPhase: 'normalized-path' },
       response: { adminPathMatch: { algorithm: 'equal-or-prefix-plus-slash' } },
@@ -274,6 +278,7 @@ describe('Allowed Surface Model v1', () => {
       corsOptionsBypass: true,
       corsPreflight: {
         allowedOriginDecision: 'early-204-before-request-validation',
+        allowedOriginResponseCacheControl: 'no-store',
         bypassScope: 'all-request-validation-including-host-and-auth',
       },
     });

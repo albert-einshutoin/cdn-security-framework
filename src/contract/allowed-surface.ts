@@ -60,6 +60,7 @@ export interface AllowedDefaultsV1 {
   corsPreflight: {
     method: 'OPTIONS';
     allowedOriginDecision: 'early-204-before-request-validation' | 'not-configured';
+    allowedOriginResponseCacheControl: 'no-store' | 'not-configured';
     nonMatchingOriginDecision: 'continue';
     bypassScope: 'all-request-validation-including-host-and-auth' | 'none';
   };
@@ -290,6 +291,7 @@ export function projectPolicyToAllowedSurface(
         allowedOriginDecision: corsOptionsBypass
           ? 'early-204-before-request-validation'
           : 'not-configured',
+        allowedOriginResponseCacheControl: corsOptionsBypass ? 'no-store' : 'not-configured',
         nonMatchingOriginDecision: 'continue',
         bypassScope: corsOptionsBypass ? 'all-request-validation-including-host-and-auth' : 'none',
       },

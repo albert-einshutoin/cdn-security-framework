@@ -10,6 +10,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
@@ -269,6 +270,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
@@ -458,6 +460,7 @@
       "corsOptionsBypass": true,
       "corsPreflight": {
         "allowedOriginDecision": "early-204-before-request-validation",
+        "allowedOriginResponseCacheControl": "no-store",
         "bypassScope": "all-request-validation-including-host-and-auth",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
@@ -727,6 +730,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
@@ -908,6 +912,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
@@ -1172,6 +1177,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
@@ -1440,6 +1446,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
@@ -1716,6 +1723,7 @@
       "corsOptionsBypass": false,
       "corsPreflight": {
         "allowedOriginDecision": "not-configured",
+        "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
         "nonMatchingOriginDecision": "continue"
