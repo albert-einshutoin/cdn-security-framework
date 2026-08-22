@@ -75,7 +75,9 @@ export function comparePathMethodContracts(input: ContractDriftInput): SecurityF
 
   const declaredShapes = new Set(declared.operations.map(({ path }) => normalizedPathShape(path)));
   for (const rule of allowed.orderedRules) {
-    const policyPaths = rule.auth.exactPath ? rule.match.authEffectiveValues : rule.match.values;
+    const policyPaths = rule.auth.exactPath
+      ? rule.match.authEffectiveValues
+      : [...new Set([...rule.match.values, ...rule.match.authEffectiveValues])].sort();
     for (const prefix of policyPaths) {
       const exactRelations = rule.auth.exactPath
         ? declared.operations.map((operation) => pathRelation(operation, prefix, allowed, 'exact'))

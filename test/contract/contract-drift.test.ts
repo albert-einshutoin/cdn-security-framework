@@ -122,6 +122,13 @@ describe('OpenAPI and Policy contract drift', () => {
     ]);
     expect(findings.find(({ ruleId }) => ruleId === 'SC-EXPOSURE-003')?.severity).toBe('warning');
 
+    const defaultAuthPrefixes = comparePathMethodContracts(input(
+      contract([operation('GET', '/health')]),
+      policy({ routes: [{ name: 'protected-defaults', match: {}, auth_gate: { type: 'jwt' } }] }),
+    ));
+    expect(defaultAuthPrefixes.filter(({ ruleId }) => ruleId === 'SC-EXPOSURE-003')
+      .map(({ route }) => route?.path)).toEqual(['/admin', '/docs', '/swagger']);
+
     const renamedParameter = comparePathMethodContracts(input(
       contract([operation('GET', '/users/{openapiId}')]),
       policy({ routes: [{
@@ -365,6 +372,36 @@ describe('OpenAPI and Policy contract drift', () => {
       policy({ request: { block: { header_missing: ['x-api-key'] } } }),
     ));
     expect(authHeaderRequest.some(({ ruleId }) => ruleId === 'SC-REQUEST-002')).toBe(false);
+
+    const httpAuthHeaderRequest = compareRequestContracts(input(
+      contract([operation('GET', '/bearer', {
+        exposure: 'authenticated',
+        auth: {
+          mode: 'alternatives',
+          alternatives: [{
+            anonymous: false,
+            schemes: [{ name: 'bearer', kind: 'bearer', scopes: [], capability: 'supported' }],
+          }],
+        },
+      })]),
+      policy({ request: { block: { header_missing: ['authorization'] } } }),
+    ));
+    expect(httpAuthHeaderRequest.some(({ ruleId }) => ruleId === 'SC-REQUEST-002')).toBe(false);
+
+    const fractionalRatio = compareRequestContracts(input(
+      contract([operation('GET', '/ratio', {
+        request: {
+          contentTypes: [], requiredHeaders: [],
+          queryParameters: [{
+            name: 'q', required: false, constraints: { type: 'string', maxLength: 5 },
+            unsupportedReasons: [],
+          }],
+          pathParameters: [], headerParameters: [], cookieParameters: [],
+        },
+      })]),
+      policy({ request: { limits: { max_query_params: 30, max_query_length: 8, max_uri_length: 2048 } } }),
+    ), { materiallyBroaderRatio: 1.5 });
+    expect(fractionalRatio.some(({ ruleId }) => ruleId === 'SC-LIMIT-002')).toBe(true);
 
     const emptyCorsRequest = compareRequestContracts(input(
       contract([operation('OPTIONS', '/items')]),

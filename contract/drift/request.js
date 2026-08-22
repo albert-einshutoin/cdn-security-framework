@@ -9,8 +9,12 @@ function requiredAuthenticationHeaders(operation) {
     const alternatives = operation.auth.alternatives;
     if (alternatives.length === 0 || alternatives.some(({ anonymous }) => anonymous))
         return [];
-    const headers = alternatives.map(({ schemes }) => new Set(schemes.flatMap((scheme) => (scheme.kind === 'api-key' && scheme.location === 'header' && scheme.parameterName
-        ? [scheme.parameterName.toLowerCase()] : []))));
+    const headers = alternatives.map(({ schemes }) => new Set(schemes.flatMap((scheme) => {
+        if (scheme.kind === 'basic' || scheme.kind === 'bearer')
+            return ['authorization'];
+        return scheme.kind === 'api-key' && scheme.location === 'header' && scheme.parameterName
+            ? [scheme.parameterName.toLowerCase()] : [];
+    })));
     return [...headers[0]].filter((header) => headers.every((alternative) => alternative.has(header)));
 }
 function limitFinding(input, operation, name, recommendation, ratio, conditionalPreflightBypass) {
@@ -45,7 +49,7 @@ function limitFinding(input, operation, name, recommendation, ratio, conditional
                 remediation: { summary: 'Raise the limit to at least the finite recommendation or narrow the declared contract.', safeAutoFix: false },
             })];
     }
-    if (candidate.value > 0 && policyValue > Math.ceil(candidate.value * ratio))
+    if (candidate.value > 0 && policyValue > candidate.value * ratio)
         return [(0, shared_1.makeFinding)({
                 ruleId: 'SC-LIMIT-002',
                 severity: 'warning',
