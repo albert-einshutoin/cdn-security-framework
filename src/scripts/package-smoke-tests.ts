@@ -97,6 +97,8 @@ function assertPackageContents(pack: PackResult) {
     'LICENSE',
     'bin/cli.js',
     'bin/cli.d.ts',
+    'bin/commands/openapi-inspect.js',
+    'bin/commands/openapi-inspect.d.ts',
     'lib/index.js',
     'lib/index.d.ts',
     'lib/compile.js',
@@ -108,6 +110,7 @@ function assertPackageContents(pack: PackResult) {
     'contract/security-ir.js',
     'contract/security-ir.d.ts',
     'schemas/security-ir-v1.schema.json',
+    'schemas/openapi-inspection-v1.schema.json',
     'openapi/index.js',
     'openapi/index.d.ts',
     'openapi/load-document.js',
@@ -118,6 +121,8 @@ function assertPackageContents(pack: PackResult) {
     'openapi/ref-resolver.d.ts',
     'openapi/operation-normalizer.js',
     'openapi/operation-normalizer.d.ts',
+    'openapi/inspect.js',
+    'openapi/inspect.d.ts',
     'scripts/compile.js',
     'scripts/compile.d.ts',
     'scripts/policy-lint.js',
@@ -169,6 +174,7 @@ function smokeInstalledPackage(tarballPath: string) {
       const contract = require(${JSON.stringify(`${packageName}/contract`)});
       const securityIr = require(${JSON.stringify(`${packageName}/contract/security-ir`)});
       const schema = require(${JSON.stringify(`${packageName}/schemas/security-ir-v1.schema.json`)});
+      const inspectionSchema = require(${JSON.stringify(`${packageName}/schemas/openapi-inspection-v1.schema.json`)});
       const openapi = require(${JSON.stringify(`${packageName}/openapi`)});
       const recommendation = require(${JSON.stringify(`${packageName}/recommendation`)});
       assert.strictEqual(typeof pkg.compile, 'function');
@@ -176,9 +182,11 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof contract.createSecurityContract, 'function');
       assert.strictEqual(typeof securityIr.serializeSecurityContract, 'function');
       assert.strictEqual(schema.properties.schemaVersion.const, 1);
+      assert.strictEqual(inspectionSchema.properties.schemaVersion.const, 1);
       assert.strictEqual(typeof openapi.loadOpenApiDocument, 'function');
       assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
       assert.strictEqual(typeof openapi.normalizeOpenApiOperations, 'function');
+      assert.strictEqual(typeof openapi.inspectOpenApi, 'function');
       assert.strictEqual(typeof recommendation.recommendRequestLimits, 'function');
       const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const result = pkg.lintPolicy({
@@ -193,6 +201,13 @@ function smokeInstalledPackage(tarballPath: string) {
     const cliPath = path.join(installDir, 'node_modules', '.bin', 'cdn-security');
     const version = run(cliPath, ['--version'], { cwd: installDir }).trim();
     assert.strictEqual(version, require(path.join(repoRoot, 'package.json')).version);
+    const openApiPath = path.join(installDir, 'openapi.json');
+    fs.writeFileSync(openApiPath, JSON.stringify({ openapi: '3.1.0', paths: {} }));
+    const inspection = JSON.parse(run(cliPath, [
+      'openapi', 'inspect', '--input', 'openapi.json', '--workspace-root', installDir, '--json',
+    ], { cwd: installDir }));
+    assert.strictEqual(inspection.schemaVersion, 1);
+    assert.strictEqual(inspection.summary.operationCount, 0);
     assertSchemaHints(installedRoot);
 
     run(cliPath, ['build', '--policy', installedBasePolicy, '--out-dir', 'dist'], {

@@ -45,6 +45,7 @@ test('package metadata exposes typed root api and bounded exports', () => {
     './openapi',
     './parser',
     './recommendation',
+    './schemas/openapi-inspection-v1.schema.json',
     './schemas/security-ir-v1.schema.json',
     './validator',
   ]);
@@ -64,6 +65,10 @@ test('package metadata exposes typed root api and bounded exports', () => {
     pkg.exports['./schemas/security-ir-v1.schema.json'],
     './schemas/security-ir-v1.schema.json',
   );
+  assert.strictEqual(
+    pkg.exports['./schemas/openapi-inspection-v1.schema.json'],
+    './schemas/openapi-inspection-v1.schema.json',
+  );
   assert.strictEqual(pkg.exports['./bin/cli.js'], './bin/cli.js');
 });
 
@@ -82,6 +87,7 @@ test('phase subpath exports expose public compiler contracts', () => {
   assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
   assert.strictEqual(typeof openapi.serializeResolvedOpenApiGraph, 'function');
   assert.strictEqual(typeof openapi.normalizeOpenApiOperations, 'function');
+  assert.strictEqual(typeof openapi.inspectOpenApi, 'function');
   assert.strictEqual(typeof recommendation.recommendRequestLimits, 'function');
 
   const phaseDeclarations = [

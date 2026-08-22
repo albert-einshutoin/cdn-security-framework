@@ -23,6 +23,27 @@ npx cdn-security <subcommand> [options]
 | `visualize` | Mermaid/HTML のポリシー可視化を生成し、実装・監視・未対応・target別制御を明示。 |
 | `diff` | 生成物の drift または policy posture の差分を比較。 |
 | `migrate` | スキーマのバージョン間マイグレーション（現状 v1 のみの stub）。 |
+| `openapi inspect` | Policyやbuild出力を変更せず、ローカルOpenAPIのSecurity Contractを決定的なText/JSONで確認。 |
+
+---
+
+## `openapi inspect`
+
+```bash
+npx cdn-security openapi inspect --input openapi.yaml --workspace-root .
+npx cdn-security openapi inspect --input openapi.yaml --workspace-root . --json
+npx cdn-security openapi inspect --input openapi.yaml --workspace-root . --json --out reports/openapi-contract.json
+```
+
+- `--input <path>` は必須で、`--workspace-root` 内のOpenAPI 3.0/3.1 YAMLまたはJSONを受け付けます。
+- ローカル`$ref`もworkspace内に限定され、remote refと`file:` refは無効です。
+- Text出力はversion、digest、operation別のexposure/auth、content type、parameter、capability、limit warningを要約します。
+- `--json`は決定的なSecurity IRと安全なanalyzer metadata/diagnosticを出力します。timestamp、absolute path、raw OpenAPIは含みません。
+- `--out`には`--json`、存在する親directory、workspace内のpathが必要です。既存fileの上書きには`--force`が必要です。
+- OpenAPI input、`policy/`、`dist/`は出力先にできません。inspectはPolicy生成・変更・deployを行いません。
+- parse、reference、resource limitの失敗はstderrへ安定した`OPENAPI_*` codeと安全なmessageを出します。
+
+JSON出力は[`openapi-inspection-v1.schema.json`](../schemas/openapi-inspection-v1.schema.json)に従います。未対応・部分対応の解析結果は明示され、publicとして扱われません。
 
 ---
 

@@ -23,3 +23,4 @@ __exportStar(require("./document-graph"), exports);
 __exportStar(require("./operation-normalizer"), exports);
 __exportStar(require("./ref-resolver"), exports);
 __exportStar(require("./ref-boundary"), exports);
+__exportStar(require("./inspect"), exports);

@@ -5,3 +5,4 @@ export * from './document-graph';
 export * from './operation-normalizer';
 export * from './ref-resolver';
 export * from './ref-boundary';
+export * from './inspect';

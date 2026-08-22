@@ -1,0 +1,65 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cdn-security.dev/schemas/openapi-inspection-v1.schema.json",
+  "title": "CDN Security OpenAPI Inspection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "analyzer", "summary", "capabilities", "diagnostics", "contract"],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "analyzer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "version", "openapiVersion", "sourceDigest"],
+      "properties": {
+        "name": { "const": "cdn-security-openapi-inspect" },
+        "version": { "const": 1 },
+        "openapiVersion": { "enum": ["3.0", "3.1"] },
+        "sourceDigest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" }
+      }
+    },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["operationCount", "exposures", "resolvedDocumentCount", "referenceCount", "totalByteSize"],
+      "properties": {
+        "operationCount": { "type": "integer", "minimum": 0 },
+        "exposures": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["public", "authenticated", "privileged", "unknown"],
+          "properties": {
+            "public": { "type": "integer", "minimum": 0 },
+            "authenticated": { "type": "integer", "minimum": 0 },
+            "privileged": { "type": "integer", "minimum": 0 },
+            "unknown": { "type": "integer", "minimum": 0 }
+          }
+        },
+        "resolvedDocumentCount": { "type": "integer", "minimum": 1 },
+        "referenceCount": { "type": "integer", "minimum": 0 },
+        "totalByteSize": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "capabilities": {
+      "$ref": "https://cdn-security.dev/schemas/security-ir-v1.schema.json#/definitions/capabilities"
+    },
+    "diagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "level", "message"],
+        "properties": {
+          "code": { "enum": ["OPENAPI_CAPABILITY_PARTIAL", "OPENAPI_CAPABILITY_UNSUPPORTED", "OPENAPI_LIMIT_NEAR"] },
+          "level": { "const": "warning" },
+          "message": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "capability": { "enum": ["routes", "parameters", "requestBodies", "authentication"] },
+          "metric": { "enum": ["documentBytes", "graphBytes", "resolvedDocuments", "operations"] },
+          "used": { "type": "integer", "minimum": 0 },
+          "limit": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "contract": { "$ref": "https://cdn-security.dev/schemas/security-ir-v1.schema.json" }
+  }
+}
