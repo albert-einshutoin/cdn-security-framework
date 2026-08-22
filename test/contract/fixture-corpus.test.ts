@@ -75,7 +75,12 @@ function generateBoundaryFixture(descriptor: Record<string, unknown>): string {
         cursor.properties = { child };
         cursor = child;
       }
-      return JSON.stringify(root);
+      return JSON.stringify({
+        openapi: '3.1.0',
+        info: { title: 'Generated schema-depth boundary', version: '1.0.0' },
+        paths: {},
+        components: { schemas: { Root: root } },
+      });
     }
     case 'yaml-aliases':
       return `base: &base { type: string }\naliases:\n${'  - *base\n'.repeat(count)}`;
@@ -147,6 +152,9 @@ describe('OpenAPI fixture corpus', () => {
       .toBe(OPENAPI_ANALYSIS_LIMIT_RANGES.maxParametersPerOperation.max + 1);
     expect(descriptors['limits/excessive-schema-depth.fixture.json'].depth)
       .toBe(OPENAPI_ANALYSIS_LIMIT_RANGES.maxSchemaDepth.max + 1);
+    expect(JSON.parse(generateBoundaryFixture(
+      descriptors['limits/excessive-schema-depth.fixture.json'],
+    ))).toMatchObject({ openapi: '3.1.0', paths: {}, components: { schemas: { Root: {} } } });
     expect(descriptors['limits/alias-expansion.fixture.json'].count)
       .toBe(OPENAPI_ANALYSIS_LIMIT_RANGES.maxYamlAliases.max + 1);
     expect(descriptors['malicious/cycle-bomb.fixture.json'].count)

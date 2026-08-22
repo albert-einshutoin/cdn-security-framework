@@ -7,6 +7,7 @@ import { DEFAULT_OPENAPI_ANALYSIS_LIMITS } from '../../src/openapi/analysis-limi
 import { loadOpenApiDocument } from '../../src/openapi/load-document';
 import {
   resolveJsonPointer,
+  resolveJsonPointerValue,
   resolveOpenApiReferences,
   serializeResolvedOpenApiGraph,
 } from '../../src/openapi/ref-resolver';
@@ -46,11 +47,12 @@ describe('resolveJsonPointer', () => {
     },
   );
 
-  test('distinguishes missing and non-object targets', () => {
+  test('distinguishes missing targets and preserves scalar schemas', () => {
     expect(() => resolveJsonPointer({}, '#/missing', 'root.yaml'))
       .toThrow(expect.objectContaining({ code: 'OPENAPI_REF_NOT_FOUND' }));
-    expect(() => resolveJsonPointer({ scalar: 1 }, '#/scalar', 'root.yaml'))
+    expect(() => resolveJsonPointer({ scalar: false }, '#/scalar', 'root.yaml'))
       .toThrow(expect.objectContaining({ code: 'OPENAPI_REF_NOT_FOUND' }));
+    expect(resolveJsonPointerValue({ scalar: false }, '#/scalar', 'root.yaml').value).toBe(false);
   });
 });
 
@@ -86,6 +88,44 @@ describe('resolveOpenApiReferences', () => {
       workspaceRoot: fixtureRoot,
       limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
     })).toThrow(expect.objectContaining({ code: 'OPENAPI_INVALID_ROOT' }));
+  });
+
+  test('binds loaded roots to their original workspace and current limits', () => {
+    const workspaceA = fs.mkdtempSync(path.join(os.tmpdir(), 'openapi-workspace-a-'));
+    const workspaceB = fs.mkdtempSync(path.join(os.tmpdir(), 'openapi-workspace-b-'));
+    temporaryDirectories.push(workspaceA, workspaceB);
+    const document = JSON.stringify({ openapi: '3.1.0', paths: {}, x: 'long-value' });
+    fs.writeFileSync(path.join(workspaceA, 'root.json'), document);
+    fs.writeFileSync(path.join(workspaceB, 'root.json'), document);
+    const root = loadOpenApiDocument({ inputPath: 'root.json', workspaceRoot: workspaceA });
+
+    expect(() => resolveOpenApiReferences({
+      root, workspaceRoot: workspaceB, limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
+    })).toThrow(expect.objectContaining({ code: 'OPENAPI_INVALID_ROOT' }));
+    expect(() => resolveOpenApiReferences({
+      root,
+      workspaceRoot: workspaceA,
+      limits: { ...DEFAULT_OPENAPI_ANALYSIS_LIMITS, maxStringLength: 8 },
+    })).toThrow(expect.objectContaining({ code: 'OPENAPI_NODE_LIMIT' }));
+  });
+
+  test('resolves boolean schemas and encoded hashes in local filenames', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'openapi-encoded-hash-'));
+    temporaryDirectories.push(workspace);
+    fs.writeFileSync(path.join(workspace, 'defs#v1.json'), JSON.stringify({ Never: false }));
+    fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
+      openapi: '3.1.0',
+      paths: {},
+      components: { schemas: { Never: { $ref: 'defs%23v1.json#/Never' } } },
+    }));
+    const graph = resolveOpenApiReferences({
+      root: loadOpenApiDocument({ inputPath: 'root.json', workspaceRoot: workspace }),
+      workspaceRoot: workspace,
+      limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
+    });
+    expect(graph.references[0]?.target.sourceUri).toBe('defs%23v1.json');
+    expect(graph.documents.find(({ sourceUri }) => sourceUri === 'defs%23v1.json')?.document)
+      .toEqual({ Never: false });
   });
 
   test('caches sibling documents and keeps cycles as reference identity', () => {

@@ -24,6 +24,11 @@ export interface LoadedOpenApiSourceDocument {
     byteSize: number;
     refStatus: 'unresolved';
 }
+export declare function loadedOpenApiDocumentMetadata(value: LoadedOpenApiDocument): {
+    workspaceRoot: string;
+    sourcePath: string;
+};
+export declare function validateLoadedOpenApiDocumentLimits(value: LoadedOpenApiDocument, limits: Readonly<OpenApiAnalysisLimits>): void;
 export declare function isLoadedOpenApiDocument(value: unknown): value is LoadedOpenApiDocument;
 export declare function loadOpenApiSourceDocument(options: LoadOpenApiDocumentOptions): LoadedOpenApiSourceDocument;
 export declare function loadOpenApiDocument(options: LoadOpenApiDocumentOptions): LoadedOpenApiDocument;

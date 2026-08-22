@@ -42,6 +42,10 @@ export interface LoadedOpenApiSourceDocument {
 
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const LOADED_OPENAPI_ROOTS = new WeakSet<object>();
+const LOADED_OPENAPI_METADATA = new WeakMap<object, {
+  workspaceRoot: string;
+  sourcePath: string;
+}>();
 
 function freezeValue(value: unknown, seen = new WeakSet<object>()): void {
   if (value === null || typeof value !== 'object' || seen.has(value)) return;
@@ -50,9 +54,33 @@ function freezeValue(value: unknown, seen = new WeakSet<object>()): void {
   Object.freeze(value);
 }
 
-function markLoaded<T extends object>(value: T, kind: 'root' | 'source'): T {
+function markLoaded<T extends object>(
+  value: T,
+  kind: 'root' | 'source',
+  metadata: { workspaceRoot: string; sourcePath: string },
+): T {
   if (kind === 'root') LOADED_OPENAPI_ROOTS.add(value);
+  LOADED_OPENAPI_METADATA.set(value, metadata);
   return Object.freeze(value);
+}
+
+export function loadedOpenApiDocumentMetadata(value: LoadedOpenApiDocument): {
+  workspaceRoot: string;
+  sourcePath: string;
+} {
+  const metadata = LOADED_OPENAPI_METADATA.get(value);
+  if (!metadata) throw new OpenApiAnalysisError('OPENAPI_INVALID_ROOT');
+  return metadata;
+}
+
+export function validateLoadedOpenApiDocumentLimits(
+  value: LoadedOpenApiDocument,
+  limits: Readonly<OpenApiAnalysisLimits>,
+): void {
+  if (value.byteSize > limits.maxDocumentBytes) {
+    throw new OpenApiAnalysisError('OPENAPI_DOCUMENT_TOO_LARGE', { sourceUri: value.sourceUri });
+  }
+  validateSafeValue(value.document, limits, { nodes: 0 }, new Set<object>());
 }
 
 export function isLoadedOpenApiDocument(value: unknown): value is LoadedOpenApiDocument {
@@ -263,15 +291,17 @@ export function loadOpenApiSourceDocument(
     contentDigest: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
     byteSize: bytes.length,
     refStatus: 'unresolved',
-  }, 'source');
+  }, 'source', { workspaceRoot: rootRealPath, sourcePath: resolvedPath });
 }
 
 export function loadOpenApiDocument(options: LoadOpenApiDocumentOptions): LoadedOpenApiDocument {
   const loaded = loadOpenApiSourceDocument(options);
+  const metadata = LOADED_OPENAPI_METADATA.get(loaded);
+  if (!metadata) throw new OpenApiAnalysisError('OPENAPI_INVALID_ROOT');
   const document = asRootDocument(loaded.document);
   return markLoaded({
     ...loaded,
     document,
     version: detectVersion(document.openapi),
-  }, 'root');
+  }, 'root', metadata);
 }
