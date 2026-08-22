@@ -31,7 +31,12 @@
   },
   {
     "id": "tooling",
-    "patterns": ["src/scripts/fingerprint-candidates.ts", "src/scripts/benchmark-compiler.ts", "src/scripts/generate-parity-doc.ts"],
+    "patterns": ["src/scripts/fingerprint-candidates.ts", "src/scripts/benchmark-compiler.ts", "src/scripts/benchmark-openapi.ts", "src/scripts/generate-parity-doc.ts"],
+    "dependsOn": []
+  },
+  {
+    "id": "openapi-analysis",
+    "patterns": ["src/openapi/**", "src/contract/**"],
     "dependsOn": []
   }
 ]

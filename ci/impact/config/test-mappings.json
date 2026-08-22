@@ -31,9 +31,15 @@
   },
   {
     "id": "tooling",
-    "patterns": ["src/scripts/fingerprint-candidates.ts", "src/scripts/benchmark-compiler.ts", "src/scripts/generate-parity-doc.ts"],
+    "patterns": ["src/scripts/fingerprint-candidates.ts", "src/scripts/benchmark-compiler.ts", "src/scripts/benchmark-openapi.ts", "src/scripts/generate-parity-doc.ts"],
     "modules": ["tooling"],
-    "targetIds": ["fingerprint-unit", "compiler-phase-unit", "cloudflare-waf-unit"]
+    "targetIds": ["fingerprint-unit", "openapi-benchmark-unit", "openapi-benchmark-ci", "compiler-phase-unit", "cloudflare-waf-unit"]
+  },
+  {
+    "id": "openapi-analysis-benchmark",
+    "patterns": ["src/openapi/**", "src/contract/**"],
+    "modules": ["openapi-analysis"],
+    "targetIds": ["openapi-benchmark-unit", "openapi-benchmark-ci"]
   },
   {
     "id": "changed-unit-tests",
