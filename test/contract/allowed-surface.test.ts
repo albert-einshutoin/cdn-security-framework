@@ -230,12 +230,7 @@ describe('Allowed Surface Model v1', () => {
       },
       response: {
         selection: 'first-auth-or-cache-rule',
-        effectiveCacheControl: {
-          base: 'no-store',
-          authProtectedOverride: {
-            value: 'no-store, no-cache, must-revalidate, private',
-          },
-        },
+        selectedBaseCacheControl: 'no-store',
       },
     });
     expect(projected.orderedRules[2].auth).toMatchObject({ kind: 'none', typeSource: 'absent' });
@@ -336,25 +331,24 @@ describe('Allowed Surface Model v1', () => {
   test('projects the force-vary no-store override as effective cache control', () => {
     const input = policy() as CDNSecurityFrameworkPolicy;
     input.routes![0].response = { cache_control: 'private, max-age=300' };
-    expect(projectPolicyToAllowedSurface(input, {
+    const projected = projectPolicyToAllowedSurface(input, {
       policyDigest: digest,
       sourceUri: 'policy/security.yml',
-    }).orderedRules[0].response).toMatchObject({
+    });
+    expect(projected.orderedRules[0].response).toMatchObject({
       cacheControl: 'private, max-age=300',
-      effectiveCacheControl: {
-        base: 'private, max-age=300',
-        authProtectedOverride: {
-          value: 'no-store, no-cache, must-revalidate, private',
-          pathMatch: { values: ['/admin', '/admin/users'] },
-        },
-      },
+      selectedBaseCacheControl: 'private, max-age=300',
+    });
+    expect(projected.defaults.response.authProtectedCacheControlOverride).toMatchObject({
+      value: 'no-store, no-cache, must-revalidate, private',
+      pathMatch: { values: ['/admin', '/admin/users'] },
     });
 
     input.response_headers.force_vary_auth = false;
     expect(projectPolicyToAllowedSurface(input, {
       policyDigest: digest,
       sourceUri: 'policy/security.yml',
-    }).orderedRules[0].response.effectiveCacheControl).toEqual({ base: 'private, max-age=300' });
+    }).defaults.response).not.toHaveProperty('authProtectedCacheControlOverride');
   });
 
   test('preserves runtime method casing and exposes auth cache overrides without route containment', () => {
@@ -377,22 +371,22 @@ describe('Allowed Surface Model v1', () => {
       sourceUri: 'policy/security.yml',
     });
     expect(projected.defaults.methods).toEqual(['get']);
-    expect(projected.orderedRules[0].response.effectiveCacheControl).toMatchObject({
-      base: 'private, max-age=300',
-      authProtectedOverride: {
-        value: 'no-store, no-cache, must-revalidate, private',
-        pathMatch: { values: ['/admin'] },
-      },
+    expect(projected.orderedRules[0].response.selectedBaseCacheControl).toBe('private, max-age=300');
+    expect(projected.defaults.response.authProtectedCacheControlOverride).toMatchObject({
+      value: 'no-store, no-cache, must-revalidate, private',
+      pathMatch: { values: ['/admin'] },
     });
 
     input.response_headers.clear_site_data_paths = ['/logout'];
+    input.routes = [];
     expect(projectPolicyToAllowedSurface(input, {
       policyDigest: digest,
       sourceUri: 'policy/security.yml',
-    }).orderedRules[0].response.effectiveCacheControl).toMatchObject({
-      clearSiteDataOverride: {
+    }).defaults.response).toMatchObject({
+      clearSiteDataCacheControlOverride: {
         when: 'matching-path-and-status-200-through-399',
         value: 'no-store',
+        order: 'after-auth-protected-override',
         pathMatch: { values: ['/logout'] },
       },
     });

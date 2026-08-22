@@ -19,6 +19,17 @@ interface AllowedResponseDefaultsV1 {
     };
     adminCacheControl: string;
     forceVaryAuth: boolean;
+    authProtectedCacheControlOverride?: {
+        when: 'force-vary-auth-and-auth-protected-path';
+        value: string;
+        pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
+    };
+    clearSiteDataCacheControlOverride?: {
+        when: 'matching-path-and-status-200-through-399';
+        value: 'no-store';
+        order: 'after-auth-protected-override';
+        pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
+    };
 }
 export interface AllowedTargetCapabilityV1 {
     id: string;
@@ -95,19 +106,7 @@ export interface AllowedRouteRuleV1 {
     };
     response: {
         cacheControl?: string;
-        effectiveCacheControl?: {
-            base: string;
-            authProtectedOverride?: {
-                when: 'force-vary-auth-and-auth-protected-path';
-                value: string;
-                pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
-            };
-            clearSiteDataOverride?: {
-                when: 'matching-path-and-status-200-through-399';
-                value: 'no-store';
-                pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
-            };
-        };
+        selectedBaseCacheControl?: string;
         selection: 'first-auth-or-cache-rule' | 'not-selected';
     };
     mode: {

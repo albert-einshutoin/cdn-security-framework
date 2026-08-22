@@ -32,6 +32,17 @@ interface AllowedResponseDefaultsV1 {
   };
   adminCacheControl: string;
   forceVaryAuth: boolean;
+  authProtectedCacheControlOverride?: {
+    when: 'force-vary-auth-and-auth-protected-path';
+    value: string;
+    pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
+  };
+  clearSiteDataCacheControlOverride?: {
+    when: 'matching-path-and-status-200-through-399';
+    value: 'no-store';
+    order: 'after-auth-protected-override';
+    pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
+  };
 }
 
 export interface AllowedTargetCapabilityV1 {
@@ -109,19 +120,7 @@ export interface AllowedRouteRuleV1 {
   requestLimits: { source: 'global' };
   response: {
     cacheControl?: string;
-    effectiveCacheControl?: {
-      base: string;
-      authProtectedOverride?: {
-        when: 'force-vary-auth-and-auth-protected-path';
-        value: string;
-        pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
-      };
-      clearSiteDataOverride?: {
-        when: 'matching-path-and-status-200-through-399';
-        value: 'no-store';
-        pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
-      };
-    };
+    selectedBaseCacheControl?: string;
     selection: 'first-auth-or-cache-rule' | 'not-selected';
   };
   mode: {
@@ -328,6 +327,35 @@ export function projectPolicyToAllowedSurface(
         },
         adminCacheControl: compilerResponse.adminCacheControl,
         forceVaryAuth: compilerResponse.forceVaryAuth,
+        ...(compilerResponse.forceVaryAuth && compilerResponse.authProtectedPrefixes.length > 0 ? {
+          authProtectedCacheControlOverride: {
+            when: 'force-vary-auth-and-auth-protected-path',
+            value: AUTH_PROTECTED_CACHE_CONTROL,
+            pathMatch: {
+              kind: 'prefix',
+              values: stablePrefixes(compilerResponse.authProtectedPrefixes),
+              boundary: 'path-segment',
+              algorithm: 'equal-or-prefix-plus-slash',
+              comparison: 'literal-no-percent-decoding',
+              phase: 'normalized-path',
+            },
+          },
+        } : {}),
+        ...(compilerResponse.clearSiteDataPaths.length > 0 ? {
+          clearSiteDataCacheControlOverride: {
+            when: 'matching-path-and-status-200-through-399',
+            value: 'no-store',
+            order: 'after-auth-protected-override',
+            pathMatch: {
+              kind: 'prefix',
+              values: stablePrefixes(compilerResponse.clearSiteDataPaths),
+              boundary: 'path-segment',
+              algorithm: 'equal-or-prefix-plus-slash',
+              comparison: 'literal-no-percent-decoding',
+              phase: 'normalized-path',
+            },
+          },
+        } : {}),
       },
     },
     orderedRules: routes.map((route, index) => {
@@ -378,37 +406,7 @@ export function projectPolicyToAllowedSurface(
             cacheControl: route.response.cache_control,
           }),
           ...(index === selectedResponseRule ? {
-            effectiveCacheControl: {
-              base: compilerResponse.adminCacheControl,
-              ...(compilerResponse.forceVaryAuth ? {
-                authProtectedOverride: {
-                  when: 'force-vary-auth-and-auth-protected-path' as const,
-                  value: AUTH_PROTECTED_CACHE_CONTROL,
-                  pathMatch: {
-                    kind: 'prefix' as const,
-                    values: stablePrefixes(compilerResponse.authProtectedPrefixes),
-                    boundary: 'path-segment' as const,
-                    algorithm: 'equal-or-prefix-plus-slash' as const,
-                    comparison: 'literal-no-percent-decoding' as const,
-                    phase: 'normalized-path' as const,
-                  },
-                },
-              } : {}),
-              ...(compilerResponse.clearSiteDataPaths.length > 0 ? {
-                clearSiteDataOverride: {
-                  when: 'matching-path-and-status-200-through-399' as const,
-                  value: 'no-store' as const,
-                  pathMatch: {
-                    kind: 'prefix' as const,
-                    values: stablePrefixes(compilerResponse.clearSiteDataPaths),
-                    boundary: 'path-segment' as const,
-                    algorithm: 'equal-or-prefix-plus-slash' as const,
-                    comparison: 'literal-no-percent-decoding' as const,
-                    phase: 'normalized-path' as const,
-                  },
-                },
-              } : {}),
-            },
+            selectedBaseCacheControl: compilerResponse.adminCacheControl,
           } : {}),
           selection: index === selectedResponseRule ? 'first-auth-or-cache-rule' : 'not-selected',
         },

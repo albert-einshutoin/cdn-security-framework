@@ -51,6 +51,20 @@
             "/"
           ]
         },
+        "authProtectedCacheControlOverride": {
+          "pathMatch": {
+            "algorithm": "equal-or-prefix-plus-slash",
+            "boundary": "path-segment",
+            "comparison": "literal-no-percent-decoding",
+            "kind": "prefix",
+            "phase": "normalized-path",
+            "values": [
+              "/"
+            ]
+          },
+          "value": "no-store, no-cache, must-revalidate, private",
+          "when": "force-vary-auth-and-auth-protected-path"
+        },
         "cspAdmin": "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';",
         "cspNonce": false,
         "cspPublic": "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';",
@@ -121,23 +135,7 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": {
-            "authProtectedOverride": {
-              "pathMatch": {
-                "algorithm": "equal-or-prefix-plus-slash",
-                "boundary": "path-segment",
-                "comparison": "literal-no-percent-decoding",
-                "kind": "prefix",
-                "phase": "normalized-path",
-                "values": [
-                  "/"
-                ]
-              },
-              "value": "no-store, no-cache, must-revalidate, private",
-              "when": "force-vary-auth-and-auth-protected-path"
-            },
-            "base": "no-store"
-          },
+          "selectedBaseCacheControl": "no-store",
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -505,6 +503,20 @@
             "/api"
           ]
         },
+        "authProtectedCacheControlOverride": {
+          "pathMatch": {
+            "algorithm": "equal-or-prefix-plus-slash",
+            "boundary": "path-segment",
+            "comparison": "literal-no-percent-decoding",
+            "kind": "prefix",
+            "phase": "normalized-path",
+            "values": [
+              "/api"
+            ]
+          },
+          "value": "no-store, no-cache, must-revalidate, private",
+          "when": "force-vary-auth-and-auth-protected-path"
+        },
         "cspAdmin": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
         "cspNonce": false,
         "cspPublic": "default-src 'none'; frame-ancestors 'none';",
@@ -585,23 +597,7 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": {
-            "authProtectedOverride": {
-              "pathMatch": {
-                "algorithm": "equal-or-prefix-plus-slash",
-                "boundary": "path-segment",
-                "comparison": "literal-no-percent-decoding",
-                "kind": "prefix",
-                "phase": "normalized-path",
-                "values": [
-                  "/api"
-                ]
-              },
-              "value": "no-store, no-cache, must-revalidate, private",
-              "when": "force-vary-auth-and-auth-protected-path"
-            },
-            "base": "no-store"
-          },
+          "selectedBaseCacheControl": "no-store",
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -955,6 +951,22 @@
             "/swagger"
           ]
         },
+        "authProtectedCacheControlOverride": {
+          "pathMatch": {
+            "algorithm": "equal-or-prefix-plus-slash",
+            "boundary": "path-segment",
+            "comparison": "literal-no-percent-decoding",
+            "kind": "prefix",
+            "phase": "normalized-path",
+            "values": [
+              "/admin",
+              "/docs",
+              "/swagger"
+            ]
+          },
+          "value": "no-store, no-cache, must-revalidate, private",
+          "when": "force-vary-auth-and-auth-protected-path"
+        },
         "cspAdmin": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
         "cspNonce": false,
         "cspPublic": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
@@ -1029,25 +1041,7 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": {
-            "authProtectedOverride": {
-              "pathMatch": {
-                "algorithm": "equal-or-prefix-plus-slash",
-                "boundary": "path-segment",
-                "comparison": "literal-no-percent-decoding",
-                "kind": "prefix",
-                "phase": "normalized-path",
-                "values": [
-                  "/admin",
-                  "/docs",
-                  "/swagger"
-                ]
-              },
-              "value": "no-store, no-cache, must-revalidate, private",
-              "when": "force-vary-auth-and-auth-protected-path"
-            },
-            "base": "no-store"
-          },
+          "selectedBaseCacheControl": "no-store",
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -1221,6 +1215,22 @@
             "/swagger"
           ]
         },
+        "authProtectedCacheControlOverride": {
+          "pathMatch": {
+            "algorithm": "equal-or-prefix-plus-slash",
+            "boundary": "path-segment",
+            "comparison": "literal-no-percent-decoding",
+            "kind": "prefix",
+            "phase": "normalized-path",
+            "values": [
+              "/admin",
+              "/docs",
+              "/swagger"
+            ]
+          },
+          "value": "no-store, no-cache, must-revalidate, private",
+          "when": "force-vary-auth-and-auth-protected-path"
+        },
         "cspAdmin": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
         "cspNonce": false,
         "cspPublic": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
@@ -1295,25 +1305,7 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": {
-            "authProtectedOverride": {
-              "pathMatch": {
-                "algorithm": "equal-or-prefix-plus-slash",
-                "boundary": "path-segment",
-                "comparison": "literal-no-percent-decoding",
-                "kind": "prefix",
-                "phase": "normalized-path",
-                "values": [
-                  "/admin",
-                  "/docs",
-                  "/swagger"
-                ]
-              },
-              "value": "no-store, no-cache, must-revalidate, private",
-              "when": "force-vary-auth-and-auth-protected-path"
-            },
-            "base": "no-store"
-          },
+          "selectedBaseCacheControl": "no-store",
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -1495,6 +1487,22 @@
             "/swagger"
           ]
         },
+        "authProtectedCacheControlOverride": {
+          "pathMatch": {
+            "algorithm": "equal-or-prefix-plus-slash",
+            "boundary": "path-segment",
+            "comparison": "literal-no-percent-decoding",
+            "kind": "prefix",
+            "phase": "normalized-path",
+            "values": [
+              "/admin",
+              "/docs",
+              "/swagger"
+            ]
+          },
+          "value": "no-store, no-cache, must-revalidate, private",
+          "when": "force-vary-auth-and-auth-protected-path"
+        },
         "cspAdmin": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none';",
         "cspNonce": false,
         "cspPublic": "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';",
@@ -1577,25 +1585,7 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": {
-            "authProtectedOverride": {
-              "pathMatch": {
-                "algorithm": "equal-or-prefix-plus-slash",
-                "boundary": "path-segment",
-                "comparison": "literal-no-percent-decoding",
-                "kind": "prefix",
-                "phase": "normalized-path",
-                "values": [
-                  "/admin",
-                  "/docs",
-                  "/swagger"
-                ]
-              },
-              "value": "no-store, no-cache, must-revalidate, private",
-              "when": "force-vary-auth-and-auth-protected-path"
-            },
-            "base": "no-store"
-          },
+          "selectedBaseCacheControl": "no-store",
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -1771,6 +1761,24 @@
             "/swagger"
           ]
         },
+        "authProtectedCacheControlOverride": {
+          "pathMatch": {
+            "algorithm": "equal-or-prefix-plus-slash",
+            "boundary": "path-segment",
+            "comparison": "literal-no-percent-decoding",
+            "kind": "prefix",
+            "phase": "normalized-path",
+            "values": [
+              "/admin",
+              "/api/admin",
+              "/docs",
+              "/internal",
+              "/swagger"
+            ]
+          },
+          "value": "no-store, no-cache, must-revalidate, private",
+          "when": "force-vary-auth-and-auth-protected-path"
+        },
         "cspAdmin": "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self';",
         "cspNonce": false,
         "cspPublic": "default-src 'self'; script-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self'; form-action 'self';",
@@ -1849,27 +1857,7 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": {
-            "authProtectedOverride": {
-              "pathMatch": {
-                "algorithm": "equal-or-prefix-plus-slash",
-                "boundary": "path-segment",
-                "comparison": "literal-no-percent-decoding",
-                "kind": "prefix",
-                "phase": "normalized-path",
-                "values": [
-                  "/admin",
-                  "/api/admin",
-                  "/docs",
-                  "/internal",
-                  "/swagger"
-                ]
-              },
-              "value": "no-store, no-cache, must-revalidate, private",
-              "when": "force-vary-auth-and-auth-protected-path"
-            },
-            "base": "no-store"
-          },
+          "selectedBaseCacheControl": "no-store",
           "selection": "first-auth-or-cache-rule"
         }
       }
