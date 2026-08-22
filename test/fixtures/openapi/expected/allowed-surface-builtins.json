@@ -44,6 +44,7 @@
         "maxQueryParams": 20,
         "maxUriLength": 1024
       },
+      "methodSource": "configured",
       "methods": [
         "GET",
         "HEAD",
@@ -340,6 +341,7 @@
         "maxQueryParams": 20,
         "maxUriLength": 1024
       },
+      "methodSource": "configured",
       "methods": [
         "DELETE",
         "GET",
@@ -562,6 +564,7 @@
         "maxQueryParams": 30,
         "maxUriLength": 2048
       },
+      "methodSource": "configured",
       "methods": [
         "DELETE",
         "GET",
@@ -868,6 +871,7 @@
         "maxQueryParams": 20,
         "maxUriLength": 1024
       },
+      "methodSource": "configured",
       "methods": [
         "GET",
         "HEAD"
@@ -1080,6 +1084,7 @@
         "maxQueryParams": 30,
         "maxUriLength": 2048
       },
+      "methodSource": "configured",
       "methods": [
         "GET",
         "HEAD",
@@ -1381,6 +1386,7 @@
         "maxQueryParams": 30,
         "maxUriLength": 2048
       },
+      "methodSource": "configured",
       "methods": [
         "GET",
         "HEAD",
@@ -1686,6 +1692,7 @@
         "maxQueryParams": 50,
         "maxUriLength": 4096
       },
+      "methodSource": "configured",
       "methods": [
         "DELETE",
         "GET",
@@ -1999,6 +2006,7 @@
         "maxQueryParams": 20,
         "maxUriLength": 1024
       },
+      "methodSource": "configured",
       "methods": [
         "GET",
         "HEAD",

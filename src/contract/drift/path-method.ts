@@ -14,6 +14,8 @@ export function comparePathMethodContracts(input: ContractDriftInput): SecurityF
   validateComparisonInput(input);
   const { declared, allowed } = input;
   const findings: SecurityFindingV1[] = [];
+  const methodsPointer = allowed.defaults.methodSource === 'runtime-default'
+    ? '/request' : '/request/allow_methods';
   const operationsByPath = new Map<string, typeof declared.operations>();
   for (const operation of declared.operations) {
     const operations = operationsByPath.get(operation.path) ?? [];
@@ -34,7 +36,7 @@ export function comparePathMethodContracts(input: ContractDriftInput): SecurityF
         route: { method: operation.method, path: operation.path, operationId: operation.operationId },
         expected: { methods: [operation.method] },
         actual: { methods: allowed.defaults.methods, decision: allowed.defaults.requestDecision },
-        evidence: evidenceFor(operation, allowed, '/request/allow_methods', 'path-method-drift-v1'),
+        evidence: evidenceFor(operation, allowed, methodsPointer, 'path-method-drift-v1'),
         remediation: { summary: 'Align the effective Policy method set with the declared operation.', safeAutoFix: false },
       }));
     }
@@ -67,7 +69,7 @@ export function comparePathMethodContracts(input: ContractDriftInput): SecurityF
             methodSurface: 'unrestricted-by-edge-in-monitor-mode',
           } : {}),
         },
-        evidence: evidenceFor(operations[0], allowed, '/request/allow_methods', 'path-method-drift-v1'),
+        evidence: evidenceFor(operations[0], allowed, methodsPointer, 'path-method-drift-v1'),
         remediation: { summary: 'Remove undeclared methods or declare the intended operations.', safeAutoFix: false },
       }));
     }

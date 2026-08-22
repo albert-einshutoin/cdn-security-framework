@@ -151,6 +151,7 @@ function projectPolicyToAllowedSurface(policy, options) {
             authenticationDecision: 'block',
             methods,
             configuredMethods,
+            methodSource: policy.request.allow_methods === undefined ? 'runtime-default' : 'configured',
             corsOptionsBypass,
             corsPreflight: {
                 method: 'OPTIONS',

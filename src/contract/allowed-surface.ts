@@ -56,6 +56,7 @@ export interface AllowedDefaultsV1 {
   authenticationDecision: 'block';
   methods: string[];
   configuredMethods: string[];
+  methodSource?: 'configured' | 'runtime-default';
   corsOptionsBypass: boolean;
   corsPreflight: {
     method: 'OPTIONS';
@@ -330,6 +331,7 @@ export function projectPolicyToAllowedSurface(
       authenticationDecision: 'block',
       methods,
       configuredMethods,
+      methodSource: policy.request.allow_methods === undefined ? 'runtime-default' : 'configured',
       corsOptionsBypass,
       corsPreflight: {
         method: 'OPTIONS',

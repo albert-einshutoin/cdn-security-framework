@@ -156,6 +156,13 @@ describe('OpenAPI and Policy contract drift', () => {
     expect(monitorSurface.find(({ ruleId }) => ruleId === 'SC-EXPOSURE-001'))
       .toMatchObject({ severity: 'warning' });
 
+    const defaultMethods = comparePathMethodContracts(input(
+      contract([operation('DELETE', '/default-method')]),
+      policy({ request: { block: { header_missing: [] } } }),
+    ));
+    expect(defaultMethods.find(({ ruleId }) => ruleId === 'SC-EXPOSURE-002')
+      ?.evidence.at(-1)?.pointer).toBe('/request');
+
     const corsMethods = comparePathMethodContracts(input(
       contract([operation('GET', '/cors')]),
       policy({ response_headers: { cors: { allow_origins: ['https://client.example'] } } }),

@@ -41,6 +41,7 @@ export interface AllowedDefaultsV1 {
     authenticationDecision: 'block';
     methods: string[];
     configuredMethods: string[];
+    methodSource?: 'configured' | 'runtime-default';
     corsOptionsBypass: boolean;
     corsPreflight: {
         method: 'OPTIONS';

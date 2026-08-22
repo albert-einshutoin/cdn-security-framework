@@ -6,6 +6,8 @@ function comparePathMethodContracts(input) {
     (0, shared_1.validateComparisonInput)(input);
     const { declared, allowed } = input;
     const findings = [];
+    const methodsPointer = allowed.defaults.methodSource === 'runtime-default'
+        ? '/request' : '/request/allow_methods';
     const operationsByPath = new Map();
     for (const operation of declared.operations) {
         const operations = operationsByPath.get(operation.path) ?? [];
@@ -25,7 +27,7 @@ function comparePathMethodContracts(input) {
                 route: { method: operation.method, path: operation.path, operationId: operation.operationId },
                 expected: { methods: [operation.method] },
                 actual: { methods: allowed.defaults.methods, decision: allowed.defaults.requestDecision },
-                evidence: (0, shared_1.evidenceFor)(operation, allowed, '/request/allow_methods', 'path-method-drift-v1'),
+                evidence: (0, shared_1.evidenceFor)(operation, allowed, methodsPointer, 'path-method-drift-v1'),
                 remediation: { summary: 'Align the effective Policy method set with the declared operation.', safeAutoFix: false },
             }));
         }
@@ -57,7 +59,7 @@ function comparePathMethodContracts(input) {
                         methodSurface: 'unrestricted-by-edge-in-monitor-mode',
                     } : {}),
                 },
-                evidence: (0, shared_1.evidenceFor)(operations[0], allowed, '/request/allow_methods', 'path-method-drift-v1'),
+                evidence: (0, shared_1.evidenceFor)(operations[0], allowed, methodsPointer, 'path-method-drift-v1'),
                 remediation: { summary: 'Remove undeclared methods or declare the intended operations.', safeAutoFix: false },
             }));
         }
