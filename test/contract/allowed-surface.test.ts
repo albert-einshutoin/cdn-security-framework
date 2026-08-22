@@ -170,6 +170,14 @@ describe('current runtime route semantics', () => {
     (input.request as Record<string, unknown>).allow_methods = ['get'];
     expect(compileViewer(input)(request('GET', '/public')).statusCode).toBe(405);
   });
+
+  test('does not treat configured IPv6 Host literals as runtime-effective', () => {
+    const input = policy();
+    (input.request as Record<string, unknown>).allowed_hosts = ['[2001:db8::1]'];
+    expect(compileViewer(input)(request('GET', '/public', {
+      host: '[2001:db8::1]',
+    })).statusCode).toBe(400);
+  });
 });
 
 describe('Allowed Surface Model v1', () => {
@@ -209,7 +217,13 @@ describe('Allowed Surface Model v1', () => {
         allowedOriginResponseCacheControl: 'not-configured',
         bypassScope: 'none',
       },
-      hosts: { kind: 'any', values: [] },
+      hosts: {
+        kind: 'any',
+        values: [],
+        configuredValues: [],
+        unsupportedConfiguredValues: [],
+        ipv6LiteralSupport: 'unsupported',
+      },
       pathNormalization: { routeMatchPhase: 'normalized-path' },
       response: { adminPathMatch: { algorithm: 'equal-or-prefix-plus-slash' } },
     });
@@ -280,6 +294,11 @@ describe('Allowed Surface Model v1', () => {
         allowedOriginDecision: 'early-204-before-request-validation',
         allowedOriginResponseCacheControl: 'no-store',
         bypassScope: 'all-request-validation-including-host-and-auth',
+        origins: {
+          kind: 'allowlist',
+          values: ['https://client.example'],
+          comparison: 'literal',
+        },
       },
     });
     expect(projectPolicyToAllowedSurface(input, {
@@ -380,6 +399,18 @@ describe('Allowed Surface Model v1', () => {
     expect(projected.defaults.response.authProtectedCacheControlOverride).toMatchObject({
       value: 'no-store, no-cache, must-revalidate, private',
       pathMatch: { values: ['/admin'] },
+    });
+
+    input.request.allowed_hosts = ['[2001:db8::1]', 'api.example'];
+    expect(projectPolicyToAllowedSurface(input, {
+      policyDigest: digest,
+      sourceUri: 'policy/security.yml',
+    }).defaults.hosts).toMatchObject({
+      kind: 'allowlist',
+      values: ['api.example'],
+      configuredValues: ['[2001:db8::1]', 'api.example'],
+      unsupportedConfiguredValues: ['[2001:db8::1]'],
+      ipv6LiteralSupport: 'unsupported',
     });
 
     input.response_headers.clear_site_data_paths = ['/logout'];

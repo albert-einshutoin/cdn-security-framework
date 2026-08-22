@@ -13,11 +13,20 @@
         "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
-        "nonMatchingOriginDecision": "continue"
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
       },
       "hosts": {
-        "comparison": "case-insensitive-without-port",
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
         "kind": "any",
+        "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
       },
@@ -273,11 +282,20 @@
         "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
-        "nonMatchingOriginDecision": "continue"
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
       },
       "hosts": {
-        "comparison": "case-insensitive-without-port",
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
         "kind": "any",
+        "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
       },
@@ -463,11 +481,22 @@
         "allowedOriginResponseCacheControl": "no-store",
         "bypassScope": "all-request-validation-including-host-and-auth",
         "method": "OPTIONS",
-        "nonMatchingOriginDecision": "continue"
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "allowlist",
+          "values": [
+            "https://app.example.com"
+          ],
+          "wildcard": "asterisk-matches-any-origin"
+        }
       },
       "hosts": {
-        "comparison": "case-insensitive-without-port",
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
         "kind": "any",
+        "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
       },
@@ -733,11 +762,20 @@
         "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
-        "nonMatchingOriginDecision": "continue"
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
       },
       "hosts": {
-        "comparison": "case-insensitive-without-port",
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
         "kind": "any",
+        "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
       },
@@ -915,11 +953,20 @@
         "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
-        "nonMatchingOriginDecision": "continue"
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
       },
       "hosts": {
-        "comparison": "case-insensitive-without-port",
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
         "kind": "any",
+        "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
       },
@@ -1180,11 +1227,20 @@
         "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
-        "nonMatchingOriginDecision": "continue"
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
       },
       "hosts": {
-        "comparison": "case-insensitive-without-port",
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
         "kind": "any",
+        "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
       },
@@ -1449,11 +1505,20 @@
         "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
-        "nonMatchingOriginDecision": "continue"
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
       },
       "hosts": {
-        "comparison": "case-insensitive-without-port",
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
         "kind": "any",
+        "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
       },
@@ -1726,11 +1791,20 @@
         "allowedOriginResponseCacheControl": "not-configured",
         "bypassScope": "none",
         "method": "OPTIONS",
-        "nonMatchingOriginDecision": "continue"
+        "nonMatchingOriginDecision": "continue",
+        "origins": {
+          "comparison": "literal",
+          "kind": "not-configured",
+          "values": [],
+          "wildcard": "asterisk-matches-any-origin"
+        }
       },
       "hosts": {
-        "comparison": "case-insensitive-without-port",
+        "comparison": "case-insensitive-first-colon-port-strip",
+        "configuredValues": [],
+        "ipv6LiteralSupport": "unsupported",
         "kind": "any",
+        "unsupportedConfiguredValues": [],
         "values": [],
         "wildcard": "leading-subdomain-only"
       },

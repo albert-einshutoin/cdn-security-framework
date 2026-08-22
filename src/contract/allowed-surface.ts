@@ -61,14 +61,23 @@ export interface AllowedDefaultsV1 {
     method: 'OPTIONS';
     allowedOriginDecision: 'early-204-before-request-validation' | 'not-configured';
     allowedOriginResponseCacheControl: 'no-store' | 'not-configured';
+    origins: {
+      kind: 'not-configured' | 'none' | 'any' | 'allowlist';
+      values: string[];
+      comparison: 'literal';
+      wildcard: 'asterisk-matches-any-origin';
+    };
     nonMatchingOriginDecision: 'continue';
     bypassScope: 'all-request-validation-including-host-and-auth' | 'none';
   };
   hosts: {
     kind: 'any' | 'allowlist';
     values: string[];
-    comparison: 'case-insensitive-without-port';
+    configuredValues: string[];
+    unsupportedConfiguredValues: string[];
+    comparison: 'case-insensitive-first-colon-port-strip';
     wildcard: 'leading-subdomain-only';
+    ipv6LiteralSupport: 'unsupported';
   };
   limits: {
     maxQueryLength: number;
@@ -267,7 +276,14 @@ export function projectPolicyToAllowedSurface(
   const gates = routes.filter((route) => route.auth_gate).map(buildAuthGateBase);
   const compilerResponse: CompilerResponseConfig = buildResponseCfgBase(policy, gates);
   const configuredMethods = stableMethods(Array.isArray(request.allowMethods) ? request.allowMethods : []);
-  const corsOptionsBypass = request.cors !== null;
+  const cors = request.cors as { allow_origins?: string[] } | null;
+  const corsOptionsBypass = cors !== null;
+  const corsOrigins = corsOptionsBypass && Array.isArray(cors.allow_origins)
+    ? stablePrefixes(cors.allow_origins)
+    : [];
+  const configuredHosts = stablePrefixes(request.allowedHosts);
+  const unsupportedHosts = configuredHosts.filter((host) => host.includes(':'));
+  const effectiveHosts = configuredHosts.filter((host) => !host.includes(':'));
   const methods = stableMethods(corsOptionsBypass ? [...configuredMethods, 'OPTIONS'] : configuredMethods);
   const mode = request.mode === 'monitor' ? 'monitor' : 'enforce';
   const requestDecision = mode === 'monitor' ? 'would-block' : 'block';
@@ -292,14 +308,25 @@ export function projectPolicyToAllowedSurface(
           ? 'early-204-before-request-validation'
           : 'not-configured',
         allowedOriginResponseCacheControl: corsOptionsBypass ? 'no-store' : 'not-configured',
+        origins: {
+          kind: !corsOptionsBypass
+            ? 'not-configured'
+            : corsOrigins.includes('*') ? 'any' : corsOrigins.length === 0 ? 'none' : 'allowlist',
+          values: corsOrigins,
+          comparison: 'literal',
+          wildcard: 'asterisk-matches-any-origin',
+        },
         nonMatchingOriginDecision: 'continue',
         bypassScope: corsOptionsBypass ? 'all-request-validation-including-host-and-auth' : 'none',
       },
       hosts: {
-        kind: request.allowedHosts.length === 0 ? 'any' : 'allowlist',
-        values: stablePrefixes(request.allowedHosts),
-        comparison: 'case-insensitive-without-port',
+        kind: configuredHosts.length === 0 ? 'any' : 'allowlist',
+        values: effectiveHosts,
+        configuredValues: configuredHosts,
+        unsupportedConfiguredValues: unsupportedHosts,
+        comparison: 'case-insensitive-first-colon-port-strip',
         wildcard: 'leading-subdomain-only',
+        ipv6LiteralSupport: 'unsupported',
       },
       limits: {
         maxQueryLength: request.maxQueryLength,

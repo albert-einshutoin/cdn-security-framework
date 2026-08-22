@@ -46,14 +46,23 @@ export interface AllowedDefaultsV1 {
         method: 'OPTIONS';
         allowedOriginDecision: 'early-204-before-request-validation' | 'not-configured';
         allowedOriginResponseCacheControl: 'no-store' | 'not-configured';
+        origins: {
+            kind: 'not-configured' | 'none' | 'any' | 'allowlist';
+            values: string[];
+            comparison: 'literal';
+            wildcard: 'asterisk-matches-any-origin';
+        };
         nonMatchingOriginDecision: 'continue';
         bypassScope: 'all-request-validation-including-host-and-auth' | 'none';
     };
     hosts: {
         kind: 'any' | 'allowlist';
         values: string[];
-        comparison: 'case-insensitive-without-port';
+        configuredValues: string[];
+        unsupportedConfiguredValues: string[];
+        comparison: 'case-insensitive-first-colon-port-strip';
         wildcard: 'leading-subdomain-only';
+        ipv6LiteralSupport: 'unsupported';
     };
     limits: {
         maxQueryLength: number;
