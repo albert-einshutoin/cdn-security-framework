@@ -130,6 +130,31 @@ describe('resolveOpenApiReferences', () => {
     fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
       openapi: '3.1.0',
       paths: {},
+      components: {
+        schemas: { Never: false },
+        responses: { Invalid: { $ref: '#/components/schemas/Never' } },
+      },
+    }));
+    expect(() => resolveOpenApiReferences({
+      root: loadOpenApiDocument({ inputPath: 'root.json', workspaceRoot: workspace }),
+      workspaceRoot: workspace,
+      limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
+    })).toThrow(expect.objectContaining({ code: 'OPENAPI_REF_NOT_FOUND' }));
+
+    fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
+      openapi: '3.0.3',
+      paths: {},
+      components: { schemas: { Invalid: { $ref: 'defs%23v1.json#/Never' } } },
+    }));
+    expect(() => resolveOpenApiReferences({
+      root: loadOpenApiDocument({ inputPath: 'root.json', workspaceRoot: workspace }),
+      workspaceRoot: workspace,
+      limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
+    })).toThrow(expect.objectContaining({ code: 'OPENAPI_REF_NOT_FOUND' }));
+
+    fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
+      openapi: '3.1.0',
+      paths: {},
       components: { schemas: { Invalid: { $ref: 'defs%23v1.json#/Count' } } },
     }));
     fs.writeFileSync(path.join(workspace, 'defs#v1.json'), JSON.stringify({ Count: 1 }));
