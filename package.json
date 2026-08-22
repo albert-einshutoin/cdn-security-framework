@@ -86,6 +86,7 @@
   "files": [
     "bin/",
     "contract/",
+    "openapi/",
     "emitter/",
     "lib/",
     "parser/",
