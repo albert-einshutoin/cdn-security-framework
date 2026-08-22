@@ -23,13 +23,13 @@ Large fixture files are generated, not committed. `test/fixtures/openapi/generat
 
 ## Representative baseline
 
-GitHub-hosted `ubuntu-latest`, Linux x64, three samples per workload; values below are the mean of two warm totals in milliseconds. Exact runner identity is intentionally excluded.
+GitHub-hosted `ubuntu-latest`, Linux x64, two independent runs with three samples per workload. Values below are the higher mean of two warm totals from those runs, preventing one unusually fast host from becoming the baseline. Exact runner identity is intentionally excluded.
 
 | Node | 100 ops | 1,000 shared refs | 10,000 nested refs | Deep | Repeated refs | Early reject |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 20.17.0 | 15.946 | 128.580 | 1628.522 | 1.093 | 124.294 | 0.164 |
-| 22.23.2 | 16.210 | 108.748 | 1305.248 | 1.555 | 107.210 | 0.135 |
-| 24.19.0 | 6.142 | 63.071 | 843.163 | 0.863 | 61.841 | 0.060 |
+| 20.17.0 | 15.946 | 132.598 | 1628.522 | 1.472 | 124.294 | 0.182 |
+| 22.23.2 | 18.397 | 110.608 | 1305.248 | 1.555 | 111.798 | 0.135 |
+| 24.19.0 | 9.437 | 105.468 | 1264.343 | 0.956 | 97.951 | 0.111 |
 
 The complete time and heap baselines are in `openapi-analysis-baseline.json`.
 
