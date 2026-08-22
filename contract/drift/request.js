@@ -95,7 +95,8 @@ function compareRequestContracts(input, options = {}) {
         ]);
         const requiredHeaders = input.allowed.defaults.requiredHeaders;
         const policyHeaders = new Set(requiredHeaders?.values ?? []);
-        const checkedHeaders = new Set(preflightBypassesValidation ? [] : policyHeaders);
+        const checkedHeaders = new Set(!preflightBypassesValidation && input.allowed.defaults.requestDecision === 'block'
+            ? policyHeaders : []);
         const requiredHeadersPointer = requiredHeaders?.source === 'configured'
             ? '/request/block/header_missing' : '/request';
         if (!preflightBypassesValidation) {

@@ -407,6 +407,20 @@ describe('OpenAPI and Policy contract drift', () => {
     ));
     expect(declaredCorsHeader.some(({ ruleId }) => ruleId === 'SC-REQUEST-001')).toBe(true);
 
+    const monitorHeader = compareRequestContracts(input(
+      contract([operation('GET', '/monitor', {
+        request: {
+          contentTypes: [], requiredHeaders: ['x-contract'], queryParameters: [], pathParameters: [],
+          headerParameters: [], cookieParameters: [],
+        },
+      })]),
+      policy({
+        defaults: { mode: 'monitor' },
+        request: { block: { header_missing: ['x-contract'] } },
+      }),
+    ));
+    expect(monitorHeader.some(({ ruleId }) => ruleId === 'SC-REQUEST-001')).toBe(true);
+
     const authHeaderRequest = compareRequestContracts(input(
       contract([operation('GET', '/key', {
         exposure: 'authenticated',
