@@ -10,9 +10,7 @@ merge・上書きは行わず、生成物をdeployすることもありません
 | --- | --- | --- |
 | operation methodの和集合 | `request.allow_methods` | globalに採用します。現行route matcherはOpenAPI pathを完全一致で表現できないため、route別method制約は省略として報告します。 |
 | 全operationで必須のheader | `request.block.header_missing` | 共通部分を選択profileのbaselineへ追加します。route固有の必須headerは省略として報告します。 |
-| 全operationで有限な`maxQueryParams` Recommendation | `request.limits.max_query_params` | Recommendationの最大値が現行Policy schema範囲内の場合だけ採用します。 |
-| 全operationで有限な`maxQueryLength` Recommendation | `request.limits.max_query_length` | Recommendationの最大値が現行Policy schema範囲内の場合だけ採用します。 |
-| 全operationで有限な`maxUriLength` Recommendation | `request.limits.max_uri_length` | path Recommendationの最大値が現行Policy schema範囲内の場合だけ採用します。 |
+| 有限なquery・URI limit Recommendation | metaの`omittedRecommendations` | OpenAPIは未宣言query parameterを禁止しないため、宣言済みparameterを閉じた上限とみなさず、選択profileのlimitを保持します。 |
 | route固有のmethodまたはheader | metaの`omittedRecommendations` | Policyのpath prefixは子pathにも一致するため、OpenAPIの完全一致pathより広くなります。 |
 | request content type、body size、parameter制約 | metaの`omittedRecommendations` | 現行Policy schemaに同等のrequest controlがありません。架空fieldや近似controlは出力しません。 |
 | Bearer、OAuth2、API key等の認証宣言 | metaの`omittedRecommendations` | 将来の明示mapping contractですべてのPolicy値が与えられない限りRecommendationに留めます。JWT issuer、audience、JWKS、algorithm、secretは推測しません。 |
@@ -20,8 +18,8 @@ merge・上書きは行わず、生成物をdeployすることもありません
 選択したbuilt-in profileは、レビュー済みのbaseline controlを提供します。ただし、
 例示routeにはapplication固有のpath・認証仮定があるため削除します。OpenAPI由来の
 fieldは、上表のmapping対象だけを置き換えます。
-limit Recommendationがpartial、unknown、unbounded、zeroのみ、または現行schema範囲外の
-場合は、選択profileの値を保持し、Recommendationを省略として報告します。
+limit Recommendationは省略として報告し、選択profileの値を保持します。将来、追加query
+inputが禁止されることを証明できるcontractが導入された場合にだけ適用対象にできます。
 
 ## 生成とレビュー
 

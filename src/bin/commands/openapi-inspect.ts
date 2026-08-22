@@ -326,11 +326,14 @@ function candidateOutputPair(
     path.join(workspaceRoot, 'policy', 'security.yml'),
     path.join(workspaceRoot, 'policy', 'base.yml'),
   ];
-  const protectedDirectories = [
+  const lexicalProtectedDirectories = [
     path.join(workspaceRoot, 'policy', 'profiles'),
     path.join(workspaceRoot, 'policy', 'archetypes'),
     path.join(workspaceRoot, 'dist'),
   ];
+  const resolvedProtectedDirectories = lexicalProtectedDirectories.flatMap((directory) => {
+    try { return [fs.realpathSync(directory)]; } catch { return []; }
+  });
   const sourceStats = sourcePaths.map((sourcePath) => fs.statSync(fs.realpathSync(sourcePath)));
   const protectedStats = protectedPaths.flatMap((protectedPath) => {
     try { return [fs.statSync(protectedPath)]; } catch { return []; }
@@ -338,7 +341,8 @@ function candidateOutputPair(
   const outputs: CandidateOutput[] = [];
   for (const outputPath of [candidatePath, metadataPath]) {
     if (protectedPaths.some((protectedPath) => protectedPath.toLowerCase() === outputPath.toLowerCase())
-      || protectedDirectories.some((directory) => isPathWithinWorkspace(directory, outputPath))
+      || lexicalProtectedDirectories.some((directory) => isPathWithinWorkspace(directory, lexicalCandidate))
+      || resolvedProtectedDirectories.some((directory) => isPathWithinWorkspace(directory, outputPath))
       || sourcePaths.map((sourcePath) => fs.realpathSync(sourcePath)).includes(outputPath)) {
       throw new OpenApiPolicyCandidateCliError(
         'OPENAPI_CANDIDATE_OUTPUT_PROTECTED',

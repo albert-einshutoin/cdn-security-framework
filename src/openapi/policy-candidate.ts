@@ -103,6 +103,14 @@ function applyNumericLimit(
   const value = usable
     ? Math.max(...recommendations.map((candidate) => candidate.value as number))
     : null;
+  if (value !== null && typeof policyLimits[field] === 'number') {
+    omitted.push({
+      id: field,
+      reason: 'profile-baseline-retained-for-open-query-surface',
+      basis,
+    });
+    return;
+  }
   if (value !== null && value >= 1 && value <= POLICY_LIMITS[field]) {
     policyLimits[field] = value;
     applied.push({ id: field, policyPath: `request.limits.${field}`, basis, value });

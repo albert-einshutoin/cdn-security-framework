@@ -89,21 +89,30 @@ describe('cdn-security openapi generate-policy', () => {
     expect(request.allow_methods).toEqual(['GET', 'POST']);
     expect(block.header_missing).toEqual(['user-agent', 'x-tenant-id']);
     expect(limits).toMatchObject({
-      max_query_params: expect.any(Number),
-      max_query_length: expect.any(Number),
-      max_uri_length: expect.any(Number),
+      max_query_params: 30,
+      max_query_length: 1024,
+      max_uri_length: 2048,
     });
     expect(candidateText).not.toMatch(/auth_gate|token_env|jwks|issuer|audience/);
     expect(metadata.appliedRecommendations.map(({ id }: { id: string }) => id)).toEqual(
       expect.arrayContaining([
         'global-allowed-methods',
         'global-required-headers',
-        'max_query_length',
-        'max_query_params',
-        'max_uri_length',
       ]),
     );
     expect(metadata.omittedRecommendations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        id: 'max_query_length',
+        reason: 'profile-baseline-retained-for-open-query-surface',
+      }),
+      expect.objectContaining({
+        id: 'max_query_params',
+        reason: 'profile-baseline-retained-for-open-query-surface',
+      }),
+      expect.objectContaining({
+        id: 'max_uri_length',
+        reason: 'profile-baseline-retained-for-open-query-surface',
+      }),
       expect.objectContaining({ id: 'authentication' }),
       expect.objectContaining({ id: 'allowed-content-types' }),
       expect.objectContaining({ id: 'max-body-bytes' }),
@@ -236,5 +245,14 @@ paths:
     const linked = run([...common, '--out', 'policy/linked.yml', '--force']);
     expect(linked.status).toBe(1);
     expect(linked.stderr).toContain('OPENAPI_CANDIDATE_OUTPUT_PROTECTED');
+
+    const protectedTarget = path.join(directory, 'protected-profiles');
+    fs.mkdirSync(protectedTarget);
+    fs.symlinkSync('../protected-profiles', path.join(directory, 'policy', 'profiles'));
+    const protectedDirectoryAlias = run([
+      ...common, '--out', 'policy/profiles/strict.yml', '--force',
+    ]);
+    expect(protectedDirectoryAlias.status).toBe(1);
+    expect(protectedDirectoryAlias.stderr).toContain('OPENAPI_CANDIDATE_OUTPUT_PROTECTED');
   });
 });
