@@ -238,6 +238,10 @@ export function resolveOpenApiReferences(
       });
     const targetDocument = rawPath === '' ? fromDocument : loadDocument(targetPath);
     const resolved = resolveJsonPointerValue(targetDocument.document, fragment, targetDocument.sourceUri);
+    if (resolved.value === null
+      || (typeof resolved.value !== 'object' && typeof resolved.value !== 'boolean')) {
+      pointerError('OPENAPI_REF_NOT_FOUND', targetDocument.sourceUri, resolved.pointer);
+    }
     const target = location(targetDocument.sourceUri, resolved.pointer);
     const refLocation = `${fromDocument.sourceUri}#${fromPointer}`;
     if (!seenReferenceLocations.has(refLocation)) {

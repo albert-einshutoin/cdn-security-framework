@@ -126,6 +126,18 @@ describe('resolveOpenApiReferences', () => {
     expect(graph.references[0]?.target.sourceUri).toBe('defs%23v1.json');
     expect(graph.documents.find(({ sourceUri }) => sourceUri === 'defs%23v1.json')?.document)
       .toEqual({ Never: false });
+
+    fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
+      openapi: '3.1.0',
+      paths: {},
+      components: { schemas: { Invalid: { $ref: 'defs%23v1.json#/Count' } } },
+    }));
+    fs.writeFileSync(path.join(workspace, 'defs#v1.json'), JSON.stringify({ Count: 1 }));
+    expect(() => resolveOpenApiReferences({
+      root: loadOpenApiDocument({ inputPath: 'root.json', workspaceRoot: workspace }),
+      workspaceRoot: workspace,
+      limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
+    })).toThrow(expect.objectContaining({ code: 'OPENAPI_REF_NOT_FOUND' }));
   });
 
   test('caches sibling documents and keeps cycles as reference identity', () => {
