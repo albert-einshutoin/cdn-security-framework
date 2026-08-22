@@ -59,6 +59,7 @@ function outputPath(options: OpenApiInspectCliOptions, sourcePaths: readonly str
       '--out requires --json.',
     );
   }
+  const requestedWorkspaceRoot = path.resolve(options.workspaceRoot);
   let workspaceRoot: string;
   try {
     workspaceRoot = fs.realpathSync(options.workspaceRoot);
@@ -85,7 +86,8 @@ function outputPath(options: OpenApiInspectCliOptions, sourcePaths: readonly str
   const input = path.isAbsolute(options.input)
     ? path.resolve(options.input)
     : path.resolve(workspaceRoot, options.input);
-  if (!isPathWithinWorkspace(workspaceRoot, lexicalOutput)) {
+  if (!isPathWithinWorkspace(workspaceRoot, lexicalOutput)
+    && !isPathWithinWorkspace(requestedWorkspaceRoot, lexicalOutput)) {
     throw new OpenApiInspectCliError(
       'OPENAPI_OUTPUT_OUTSIDE_ROOT',
       'OpenAPI output must be inside the workspace root.',

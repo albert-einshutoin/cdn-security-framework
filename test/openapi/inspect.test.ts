@@ -141,6 +141,20 @@ describe('cdn-security openapi inspect', () => {
     const reportPath = path.join(workspace, 'report.json');
     childProcess.execFileSync(process.execPath, [cli, ...args, '--out', 'report.json']);
     expect(JSON.parse(fs.readFileSync(reportPath, 'utf8'))).toEqual(JSON.parse(stdout));
+
+    const workspaceAlias = `${workspace}-alias`;
+    temporaryDirectories.push(workspaceAlias);
+    fs.symlinkSync(workspace, workspaceAlias, 'dir');
+    const aliasedReport = path.join(workspaceAlias, 'report-via-alias.json');
+    childProcess.execFileSync(process.execPath, [
+      cli, 'openapi', 'inspect', '--input', 'openapi.json', '--workspace-root', workspaceAlias,
+      '--json', '--out', aliasedReport,
+    ]);
+    expect(JSON.parse(fs.readFileSync(
+      path.join(workspace, 'report-via-alias.json'),
+      'utf8',
+    ))).toEqual(JSON.parse(stdout));
+
     expect(childProcess.spawnSync(
       process.execPath,
       [cli, ...args, '--out', 'report.json'],
