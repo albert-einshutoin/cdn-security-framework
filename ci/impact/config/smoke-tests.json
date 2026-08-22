@@ -119,6 +119,18 @@
     "args": ["scripts/policy-io-unit-tests.js"]
   },
   {
+    "id": "openapi-benchmark-unit",
+    "category": "unit",
+    "command": "node",
+    "args": ["scripts/openapi-benchmark-unit-tests.js"]
+  },
+  {
+    "id": "openapi-benchmark-ci",
+    "category": "smoke",
+    "command": "npm",
+    "args": ["run", "benchmark:openapi:ci"]
+  },
+  {
     "id": "vitest",
     "category": "unit",
     "command": "npx",

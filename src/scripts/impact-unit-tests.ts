@@ -238,6 +238,14 @@ function testRepositoryConfiguration(): void {
       `${riskyPath} must force full validation`,
     );
   }
+  const openApiPath = 'src/openapi/ref-resolver.ts';
+  const openApiTargets = selectMappedTargets(
+    [openApiPath],
+    selectAffectedModules([openApiPath], config),
+    config,
+  );
+  assert.ok(openApiTargets.includes('openapi-benchmark-unit'));
+  assert.ok(openApiTargets.includes('openapi-benchmark-ci'));
 }
 
 function git(cwd: string, args: string[]): string {

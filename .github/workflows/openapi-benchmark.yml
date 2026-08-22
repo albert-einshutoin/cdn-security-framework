@@ -1,0 +1,49 @@
+name: OpenAPI Analysis Benchmark
+
+on:
+  schedule:
+    - cron: '43 3 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: openapi-benchmark-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        node: ['20.17.0', '22', '24']
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Run full benchmark and regression gate
+        run: >-
+          npm run benchmark:openapi --
+          --iterations 3
+          --output openapi-benchmark-node-${{ matrix.node }}.json
+          --baseline docs/benchmarks/openapi-analysis-baseline.json
+
+      - name: Upload benchmark report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: openapi-benchmark-node-${{ matrix.node }}
+          path: openapi-benchmark-node-${{ matrix.node }}.json
+          if-no-files-found: error
+          retention-days: 30
