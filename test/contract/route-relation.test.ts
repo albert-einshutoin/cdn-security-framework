@@ -51,11 +51,18 @@ describe('route relation', () => {
     expect(relatePath(template, { kind: 'exact', value: '/users/42/profile' }, normalized))
       .toBe('definitely-disjoint');
     expect(relatePath(template, { kind: 'prefix', value: '/users' }, normalized))
-      .toBe('definitely-covered');
+      .toBe('possibly-overlapping');
     expect(relatePath(template, { kind: 'prefix', value: '/users/admin' }, normalized))
       .toBe('possibly-overlapping');
     expect(relatePath(template, { kind: 'prefix', value: '/admins' }, normalized))
       .toBe('definitely-disjoint');
+    expect(relatePath(template, { kind: 'exact', value: '/users' }, normalized))
+      .toBe('possibly-overlapping');
+    expect(relatePath(
+      { kind: 'template', value: '/{group}/{id}' },
+      { kind: 'prefix', value: '/users' },
+      normalized,
+    )).toBe('unknown');
   });
 
   test('only proves the deliberately small literal regex subset', () => {
@@ -143,15 +150,14 @@ describe('route relation', () => {
   });
 
   test('keeps directional template-prefix proofs sound across generated samples', () => {
-    const values = ['a', 'admin', 'child'];
+    const paths = ['/users/a', '/users/admin', '/users/child', '/users', '/'];
     for (const prefix of ['/', '/users', '/users/a', '/admin']) {
       const relation = relatePath(
         { kind: 'template', value: '/users/{id}' },
         { kind: 'prefix', value: prefix },
         normalized,
       );
-      const outcomes = values.map((value) => {
-        const concrete = `/users/${value}`;
+      const outcomes = paths.map((concrete) => {
         return concrete === prefix || concrete.startsWith(`${prefix}/`);
       });
       if (relation === 'definitely-covered') expect(outcomes.every(Boolean)).toBe(true);

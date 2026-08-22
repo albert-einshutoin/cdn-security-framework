@@ -144,23 +144,13 @@ function regexLiteral(value: string): string | undefined {
   return /[\\[\]().*+?{}|^$]/.test(literal) ? undefined : literal;
 }
 
-export function relatePath(
-  source: OpenApiPath,
-  policy: PolicyPathMatcher,
-  options: RouteRelationOptions,
+function relateNormalizedPath(
+  sourceKind: OpenApiPath['kind'],
+  sourcePath: string,
+  policyKind: 'exact' | 'prefix',
+  policyValue: string,
 ): RouteRelation {
-  const sourcePath = normalizePath(source.value, options, true);
-  let policyKind = policy.kind;
-  let policyValue = normalizePath(policy.value, options, false);
-  if (policy.kind === 'pattern') {
-    const literal = regexLiteral(policy.value);
-    if (!literal) return 'unknown';
-    policyKind = 'exact';
-    policyValue = normalizePath(literal, options, false);
-  }
-  if (!sourcePath || !policyValue) return 'unknown';
-
-  if (source.kind === 'exact') {
+  if (sourceKind === 'exact') {
     if (policyKind === 'exact') {
       return sourcePath === policyValue ? 'definitely-covered' : 'definitely-disjoint';
     }
@@ -170,6 +160,52 @@ export function relatePath(
   }
   if (policyKind === 'exact') return exactAgainstTemplate(policyValue, sourcePath);
   return templateAgainstPrefix(sourcePath, policyValue);
+}
+
+function combineAlternatives(relations: readonly RouteRelation[]): RouteRelation {
+  if (relations.includes('unknown')) return 'unknown';
+  if (relations.every((relation) => relation === 'definitely-covered')) return 'definitely-covered';
+  if (relations.every((relation) => relation === 'definitely-disjoint')) return 'definitely-disjoint';
+  return 'possibly-overlapping';
+}
+
+export function relatePath(
+  source: OpenApiPath,
+  policy: PolicyPathMatcher,
+  options: RouteRelationOptions,
+): RouteRelation {
+  const sourcePath = normalizePath(source.value, options, true);
+  let policyKind: 'exact' | 'prefix';
+  let policyValue: string | undefined;
+  if (policy.kind === 'pattern') {
+    const literal = regexLiteral(policy.value);
+    if (!literal) return 'unknown';
+    policyKind = 'exact';
+    policyValue = normalizePath(literal, options, false);
+  } else {
+    policyKind = policy.kind;
+    policyValue = normalizePath(policy.value, options, false);
+  }
+  if (!sourcePath || !policyValue) return 'unknown';
+
+  const relation = relateNormalizedPath(source.kind, sourcePath, policyKind, policyValue);
+  if (source.kind !== 'template' || !options.removeDotSegments) return relation;
+
+  const parsed = templateParts(sourcePath);
+  if (!parsed) return 'unknown';
+  const indexes = parsed.parts.flatMap((part, index) => TEMPLATE_SEGMENT.test(part) ? [index] : []);
+  if (indexes.length === 0) return relation;
+  if (indexes.length > 1) return 'unknown';
+
+  const alternatives = ['.', '..'].map((replacement) => {
+    const parts = [...parsed.parts];
+    parts[indexes[0]] = replacement;
+    const normalizedAlternative = normalizePath(`/${parts.join('/')}`, options, true);
+    return normalizedAlternative
+      ? relateNormalizedPath('exact', normalizedAlternative, policyKind, policyValue)
+      : 'unknown' as const;
+  });
+  return combineAlternatives([relation, ...alternatives]);
 }
 
 export function relateMethods(source: readonly string[], policy: readonly string[]): RouteRelation {

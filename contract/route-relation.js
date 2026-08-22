@@ -110,20 +110,8 @@ function regexLiteral(value) {
     const literal = value.slice(1, -1);
     return /[\\[\]().*+?{}|^$]/.test(literal) ? undefined : literal;
 }
-function relatePath(source, policy, options) {
-    const sourcePath = normalizePath(source.value, options, true);
-    let policyKind = policy.kind;
-    let policyValue = normalizePath(policy.value, options, false);
-    if (policy.kind === 'pattern') {
-        const literal = regexLiteral(policy.value);
-        if (!literal)
-            return 'unknown';
-        policyKind = 'exact';
-        policyValue = normalizePath(literal, options, false);
-    }
-    if (!sourcePath || !policyValue)
-        return 'unknown';
-    if (source.kind === 'exact') {
+function relateNormalizedPath(sourceKind, sourcePath, policyKind, policyValue) {
+    if (sourceKind === 'exact') {
         if (policyKind === 'exact') {
             return sourcePath === policyValue ? 'definitely-covered' : 'definitely-disjoint';
         }
@@ -134,6 +122,53 @@ function relatePath(source, policy, options) {
     if (policyKind === 'exact')
         return exactAgainstTemplate(policyValue, sourcePath);
     return templateAgainstPrefix(sourcePath, policyValue);
+}
+function combineAlternatives(relations) {
+    if (relations.includes('unknown'))
+        return 'unknown';
+    if (relations.every((relation) => relation === 'definitely-covered'))
+        return 'definitely-covered';
+    if (relations.every((relation) => relation === 'definitely-disjoint'))
+        return 'definitely-disjoint';
+    return 'possibly-overlapping';
+}
+function relatePath(source, policy, options) {
+    const sourcePath = normalizePath(source.value, options, true);
+    let policyKind;
+    let policyValue;
+    if (policy.kind === 'pattern') {
+        const literal = regexLiteral(policy.value);
+        if (!literal)
+            return 'unknown';
+        policyKind = 'exact';
+        policyValue = normalizePath(literal, options, false);
+    }
+    else {
+        policyKind = policy.kind;
+        policyValue = normalizePath(policy.value, options, false);
+    }
+    if (!sourcePath || !policyValue)
+        return 'unknown';
+    const relation = relateNormalizedPath(source.kind, sourcePath, policyKind, policyValue);
+    if (source.kind !== 'template' || !options.removeDotSegments)
+        return relation;
+    const parsed = templateParts(sourcePath);
+    if (!parsed)
+        return 'unknown';
+    const indexes = parsed.parts.flatMap((part, index) => TEMPLATE_SEGMENT.test(part) ? [index] : []);
+    if (indexes.length === 0)
+        return relation;
+    if (indexes.length > 1)
+        return 'unknown';
+    const alternatives = ['.', '..'].map((replacement) => {
+        const parts = [...parsed.parts];
+        parts[indexes[0]] = replacement;
+        const normalizedAlternative = normalizePath(`/${parts.join('/')}`, options, true);
+        return normalizedAlternative
+            ? relateNormalizedPath('exact', normalizedAlternative, policyKind, policyValue)
+            : 'unknown';
+    });
+    return combineAlternatives([relation, ...alternatives]);
 }
 function relateMethods(source, policy) {
     if (source.length === 0 || !withinConditionBudget(source) || !withinConditionBudget(policy)) {
