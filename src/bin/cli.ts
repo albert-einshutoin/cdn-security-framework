@@ -3200,7 +3200,12 @@ const { registerOpenApiInspectCommand } = require(path.join(
   'commands',
   'openapi-inspect.js',
 ));
-registerOpenApiInspectCommand(program);
+const { validatePolicy: validatePolicyCandidate } = require(path.join(pkgRoot, 'validator', 'index.js'));
+registerOpenApiInspectCommand(program, {
+  pkgRoot,
+  evaluatePolicyCapabilities,
+  validatePolicy: validatePolicyCandidate,
+});
 
 program
   .command('init')

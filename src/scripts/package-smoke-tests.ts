@@ -123,6 +123,10 @@ function assertPackageContents(pack: PackResult) {
     'openapi/operation-normalizer.d.ts',
     'openapi/inspect.js',
     'openapi/inspect.d.ts',
+    'openapi/policy-candidate.js',
+    'openapi/policy-candidate.d.ts',
+    'docs/openapi-policy-candidates.md',
+    'docs/openapi-policy-candidates.ja.md',
     'scripts/compile.js',
     'scripts/compile.d.ts',
     'scripts/policy-lint.js',
@@ -187,6 +191,7 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
       assert.strictEqual(typeof openapi.normalizeOpenApiOperations, 'function');
       assert.strictEqual(typeof openapi.inspectOpenApi, 'function');
+      assert.strictEqual(typeof openapi.generatePolicyCandidate, 'function');
       assert.strictEqual(typeof recommendation.recommendRequestLimits, 'function');
       const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const result = pkg.lintPolicy({
@@ -208,6 +213,12 @@ function smokeInstalledPackage(tarballPath: string) {
     ], { cwd: installDir }));
     assert.strictEqual(inspection.schemaVersion, 1);
     assert.strictEqual(inspection.summary.operationCount, 0);
+    run(cliPath, [
+      'openapi', 'generate-policy', '--input', 'openapi.json', '--workspace-root', installDir,
+      '--profile', 'balanced', '--out', 'openapi.candidate.yml',
+    ], { cwd: installDir });
+    assert.ok(fs.existsSync(path.join(installDir, 'openapi.candidate.yml')));
+    assert.ok(fs.existsSync(path.join(installDir, 'openapi.candidate.meta.json')));
     assertSchemaHints(installedRoot);
 
     run(cliPath, ['build', '--policy', installedBasePolicy, '--out-dir', 'dist'], {
