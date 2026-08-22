@@ -256,15 +256,15 @@ function appliesToContext(
 
 function specificity(exception: FindingExceptionV1): readonly number[] {
   const selector = exception.selector;
-  const kind = selector.instance_id ? 3 : selector.method && selector.path ? 2 : 1;
   const routePatterns = [selector.method, selector.path].filter((value): value is string => Boolean(value));
   const literalLength = routePatterns.reduce((total, value) => total + value.replaceAll('*', '').length, 0);
   const wildcardCount = routePatterns.reduce((total, value) => total + (value.match(/\*/g)?.length ?? 0), 0);
   return [
-    kind,
+    Number(selector.instance_id !== undefined),
     Number(selector.method !== undefined && !selector.method.includes('*'))
       + Number(selector.path !== undefined && !selector.path.includes('*')),
     literalLength,
+    routePatterns.length,
     -wildcardCount,
     Number(selector.target !== undefined) + Number(selector.environment !== undefined),
   ];
@@ -299,9 +299,13 @@ function governanceFinding(
   digest: string,
   context: FindingExceptionContext,
   exceptionIndex?: number,
+  sourceFinding?: SecurityFindingV1,
 ): SecurityFindingV1 {
   return createFinding({
     ruleId, severity, confidence: 'deterministic', category: 'governance', title, message, actual,
+    ...(sourceFinding ? {
+      route: { ...sourceFinding.route, operationId: sourceFinding.instanceId },
+    } : {}),
     evidence: [{
       source: 'policy', uri: evidenceUri(context.sourceUri),
       ...(exceptionIndex === undefined ? {} : { pointer: `/exceptions/${exceptionIndex}` }),
@@ -465,7 +469,7 @@ export function applyFindingExceptions(
       'SC-GOV-003', 'warning', 'Multiple exceptions match one Finding',
       'The most specific exception was applied; remove redundant matching exceptions.',
       { findingInstanceId: finding.instanceId, selectedExceptionId: selected.id, matchCount: candidates.length },
-      digest, context,
+      digest, context, undefined, finding,
     ));
   }
 

@@ -127,6 +127,22 @@ describe('Finding Exception Contract v1', () => {
       currentDate: '2026-08-23',
       },
     ).appliedExceptionIds).toEqual(['EXC-2026-002']);
+    expect(applyFindingExceptions(
+      [createFinding(baseFinding)], exceptionSet([routeWildcard, { ...valid, id: 'EXC-2026-003' }]),
+      { currentDate: '2026-08-23' },
+    ).appliedExceptionIds).toEqual(['EXC-2026-003']);
+
+    const sameRouteOtherEvidence = createFinding({
+      ...baseFinding,
+      evidence: [{ ...baseFinding.evidence[0], uri: 'other-openapi.yaml' }],
+    });
+    const duplicateReport = applyFindingExceptions(
+      [createFinding(baseFinding), sameRouteOtherEvidence], exceptionSet([broad, routeWildcard]),
+      { currentDate: '2026-08-23' },
+    );
+    const duplicateIds = duplicateReport.findings
+      .filter(({ ruleId }) => ruleId === 'SC-GOV-003').map(({ instanceId }) => instanceId);
+    expect(new Set(duplicateIds).size).toBe(2);
 
     const invalid = exceptionSet([
       valid,

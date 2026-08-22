@@ -244,15 +244,15 @@ function appliesToContext(exception, context) {
 }
 function specificity(exception) {
     const selector = exception.selector;
-    const kind = selector.instance_id ? 3 : selector.method && selector.path ? 2 : 1;
     const routePatterns = [selector.method, selector.path].filter((value) => Boolean(value));
     const literalLength = routePatterns.reduce((total, value) => total + value.replaceAll('*', '').length, 0);
     const wildcardCount = routePatterns.reduce((total, value) => total + (value.match(/\*/g)?.length ?? 0), 0);
     return [
-        kind,
+        Number(selector.instance_id !== undefined),
         Number(selector.method !== undefined && !selector.method.includes('*'))
             + Number(selector.path !== undefined && !selector.path.includes('*')),
         literalLength,
+        routePatterns.length,
         -wildcardCount,
         Number(selector.target !== undefined) + Number(selector.environment !== undefined),
     ];
@@ -277,9 +277,12 @@ function evidenceUri(sourceUri) {
         return node_path_1.default.win32.basename(uri);
     return uri;
 }
-function governanceFinding(ruleId, severity, title, message, actual, digest, context, exceptionIndex) {
+function governanceFinding(ruleId, severity, title, message, actual, digest, context, exceptionIndex, sourceFinding) {
     return (0, finding_1.createFinding)({
         ruleId, severity, confidence: 'deterministic', category: 'governance', title, message, actual,
+        ...(sourceFinding ? {
+            route: { ...sourceFinding.route, operationId: sourceFinding.instanceId },
+        } : {}),
         evidence: [{
                 source: 'policy', uri: evidenceUri(context.sourceUri),
                 ...(exceptionIndex === undefined ? {} : { pointer: `/exceptions/${exceptionIndex}` }),
@@ -434,7 +437,7 @@ function applyFindingExceptions(findings, set, context) {
         suppressed.push(finding);
         appliedIds.add(selected.id);
         if (candidates.length > 1)
-            governance.push(governanceFinding('SC-GOV-003', 'warning', 'Multiple exceptions match one Finding', 'The most specific exception was applied; remove redundant matching exceptions.', { findingInstanceId: finding.instanceId, selectedExceptionId: selected.id, matchCount: candidates.length }, digest, context));
+            governance.push(governanceFinding('SC-GOV-003', 'warning', 'Multiple exceptions match one Finding', 'The most specific exception was applied; remove redundant matching exceptions.', { findingInstanceId: finding.instanceId, selectedExceptionId: selected.id, matchCount: candidates.length }, digest, context, undefined, finding));
     }
     for (const exception of applicableLive) {
         if (!matchedIds.has(exception.id))
