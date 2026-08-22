@@ -28,8 +28,9 @@ const NAMED_OBJECT_MAP_KEYS = new Set([
   'requestBodies', 'responses', 'schemas', 'securitySchemes', 'webhooks',
 ]);
 const SCHEMA_MAP_KEYS = new Set([
-  '$defs', 'definitions', 'dependentSchemas', 'patternProperties', 'properties', 'schemas',
+  '$defs', 'definitions', 'dependentSchemas', 'patternProperties', 'properties',
 ]);
+const SCHEMA_NAMED_MAP_KEYS = new Set([...SCHEMA_MAP_KEYS, 'schemas']);
 const SCHEMA_SINGLE_KEYS = new Set([
   'additionalProperties', 'contains', 'contentSchema', 'else', 'if', 'items', 'not',
   'propertyNames', 'then', 'unevaluatedItems', 'unevaluatedProperties',
@@ -324,7 +325,7 @@ export function resolveOpenApiReferences(
         childNamedMap,
         namedMap === 'links',
         schemaArray
-          || (namedMap !== undefined && SCHEMA_MAP_KEYS.has(namedMap))
+          || (namedMap !== undefined && SCHEMA_NAMED_MAP_KEYS.has(namedMap))
           || (!schemaObject && key === 'schema')
           || (schemaObject && SCHEMA_SINGLE_KEYS.has(key) && !Array.isArray(child)),
         schemaObject && (SCHEMA_ARRAY_KEYS.has(key)

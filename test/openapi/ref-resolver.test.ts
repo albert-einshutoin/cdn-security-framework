@@ -158,6 +158,7 @@ describe('resolveOpenApiReferences', () => {
         default: { $ref: '#/components/schemas/Sample/example' },
         enum: [{ $ref: '#/components/schemas/Sample/type' }],
         customAnnotation: { $ref: '#/components/schemas/Target/type' },
+        schemas: { nested: { $ref: '#/components/schemas/Target/type' } },
       } }, links: {
         Alias: { $ref: '#/components/links/TargetLink' },
         TargetLink: {
