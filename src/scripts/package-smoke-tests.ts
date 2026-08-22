@@ -108,6 +108,10 @@ function assertPackageContents(pack: PackResult) {
     'contract/security-ir.js',
     'contract/security-ir.d.ts',
     'schemas/security-ir-v1.schema.json',
+    'openapi/index.js',
+    'openapi/index.d.ts',
+    'openapi/load-document.js',
+    'openapi/load-document.d.ts',
     'scripts/compile.js',
     'scripts/compile.d.ts',
     'scripts/policy-lint.js',
@@ -159,11 +163,13 @@ function smokeInstalledPackage(tarballPath: string) {
       const contract = require(${JSON.stringify(`${packageName}/contract`)});
       const securityIr = require(${JSON.stringify(`${packageName}/contract/security-ir`)});
       const schema = require(${JSON.stringify(`${packageName}/schemas/security-ir-v1.schema.json`)});
+      const openapi = require(${JSON.stringify(`${packageName}/openapi`)});
       assert.strictEqual(typeof pkg.compile, 'function');
       assert.strictEqual(typeof pkg.lintPolicy, 'function');
       assert.strictEqual(typeof contract.createSecurityContract, 'function');
       assert.strictEqual(typeof securityIr.serializeSecurityContract, 'function');
       assert.strictEqual(schema.properties.schemaVersion.const, 1);
+      assert.strictEqual(typeof openapi.loadOpenApiDocument, 'function');
       const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const result = pkg.lintPolicy({
         policyPath: path.join(pkgRoot, 'policy', 'base.yml'),
