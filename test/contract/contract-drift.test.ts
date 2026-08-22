@@ -369,7 +369,7 @@ describe('OpenAPI and Policy contract drift', () => {
             auth_gate: { type: 'static_token', header: 'x-api-key' },
           },
         ],
-        response_headers: { cors: { allow_origins: [] } },
+        response_headers: { cors: { allow_origins: [''] } },
       }),
     ));
     expect(emptyCorsAuth.map(({ ruleId }) => ruleId)).toEqual(['SC-AUTHN-002']);
@@ -548,7 +548,7 @@ describe('OpenAPI and Policy contract drift', () => {
       contract([operation('OPTIONS', '/items')]),
       policy({
         request: { block: { header_missing: ['x-policy'] } },
-        response_headers: { cors: { allow_origins: [] } },
+        response_headers: { cors: { allow_origins: [''] } },
       }),
     ));
     expect(emptyCorsRequest.find(({ ruleId }) => ruleId === 'SC-REQUEST-002')?.severity).toBe('error');

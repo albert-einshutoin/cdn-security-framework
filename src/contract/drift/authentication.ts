@@ -70,7 +70,7 @@ export function compareAuthContracts(input: ContractDriftInput): SecurityFinding
   const findings: SecurityFindingV1[] = [];
   const corsOriginCanMatch = allowed.defaults.corsPreflight.origins.kind === 'any'
     || (allowed.defaults.corsPreflight.origins.kind === 'allowlist'
-      && allowed.defaults.corsPreflight.origins.values.length > 0);
+      && allowed.defaults.corsPreflight.origins.values.some((origin) => origin.length > 0));
   for (const operation of declared.operations) {
     if (allowed.defaults.requestDecision === 'block'
       && !allowed.defaults.methods.includes(operation.method)) continue;

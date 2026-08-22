@@ -108,7 +108,8 @@ export function compareRequestContracts(
     const preflightBypassesValidation = operation.method === 'OPTIONS'
       && corsPreflight.bypassScope === 'all-request-validation-including-host-and-auth'
       && (corsPreflight.origins.kind === 'any'
-        || (corsPreflight.origins.kind === 'allowlist' && corsPreflight.origins.values.length > 0));
+        || (corsPreflight.origins.kind === 'allowlist'
+          && corsPreflight.origins.values.some((origin) => origin.length > 0)));
     for (const name of ['maxQueryParams', 'maxQueryLength', 'maxUriLength'] as const) {
       findings.push(...limitFinding(
         input, operation, name, recommendation, ratio, preflightBypassesValidation,
