@@ -232,6 +232,20 @@ function projectPolicyToAllowedSurface(policy, options) {
                                     },
                                 },
                             } : {}),
+                            ...(compilerResponse.clearSiteDataPaths.length > 0 ? {
+                                clearSiteDataOverride: {
+                                    when: 'matching-path-and-status-200-through-399',
+                                    value: 'no-store',
+                                    pathMatch: {
+                                        kind: 'prefix',
+                                        values: stablePrefixes(compilerResponse.clearSiteDataPaths),
+                                        boundary: 'path-segment',
+                                        algorithm: 'equal-or-prefix-plus-slash',
+                                        comparison: 'literal-no-percent-decoding',
+                                        phase: 'normalized-path',
+                                    },
+                                },
+                            } : {}),
                         },
                     } : {}),
                     selection: index === selectedResponseRule ? 'first-auth-or-cache-rule' : 'not-selected',

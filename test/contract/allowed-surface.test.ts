@@ -318,6 +318,19 @@ describe('Allowed Surface Model v1', () => {
       aws: 'unsupported-configuration',
       cloudflare: 'unsupported-configuration',
     });
+
+    input.routes[0].auth_gate = {
+      type: 'jwt', algorithm: 'RS256', jwks_url: 'https://id.example/jwks',
+    };
+    input.firewall = { jwks: { allowed_hosts: [' '] } };
+    projected = projectPolicyToAllowedSurface(input, {
+      policyDigest: digest,
+      sourceUri: 'policy/security.yml',
+    });
+    expect(projected.orderedRules[0].auth.verifiability).toEqual({
+      aws: 'unsupported-configuration',
+      cloudflare: 'unsupported-configuration',
+    });
   });
 
   test('projects the force-vary no-store override as effective cache control', () => {
@@ -369,6 +382,18 @@ describe('Allowed Surface Model v1', () => {
       authProtectedOverride: {
         value: 'no-store, no-cache, must-revalidate, private',
         pathMatch: { values: ['/admin'] },
+      },
+    });
+
+    input.response_headers.clear_site_data_paths = ['/logout'];
+    expect(projectPolicyToAllowedSurface(input, {
+      policyDigest: digest,
+      sourceUri: 'policy/security.yml',
+    }).orderedRules[0].response.effectiveCacheControl).toMatchObject({
+      clearSiteDataOverride: {
+        when: 'matching-path-and-status-200-through-399',
+        value: 'no-store',
+        pathMatch: { values: ['/logout'] },
       },
     });
   });

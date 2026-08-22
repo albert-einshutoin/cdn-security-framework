@@ -50,7 +50,8 @@ export function validateJwksUrl(rawUrl: string, allowedHosts: unknown): { ok: bo
     return { ok: false, reason: `jwks_url hostname "${hostname}" resolves to a private/loopback/link-local range` };
   }
   const normalizedHosts = normalizeStringList(allowedHosts, 'lower');
-  if (normalizedHosts.length > 0 && !normalizedHosts.includes(hostname)) {
+  const hasConfiguredAllowlist = Array.isArray(allowedHosts) && allowedHosts.length > 0;
+  if (hasConfiguredAllowlist && !normalizedHosts.includes(hostname)) {
     return {
       ok: false,
       reason: `jwks_url hostname "${hostname}" is not in firewall.jwks.allowed_hosts (${normalizedHosts.join(', ')})`,

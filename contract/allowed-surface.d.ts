@@ -102,6 +102,11 @@ export interface AllowedRouteRuleV1 {
                 value: string;
                 pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
             };
+            clearSiteDataOverride?: {
+                when: 'matching-path-and-status-200-through-399';
+                value: 'no-store';
+                pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
+            };
         };
         selection: 'first-auth-or-cache-rule' | 'not-selected';
     };

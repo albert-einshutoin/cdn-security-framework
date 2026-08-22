@@ -116,6 +116,11 @@ export interface AllowedRouteRuleV1 {
         value: string;
         pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
       };
+      clearSiteDataOverride?: {
+        when: 'matching-path-and-status-200-through-399';
+        value: 'no-store';
+        pathMatch: AllowedResponseDefaultsV1['adminPathMatch'];
+      };
     };
     selection: 'first-auth-or-cache-rule' | 'not-selected';
   };
@@ -382,6 +387,20 @@ export function projectPolicyToAllowedSurface(
                   pathMatch: {
                     kind: 'prefix' as const,
                     values: stablePrefixes(compilerResponse.authProtectedPrefixes),
+                    boundary: 'path-segment' as const,
+                    algorithm: 'equal-or-prefix-plus-slash' as const,
+                    comparison: 'literal-no-percent-decoding' as const,
+                    phase: 'normalized-path' as const,
+                  },
+                },
+              } : {}),
+              ...(compilerResponse.clearSiteDataPaths.length > 0 ? {
+                clearSiteDataOverride: {
+                  when: 'matching-path-and-status-200-through-399' as const,
+                  value: 'no-store' as const,
+                  pathMatch: {
+                    kind: 'prefix' as const,
+                    values: stablePrefixes(compilerResponse.clearSiteDataPaths),
                     boundary: 'path-segment' as const,
                     algorithm: 'equal-or-prefix-plus-slash' as const,
                     comparison: 'literal-no-percent-decoding' as const,
