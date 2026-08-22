@@ -37,7 +37,7 @@
   },
   {
     "id": "openapi-analysis-benchmark",
-    "patterns": ["src/openapi/**", "src/contract/security-ir.ts", "src/contract/canonical-route.ts"],
+    "patterns": ["src/openapi/**", "src/contract/**"],
     "modules": ["openapi-analysis"],
     "targetIds": ["openapi-benchmark-unit", "openapi-benchmark-ci"]
   },

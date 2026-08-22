@@ -238,7 +238,7 @@ function testRepositoryConfiguration(): void {
       `${riskyPath} must force full validation`,
     );
   }
-  for (const openApiPath of ['src/openapi/ref-resolver.ts', 'src/contract/canonical-route.ts']) {
+  for (const openApiPath of ['src/openapi/ref-resolver.ts', 'src/contract/finding.ts']) {
     const openApiTargets = selectMappedTargets(
       [openApiPath],
       selectAffectedModules([openApiPath], config),
