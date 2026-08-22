@@ -1,0 +1,18 @@
+openapi: 3.0.3
+info: { title: Sibling and nested refs, version: 1.0.0 }
+paths:
+  /orders/{id}:
+    get:
+      security:
+        - sharedKey: []
+      parameters:
+        - $ref: './components.json#/parameters/OrderId'
+      responses:
+        '200':
+          description: OK
+          content:
+            application/json:
+              schema: { $ref: './nested/common.yaml#/components/schemas/Order' }
+components:
+  securitySchemes:
+    sharedKey: { $ref: './components.json#/securitySchemes/sharedKey' }

@@ -1,0 +1,7 @@
+components:
+  schemas:
+    Order:
+      type: object
+      properties:
+        id: { type: string }
+        parent: { $ref: '../cycle-a.yaml#/components/schemas/NodeA' }

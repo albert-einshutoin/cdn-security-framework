@@ -1,0 +1,8 @@
+{
+  "parameters": {
+    "OrderId": { "name": "id", "in": "path", "required": true, "schema": { "type": "string" } }
+  },
+  "securitySchemes": {
+    "sharedKey": { "type": "apiKey", "in": "header", "name": "X-Shared-Key" }
+  }
+}

@@ -1,0 +1,6 @@
+openapi: 3.0.3
+info: { title: Duplicate operation, version: 1.0.0 }
+paths:
+  /users:
+    get: { responses: { '200': { description: First } } }
+    get: { responses: { '200': { description: Second } } }

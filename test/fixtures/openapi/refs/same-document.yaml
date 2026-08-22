@@ -1,0 +1,12 @@
+openapi: 3.0.3
+info: { title: Same-document ref, version: 1.0.0 }
+paths:
+  /users/{id}:
+    get:
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+      responses:
+        '200': { description: OK }
+components:
+  parameters:
+    UserId: { name: id, in: path, required: true, schema: { type: string } }

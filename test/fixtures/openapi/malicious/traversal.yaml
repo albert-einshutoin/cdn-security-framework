@@ -1,0 +1,11 @@
+openapi: 3.0.3
+info: { title: Traversal ref, version: 1.0.0 }
+paths:
+  /escape:
+    get:
+      responses:
+        '200':
+          description: Must reject
+          content:
+            application/json:
+              schema: { $ref: '../../../../outside.yaml#/Secret' }
