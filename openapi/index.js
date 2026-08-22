@@ -27,3 +27,4 @@ var inspect_1 = require("./inspect");
 Object.defineProperty(exports, "formatOpenApiInspectionJson", { enumerable: true, get: function () { return inspect_1.formatOpenApiInspectionJson; } });
 Object.defineProperty(exports, "formatOpenApiInspectionText", { enumerable: true, get: function () { return inspect_1.formatOpenApiInspectionText; } });
 Object.defineProperty(exports, "inspectOpenApi", { enumerable: true, get: function () { return inspect_1.inspectOpenApi; } });
+__exportStar(require("./policy-candidate"), exports);

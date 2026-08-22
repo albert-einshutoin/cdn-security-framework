@@ -88,6 +88,7 @@ test('phase subpath exports expose public compiler contracts', () => {
   assert.strictEqual(typeof openapi.serializeResolvedOpenApiGraph, 'function');
   assert.strictEqual(typeof openapi.normalizeOpenApiOperations, 'function');
   assert.strictEqual(typeof openapi.inspectOpenApi, 'function');
+  assert.strictEqual(typeof openapi.generatePolicyCandidate, 'function');
   assert.strictEqual(typeof recommendation.recommendRequestLimits, 'function');
 
   const phaseDeclarations = [

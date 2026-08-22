@@ -18,3 +18,4 @@ export {
   type OpenApiInspectionDiagnosticV1,
   type OpenApiInspectionV1,
 } from './inspect';
+export * from './policy-candidate';
