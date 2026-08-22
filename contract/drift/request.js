@@ -78,6 +78,9 @@ function compareRequestContracts(input, options = {}) {
         .map((recommendation) => [recommendation.routeKey, recommendation]));
     const findings = [];
     for (const operation of input.declared.operations) {
+        if (input.allowed.defaults.requestDecision === 'block'
+            && !input.allowed.defaults.methods.includes(operation.method))
+            continue;
         const recommendation = byRouteKey.get(operation.routeKey);
         if (!recommendation)
             continue;

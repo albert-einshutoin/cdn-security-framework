@@ -563,6 +563,17 @@ describe('OpenAPI and Policy contract drift', () => {
     expect(compareRequestContracts(runtimeDefaultInput)
       .find(({ ruleId }) => ruleId === 'SC-REQUEST-002')
       ?.evidence.at(-1)?.pointer).toBe('/request');
+
+    const blockedRequestChecks = compareRequestContracts(input(
+      contract([operation('DELETE', '/blocked', {
+        request: {
+          contentTypes: ['application/json'], requiredHeaders: ['x-contract'],
+          queryParameters: [], pathParameters: [], headerParameters: [], cookieParameters: [],
+        },
+      })]),
+      policy({ request: { allow_methods: [] } }),
+    ));
+    expect(blockedRequestChecks).toEqual([]);
   });
 
   test('is deterministic, validates the comparison boundary, and matches the golden contract', () => {

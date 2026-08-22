@@ -100,6 +100,8 @@ export function compareRequestContracts(
   const findings: SecurityFindingV1[] = [];
 
   for (const operation of input.declared.operations) {
+    if (input.allowed.defaults.requestDecision === 'block'
+      && !input.allowed.defaults.methods.includes(operation.method)) continue;
     const recommendation = byRouteKey.get(operation.routeKey);
     if (!recommendation) continue;
     const corsPreflight = input.allowed.defaults.corsPreflight;
