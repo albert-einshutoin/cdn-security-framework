@@ -15,6 +15,18 @@ export interface RequestDriftOptions {
 const APPLICATION_DISCLAIMER = 'Application validation is not evaluated.';
 const DEFAULT_BROADER_RATIO = 2;
 
+function requiredAuthenticationHeaders(
+  operation: ContractDriftInput['declared']['operations'][number],
+): string[] {
+  const alternatives = operation.auth.alternatives;
+  if (alternatives.length === 0 || alternatives.some(({ anonymous }) => anonymous)) return [];
+  const headers = alternatives.map(({ schemes }) => new Set(schemes.flatMap((scheme) => (
+    scheme.kind === 'api-key' && scheme.location === 'header' && scheme.parameterName
+      ? [scheme.parameterName.toLowerCase()] : []
+  ))));
+  return [...headers[0]].filter((header) => headers.every((alternative) => alternative.has(header)));
+}
+
 function limitFinding(
   input: ContractDriftInput,
   operation: ContractDriftInput['declared']['operations'][number],
@@ -97,7 +109,10 @@ export function compareRequestContracts(
       ));
     }
 
-    const declaredHeaders = new Set(operation.request.requiredHeaders.map((header) => header.toLowerCase()));
+    const declaredHeaders = new Set([
+      ...operation.request.requiredHeaders.map((header) => header.toLowerCase()),
+      ...requiredAuthenticationHeaders(operation),
+    ]);
     const requiredHeaders = input.allowed.defaults.requiredHeaders;
     const policyHeaders = new Set(requiredHeaders?.values ?? []);
     const unchecked = [...declaredHeaders].filter((header) => !policyHeaders.has(header)).sort();

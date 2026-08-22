@@ -48,7 +48,7 @@ function authCompatibility(
     });
     const relations = [...schemeRelations, ...ruleRelations];
     if (relations.every((relation) => relation === 'compatible')) return 'compatible';
-    if (relations.includes('unknown')) sawUnknown = true;
+    if (!relations.includes('incompatible') && relations.includes('unknown')) sawUnknown = true;
   }
   return sawUnknown ? 'unknown' : 'incompatible';
 }

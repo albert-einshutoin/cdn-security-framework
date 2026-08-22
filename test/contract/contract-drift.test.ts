@@ -194,6 +194,7 @@ describe('OpenAPI and Policy contract drift', () => {
         operation('GET', '/bearer', { exposure: 'authenticated', auth: bearerAuth }),
         operation('GET', '/optional', { exposure: 'public', auth: optionalAuth }),
         operation('GET', '/stacked', { exposure: 'authenticated', auth: apiKeyAuth }),
+        operation('GET', '/stacked-bearer', { exposure: 'authenticated', auth: bearerAuth }),
       ]),
       policy({
         routes: [
@@ -221,12 +222,20 @@ describe('OpenAPI and Policy contract drift', () => {
             name: 'stacked-basic', match: { path_prefixes: ['/stacked'] },
             auth_gate: { type: 'basic_auth' },
           },
+          {
+            name: 'stacked-bearer-jwt', match: { path_prefixes: ['/stacked-bearer'] },
+            auth_gate: { type: 'jwt', algorithm: 'HS256' },
+          },
+          {
+            name: 'stacked-bearer-basic', match: { path_prefixes: ['/stacked-bearer'] },
+            auth_gate: { type: 'basic_auth' },
+          },
         ],
       }),
     ));
 
     expect(findings.map(({ ruleId }) => ruleId)).toEqual([
-      'SC-AUTHN-002', 'SC-AUTHN-002', 'SC-AUTHN-003', 'SC-AUTHN-004',
+      'SC-AUTHN-002', 'SC-AUTHN-002', 'SC-AUTHN-003', 'SC-AUTHN-003', 'SC-AUTHN-004',
     ]);
     expect(findings.find(({ ruleId }) => ruleId === 'SC-AUTHN-004')?.severity).toBe('info');
     expect(findings.find(({ ruleId }) => ruleId === 'SC-AUTHN-002')?.message)
@@ -338,6 +347,24 @@ describe('OpenAPI and Policy contract drift', () => {
     ));
     expect(corsRequest.find(({ ruleId }) => ruleId === 'SC-REQUEST-002')?.severity).toBe('warning');
     expect(corsRequest.some(({ severity }) => severity === 'error')).toBe(false);
+
+    const authHeaderRequest = compareRequestContracts(input(
+      contract([operation('GET', '/key', {
+        exposure: 'authenticated',
+        auth: {
+          mode: 'alternatives',
+          alternatives: [{
+            anonymous: false,
+            schemes: [{
+              name: 'key', kind: 'api-key', location: 'header', parameterName: 'X-API-Key',
+              scopes: [], capability: 'supported',
+            }],
+          }],
+        },
+      })]),
+      policy({ request: { block: { header_missing: ['x-api-key'] } } }),
+    ));
+    expect(authHeaderRequest.some(({ ruleId }) => ruleId === 'SC-REQUEST-002')).toBe(false);
 
     const emptyCorsRequest = compareRequestContracts(input(
       contract([operation('OPTIONS', '/items')]),

@@ -83,7 +83,8 @@ Metadataだけを含め、Credential Valueは含めません。
   生成しません。Policyを厳格化する前にEvidenceを確認し、ContractをCompleteにします。
 - Recommendationが0の場合はBroad-limit Warningを出しません。PartialまたはUnknownの
   Request EstimateからLimit Errorを生成しません。
-- Header名はCase-insensitiveで比較します。`SC-REQUEST-001`は意図したApplication-only
+- Header名はCase-insensitiveで比較します。すべての非Anonymous Authentication Alternativeで
+  必須のAPI-key Headerも宣言済みClient Headerとして扱います。`SC-REQUEST-001`は意図したApplication-only
   Validationの場合があります。`SC-REQUEST-002`はEdge要件をClient向けに宣言するか削除します。
 - Policy Schemaと選択TargetがCapabilityを提供するまでは、Content-Type Validationを
   Application側で維持します。

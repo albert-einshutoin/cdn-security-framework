@@ -87,7 +87,8 @@ contains credential metadata, never credential values.
   before tightening Policy.
 - Zero-valued recommendations do not trigger broad-limit warnings. Partial or
   unknown request estimates do not produce limit Errors.
-- Header names are compared case-insensitively. `SC-REQUEST-001` may be an
+- Header names are compared case-insensitively. API-key headers required by every
+  non-anonymous authentication alternative count as declared client headers. `SC-REQUEST-001` may be an
   intentional Application-only validation boundary; `SC-REQUEST-002` means an
   Edge requirement must be documented for clients or removed.
 - Content-type validation remains an Application responsibility until the

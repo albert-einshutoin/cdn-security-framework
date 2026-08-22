@@ -5,6 +5,14 @@ const recommendation_1 = require("../../recommendation");
 const shared_1 = require("./shared");
 const APPLICATION_DISCLAIMER = 'Application validation is not evaluated.';
 const DEFAULT_BROADER_RATIO = 2;
+function requiredAuthenticationHeaders(operation) {
+    const alternatives = operation.auth.alternatives;
+    if (alternatives.length === 0 || alternatives.some(({ anonymous }) => anonymous))
+        return [];
+    const headers = alternatives.map(({ schemes }) => new Set(schemes.flatMap((scheme) => (scheme.kind === 'api-key' && scheme.location === 'header' && scheme.parameterName
+        ? [scheme.parameterName.toLowerCase()] : []))));
+    return [...headers[0]].filter((header) => headers.every((alternative) => alternative.has(header)));
+}
 function limitFinding(input, operation, name, recommendation, ratio, conditionalPreflightBypass) {
     const candidate = recommendation[name];
     if (candidate.value === null || !['exact', 'upper-bound'].includes(candidate.estimateKind))
@@ -75,7 +83,10 @@ function compareRequestContracts(input, options = {}) {
         for (const name of ['maxQueryParams', 'maxQueryLength', 'maxUriLength']) {
             findings.push(...limitFinding(input, operation, name, recommendation, ratio, preflightBypassesValidation));
         }
-        const declaredHeaders = new Set(operation.request.requiredHeaders.map((header) => header.toLowerCase()));
+        const declaredHeaders = new Set([
+            ...operation.request.requiredHeaders.map((header) => header.toLowerCase()),
+            ...requiredAuthenticationHeaders(operation),
+        ]);
         const requiredHeaders = input.allowed.defaults.requiredHeaders;
         const policyHeaders = new Set(requiredHeaders?.values ?? []);
         const unchecked = [...declaredHeaders].filter((header) => !policyHeaders.has(header)).sort();

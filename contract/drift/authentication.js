@@ -38,7 +38,7 @@ function authCompatibility(operation, rules) {
         const relations = [...schemeRelations, ...ruleRelations];
         if (relations.every((relation) => relation === 'compatible'))
             return 'compatible';
-        if (relations.includes('unknown'))
+        if (!relations.includes('incompatible') && relations.includes('unknown'))
             sawUnknown = true;
     }
     return sawUnknown ? 'unknown' : 'incompatible';
