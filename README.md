@@ -108,6 +108,7 @@ The authoritative source for package code lives under `src/**/*.ts`. `npm run bu
 See [IaC integration](docs/iac.md) for Terraform / CloudFormation / CDK / WAF usage.
 
 ### Operational docs
+- [OpenAPI integration](docs/openapi-integration.md) — inspect an API contract, generate a review-only policy candidate, and understand safety limits
 - [CLI reference](docs/cli.md) — `init` / `build` / `emit-waf` / `doctor` / `readiness` / `capabilities` / `explain` / `diff` / `migrate`
 - [Programmatic API](docs/programmatic-api.md) — `require('cdn-security-framework')` for CI / IaC integration
 - [Compiler strictness](docs/compiler-strictness.md) — phase contracts, strict checks, and remaining dynamic areas

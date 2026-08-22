@@ -24,6 +24,7 @@ npx cdn-security <subcommand> [options]
 | `diff` | Compare generated output drift or semantic policy posture changes between policies. |
 | `migrate` | Migrate a policy file between schema versions (stub — v1 is the only shipped version today). |
 | `openapi inspect` | Inspect local OpenAPI security contracts as deterministic text or JSON without changing policy or build output. |
+| `openapi generate-policy` | Generate a non-destructive, review-only policy candidate and metadata sidecar. |
 
 ---
 
@@ -44,6 +45,27 @@ npx cdn-security openapi inspect --input openapi.yaml --workspace-root . --json 
 - Parse, reference, and resource-limit failures use stable `OPENAPI_*` codes and safe messages on stderr.
 
 The JSON output follows [`openapi-inspection-v1.schema.json`](../schemas/openapi-inspection-v1.schema.json). Unsupported or partial analysis remains explicit; it is never treated as public access.
+
+## `openapi generate-policy`
+
+```bash
+npx cdn-security openapi generate-policy \
+  --input openapi.yaml \
+  --workspace-root . \
+  --profile balanced \
+  --out policy/openapi.candidate.yml
+```
+
+- `--input`, `--profile strict|balanced|permissive`, and `--out` are required.
+- `--workspace-root` bounds the input, local `$ref`s, and both output files.
+- Existing regular candidate and sidecar files require `--force`.
+- The command writes a schema-valid YAML candidate plus a deterministic
+  `.meta.json` sidecar. It never merges with the active policy or deploys it.
+- Authentication details and unsupported controls are reported as omitted,
+  never guessed or approximated.
+
+See the [OpenAPI integration guide](openapi-integration.md) for the runnable
+example, limits, review workflow, and troubleshooting.
 
 ---
 
