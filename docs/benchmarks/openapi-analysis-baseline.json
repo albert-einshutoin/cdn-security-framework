@@ -5,7 +5,7 @@
   "maxTimeRegressionPercent": 50,
   "maxHeapRegressionPercent": 100,
   "nodes": {
-    "20": {
+    "20.17.0": {
       "operations-100": { "warmMeanTotalMs": 15.946, "peakHeapDeltaBytes": 2121304 },
       "shared-refs-1000": { "warmMeanTotalMs": 128.58, "peakHeapDeltaBytes": 11058248 },
       "nested-refs-10000": { "warmMeanTotalMs": 1628.522, "peakHeapDeltaBytes": 120217088 },
@@ -13,7 +13,7 @@
       "repeated-refs": { "warmMeanTotalMs": 124.294, "peakHeapDeltaBytes": 11840608 },
       "early-document-limit": { "warmMeanTotalMs": 0.164, "peakHeapDeltaBytes": 21488 }
     },
-    "22": {
+    "22.23.2": {
       "operations-100": { "warmMeanTotalMs": 16.21, "peakHeapDeltaBytes": 3839096 },
       "shared-refs-1000": { "warmMeanTotalMs": 108.748, "peakHeapDeltaBytes": 10632944 },
       "nested-refs-10000": { "warmMeanTotalMs": 1305.248, "peakHeapDeltaBytes": 142321176 },
@@ -21,7 +21,7 @@
       "repeated-refs": { "warmMeanTotalMs": 107.21, "peakHeapDeltaBytes": 9259232 },
       "early-document-limit": { "warmMeanTotalMs": 0.135, "peakHeapDeltaBytes": 23944 }
     },
-    "24": {
+    "24.19.0": {
       "operations-100": { "warmMeanTotalMs": 6.142, "peakHeapDeltaBytes": 3536232 },
       "shared-refs-1000": { "warmMeanTotalMs": 63.071, "peakHeapDeltaBytes": 12858104 },
       "nested-refs-10000": { "warmMeanTotalMs": 843.163, "peakHeapDeltaBytes": 137093776 },

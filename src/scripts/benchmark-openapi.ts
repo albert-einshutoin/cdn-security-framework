@@ -166,7 +166,7 @@ export function generateOpenApiBenchmarkWorkloads(
   );
 
   let deepSchema: Record<string, unknown> = { type: 'string' };
-  for (let depth = 0; depth < 63; depth += 1) deepSchema = { type: 'array', items: deepSchema };
+  for (let depth = 0; depth < 55; depth += 1) deepSchema = { type: 'array', items: deepSchema };
   writeJson(
     path.join(workspaceRoot, files.deep),
     documentWithPaths({ '/deep': operation('getDeep', { name: 'value', in: 'query', schema: deepSchema }) }),
@@ -221,20 +221,25 @@ function runWorkload(
     let heapPeak = heapStart;
     const totalStart = performance.now();
     const parseStart = performance.now();
+    const limits = workload.rejection
+      ? { ...BENCHMARK_LIMITS, maxDocumentBytes: 1_024 }
+      : workload.id === 'deep-schema'
+        ? { ...BENCHMARK_LIMITS, maxSchemaDepth: DEFAULT_OPENAPI_ANALYSIS_LIMITS.maxSchemaDepth }
+        : BENCHMARK_LIMITS;
     try {
       const loaded = loadOpenApiDocument({
         inputPath: absoluteInput,
         workspaceRoot,
-        limits: workload.rejection ? { ...BENCHMARK_LIMITS, maxDocumentBytes: 1_024 } : BENCHMARK_LIMITS,
+        limits,
       });
       const parseMs = elapsed(parseStart);
       heapPeak = Math.max(heapPeak, process.memoryUsage().heapUsed);
       const resolveStart = performance.now();
-      const graph = resolveOpenApiReferences({ root: loaded, workspaceRoot, limits: BENCHMARK_LIMITS });
+      const graph = resolveOpenApiReferences({ root: loaded, workspaceRoot, limits });
       const resolveMs = elapsed(resolveStart);
       heapPeak = Math.max(heapPeak, process.memoryUsage().heapUsed);
       const normalizeStart = performance.now();
-      const contract = normalizeOpenApiOperations(graph, { limits: BENCHMARK_LIMITS });
+      const contract = normalizeOpenApiOperations(graph, { limits });
       const normalizeMs = elapsed(normalizeStart);
       const serialized = serializeSecurityContract(contract);
       heapPeak = Math.max(heapPeak, process.memoryUsage().heapUsed);
@@ -350,9 +355,9 @@ function enforceRegressionBaseline(report: OpenApiBenchmarkReport, baselinePath:
   if (baseline.environment.platform !== process.platform || baseline.environment.arch !== process.arch) {
     throw new Error(`OpenAPI benchmark baseline requires ${baseline.environment.platform}/${baseline.environment.arch}`);
   }
-  const nodeMajor = process.versions.node.split('.')[0];
-  const expected = baseline.nodes[nodeMajor];
-  if (!expected) throw new Error(`No OpenAPI benchmark baseline for Node ${nodeMajor}`);
+  const nodeVersion = process.versions.node;
+  const expected = baseline.nodes[nodeVersion];
+  if (!expected) throw new Error(`No OpenAPI benchmark baseline for Node ${nodeVersion}`);
   const failures: string[] = [];
   for (const workload of report.workloads) {
     const target = expected[workload.id];

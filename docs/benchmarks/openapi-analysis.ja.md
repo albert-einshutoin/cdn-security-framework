@@ -36,7 +36,7 @@ GitHub-hosted `ubuntu-latest`、Linux x64、各 workload 3 sample。表は warm 
 ## CI 方針
 
 - 通常検証は `shared-refs-1000` だけを実行し、合計 15 秒・概算 heap 差分 512 MiB の余裕ある絶対上限を適用します。10,000 operation は実行しません。
-- schedule/manual の `OpenAPI Analysis Benchmark` だけが全 workload を Node 20.17.0、22、24 で実行します。percentage gate は warm 平均 wall time 50%、概算 heap 差分 100% です。sub-ms の timer 揺らぎによる失敗を避けるため、時間には絶対幅 1 ms の下限を設けます。
+- schedule/manual の `OpenAPI Analysis Benchmark` だけが全 workload を baseline と一致する Node 20.17.0、22.23.2、24.19.0 で実行します。percentage gate は warm 平均 wall time 50%、概算 heap 差分 100% です。sub-ms の timer 揺らぎによる失敗を避けるため、時間には絶対幅 1 ms の下限を設けます。
 - 共有 runner の揺らぎだけで PR の percentage check が失敗することはありません。
 
 完全な JSON report は `npm run benchmark:openapi -- --iterations 3 --output report.json` で取得できます。閾値変更時は変更前後 report、Node version、host class、変更理由を PR に残してください。microbenchmark の改善を製品速度の改善とは扱いません。Rust/WASM への置換は対象外です。

@@ -36,7 +36,7 @@ The complete time and heap baselines are in `openapi-analysis-baseline.json`.
 ## CI policy
 
 - Regular validation runs only `shared-refs-1000` with a tolerant absolute ceiling of 15 seconds and 512 MiB approximate heap delta. It never runs the 10,000-operation workload.
-- The scheduled/manual `OpenAPI Analysis Benchmark` workflow runs all workloads on Node 20.17.0, 22, and 24. Only this dedicated workflow applies percentage gates: 50% for mean warm wall time and 100% for approximate heap delta. A 1 ms absolute floor prevents sub-millisecond timer jitter from failing the run.
+- The scheduled/manual `OpenAPI Analysis Benchmark` workflow runs all workloads on the baseline-matched Node 20.17.0, 22.23.2, and 24.19.0. Only this dedicated workflow applies percentage gates: 50% for mean warm wall time and 100% for approximate heap delta. A 1 ms absolute floor prevents sub-millisecond timer jitter from failing the run.
 - Shared-runner variance therefore cannot fail a pull-request check through a percentage comparison.
 
 Run `npm run benchmark:openapi -- --iterations 3 --output report.json` for a full JSON report. Threshold changes require before/after reports, the tested Node versions and host class, and a written reason in the pull request. Microbenchmark gains are not treated as product-speed claims; Rust/WASM replacement is outside this benchmark's scope.
