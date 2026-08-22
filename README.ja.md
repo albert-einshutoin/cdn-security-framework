@@ -108,6 +108,7 @@ package code の正となるソースは `src/**/*.ts` です。root 配下の J
 Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.md) を参照。
 
 ### 運用ドキュメント
+- [OpenAPI導入ガイド](docs/openapi-integration.ja.md) — API contractのinspect、review専用Policy Candidate生成、安全上の制約
 - [CLI リファレンス](docs/cli.ja.md) — `init` / `build` / `emit-waf` / `doctor` / `readiness` / `capabilities` / `explain` / `diff` / `migrate`
 - [プログラマティック API](docs/programmatic-api.ja.md) — `require('cdn-security-framework')` で CI / IaC から直接呼び出し
 - [Compiler strictness](docs/compiler-strictness.ja.md) — phase contract、strict check、残る dynamic area

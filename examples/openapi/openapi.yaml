@@ -1,0 +1,100 @@
+openapi: 3.1.0
+info:
+  title: CDN Security OpenAPI Example
+  version: 1.0.0
+security:
+  - bearerAuth: []
+paths:
+  /health:
+    get:
+      summary: Explicitly public health check
+      security: []
+      responses:
+        '200':
+          description: Healthy
+  /users/{userId}:
+    get:
+      summary: Authenticated user lookup
+      parameters:
+        - $ref: '#/components/parameters/UserId'
+        - $ref: '#/components/parameters/TenantHeader'
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+      responses:
+        '200':
+          description: User details
+  /admin/reports:
+    get:
+      summary: Admin-like route name; privilege is not inferred from the path
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+      responses:
+        '200':
+          description: Report list
+  /documents:
+    post:
+      summary: JSON request body
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/DocumentInput'
+      responses:
+        '201':
+          description: Created
+  /uploads:
+    post:
+      summary: Multipart body with intentionally unknown size
+      parameters:
+        - $ref: '#/components/parameters/TenantHeader'
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+      responses:
+        '202':
+          description: Accepted
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+  parameters:
+    UserId:
+      name: userId
+      in: path
+      required: true
+      schema:
+        type: string
+        maxLength: 64
+    TenantHeader:
+      name: X-Tenant-ID
+      in: header
+      required: true
+      schema:
+        type: string
+        maxLength: 64
+  schemas:
+    DocumentInput:
+      type: object
+      additionalProperties: false
+      required: [title]
+      properties:
+        title:
+          type: string
+          maxLength: 200

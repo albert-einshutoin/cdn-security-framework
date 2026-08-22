@@ -24,6 +24,7 @@ npx cdn-security <subcommand> [options]
 | `diff` | 生成物の drift または policy posture の差分を比較。 |
 | `migrate` | スキーマのバージョン間マイグレーション（現状 v1 のみの stub）。 |
 | `openapi inspect` | Policyやbuild出力を変更せず、ローカルOpenAPIのSecurity Contractを決定的なText/JSONで確認。 |
+| `openapi generate-policy` | 非破壊・review専用Policy Candidateとmeta sidecarを生成。 |
 
 ---
 
@@ -44,6 +45,26 @@ npx cdn-security openapi inspect --input openapi.yaml --workspace-root . --json 
 - parse、reference、resource limitの失敗はstderrへ安定した`OPENAPI_*` codeと安全なmessageを出します。
 
 JSON出力は[`openapi-inspection-v1.schema.json`](../schemas/openapi-inspection-v1.schema.json)に従います。未対応・部分対応の解析結果は明示され、publicとして扱われません。
+
+## `openapi generate-policy`
+
+```bash
+npx cdn-security openapi generate-policy \
+  --input openapi.yaml \
+  --workspace-root . \
+  --profile balanced \
+  --out policy/openapi.candidate.yml
+```
+
+- `--input`、`--profile strict|balanced|permissive`、`--out`は必須です。
+- `--workspace-root`はinput、local `$ref`、2つのoutput fileの境界です。
+- 既存のregular Candidate/sidecar fileには`--force`が必要です。
+- commandはschema-valid YAML Candidateと決定的な`.meta.json` sidecarを生成します。
+  active Policyとのmergeやdeployは行いません。
+- 認証詳細と未対応controlは省略として報告し、推測・近似しません。
+
+runnable example、limit、review workflow、troubleshootingは
+[OpenAPI導入ガイド](openapi-integration.ja.md)を参照してください。
 
 ---
 

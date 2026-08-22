@@ -127,6 +127,11 @@ function assertPackageContents(pack: PackResult) {
     'openapi/policy-candidate.d.ts',
     'docs/openapi-policy-candidates.md',
     'docs/openapi-policy-candidates.ja.md',
+    'docs/openapi-integration.md',
+    'docs/openapi-integration.ja.md',
+    'examples/openapi/README.md',
+    'examples/openapi/README.ja.md',
+    'examples/openapi/openapi.yaml',
     'scripts/compile.js',
     'scripts/compile.d.ts',
     'scripts/policy-lint.js',
@@ -206,22 +211,29 @@ function smokeInstalledPackage(tarballPath: string) {
     const cliPath = path.join(installDir, 'node_modules', '.bin', 'cdn-security');
     const version = run(cliPath, ['--version'], { cwd: installDir }).trim();
     assert.strictEqual(version, require(path.join(repoRoot, 'package.json')).version);
-    const openApiPath = path.join(installDir, 'openapi.json');
-    fs.writeFileSync(openApiPath, JSON.stringify({ openapi: '3.1.0', paths: {} }));
-    const inspection = JSON.parse(run(cliPath, [
-      'openapi', 'inspect', '--input', 'openapi.json', '--workspace-root', installDir, '--json',
-    ], { cwd: installDir }));
-    assert.strictEqual(inspection.schemaVersion, 1);
-    assert.strictEqual(inspection.summary.operationCount, 0);
+    const openApiPath = path.join(installedRoot, 'examples', 'openapi', 'openapi.yaml');
+    fs.mkdirSync(path.join(installDir, 'reports'));
     run(cliPath, [
-      'openapi', 'generate-policy', '--input', 'openapi.json', '--workspace-root', installDir,
+      'openapi', 'inspect', '--input', openApiPath, '--workspace-root', installDir, '--json',
+      '--out', 'reports/openapi-contract.json',
+    ], { cwd: installDir });
+    const inspection = JSON.parse(fs.readFileSync(
+      path.join(installDir, 'reports', 'openapi-contract.json'), 'utf8',
+    ));
+    assert.strictEqual(inspection.schemaVersion, 1);
+    assert.strictEqual(inspection.summary.operationCount, 5);
+    assert.ok(fs.existsSync(path.join(installDir, 'reports', 'openapi-contract.json')));
+    run(cliPath, [
+      'openapi', 'generate-policy', '--input', openApiPath, '--workspace-root', installDir,
       '--profile', 'balanced', '--out', 'openapi.candidate.yml',
     ], { cwd: installDir });
     assert.ok(fs.existsSync(path.join(installDir, 'openapi.candidate.yml')));
     assert.ok(fs.existsSync(path.join(installDir, 'openapi.candidate.meta.json')));
     assertSchemaHints(installedRoot);
 
-    run(cliPath, ['build', '--policy', installedBasePolicy, '--out-dir', 'dist'], {
+    run(cliPath, [
+      'build', '--policy', path.join(installDir, 'openapi.candidate.yml'), '--out-dir', 'dist',
+    ], {
       cwd: installDir,
       env: {
         ...process.env,
