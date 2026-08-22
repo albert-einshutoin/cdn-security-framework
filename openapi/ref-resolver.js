@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.serializeResolvedOpenApiGraph = void 0;
+exports.isResolvedOpenApiGraph = isResolvedOpenApiGraph;
 exports.resolveJsonPointer = resolveJsonPointer;
 exports.resolveOpenApiReferences = resolveOpenApiReferences;
 const node_fs_1 = __importDefault(require("node:fs"));
@@ -12,8 +13,14 @@ const analysis_error_1 = require("./analysis-error");
 const analysis_limits_1 = require("./analysis-limits");
 const load_document_1 = require("./load-document");
 const ref_boundary_1 = require("./ref-boundary");
+const RESOLVED_OPENAPI_GRAPHS = new WeakSet();
 var document_graph_1 = require("./document-graph");
 Object.defineProperty(exports, "serializeResolvedOpenApiGraph", { enumerable: true, get: function () { return document_graph_1.serializeResolvedOpenApiGraph; } });
+function isResolvedOpenApiGraph(value) {
+    return typeof value === 'object' && value !== null
+        && RESOLVED_OPENAPI_GRAPHS.has(value)
+        && Object.isFrozen(value);
+}
 function pointerError(code, sourceUri, pointer) {
     throw new analysis_error_1.OpenApiAnalysisError(code, { sourceUri, pointer });
 }
@@ -218,10 +225,12 @@ function resolveOpenApiReferences(options) {
         from: Object.freeze(reference.from),
         target: Object.freeze(reference.target),
     })));
-    return Object.freeze({
+    const graph = Object.freeze({
         root,
         documents: frozenDocuments,
         references: frozenReferences,
         totalByteSize,
     });
+    RESOLVED_OPENAPI_GRAPHS.add(graph);
+    return graph;
 }

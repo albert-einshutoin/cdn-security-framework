@@ -20,6 +20,8 @@ exports.OPENAPI_ANALYSIS_ERROR_CODES = [
     'OPENAPI_REF_DEPTH_LIMIT',
     'OPENAPI_DOCUMENT_COUNT_LIMIT',
     'OPENAPI_GRAPH_SIZE_LIMIT',
+    'OPENAPI_OPERATION_INVALID',
+    'OPENAPI_OPERATION_LIMIT',
     'OPENAPI_NODE_LIMIT',
     'OPENAPI_INVALID_LIMITS',
 ];
@@ -38,6 +40,8 @@ const SAFE_MESSAGES = {
     OPENAPI_REF_DEPTH_LIMIT: 'OpenAPI reference depth limit was exceeded.',
     OPENAPI_DOCUMENT_COUNT_LIMIT: 'OpenAPI resolved document limit was exceeded.',
     OPENAPI_GRAPH_SIZE_LIMIT: 'OpenAPI resolved graph size limit was exceeded.',
+    OPENAPI_OPERATION_INVALID: 'OpenAPI operation is invalid.',
+    OPENAPI_OPERATION_LIMIT: 'OpenAPI operation limit was exceeded.',
     OPENAPI_NODE_LIMIT: 'OpenAPI analysis node limit was exceeded.',
     OPENAPI_INVALID_LIMITS: 'OpenAPI analysis limits are invalid.',
 };

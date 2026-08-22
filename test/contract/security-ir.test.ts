@@ -205,6 +205,12 @@ describe('Security IR v1', () => {
     unsafe.operations[0].request.queryParameters[0].constraints.enum = ['Bearer actual-secret'];
     expect(() => createSecurityContract(unsafe)).toThrow('secret-like value');
 
+    for (const token of ['sk-proj-', 'ghp_', 'github_pat_', 'AKIA'].map((prefix) => `${prefix}${'a'.repeat(8)}`)) {
+      const prefixed = structuredClone(baseInput);
+      prefixed.operations[0].request.queryParameters[0].constraints.enum = [token];
+      expect(() => createSecurityContract(prefixed)).toThrow('secret-like value');
+    }
+
     const invalid = structuredClone(baseInput);
     invalid.operations[0].request.body!.constraints.maxProperties = -1;
     expect(() => createSecurityContract(invalid)).toThrow('invalid constraint maxProperties');

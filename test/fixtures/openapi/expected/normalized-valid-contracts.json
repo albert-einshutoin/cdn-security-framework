@@ -1,0 +1,315 @@
+[
+  {
+    "name": "openapi-3.0.json",
+    "contract": {
+      "schemaVersion": 1,
+      "source": "openapi",
+      "capabilities": {
+        "routes": "complete",
+        "parameters": "complete",
+        "requestBodies": "complete",
+        "authentication": "unsupported"
+      },
+      "operations": [
+        {
+          "routeKey": "GET /health",
+          "method": "GET",
+          "path": "/health",
+          "operationId": "health",
+          "exposure": "unknown",
+          "auth": {
+            "mode": "unknown",
+            "alternatives": []
+          },
+          "request": {
+            "contentTypes": [],
+            "requiredHeaders": [],
+            "queryParameters": [],
+            "pathParameters": [],
+            "headerParameters": [],
+            "cookieParameters": []
+          },
+          "provenance": [
+            {
+              "source": "openapi",
+              "uri": "valid/openapi-3.0.json",
+              "pointer": "/paths/~1health/get",
+              "digest": "sha256:f0f365d241ca34c52fbb836a99f0b1623ada7fb193055c5f6f40cbe6572f7bfd",
+              "analyzer": "openapi-operation-normalizer-v1",
+              "capability": "request-surface-v1",
+              "complete": true
+            }
+          ],
+          "metadata": {
+            "deprecated": false,
+            "tags": []
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "openapi-3.0.yaml",
+    "contract": {
+      "schemaVersion": 1,
+      "source": "openapi",
+      "capabilities": {
+        "routes": "complete",
+        "parameters": "complete",
+        "requestBodies": "partial",
+        "authentication": "unsupported"
+      },
+      "operations": [
+        {
+          "routeKey": "GET /public",
+          "method": "GET",
+          "path": "/public",
+          "operationId": "publicStatus",
+          "exposure": "unknown",
+          "auth": {
+            "mode": "unknown",
+            "alternatives": []
+          },
+          "request": {
+            "contentTypes": [],
+            "requiredHeaders": [],
+            "queryParameters": [],
+            "pathParameters": [],
+            "headerParameters": [],
+            "cookieParameters": []
+          },
+          "provenance": [
+            {
+              "source": "openapi",
+              "uri": "valid/openapi-3.0.yaml",
+              "pointer": "/paths/~1public/get",
+              "digest": "sha256:083ddfb67e3616074e16538ede359da045e0f7fc137f12a1337d668ff080b061",
+              "analyzer": "openapi-operation-normalizer-v1",
+              "capability": "request-surface-v1",
+              "complete": true
+            }
+          ],
+          "metadata": {
+            "deprecated": false,
+            "tags": [
+              "status"
+            ]
+          }
+        },
+        {
+          "routeKey": "POST /users/{userId}",
+          "method": "POST",
+          "path": "/users/{userId}",
+          "operationId": "updateUser",
+          "exposure": "unknown",
+          "auth": {
+            "mode": "unknown",
+            "alternatives": []
+          },
+          "request": {
+            "contentTypes": [
+              "application/json",
+              "application/x-www-form-urlencoded",
+              "multipart/form-data",
+              "text/plain"
+            ],
+            "requiredHeaders": [
+              "x-tenant-id"
+            ],
+            "queryParameters": [
+              {
+                "name": "page",
+                "required": false,
+                "constraints": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "unsupportedReasons": []
+              }
+            ],
+            "pathParameters": [
+              {
+                "name": "userId",
+                "required": true,
+                "constraints": {
+                  "type": "string",
+                  "maxLength": 64
+                },
+                "unsupportedReasons": []
+              }
+            ],
+            "headerParameters": [
+              {
+                "name": "x-tenant-id",
+                "required": true,
+                "constraints": {
+                  "type": "string"
+                },
+                "unsupportedReasons": []
+              }
+            ],
+            "cookieParameters": [
+              {
+                "name": "session",
+                "required": false,
+                "constraints": {
+                  "type": "string"
+                },
+                "unsupportedReasons": []
+              }
+            ],
+            "body": {
+              "required": true,
+              "constraints": {
+                "type": "unknown"
+              },
+              "unsupportedReasons": [
+                "requestBody:multiple-schemas"
+              ]
+            }
+          },
+          "provenance": [
+            {
+              "source": "openapi",
+              "uri": "valid/openapi-3.0.yaml",
+              "pointer": "/paths/~1users~1{userId}/post",
+              "digest": "sha256:083ddfb67e3616074e16538ede359da045e0f7fc137f12a1337d668ff080b061",
+              "analyzer": "openapi-operation-normalizer-v1",
+              "capability": "request-surface-v1",
+              "complete": true
+            }
+          ],
+          "metadata": {
+            "deprecated": true,
+            "tags": [
+              "users",
+              "write"
+            ]
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "openapi-3.1.json",
+    "contract": {
+      "schemaVersion": 1,
+      "source": "openapi",
+      "capabilities": {
+        "routes": "complete",
+        "parameters": "partial",
+        "requestBodies": "complete",
+        "authentication": "unsupported"
+      },
+      "operations": [
+        {
+          "routeKey": "GET /search",
+          "method": "GET",
+          "path": "/search",
+          "exposure": "unknown",
+          "auth": {
+            "mode": "unknown",
+            "alternatives": []
+          },
+          "request": {
+            "contentTypes": [],
+            "requiredHeaders": [],
+            "queryParameters": [
+              {
+                "name": "kind",
+                "required": false,
+                "constraints": {
+                  "type": "string",
+                  "enum": [
+                    "team",
+                    "user",
+                    null
+                  ]
+                },
+                "unsupportedReasons": [
+                  "schema:nullable-union"
+                ]
+              }
+            ],
+            "pathParameters": [],
+            "headerParameters": [],
+            "cookieParameters": []
+          },
+          "provenance": [
+            {
+              "source": "openapi",
+              "uri": "valid/openapi-3.1.json",
+              "pointer": "/paths/~1search/get",
+              "digest": "sha256:8e25f6806c7ee9c9219340cca9ada23a9c0796a1f96b6566b4d2e16772ea4c7e",
+              "analyzer": "openapi-operation-normalizer-v1",
+              "capability": "request-surface-v1",
+              "complete": true
+            }
+          ],
+          "metadata": {
+            "deprecated": false,
+            "tags": []
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "openapi-3.1.yaml",
+    "contract": {
+      "schemaVersion": 1,
+      "source": "openapi",
+      "capabilities": {
+        "routes": "complete",
+        "parameters": "complete",
+        "requestBodies": "complete",
+        "authentication": "unsupported"
+      },
+      "operations": [
+        {
+          "routeKey": "POST /messages",
+          "method": "POST",
+          "path": "/messages",
+          "exposure": "unknown",
+          "auth": {
+            "mode": "unknown",
+            "alternatives": []
+          },
+          "request": {
+            "contentTypes": [
+              "text/plain"
+            ],
+            "requiredHeaders": [],
+            "queryParameters": [],
+            "pathParameters": [],
+            "headerParameters": [],
+            "cookieParameters": [],
+            "body": {
+              "required": false,
+              "constraints": {
+                "type": "string",
+                "maxLength": 4096
+              },
+              "unsupportedReasons": []
+            }
+          },
+          "provenance": [
+            {
+              "source": "openapi",
+              "uri": "valid/openapi-3.1.yaml",
+              "pointer": "/paths/~1messages/post",
+              "digest": "sha256:691bbbe228688d8b3d0ee32d40fb1b000c03d9519d11ba2830a562214a8d3f52",
+              "analyzer": "openapi-operation-normalizer-v1",
+              "capability": "request-surface-v1",
+              "complete": true
+            }
+          ],
+          "metadata": {
+            "deprecated": false,
+            "tags": []
+          }
+        }
+      ]
+    }
+  }
+]
