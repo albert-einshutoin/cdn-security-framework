@@ -184,6 +184,13 @@ function loadOpenApiDocument(options) {
         if (!opened.isFile() || opened.dev !== beforeRead.dev || opened.ino !== beforeRead.ino) {
             throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_INPUT_NOT_FOUND', { sourceUri });
         }
+        const openedRealPath = node_fs_1.default.realpathSync(resolvedPath);
+        const openedPath = node_fs_1.default.statSync(openedRealPath);
+        if (!(0, ref_boundary_1.isPathWithinWorkspace)(rootRealPath, openedRealPath)
+            || openedPath.dev !== opened.dev
+            || openedPath.ino !== opened.ino) {
+            throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_REF_OUTSIDE_ROOT', { sourceUri });
+        }
         if (opened.size > limits.maxDocumentBytes) {
             throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_DOCUMENT_TOO_LARGE', { sourceUri });
         }

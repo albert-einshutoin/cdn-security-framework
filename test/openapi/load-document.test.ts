@@ -164,6 +164,22 @@ describe('loadOpenApiDocument', () => {
     })).toThrow(expect.objectContaining({ code: 'OPENAPI_REMOTE_REF_DISABLED' }));
   });
 
+  test('rechecks workspace confinement after opening the descriptor', () => {
+    const fixture = temporaryFile('inside.yaml', 'openapi: 3.1.0\npaths: {}\n');
+    const outside = temporaryFile('outside.yaml', 'openapi: 3.1.0\npaths: {}\n');
+    const realpathSync = fs.realpathSync.bind(fs);
+    let calls = 0;
+    vi.spyOn(fs, 'realpathSync').mockImplementation((inputPath) => {
+      calls += 1;
+      return calls === 5 ? outside.inputPath : realpathSync(inputPath);
+    });
+
+    expect(() => loadOpenApiDocument({
+      inputPath: fixture.inputPath,
+      workspaceRoot: fixture.root,
+    })).toThrow(expect.objectContaining({ code: 'OPENAPI_REF_OUTSIDE_ROOT' }));
+  });
+
   test('never includes source content or example secrets in parse errors', () => {
     const fixture = temporaryFile(
       'secret.yaml',

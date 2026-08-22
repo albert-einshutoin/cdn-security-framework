@@ -185,6 +185,13 @@ export function loadOpenApiDocument(options: LoadOpenApiDocumentOptions): Loaded
     if (!opened.isFile() || opened.dev !== beforeRead.dev || opened.ino !== beforeRead.ino) {
       throw new OpenApiAnalysisError('OPENAPI_INPUT_NOT_FOUND', { sourceUri });
     }
+    const openedRealPath = fs.realpathSync(resolvedPath);
+    const openedPath = fs.statSync(openedRealPath);
+    if (!isPathWithinWorkspace(rootRealPath, openedRealPath)
+      || openedPath.dev !== opened.dev
+      || openedPath.ino !== opened.ino) {
+      throw new OpenApiAnalysisError('OPENAPI_REF_OUTSIDE_ROOT', { sourceUri });
+    }
     if (opened.size > limits.maxDocumentBytes) {
       throw new OpenApiAnalysisError('OPENAPI_DOCUMENT_TOO_LARGE', { sourceUri });
     }
