@@ -120,8 +120,8 @@ export function compareRequestContracts(
     const requiredHeaders = input.allowed.defaults.requiredHeaders;
     const policyHeaders = new Set(requiredHeaders?.values ?? []);
     const checkedHeaders = new Set(preflightBypassesValidation ? [] : policyHeaders);
-    const requiredHeadersPointer = requiredHeaders?.source === 'runtime-default'
-      ? '/request' : '/request/block/header_missing';
+    const requiredHeadersPointer = requiredHeaders?.source === 'configured'
+      ? '/request/block/header_missing' : '/request';
     if (!preflightBypassesValidation) {
       for (const { rule, relation } of matchingAuthRules(operation, input.allowed)) {
         if (relation === 'definitely-covered' && rule.auth.verifiability[input.target] === 'enforced'

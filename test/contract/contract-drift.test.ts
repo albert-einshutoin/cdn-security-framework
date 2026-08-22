@@ -508,10 +508,15 @@ describe('OpenAPI and Policy contract drift', () => {
     ));
     expect(emptyCorsRequest.find(({ ruleId }) => ruleId === 'SC-REQUEST-002')?.severity).toBe('error');
 
-    const runtimeDefault = compareRequestContracts(input(
+    const runtimeDefaultInput = input(
       contract([operation('GET', '/items')]), policy({ request: { allow_methods: ['GET'] } }),
-    ));
+    );
+    const runtimeDefault = compareRequestContracts(runtimeDefaultInput);
     expect(runtimeDefault.find(({ ruleId }) => ruleId === 'SC-REQUEST-002')
+      ?.evidence.at(-1)?.pointer).toBe('/request');
+    delete (runtimeDefaultInput.allowed.defaults.requiredHeaders as { source?: string }).source;
+    expect(compareRequestContracts(runtimeDefaultInput)
+      .find(({ ruleId }) => ruleId === 'SC-REQUEST-002')
       ?.evidence.at(-1)?.pointer).toBe('/request');
   });
 
