@@ -3,6 +3,7 @@ import type { SecurityFindingV1 } from '../finding';
 import {
   evidenceFor,
   makeFinding,
+  matchingAuthRules,
   stableFindings,
   validateComparisonInput,
   type ContractDriftInput,
@@ -116,7 +117,16 @@ export function compareRequestContracts(
     ]);
     const requiredHeaders = input.allowed.defaults.requiredHeaders;
     const policyHeaders = new Set(requiredHeaders?.values ?? []);
-    const unchecked = [...declaredHeaders].filter((header) => !policyHeaders.has(header)).sort();
+    const checkedHeaders = new Set(policyHeaders);
+    if (!preflightBypassesValidation) {
+      for (const { rule, relation } of matchingAuthRules(operation, input.allowed)) {
+        if (relation === 'definitely-covered' && rule.auth.verifiability[input.target] === 'enforced'
+          && rule.auth.credential?.location === 'header') {
+          rule.auth.credential.names.forEach((header) => checkedHeaders.add(header));
+        }
+      }
+    }
+    const unchecked = [...declaredHeaders].filter((header) => !checkedHeaders.has(header)).sort();
     if (requiredHeaders && unchecked.length > 0) findings.push(makeFinding({
       ruleId: 'SC-REQUEST-001',
       severity: 'info',
@@ -126,7 +136,7 @@ export function compareRequestContracts(
       message: `The selected Edge target does not require one or more declared headers. ${APPLICATION_DISCLAIMER}`,
       route: { method: operation.method, path: operation.path, operationId: operation.operationId },
       expected: { requiredHeaders: [...declaredHeaders].sort() },
-      actual: { edgeRequiredHeaders: [...policyHeaders].sort(), unchecked },
+      actual: { edgeRequiredHeaders: [...checkedHeaders].sort(), unchecked },
       evidence: evidenceFor(operation, input.allowed, '/request/block/header_missing', 'request-drift-v1'),
       remediation: { summary: 'Decide whether these headers belong at Edge or only in Application validation.', safeAutoFix: false },
     }));

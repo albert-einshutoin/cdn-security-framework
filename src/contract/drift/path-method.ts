@@ -119,7 +119,13 @@ export function comparePathMethodContracts(input: ContractDriftInput): SecurityF
             relations: [...new Set(relations.length === 0 ? ['unknown'] : relations)].sort(),
             policyRule: rule.name,
           },
-          evidence: [policyEvidence(allowed, `${rule.pointer}/match/path_prefixes`, 'path-method-drift-v1')],
+          evidence: [policyEvidence(
+            allowed,
+            rule.match.values.includes(prefix)
+              ? `${rule.pointer}/match/path_prefixes`
+              : `${rule.pointer}/auth_gate`,
+            'path-method-drift-v1',
+          )],
           remediation: { summary: 'Narrow the prefix or document the intentionally broader Edge surface.', safeAutoFix: false },
         }));
       }

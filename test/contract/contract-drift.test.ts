@@ -128,6 +128,9 @@ describe('OpenAPI and Policy contract drift', () => {
     ));
     expect(defaultAuthPrefixes.filter(({ ruleId }) => ruleId === 'SC-EXPOSURE-003')
       .map(({ route }) => route?.path)).toEqual(['/admin', '/docs', '/swagger']);
+    expect(defaultAuthPrefixes.find(({ ruleId, route }) => (
+      ruleId === 'SC-EXPOSURE-003' && route?.path === '/admin'
+    ))?.evidence.at(-1)?.pointer).toBe('/routes/0/auth_gate');
 
     const renamedParameter = comparePathMethodContracts(input(
       contract([operation('GET', '/users/{openapiId}')]),
@@ -387,6 +390,23 @@ describe('OpenAPI and Policy contract drift', () => {
       policy({ request: { block: { header_missing: ['authorization'] } } }),
     ));
     expect(httpAuthHeaderRequest.some(({ ruleId }) => ruleId === 'SC-REQUEST-002')).toBe(false);
+
+    const gatedHttpAuthHeader = compareRequestContracts(input(
+      contract([operation('GET', '/private', {
+        exposure: 'authenticated',
+        auth: {
+          mode: 'alternatives',
+          alternatives: [{
+            anonymous: false,
+            schemes: [{ name: 'basic', kind: 'basic', scopes: [], capability: 'supported' }],
+          }],
+        },
+      })]),
+      policy({ routes: [{
+        name: 'private', match: { path_prefixes: ['/private'] }, auth_gate: { type: 'basic_auth' },
+      }] }),
+    ));
+    expect(gatedHttpAuthHeader.some(({ ruleId }) => ruleId === 'SC-REQUEST-001')).toBe(false);
 
     const fractionalRatio = compareRequestContracts(input(
       contract([operation('GET', '/ratio', {
