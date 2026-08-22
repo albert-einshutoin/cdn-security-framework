@@ -159,6 +159,8 @@ const TARGET_CAPABILITIES: AllowedSurfaceModelV1['targetCapabilities'] = {
   ],
 };
 
+const AUTH_PROTECTED_CACHE_CONTROL = 'no-store, no-cache, must-revalidate, private';
+
 function normalizedMethods(methods: readonly string[]): string[] {
   return [...new Set(methods.map((method) => method.trim().toUpperCase()).filter(Boolean))].sort();
 }
@@ -354,7 +356,9 @@ export function projectPolicyToAllowedSurface(
             cacheControl: route.response.cache_control,
           }),
           ...(index === selectedResponseRule ? {
-            effectiveCacheControl: compilerResponse.adminCacheControl,
+            effectiveCacheControl: compilerResponse.forceVaryAuth && route.auth_gate
+              ? AUTH_PROTECTED_CACHE_CONTROL
+              : compilerResponse.adminCacheControl,
           } : {}),
           selection: index === selectedResponseRule ? 'first-auth-or-cache-rule' : 'not-selected',
         },

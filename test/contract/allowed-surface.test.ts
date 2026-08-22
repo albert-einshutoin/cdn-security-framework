@@ -217,7 +217,10 @@ describe('Allowed Surface Model v1', () => {
         preAuthBypassCondition: 'none',
         credentialEnvironmentNames: ['FIRST_TOKEN'],
       },
-      response: { selection: 'first-auth-or-cache-rule', effectiveCacheControl: 'no-store' },
+      response: {
+        selection: 'first-auth-or-cache-rule',
+        effectiveCacheControl: 'no-store, no-cache, must-revalidate, private',
+      },
     });
     expect(projected.orderedRules[2].auth).toMatchObject({ kind: 'none', typeSource: 'absent' });
     expect(projected.orderedRules[3].auth).toMatchObject({
@@ -296,6 +299,24 @@ describe('Allowed Surface Model v1', () => {
       aws: 'unsupported-configuration',
       cloudflare: 'unsupported-configuration',
     });
+  });
+
+  test('projects the force-vary no-store override as effective cache control', () => {
+    const input = policy() as CDNSecurityFrameworkPolicy;
+    input.routes![0].response = { cache_control: 'private, max-age=300' };
+    expect(projectPolicyToAllowedSurface(input, {
+      policyDigest: digest,
+      sourceUri: 'policy/security.yml',
+    }).orderedRules[0].response).toMatchObject({
+      cacheControl: 'private, max-age=300',
+      effectiveCacheControl: 'no-store, no-cache, must-revalidate, private',
+    });
+
+    input.response_headers.force_vary_auth = false;
+    expect(projectPolicyToAllowedSurface(input, {
+      policyDigest: digest,
+      sourceUri: 'policy/security.yml',
+    }).orderedRules[0].response.effectiveCacheControl).toBe('private, max-age=300');
   });
 
   test('is pure, ignores credential values, and rejects unsafe evidence metadata', () => {

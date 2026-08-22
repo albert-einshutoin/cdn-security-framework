@@ -117,7 +117,7 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": "no-store",
+          "effectiveCacheControl": "no-store, no-cache, must-revalidate, private",
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -560,7 +560,7 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": "no-store",
+          "effectiveCacheControl": "no-store, no-cache, must-revalidate, private",
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -983,7 +983,7 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": "no-store",
+          "effectiveCacheControl": "no-store, no-cache, must-revalidate, private",
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -1227,7 +1227,7 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": "no-store",
+          "effectiveCacheControl": "no-store, no-cache, must-revalidate, private",
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -1487,7 +1487,7 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": "no-store",
+          "effectiveCacheControl": "no-store, no-cache, must-revalidate, private",
           "selection": "first-auth-or-cache-rule"
         }
       }
@@ -1737,7 +1737,7 @@
         },
         "response": {
           "cacheControl": "no-store",
-          "effectiveCacheControl": "no-store",
+          "effectiveCacheControl": "no-store, no-cache, must-revalidate, private",
           "selection": "first-auth-or-cache-rule"
         }
       }
