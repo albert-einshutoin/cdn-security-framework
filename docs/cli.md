@@ -23,6 +23,27 @@ npx cdn-security <subcommand> [options]
 | `visualize` | Render a deterministic policy control map in Mermaid or static HTML, including supported/monitor/unsupported/target-specific status. |
 | `diff` | Compare generated output drift or semantic policy posture changes between policies. |
 | `migrate` | Migrate a policy file between schema versions (stub — v1 is the only shipped version today). |
+| `openapi inspect` | Inspect local OpenAPI security contracts as deterministic text or JSON without changing policy or build output. |
+
+---
+
+## `openapi inspect`
+
+```bash
+npx cdn-security openapi inspect --input openapi.yaml --workspace-root .
+npx cdn-security openapi inspect --input openapi.yaml --workspace-root . --json
+npx cdn-security openapi inspect --input openapi.yaml --workspace-root . --json --out reports/openapi-contract.json
+```
+
+- `--input <path>` is required and accepts OpenAPI 3.0/3.1 YAML or JSON inside `--workspace-root`.
+- Local `$ref` files must stay inside the workspace. Remote and `file:` references remain disabled.
+- Text output summarizes version, digest, operation exposure/auth, content types, parameters, capabilities, and limit warnings.
+- `--json` emits deterministic Security IR plus safe analyzer metadata and diagnostics. It contains no timestamp, absolute path, or raw OpenAPI document.
+- `--out` requires `--json`, an existing parent directory, and a path inside the workspace. Existing files require `--force`.
+- OpenAPI input, `policy/`, and `dist/` are protected output locations. Inspection never generates or deploys policy.
+- Parse, reference, and resource-limit failures use stable `OPENAPI_*` codes and safe messages on stderr.
+
+The JSON output follows [`openapi-inspection-v1.schema.json`](../schemas/openapi-inspection-v1.schema.json). Unsupported or partial analysis remains explicit; it is never treated as public access.
 
 ---
 

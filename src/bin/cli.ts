@@ -3194,6 +3194,14 @@ program
   .description('CDN edge security: init policy YAML and build runtime code from policy')
   .version(require(path.join(pkgRoot, 'package.json')).version);
 
+const { registerOpenApiInspectCommand } = require(path.join(
+  pkgRoot,
+  'bin',
+  'commands',
+  'openapi-inspect.js',
+));
+registerOpenApiInspectCommand(program);
+
 program
   .command('init')
   .description('Scaffold policy/security.yml from a profile, archetype, or guided setup')

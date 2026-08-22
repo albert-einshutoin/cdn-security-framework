@@ -20,6 +20,7 @@ docs/SELF-REVIEW.md
 # tsc output (generated from src/ — see tsconfig.json rootDir/outDir)
 /bin/*.js
 /bin/*.d.ts
+/bin/commands/
 /scripts/*.js
 /scripts/*.d.ts
 /scripts/lib/

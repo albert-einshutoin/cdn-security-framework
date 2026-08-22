@@ -46,6 +46,7 @@
       "default": "./recommendation/index.js"
     },
     "./schemas/security-ir-v1.schema.json": "./schemas/security-ir-v1.schema.json",
+    "./schemas/openapi-inspection-v1.schema.json": "./schemas/openapi-inspection-v1.schema.json",
     "./bin/cli": "./bin/cli.js",
     "./bin/cli.js": "./bin/cli.js"
   },

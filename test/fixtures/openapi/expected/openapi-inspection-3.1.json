@@ -1,0 +1,102 @@
+{
+  "schemaVersion": 1,
+  "analyzer": {
+    "name": "cdn-security-openapi-inspect",
+    "version": 1,
+    "openapiVersion": "3.1",
+    "sourceDigest": "sha256:8e25f6806c7ee9c9219340cca9ada23a9c0796a1f96b6566b4d2e16772ea4c7e"
+  },
+  "summary": {
+    "operationCount": 1,
+    "exposures": {
+      "public": 0,
+      "authenticated": 0,
+      "privileged": 0,
+      "unknown": 1
+    },
+    "resolvedDocumentCount": 1,
+    "referenceCount": 0,
+    "totalByteSize": 438
+  },
+  "capabilities": {
+    "routes": "complete",
+    "parameters": "partial",
+    "requestBodies": "complete",
+    "authentication": "partial"
+  },
+  "diagnostics": [
+    {
+      "code": "OPENAPI_CAPABILITY_PARTIAL",
+      "level": "warning",
+      "message": "OpenAPI capability is only partially supported.",
+      "capability": "parameters"
+    },
+    {
+      "code": "OPENAPI_CAPABILITY_PARTIAL",
+      "level": "warning",
+      "message": "OpenAPI capability is only partially supported.",
+      "capability": "authentication"
+    }
+  ],
+  "contract": {
+    "schemaVersion": 1,
+    "source": "openapi",
+    "capabilities": {
+      "routes": "complete",
+      "parameters": "partial",
+      "requestBodies": "complete",
+      "authentication": "partial"
+    },
+    "operations": [
+      {
+        "routeKey": "GET /search",
+        "method": "GET",
+        "path": "/search",
+        "exposure": "unknown",
+        "auth": {
+          "mode": "unknown",
+          "alternatives": []
+        },
+        "request": {
+          "contentTypes": [],
+          "requiredHeaders": [],
+          "queryParameters": [
+            {
+              "name": "kind",
+              "required": false,
+              "constraints": {
+                "type": "string",
+                "enum": [
+                  "team",
+                  "user",
+                  null
+                ]
+              },
+              "unsupportedReasons": [
+                "schema:nullable-union"
+              ]
+            }
+          ],
+          "pathParameters": [],
+          "headerParameters": [],
+          "cookieParameters": []
+        },
+        "provenance": [
+          {
+            "source": "openapi",
+            "uri": "valid/openapi-3.1.json",
+            "pointer": "/paths/~1search/get",
+            "digest": "sha256:8e25f6806c7ee9c9219340cca9ada23a9c0796a1f96b6566b4d2e16772ea4c7e",
+            "analyzer": "openapi-operation-normalizer-v1",
+            "capability": "request-surface-v1",
+            "complete": true
+          }
+        ],
+        "metadata": {
+          "deprecated": false,
+          "tags": []
+        }
+      }
+    ]
+  }
+}
