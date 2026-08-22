@@ -1,5 +1,9 @@
 "use strict";
+var __importDefault = (this && this.__importDefault) || function (mod) {
+    return (mod && mod.__esModule) ? mod : { "default": mod };
+};
 Object.defineProperty(exports, "__esModule", { value: true });
+exports.inspectOpenApiForCli = inspectOpenApiForCli;
 exports.inspectOpenApi = inspectOpenApi;
 exports.formatOpenApiInspectionJson = formatOpenApiInspectionJson;
 exports.formatOpenApiInspectionText = formatOpenApiInspectionText;
@@ -27,7 +31,7 @@ function limitDiagnostic(metric, used, limit) {
 function escapeTerminalText(value) {
     return value.replace(/[\p{Cc}\p{Cf}]/gu, (character) => (`\\u{${character.codePointAt(0)?.toString(16).padStart(4, '0')}}`));
 }
-function inspectOpenApi(options) {
+function inspectOpenApiForCli(options) {
     const limits = (0, analysis_limits_1.validateOpenApiAnalysisLimits)({
         ...analysis_limits_1.DEFAULT_OPENAPI_ANALYSIS_LIMITS,
         ...(options.limits ?? {}),
@@ -66,7 +70,7 @@ function inspectOpenApi(options) {
     ])
         if (diagnostic)
             diagnostics.push(diagnostic);
-    return {
+    const report = {
         schemaVersion: 1,
         analyzer: {
             name: 'cdn-security-openapi-inspect',
@@ -85,6 +89,14 @@ function inspectOpenApi(options) {
         diagnostics,
         contract,
     };
+    const workspaceRoot = node_fs_1.default.realpathSync(options.workspaceRoot);
+    return {
+        report,
+        sourcePaths: graph.documents.map(({ sourceUri }) => (node_path_1.default.resolve(workspaceRoot, ...sourceUri.split('/').map(decodeURIComponent)))),
+    };
+}
+function inspectOpenApi(options) {
+    return inspectOpenApiForCli(options).report;
 }
 function formatOpenApiInspectionJson(report) {
     return `${JSON.stringify(report, null, 2)}\n`;
@@ -116,3 +128,5 @@ function formatOpenApiInspectionText(report) {
         '',
     ].join('\n');
 }
+const node_fs_1 = __importDefault(require("node:fs"));
+const node_path_1 = __importDefault(require("node:path"));

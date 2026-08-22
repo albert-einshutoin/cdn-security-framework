@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.loadOpenApiDocument = void 0;
+exports.inspectOpenApi = exports.formatOpenApiInspectionText = exports.formatOpenApiInspectionJson = exports.loadOpenApiDocument = void 0;
 __exportStar(require("./analysis-error"), exports);
 __exportStar(require("./analysis-limits"), exports);
 var load_document_1 = require("./load-document");
@@ -23,4 +23,7 @@ __exportStar(require("./document-graph"), exports);
 __exportStar(require("./operation-normalizer"), exports);
 __exportStar(require("./ref-resolver"), exports);
 __exportStar(require("./ref-boundary"), exports);
-__exportStar(require("./inspect"), exports);
+var inspect_1 = require("./inspect");
+Object.defineProperty(exports, "formatOpenApiInspectionJson", { enumerable: true, get: function () { return inspect_1.formatOpenApiInspectionJson; } });
+Object.defineProperty(exports, "formatOpenApiInspectionText", { enumerable: true, get: function () { return inspect_1.formatOpenApiInspectionText; } });
+Object.defineProperty(exports, "inspectOpenApi", { enumerable: true, get: function () { return inspect_1.inspectOpenApi; } });

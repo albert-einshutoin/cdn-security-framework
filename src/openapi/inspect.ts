@@ -49,6 +49,11 @@ export interface OpenApiInspectionV1 {
   contract: SecurityContractV1;
 }
 
+export interface OpenApiInspectionForCli {
+  report: OpenApiInspectionV1;
+  sourcePaths: readonly string[];
+}
+
 const CAPABILITY_MESSAGES: Record<CapabilityLevelV1, string | undefined> = {
   complete: undefined,
   partial: 'OpenAPI capability is only partially supported.',
@@ -77,7 +82,7 @@ function escapeTerminalText(value: string): string {
   ));
 }
 
-export function inspectOpenApi(options: InspectOpenApiOptions): OpenApiInspectionV1 {
+export function inspectOpenApiForCli(options: InspectOpenApiOptions): OpenApiInspectionForCli {
   const limits = validateOpenApiAnalysisLimits({
     ...DEFAULT_OPENAPI_ANALYSIS_LIMITS,
     ...(options.limits ?? {}),
@@ -115,7 +120,7 @@ export function inspectOpenApi(options: InspectOpenApiOptions): OpenApiInspectio
     limitDiagnostic('operations', contract.operations.length, limits.maxOperations),
   ]) if (diagnostic) diagnostics.push(diagnostic);
 
-  return {
+  const report: OpenApiInspectionV1 = {
     schemaVersion: 1,
     analyzer: {
       name: 'cdn-security-openapi-inspect',
@@ -134,6 +139,17 @@ export function inspectOpenApi(options: InspectOpenApiOptions): OpenApiInspectio
     diagnostics,
     contract,
   };
+  const workspaceRoot = fs.realpathSync(options.workspaceRoot);
+  return {
+    report,
+    sourcePaths: graph.documents.map(({ sourceUri }) => (
+      path.resolve(workspaceRoot, ...sourceUri.split('/').map(decodeURIComponent))
+    )),
+  };
+}
+
+export function inspectOpenApi(options: InspectOpenApiOptions): OpenApiInspectionV1 {
+  return inspectOpenApiForCli(options).report;
 }
 
 export function formatOpenApiInspectionJson(report: OpenApiInspectionV1): string {
@@ -167,3 +183,5 @@ export function formatOpenApiInspectionText(report: OpenApiInspectionV1): string
     '',
   ].join('\n');
 }
+import fs from 'node:fs';
+import path from 'node:path';

@@ -6,10 +6,10 @@ import type { Command } from 'commander';
 import {
   formatOpenApiInspectionJson,
   formatOpenApiInspectionText,
-  inspectOpenApi,
   isPathWithinWorkspace,
   OpenApiAnalysisError,
 } from '../../openapi';
+import { inspectOpenApiForCli } from '../../openapi/inspect';
 
 interface OpenApiInspectCliOptions {
   input: string;
@@ -38,15 +38,21 @@ interface OutputTarget {
   parent: string;
   parentDevice: number;
   parentInode: number;
-  inputDevice: number;
-  inputInode: number;
+  sourceFiles: Array<{ device: number; inode: number }>;
 }
 
 function sameFile(left: fs.Stats, right: { device: number; inode: number }): boolean {
   return left.dev === right.device && left.ino === right.inode;
 }
 
-function outputPath(options: OpenApiInspectCliOptions): OutputTarget {
+function isSourceFile(
+  candidate: fs.Stats,
+  sourceFiles: ReadonlyArray<{ device: number; inode: number }>,
+): boolean {
+  return sourceFiles.some((source) => sameFile(candidate, source));
+}
+
+function outputPath(options: OpenApiInspectCliOptions, sourcePaths: readonly string[]): OutputTarget {
   if (!options.json) {
     throw new OpenApiInspectCliError(
       'OPENAPI_OUTPUT_REQUIRES_JSON',
@@ -99,9 +105,12 @@ function outputPath(options: OpenApiInspectCliOptions): OutputTarget {
       'OpenAPI output must be inside the workspace root.',
     );
   }
-  const inputRealPath = fs.realpathSync(input);
-  const inputStats = fs.statSync(inputRealPath);
-  if (requested === inputRealPath
+  const sourceRealPaths = sourcePaths.map((sourcePath) => fs.realpathSync(sourcePath));
+  const sourceFiles = sourceRealPaths.map((sourcePath) => {
+    const stats = fs.statSync(sourcePath);
+    return { device: stats.dev, inode: stats.ino };
+  });
+  if (sourceRealPaths.includes(requested)
     || ['policy', 'dist'].some((directory) => (
       isPathWithinWorkspace(path.join(workspaceRoot, directory), requested)
     ))) {
@@ -119,7 +128,7 @@ function outputPath(options: OpenApiInspectCliOptions): OutputTarget {
       );
     }
     if (!existing.isFile() || existing.isSymbolicLink() || existing.nlink > 1
-      || sameFile(existing, { device: inputStats.dev, inode: inputStats.ino })) {
+      || isSourceFile(existing, sourceFiles)) {
       throw new OpenApiInspectCliError(
         'OPENAPI_OUTPUT_PROTECTED',
         'OpenAPI output must be a regular file.',
@@ -132,8 +141,7 @@ function outputPath(options: OpenApiInspectCliOptions): OutputTarget {
     parent,
     parentDevice: parentStats.dev,
     parentInode: parentStats.ino,
-    inputDevice: inputStats.dev,
-    inputInode: inputStats.ino,
+    sourceFiles,
   };
 }
 
@@ -160,10 +168,7 @@ function writeOutput(target: OutputTarget, content: string, force: boolean): voi
     }
     const beforeOpen = exists ? fs.lstatSync(target.basename) : undefined;
     if (beforeOpen && (!beforeOpen.isFile() || beforeOpen.isSymbolicLink()
-      || beforeOpen.nlink > 1 || sameFile(beforeOpen, {
-        device: target.inputDevice,
-        inode: target.inputInode,
-      }))) {
+      || beforeOpen.nlink > 1 || isSourceFile(beforeOpen, target.sourceFiles))) {
       throw new OpenApiInspectCliError(
         'OPENAPI_OUTPUT_PROTECTED',
         'OpenAPI output must be a regular single-link file.',
@@ -178,7 +183,7 @@ function writeOutput(target: OutputTarget, content: string, force: boolean): voi
     );
     const opened = fs.fstatSync(descriptor);
     if (!opened.isFile() || opened.nlink > 1
-      || sameFile(opened, { device: target.inputDevice, inode: target.inputInode })
+      || isSourceFile(opened, target.sourceFiles)
       || (beforeOpen && !sameFile(opened, { device: beforeOpen.dev, inode: beforeOpen.ino }))) {
       throw new OpenApiInspectCliError(
         'OPENAPI_OUTPUT_PROTECTED',
@@ -203,14 +208,16 @@ function run(options: OpenApiInspectCliOptions): void {
   if (options.force && !options.out) {
     throw new OpenApiInspectCliError('OPENAPI_OUTPUT_WRITE_FAILED', '--force requires --out.');
   }
-  const report = inspectOpenApi({
+  const inspection = inspectOpenApiForCli({
     inputPath: options.input,
     workspaceRoot: options.workspaceRoot,
   });
   const output = options.json
-    ? formatOpenApiInspectionJson(report)
-    : formatOpenApiInspectionText(report);
-  if (options.out) writeOutput(outputPath(options), output, Boolean(options.force));
+    ? formatOpenApiInspectionJson(inspection.report)
+    : formatOpenApiInspectionText(inspection.report);
+  if (options.out) {
+    writeOutput(outputPath(options, inspection.sourcePaths), output, Boolean(options.force));
+  }
   else process.stdout.write(output);
 }
 

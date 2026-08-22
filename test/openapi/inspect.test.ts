@@ -159,6 +159,21 @@ describe('cdn-security openapi inspect', () => {
     expect(hardLinkOutput.status).toBe(1);
     expect(hardLinkOutput.stderr).toContain('OPENAPI_OUTPUT_PROTECTED');
     expect(fs.readFileSync(input, 'utf8')).toBe(before[0]);
+
+    fs.cpSync(path.join(fixtureRoot, 'refs'), path.join(workspace, 'refs'), { recursive: true });
+    const referencedInput = path.join(workspace, 'refs', 'components.json');
+    const referencedBefore = fs.readFileSync(referencedInput, 'utf8');
+    const referencedOutput = childProcess.spawnSync(
+      process.execPath,
+      [
+        cli, 'openapi', 'inspect', '--input', 'refs/sibling.yaml',
+        '--workspace-root', workspace, '--json', '--out', 'refs/components.json', '--force',
+      ],
+      { encoding: 'utf8' },
+    );
+    expect(referencedOutput.status).toBe(1);
+    expect(referencedOutput.stderr).toContain('OPENAPI_OUTPUT_PROTECTED');
+    expect(fs.readFileSync(referencedInput, 'utf8')).toBe(referencedBefore);
   });
 
   test('returns stable safe errors for invalid input and unsafe output paths', () => {

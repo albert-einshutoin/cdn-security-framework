@@ -5,4 +5,4 @@ export * from './document-graph';
 export * from './operation-normalizer';
 export * from './ref-resolver';
 export * from './ref-boundary';
-export * from './inspect';
+export { formatOpenApiInspectionJson, formatOpenApiInspectionText, inspectOpenApi, type InspectOpenApiOptions, type OpenApiInspectionDiagnosticV1, type OpenApiInspectionV1, } from './inspect';

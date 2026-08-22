@@ -33,6 +33,11 @@ export interface OpenApiInspectionV1 {
     diagnostics: OpenApiInspectionDiagnosticV1[];
     contract: SecurityContractV1;
 }
+export interface OpenApiInspectionForCli {
+    report: OpenApiInspectionV1;
+    sourcePaths: readonly string[];
+}
+export declare function inspectOpenApiForCli(options: InspectOpenApiOptions): OpenApiInspectionForCli;
 export declare function inspectOpenApi(options: InspectOpenApiOptions): OpenApiInspectionV1;
 export declare function formatOpenApiInspectionJson(report: OpenApiInspectionV1): string;
 export declare function formatOpenApiInspectionText(report: OpenApiInspectionV1): string;
