@@ -8,6 +8,8 @@ const node_path_1 = __importDefault(require("node:path"));
 exports.OPENAPI_ANALYSIS_ERROR_CODES = [
     'OPENAPI_INPUT_NOT_FOUND',
     'OPENAPI_DOCUMENT_TOO_LARGE',
+    'OPENAPI_PARSE_ERROR',
+    'OPENAPI_INVALID_ROOT',
     'OPENAPI_UNSUPPORTED_VERSION',
     'OPENAPI_YAML_ALIAS_LIMIT',
     'OPENAPI_REF_OUTSIDE_ROOT',
@@ -19,6 +21,8 @@ exports.OPENAPI_ANALYSIS_ERROR_CODES = [
 const SAFE_MESSAGES = {
     OPENAPI_INPUT_NOT_FOUND: 'OpenAPI input was not found.',
     OPENAPI_DOCUMENT_TOO_LARGE: 'OpenAPI document exceeds the configured size limit.',
+    OPENAPI_PARSE_ERROR: 'OpenAPI document could not be parsed.',
+    OPENAPI_INVALID_ROOT: 'OpenAPI document root is invalid.',
     OPENAPI_UNSUPPORTED_VERSION: 'OpenAPI version is not supported.',
     OPENAPI_YAML_ALIAS_LIMIT: 'OpenAPI YAML alias limit was exceeded.',
     OPENAPI_REF_OUTSIDE_ROOT: 'OpenAPI reference is outside the workspace root.',
@@ -57,6 +61,8 @@ class OpenApiAnalysisError extends Error {
     safeMessage;
     sourceUri;
     pointer;
+    line;
+    column;
     constructor(code, options = {}) {
         const safeMessage = SAFE_MESSAGES[code];
         super(safeMessage);
@@ -65,6 +71,12 @@ class OpenApiAnalysisError extends Error {
         this.safeMessage = safeMessage;
         this.sourceUri = safeSourceUri(options.sourceUri);
         this.pointer = safePointer(options.pointer);
+        this.line = Number.isInteger(options.line) && options.line > 0
+            ? options.line
+            : undefined;
+        this.column = Number.isInteger(options.column) && options.column > 0
+            ? options.column
+            : undefined;
     }
     toJSON() {
         return {
@@ -72,6 +84,8 @@ class OpenApiAnalysisError extends Error {
             safeMessage: this.safeMessage,
             ...(this.sourceUri ? { sourceUri: this.sourceUri } : {}),
             ...(this.pointer ? { pointer: this.pointer } : {}),
+            ...(this.line ? { line: this.line } : {}),
+            ...(this.column ? { column: this.column } : {}),
         };
     }
 }
