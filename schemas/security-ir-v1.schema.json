@@ -101,10 +101,39 @@
         "name": { "type": "string", "minLength": 1, "maxLength": 16384 },
         "kind": { "enum": ["basic", "bearer", "api-key", "oauth2", "openid-connect", "mutual-tls", "unknown"] },
         "location": { "enum": ["header", "query", "cookie"] },
+        "parameterName": { "type": "string", "minLength": 1, "maxLength": 16384 },
         "scopes": { "$ref": "#/definitions/stringSet" },
+        "flows": { "$ref": "#/definitions/stringSet" },
         "capability": { "enum": ["supported", "unsupported"] },
         "unsupportedReason": { "type": "string", "minLength": 1, "maxLength": 16384 }
-      }
+      },
+      "allOf": [
+        {
+          "if": { "required": ["parameterName"] },
+          "then": {
+            "required": ["location"],
+            "properties": { "kind": { "const": "api-key" } }
+          }
+        },
+        {
+          "if": { "required": ["flows"] },
+          "then": {
+            "properties": {
+              "kind": { "const": "oauth2" },
+              "flows": { "type": "array", "minItems": 1 }
+            }
+          }
+        },
+        {
+          "if": { "properties": { "kind": { "const": "unknown" } } },
+          "then": { "properties": { "capability": { "const": "unsupported" } } }
+        },
+        {
+          "if": { "properties": { "capability": { "const": "unsupported" } } },
+          "then": { "required": ["unsupportedReason"] },
+          "else": { "not": { "required": ["unsupportedReason"] } }
+        }
+      ]
     },
     "authAlternative": {
       "type": "object",

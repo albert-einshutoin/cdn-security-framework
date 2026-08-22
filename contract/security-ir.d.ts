@@ -54,7 +54,9 @@ export interface ApiAuthSchemeV1 {
     name: string;
     kind: AuthSchemeKindV1;
     location?: 'header' | 'query' | 'cookie';
+    parameterName?: string;
     scopes: string[];
+    flows?: string[];
     capability: 'supported' | 'unsupported';
     unsupportedReason?: string;
 }

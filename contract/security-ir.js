@@ -206,12 +206,26 @@ function normalizeAuth(input, state) {
                 name: nonEmpty(scheme.name, 'authentication scheme name'),
                 kind: scheme.kind,
                 ...(scheme.location === undefined ? {} : { location: scheme.location }),
+                ...(scheme.parameterName === undefined ? {} : {
+                    parameterName: nonEmpty(scheme.parameterName, 'authentication parameter name'),
+                }),
                 scopes: sortedSet(scheme.scopes, 'authentication scope', state),
+                ...(scheme.flows === undefined ? {} : {
+                    flows: sortedSet(scheme.flows, 'authentication flow', state),
+                }),
                 capability: scheme.capability,
                 ...(scheme.unsupportedReason === undefined ? {} : {
                     unsupportedReason: nonEmpty(scheme.unsupportedReason, 'unsupported reason'),
                 }),
             };
+            if (('parameterName' in normalized
+                && (normalized.kind !== 'api-key' || !('location' in normalized)))
+                || ('flows' in normalized && normalized.kind !== 'oauth2')
+                || (normalized.flows !== undefined && normalized.flows.length === 0)
+                || (normalized.kind === 'unknown' && normalized.capability !== 'unsupported')
+                || ((normalized.capability === 'unsupported') !== ('unsupportedReason' in normalized))) {
+                throw new Error('invalid authentication scheme metadata');
+            }
             const serialized = stableSerialize(normalized);
             const previous = byName.get(normalized.name);
             if (previous !== undefined && previous !== serialized)

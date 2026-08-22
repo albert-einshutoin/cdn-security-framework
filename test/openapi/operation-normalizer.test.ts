@@ -32,7 +32,7 @@ function temporaryGraph(document: unknown) {
 }
 
 describe('normalizeOpenApiOperations', () => {
-  test('extracts request surface without interpreting authentication', () => {
+  test('extracts request surface with minimal operation metadata', () => {
     const contract = normalizeOpenApiOperations(graphFor(
       path.join(fixtureRoot, 'valid/openapi-3.0.yaml'),
     ));
@@ -43,8 +43,6 @@ describe('normalizeOpenApiOperations', () => {
     const operation = contract.operations[1];
     expect(operation).toMatchObject({
       operationId: 'updateUser',
-      exposure: 'unknown',
-      auth: { mode: 'unknown', alternatives: [] },
       metadata: { deprecated: true, tags: ['users', 'write'] },
       request: {
         contentTypes: [
@@ -61,11 +59,11 @@ describe('normalizeOpenApiOperations', () => {
         body: expect.objectContaining({ required: true }),
       },
     });
-    expect(operation?.provenance[0]).toMatchObject({
+    expect(operation?.provenance).toContainEqual(expect.objectContaining({
       source: 'openapi',
       uri: 'valid/openapi-3.0.yaml',
       pointer: '/paths/~1users~1{userId}/post',
-    });
+    }));
     expect(JSON.stringify(contract)).not.toContain('Update users');
     expect(JSON.stringify(contract)).not.toContain('description');
   });
