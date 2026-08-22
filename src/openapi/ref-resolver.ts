@@ -217,6 +217,7 @@ export function resolveOpenApiReferences(
     fromPointer: string,
     depth: number,
     ancestors: ReadonlySet<string>,
+    linkObject = false,
   ): void => {
     if (depth >= limits.maxRefDepth) {
       throw new OpenApiAnalysisError('OPENAPI_REF_DEPTH_LIMIT', {
@@ -262,7 +263,7 @@ export function resolveOpenApiReferences(
     walk(resolved.value, targetDocument, resolved.pointer, depth + 1, new Set([
       ...ancestors,
       target.id,
-    ]));
+    ]), undefined, linkObject);
   };
 
   const walk = (
@@ -289,6 +290,7 @@ export function resolveOpenApiReferences(
         pointer,
         depth,
         ancestors,
+        linkObject,
       );
     }
     for (const [key, child] of Object.entries(value)) {

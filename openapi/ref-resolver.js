@@ -163,7 +163,7 @@ function resolveOpenApiReferences(options) {
         documentsByPath.set(absolutePath, loaded);
         return loaded;
     };
-    const followReference = (ref, fromDocument, fromPointer, depth, ancestors) => {
+    const followReference = (ref, fromDocument, fromPointer, depth, ancestors, linkObject = false) => {
         if (depth >= limits.maxRefDepth) {
             throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_REF_DEPTH_LIMIT', {
                 sourceUri: fromDocument.sourceUri,
@@ -210,7 +210,7 @@ function resolveOpenApiReferences(options) {
         walk(resolved.value, targetDocument, resolved.pointer, depth + 1, new Set([
             ...ancestors,
             target.id,
-        ]));
+        ]), undefined, linkObject);
     };
     const walk = (value, document, pointer, depth, ancestors, namedMap, linkObject = false) => {
         resolutionVisits += 1;
@@ -223,7 +223,7 @@ function resolveOpenApiReferences(options) {
         if (value === null || typeof value !== 'object')
             return;
         if (!Array.isArray(value) && typeof value.$ref === 'string') {
-            followReference(value.$ref, document, pointer, depth, ancestors);
+            followReference(value.$ref, document, pointer, depth, ancestors, linkObject);
         }
         for (const [key, child] of Object.entries(value)) {
             if (key === '$ref')

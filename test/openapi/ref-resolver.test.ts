@@ -146,8 +146,7 @@ describe('resolveOpenApiReferences', () => {
     fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
       openapi: '3.1.0',
       paths: { '/items': { get: { responses: { 200: { links: { next: {
-        parameters: { id: { $ref: '#/components/schemas/Target/type' } },
-        requestBody: { $ref: '#/components/schemas/Target/type' },
+        $ref: '#/components/links/Alias',
       } } } } } } },
       components: { schemas: {
         Target: { type: 'string' },
@@ -158,7 +157,13 @@ describe('resolveOpenApiReferences', () => {
         example: { $ref: '#/components/schemas/Sample/default' },
         default: { $ref: '#/components/schemas/Sample/example' },
         enum: [{ $ref: '#/components/schemas/Sample/type' }],
-      } } },
+      } }, links: {
+        Alias: { $ref: '#/components/links/TargetLink' },
+        TargetLink: {
+          parameters: { id: { $ref: '#/components/schemas/Target/type' } },
+          requestBody: { $ref: '#/components/schemas/Target/type' },
+        },
+      } },
     }));
     const graph = resolveOpenApiReferences({
       root: loadOpenApiDocument({ inputPath: 'root.json', workspaceRoot: workspace }),
@@ -166,8 +171,10 @@ describe('resolveOpenApiReferences', () => {
       limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
     });
     expect(graph.references.map(({ from }) => from.pointer)).toEqual([
+      '/components/links/Alias',
       '/components/schemas/Sample/properties/value',
       '/components/schemas/default',
+      '/paths/~1items/get/responses/200/links/next',
     ]);
   });
 
