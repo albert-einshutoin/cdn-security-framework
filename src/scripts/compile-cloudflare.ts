@@ -38,9 +38,6 @@ const {
   numberOr,
 } = require('./lib/value-normalize');
 const {
-  LIMITS_DEFAULTS,
-} = require('./lib/policy-defaults');
-const {
   parseArgs,
   loadPolicyWithWarnings,
   reportPolicyWarnings,
@@ -169,7 +166,6 @@ function getWorkerAuthGates(): any[] {
 
 const authGates = getWorkerAuthGates();
 const requestBase = buildRequestCfgBase(policy);
-const limits = (policy.request || {}).limits || {};
 const originAuth = (policy.origin || {}).auth || null;
 const jwksCache = buildJwksCacheCfg(policy);
 const fwGeo = (policy.firewall || {}).geo || {};
@@ -190,7 +186,7 @@ const cfgCode = renderConstObject('CFG', {
   maxQueryLength: requestBase.maxQueryLength,
   maxQueryParams: requestBase.maxQueryParams,
   maxUriLength: requestBase.maxUriLength,
-  maxHeaderSize: numberOr(limits.max_header_size, LIMITS_DEFAULTS.maxHeaderSize),
+  maxHeaderSize: requestBase.maxHeaderSize,
   maxHeaderCount: requestBase.maxHeaderCount,
   dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(requestBase.dropQueryKeysArray)})`),
   uaDenyContains: requestBase.uaDenyContains,

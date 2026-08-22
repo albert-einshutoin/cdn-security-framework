@@ -13,9 +13,6 @@ const {
   numberOr,
 } = require('./value-normalize');
 const {
-  LIMITS_DEFAULTS,
-} = require('./policy-defaults');
-const {
   DEFAULT_CONTAINS,
   parsePathPatterns,
   extractRegex,
@@ -44,6 +41,10 @@ const {
   isErrnoException,
   PolicyValidationError,
 } = require('./errors') as typeof import('./errors');
+const {
+  validateAuthGateStructure,
+  validateJwksUrl,
+} = require('./auth-gate-validation') as typeof import('./auth-gate-validation');
 
 const repoRoot = path.join(__dirname, '..', '..');
 
@@ -57,89 +58,6 @@ function loadPolicy(policyPath: string) {
   return loadPolicyIo(policyPath);
 }
 
-// Reject JWKS URLs that point at loopback, private, link-local, or other
-// internal address ranges. An attacker who can influence the JWKS URL at
-// build time (via a policy PR) or at runtime (via a regression that lets a
-// client seed the cache) could otherwise force the edge to fetch cloud
-// metadata endpoints (169.254.169.254) or internal services.
-const JWKS_DISALLOWED_HOSTNAMES = new Set([
-  'localhost',
-  'ip6-localhost',
-  'ip6-loopback',
-  'broadcasthost',
-]);
-
-function isPrivateIPv4Literal(hostname: string) {
-  const m = /^(\d{1,3})\.(\d{1,3})\.(\d{1,3})\.(\d{1,3})$/.exec(hostname);
-  if (!m) return false;
-  const octets = m.slice(1, 5).map(Number);
-  if (octets.some((o) => o < 0 || o > 255)) return false;
-  const [a, b] = octets;
-  if (a === 10) return true;                             // 10.0.0.0/8
-  if (a === 127) return true;                            // loopback
-  if (a === 172 && b >= 16 && b <= 31) return true;      // 172.16.0.0/12
-  if (a === 192 && b === 168) return true;               // 192.168.0.0/16
-  if (a === 169 && b === 254) return true;               // link-local / metadata
-  if (a === 100 && b >= 64 && b <= 127) return true;     // CGN 100.64.0.0/10
-  if (a === 0) return true;                              // 0.0.0.0/8
-  if (a >= 224) return true;                             // multicast / reserved
-  return false;
-}
-
-function isPrivateIPv6Literal(hostname: string) {
-  const h = hostname.startsWith('[') && hostname.endsWith(']')
-    ? hostname.slice(1, -1).toLowerCase()
-    : hostname.toLowerCase();
-  if (!h.includes(':')) return false;
-  if (h === '::' || h === '::1') return true;
-  if (h.startsWith('fe80:') || h.startsWith('fe80::')) return true;   // link-local
-  if (h.startsWith('fc') || h.startsWith('fd')) return true;          // ULA fc00::/7
-  // IPv4-mapped IPv6 (::ffff:a.b.c.d). Node's WHATWG URL normalizes the
-  // trailing IPv4 to hex (e.g. ::ffff:127.0.0.1 → ::ffff:7f00:1), so we
-  // reject the entire `::ffff:` family. Legitimate public IdPs never serve
-  // JWKS behind an IPv4-mapped literal — they use a real v4 or v6 address.
-  if (h.startsWith('::ffff:')) return true;
-  return false;
-}
-
-function validateJwksUrl(rawUrl: string, allowedHosts: any) {
-  if (typeof rawUrl !== 'string' || rawUrl.trim() === '') {
-    return { ok: false, reason: 'jwks_url is empty' };
-  }
-  let parsed;
-  try {
-    parsed = new URL(rawUrl);
-  } catch {
-    return { ok: false, reason: `jwks_url is not a valid URL: ${rawUrl}` };
-  }
-  if (parsed.protocol !== 'https:') {
-    return { ok: false, reason: `jwks_url must use https:// (got ${parsed.protocol})` };
-  }
-  if (parsed.username || parsed.password) {
-    return { ok: false, reason: 'jwks_url must not contain userinfo (user:pass@host)' };
-  }
-  const hostname = (parsed.hostname || '').toLowerCase();
-  if (!hostname) {
-    return { ok: false, reason: 'jwks_url has empty hostname' };
-  }
-  if (JWKS_DISALLOWED_HOSTNAMES.has(hostname)) {
-    return { ok: false, reason: `jwks_url hostname "${hostname}" is a loopback alias` };
-  }
-  if (isPrivateIPv4Literal(hostname) || isPrivateIPv6Literal(parsed.hostname)) {
-    return { ok: false, reason: `jwks_url hostname "${hostname}" resolves to a private/loopback/link-local range` };
-  }
-  if (Array.isArray(allowedHosts) && allowedHosts.length > 0) {
-    const normalized = normalizeStringList(allowedHosts, 'lower');
-    if (!normalized.includes(hostname)) {
-      return {
-        ok: false,
-        reason: `jwks_url hostname "${hostname}" is not in firewall.jwks.allowed_hosts (${normalized.join(', ')})`,
-      };
-    }
-  }
-  return { ok: true, hostname };
-}
-
 function validateAuthGates(policy: any, options: any = {}) {
   const exitOnError = options.exitOnError !== false;
   const logger = options.logger || console;
@@ -147,8 +65,6 @@ function validateAuthGates(policy: any, options: any = {}) {
   const allowPlaceholderToken = options.allowPlaceholderToken === true;
   const routes = policy.routes || [];
   const errors: string[] = [];
-  const jwksAllowedHosts = ((policy.firewall || {}).jwks || {}).allowed_hosts;
-  const normalizedJwksAllowedHosts = normalizeStringList(jwksAllowedHosts, 'lower');
   const requireJwksAllowedHosts = options.requireJwksAllowedHosts === true;
 
   for (const route of routes) {
@@ -157,44 +73,10 @@ function validateAuthGates(policy: any, options: any = {}) {
     const name = route.name || 'unnamed';
     const authType = gate.type || 'static_token';
 
-    if (authType === 'jwt') {
-      const alg = gate.algorithm || 'RS256';
-      if (alg === 'RS256' && !gate.jwks_url) {
-        errors.push(`Route "${name}": JWT+RS256 requires "jwks_url"`);
-      }
-      if (alg === 'RS256' && requireJwksAllowedHosts && normalizedJwksAllowedHosts.length === 0) {
-        errors.push(`Route "${name}": JWT+RS256 requires firewall.jwks.allowed_hosts for this target`);
-      }
-      if (gate.jwks_url) {
-        const v = validateJwksUrl(gate.jwks_url, jwksAllowedHosts);
-        if (!v.ok) {
-          errors.push(`Route "${name}": ${v.reason}`);
-        }
-      }
-      if (alg === 'HS256' && !gate.secret_env) {
-        errors.push(`Route "${name}": JWT+HS256 requires "secret_env"`);
-      }
-      // The gate has a single verifier chosen by `gate.algorithm`. Accepting
-      // any other alg via `allowed_algorithms` would route those tokens
-      // through the wrong verifier and cause a silent auth outage, so fail
-      // at build time rather than ship a config that never authenticates.
-      if (Array.isArray(gate.allowed_algorithms) && gate.allowed_algorithms.length > 0) {
-        const extras = gate.allowed_algorithms.filter(
-          (a: any) => typeof a === 'string' && a !== 'none' && a !== alg,
-        );
-        if (extras.length > 0) {
-          errors.push(
-            `Route "${name}": auth_gate.allowed_algorithms contains ${JSON.stringify(extras)} ` +
-              `but the gate only runs the "${alg}" verifier. Remove the extra algorithm(s) ` +
-              `or switch the gate's "algorithm" field.`,
-          );
-        }
-      }
-    } else if (authType === 'signed_url') {
-      if (!gate.secret_env) {
-        errors.push(`Route "${name}": signed_url requires "secret_env"`);
-      }
-    } else if (authType === 'static_token') {
+    validateAuthGateStructure(policy, route, { requireJwksAllowedHosts })
+      .forEach((message) => errors.push(`Route "${name}": ${message}`));
+
+    if (authType === 'static_token') {
       const tokenEnv = gate.token_env || 'EDGE_ADMIN_TOKEN';
       const resolved = env[tokenEnv];
       if (!resolved && !allowPlaceholderToken) {
@@ -579,8 +461,11 @@ function build(policy: any, options: any = {}) {
   const outPathResponse = path.join(distDir, 'viewer-response.js');
   fs.writeFileSync(outPathResponse, codeResponse, 'utf8');
 
-  const jwtGates = authGates.filter((g) => g.type === 'jwt').map((g) => {
-    const route = (policy.routes || []).find((r: any) => r.name === g.name);
+  const authRoutes = (policy.routes || []).filter((route: any) => route.auth_gate);
+  const jwtRoutes = authRoutes.filter((route: any) => (route.auth_gate.type || 'static_token') === 'jwt');
+  const signedUrlRoutes = authRoutes.filter((route: any) => route.auth_gate.type === 'signed_url');
+  const jwtGates = authGates.filter((g) => g.type === 'jwt').map((g, index) => {
+    const route = jwtRoutes[index];
     const gate = route?.auth_gate || {};
     const compiled = buildJwtGateConfig(gate, g);
     return {
@@ -592,8 +477,8 @@ function build(policy: any, options: any = {}) {
     };
   });
 
-  const signedUrlGates = authGates.filter((g) => g.type === 'signed_url').map((g) => {
-    const route = (policy.routes || []).find((r: any) => r.name === g.name);
+  const signedUrlGates = authGates.filter((g) => g.type === 'signed_url').map((g, index) => {
+    const route = signedUrlRoutes[index];
     const gate = route?.auth_gate || {};
     const compiled = buildSignedUrlGateConfig(gate, g);
     return { ...compiled, secret: gate.secret_env ? (env[gate.secret_env] || '') : '' };
@@ -605,13 +490,12 @@ function build(policy: any, options: any = {}) {
     : null;
   const jwksCache = buildJwksCacheCfg(policy);
   const defaults = policy.defaults || {};
-  const limits = (policy.request || {}).limits || {};
   const trustForwardedFor = requestBase.trustForwardedFor;
 
   const originCfgCode = renderConstObject('CFG', {
     project: policy.project || 'cdn-security',
     mode: defaults.mode || 'enforce',
-    maxHeaderSize: numberOr(limits.max_header_size, LIMITS_DEFAULTS.maxHeaderSize),
+    maxHeaderSize: requestBase.maxHeaderSize,
     trustForwardedFor,
     jwtGates,
     signedUrlGates,

@@ -1,9 +1,9 @@
-const {
+import {
   clampNumber,
   normalizeStringList,
   numberOr,
-} = require('./value-normalize');
-const {
+} from './value-normalize';
+import {
   DEFAULT_ADMIN_PATH_PREFIXES,
   DEFAULT_ALLOW_METHODS,
   DEFAULT_CLEAR_SITE_DATA_TYPES,
@@ -16,10 +16,10 @@ const {
   JWKS_DEFAULTS,
   JWT_CLOCK_SKEW,
   LIMITS_DEFAULTS,
-} = require('./policy-defaults');
-const {
+} from './policy-defaults';
+import {
   errorMessage,
-} = require('./errors') as typeof import('./errors');
+} from './errors';
 
 const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
 
@@ -204,7 +204,7 @@ function collectAuthProtectedPrefixes(authGates: Array<{ protectedPrefixes?: str
   ));
 }
 
-function buildAuthGateBase(route: { name?: string; match?: { path_prefixes?: string[] }; auth_gate?: { type?: string } }) {
+export function buildAuthGateBase(route: { name?: string; match?: { path_prefixes?: string[] }; auth_gate?: { type?: string } }) {
   const gate = route.auth_gate || {};
   const match = route.match || {};
   const prefixes = match.path_prefixes || [];
@@ -216,7 +216,7 @@ function buildAuthGateBase(route: { name?: string; match?: { path_prefixes?: str
   };
 }
 
-function buildResponseCfgBase(
+export function buildResponseCfgBase(
   policy: {
     response_headers?: Record<string, unknown>;
     routes?: Parameters<typeof findAdminCacheRoute>[0];
@@ -323,7 +323,7 @@ function buildSignedUrlGateConfig(
   };
 }
 
-function buildRequestCfgBase(policy: {
+export function buildRequestCfgBase(policy: {
   defaults?: { mode?: string };
   request?: Record<string, unknown>;
   response_headers?: { cors?: unknown };
@@ -348,6 +348,7 @@ function buildRequestCfgBase(policy: {
     maxQueryLength: numberOr(limits.max_query_length, LIMITS_DEFAULTS.maxQueryLength),
     maxQueryParams: numberOr(limits.max_query_params, LIMITS_DEFAULTS.maxQueryParams),
     maxUriLength: numberOr(limits.max_uri_length, LIMITS_DEFAULTS.maxUriLength),
+    maxHeaderSize: numberOr(limits.max_header_size, LIMITS_DEFAULTS.maxHeaderSize),
     maxHeaderCount: clampNumber(
       limits.max_header_count,
       LIMITS_DEFAULTS.headerCountMin,
