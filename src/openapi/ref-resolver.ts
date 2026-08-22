@@ -27,6 +27,14 @@ const NAMED_OBJECT_MAP_KEYS = new Set([
   'headers', 'links', 'parameters', 'pathItems', 'paths', 'patternProperties', 'properties',
   'requestBodies', 'responses', 'schemas', 'securitySchemes', 'webhooks',
 ]);
+const SCHEMA_MAP_KEYS = new Set([
+  '$defs', 'definitions', 'dependentSchemas', 'patternProperties', 'properties', 'schemas',
+]);
+const SCHEMA_SINGLE_KEYS = new Set([
+  'additionalProperties', 'contains', 'contentSchema', 'else', 'if', 'items', 'not',
+  'propertyNames', 'then', 'unevaluatedItems', 'unevaluatedProperties',
+]);
+const SCHEMA_ARRAY_KEYS = new Set(['allOf', 'anyOf', 'oneOf', 'prefixItems']);
 
 export { serializeResolvedOpenApiGraph } from './document-graph';
 export type {
@@ -218,6 +226,7 @@ export function resolveOpenApiReferences(
     depth: number,
     ancestors: ReadonlySet<string>,
     linkObject = false,
+    schemaObject = false,
   ): void => {
     if (depth >= limits.maxRefDepth) {
       throw new OpenApiAnalysisError('OPENAPI_REF_DEPTH_LIMIT', {
@@ -263,7 +272,7 @@ export function resolveOpenApiReferences(
     walk(resolved.value, targetDocument, resolved.pointer, depth + 1, new Set([
       ...ancestors,
       target.id,
-    ]), undefined, linkObject);
+    ]), undefined, linkObject, schemaObject);
   };
 
   const walk = (
@@ -274,6 +283,8 @@ export function resolveOpenApiReferences(
     ancestors: ReadonlySet<string>,
     namedMap?: string,
     linkObject = false,
+    schemaObject = false,
+    schemaArray = false,
   ): void => {
     resolutionVisits += 1;
     if (resolutionVisits > limits.maxNodes) {
@@ -291,21 +302,33 @@ export function resolveOpenApiReferences(
         depth,
         ancestors,
         linkObject,
+        schemaObject,
       );
     }
     for (const [key, child] of Object.entries(value)) {
       if (key === '$ref') continue;
+      if (schemaObject && !SCHEMA_MAP_KEYS.has(key)
+        && !SCHEMA_SINGLE_KEYS.has(key) && !SCHEMA_ARRAY_KEYS.has(key)) continue;
       if (linkObject && (key === 'parameters' || key === 'requestBody')) continue;
       if (!namedMap && (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
         || (key === 'examples' && Array.isArray(child)))) continue;
+      const childNamedMap = !namedMap && NAMED_OBJECT_MAP_KEYS.has(key) && !Array.isArray(child)
+        ? key
+        : undefined;
       walk(
         child,
         document,
         `${pointer}/${encodePointerToken(key)}`,
         depth,
         ancestors,
-        !namedMap && NAMED_OBJECT_MAP_KEYS.has(key) && !Array.isArray(child) ? key : undefined,
+        childNamedMap,
         namedMap === 'links',
+        schemaArray
+          || (namedMap !== undefined && SCHEMA_MAP_KEYS.has(namedMap))
+          || (!schemaObject && key === 'schema')
+          || (schemaObject && SCHEMA_SINGLE_KEYS.has(key) && !Array.isArray(child)),
+        schemaObject && (SCHEMA_ARRAY_KEYS.has(key)
+          || (key === 'items' && Array.isArray(child))),
       );
     }
   };

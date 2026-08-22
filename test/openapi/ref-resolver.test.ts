@@ -157,6 +157,7 @@ describe('resolveOpenApiReferences', () => {
         example: { $ref: '#/components/schemas/Sample/default' },
         default: { $ref: '#/components/schemas/Sample/example' },
         enum: [{ $ref: '#/components/schemas/Sample/type' }],
+        customAnnotation: { $ref: '#/components/schemas/Target/type' },
       } }, links: {
         Alias: { $ref: '#/components/links/TargetLink' },
         TargetLink: {
@@ -275,7 +276,7 @@ describe('resolveOpenApiReferences', () => {
         schemas: {
           A: {
             type: 'object',
-            properties: Object.fromEntries(Array.from({ length: 10 }, (_, index) => [
+            properties: Object.fromEntries(Array.from({ length: 20 }, (_, index) => [
               `p${index}`,
               { type: 'string' },
             ])),

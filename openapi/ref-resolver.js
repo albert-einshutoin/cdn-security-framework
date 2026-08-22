@@ -21,6 +21,14 @@ const NAMED_OBJECT_MAP_KEYS = new Set([
     'headers', 'links', 'parameters', 'pathItems', 'paths', 'patternProperties', 'properties',
     'requestBodies', 'responses', 'schemas', 'securitySchemes', 'webhooks',
 ]);
+const SCHEMA_MAP_KEYS = new Set([
+    '$defs', 'definitions', 'dependentSchemas', 'patternProperties', 'properties', 'schemas',
+]);
+const SCHEMA_SINGLE_KEYS = new Set([
+    'additionalProperties', 'contains', 'contentSchema', 'else', 'if', 'items', 'not',
+    'propertyNames', 'then', 'unevaluatedItems', 'unevaluatedProperties',
+]);
+const SCHEMA_ARRAY_KEYS = new Set(['allOf', 'anyOf', 'oneOf', 'prefixItems']);
 var document_graph_1 = require("./document-graph");
 Object.defineProperty(exports, "serializeResolvedOpenApiGraph", { enumerable: true, get: function () { return document_graph_1.serializeResolvedOpenApiGraph; } });
 function isResolvedOpenApiGraph(value) {
@@ -163,7 +171,7 @@ function resolveOpenApiReferences(options) {
         documentsByPath.set(absolutePath, loaded);
         return loaded;
     };
-    const followReference = (ref, fromDocument, fromPointer, depth, ancestors, linkObject = false) => {
+    const followReference = (ref, fromDocument, fromPointer, depth, ancestors, linkObject = false, schemaObject = false) => {
         if (depth >= limits.maxRefDepth) {
             throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_REF_DEPTH_LIMIT', {
                 sourceUri: fromDocument.sourceUri,
@@ -210,9 +218,9 @@ function resolveOpenApiReferences(options) {
         walk(resolved.value, targetDocument, resolved.pointer, depth + 1, new Set([
             ...ancestors,
             target.id,
-        ]), undefined, linkObject);
+        ]), undefined, linkObject, schemaObject);
     };
-    const walk = (value, document, pointer, depth, ancestors, namedMap, linkObject = false) => {
+    const walk = (value, document, pointer, depth, ancestors, namedMap, linkObject = false, schemaObject = false, schemaArray = false) => {
         resolutionVisits += 1;
         if (resolutionVisits > limits.maxNodes) {
             throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_NODE_LIMIT', {
@@ -223,17 +231,27 @@ function resolveOpenApiReferences(options) {
         if (value === null || typeof value !== 'object')
             return;
         if (!Array.isArray(value) && typeof value.$ref === 'string') {
-            followReference(value.$ref, document, pointer, depth, ancestors, linkObject);
+            followReference(value.$ref, document, pointer, depth, ancestors, linkObject, schemaObject);
         }
         for (const [key, child] of Object.entries(value)) {
             if (key === '$ref')
+                continue;
+            if (schemaObject && !SCHEMA_MAP_KEYS.has(key)
+                && !SCHEMA_SINGLE_KEYS.has(key) && !SCHEMA_ARRAY_KEYS.has(key))
                 continue;
             if (linkObject && (key === 'parameters' || key === 'requestBody'))
                 continue;
             if (!namedMap && (LITERAL_VALUE_KEYS.has(key) || key.startsWith('x-')
                 || (key === 'examples' && Array.isArray(child))))
                 continue;
-            walk(child, document, `${pointer}/${encodePointerToken(key)}`, depth, ancestors, !namedMap && NAMED_OBJECT_MAP_KEYS.has(key) && !Array.isArray(child) ? key : undefined, namedMap === 'links');
+            const childNamedMap = !namedMap && NAMED_OBJECT_MAP_KEYS.has(key) && !Array.isArray(child)
+                ? key
+                : undefined;
+            walk(child, document, `${pointer}/${encodePointerToken(key)}`, depth, ancestors, childNamedMap, namedMap === 'links', schemaArray
+                || (namedMap !== undefined && SCHEMA_MAP_KEYS.has(namedMap))
+                || (!schemaObject && key === 'schema')
+                || (schemaObject && SCHEMA_SINGLE_KEYS.has(key) && !Array.isArray(child)), schemaObject && (SCHEMA_ARRAY_KEYS.has(key)
+                || (key === 'items' && Array.isArray(child))));
         }
     };
     walk(options.root.document, options.root, '', 0, new Set());
