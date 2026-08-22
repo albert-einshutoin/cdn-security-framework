@@ -184,7 +184,9 @@ describe('resolveOpenApiReferences', () => {
         enum: [{ $ref: '#/components/schemas/Sample/type' }],
         customAnnotation: { $ref: '#/components/schemas/Target/type' },
         schemas: { nested: { $ref: '#/components/schemas/Target/type' } },
-      } }, links: {
+      } }, headers: {
+        schema: { schema: { $ref: '#/components/schemas/Target' } },
+      }, links: {
         Alias: { $ref: '#/components/links/TargetLink' },
         TargetLink: {
           parameters: { id: { $ref: '#/components/schemas/Target/type' } },
@@ -198,6 +200,7 @@ describe('resolveOpenApiReferences', () => {
       limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
     });
     expect(graph.references.map(({ from }) => from.pointer)).toEqual([
+      '/components/headers/schema/schema',
       '/components/links/Alias',
       '/components/schemas/Sample/properties/value',
       '/components/schemas/default',

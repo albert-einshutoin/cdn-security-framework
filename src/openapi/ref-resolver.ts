@@ -327,7 +327,7 @@ export function resolveOpenApiReferences(
         namedMap === 'links',
         schemaArray
           || (namedMap !== undefined && SCHEMA_NAMED_MAP_KEYS.has(namedMap))
-          || (!schemaObject && key === 'schema')
+          || (!schemaObject && namedMap === undefined && key === 'schema')
           || (schemaObject && SCHEMA_SINGLE_KEYS.has(key) && !Array.isArray(child)),
         schemaObject && (SCHEMA_ARRAY_KEYS.has(key)
           || (key === 'items' && Array.isArray(child))),
