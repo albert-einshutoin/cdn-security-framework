@@ -85,10 +85,12 @@ function main(): void {
     const failedGate = spawnSync(process.execPath, [
       path.join(__dirname, 'benchmark-openapi.js'),
       '--profile', 'ci',
+      '--iterations', '2',
       '--output', outputPath,
       '--baseline', baselinePath,
     ], { encoding: 'utf8' });
     assert.notStrictEqual(failedGate.status, 0);
+    assert.match(failedGate.stderr, /OpenAPI benchmark regression/u);
     assert.ok(fs.existsSync(outputPath), 'regression report must exist before the gate fails');
     console.log('OK: OpenAPI benchmark workloads, metrics, cache evidence, and early rejection');
   } finally {
