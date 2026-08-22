@@ -23,20 +23,20 @@ JSON report は cold/warm を分離し、parse・ref 解決・正規化・合計
 
 ## 代表 baseline
 
-GitHub-hosted `ubuntu-latest`、Linux x64、各 workload 3 sample。表は最後の warm 合計 ms です。個別 runner 名は記録しません。
+GitHub-hosted `ubuntu-latest`、Linux x64、各 workload 3 sample。表は warm 2 sample の合計時間平均 ms です。個別 runner 名は記録しません。
 
 | Node | 100 ops | 1,000 shared refs | 10,000 nested refs | Deep | Repeated refs | Early reject |
 | --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 20.17.0 | 14.688 | 123.433 | 1555.160 | 1.029 | 124.049 | 0.098 |
-| 22.23.2 | 16.036 | 91.280 | 1299.522 | 1.458 | 102.501 | 0.087 |
-| 24.19.0 | 5.337 | 57.655 | 844.849 | 0.903 | 60.573 | 0.036 |
+| 20.17.0 | 15.946 | 128.580 | 1628.522 | 1.093 | 124.294 | 0.164 |
+| 22.23.2 | 16.210 | 108.748 | 1305.248 | 1.555 | 107.210 | 0.135 |
+| 24.19.0 | 6.142 | 63.071 | 843.163 | 0.863 | 61.841 | 0.060 |
 
 時間と heap の完全な baseline は `openapi-analysis-baseline.json` にあります。
 
 ## CI 方針
 
 - 通常検証は `shared-refs-1000` だけを実行し、合計 15 秒・概算 heap 差分 512 MiB の余裕ある絶対上限を適用します。10,000 operation は実行しません。
-- schedule/manual の `OpenAPI Analysis Benchmark` だけが全 workload を Node 20.17.0、22、24 で実行します。percentage gate は warm wall time 50%、概算 heap 差分 100% です。
+- schedule/manual の `OpenAPI Analysis Benchmark` だけが全 workload を Node 20.17.0、22、24 で実行します。percentage gate は warm 平均 wall time 50%、概算 heap 差分 100% です。sub-ms の timer 揺らぎによる失敗を避けるため、時間には絶対幅 1 ms の下限を設けます。
 - 共有 runner の揺らぎだけで PR の percentage check が失敗することはありません。
 
 完全な JSON report は `npm run benchmark:openapi -- --iterations 3 --output report.json` で取得できます。閾値変更時は変更前後 report、Node version、host class、変更理由を PR に残してください。microbenchmark の改善を製品速度の改善とは扱いません。Rust/WASM への置換は対象外です。

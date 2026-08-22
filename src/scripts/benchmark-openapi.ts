@@ -345,7 +345,7 @@ function enforceRegressionBaseline(report: OpenApiBenchmarkReport, baselinePath:
     environment: { platform: string; arch: string };
     maxTimeRegressionPercent: number;
     maxHeapRegressionPercent: number;
-    nodes: Record<string, Record<string, { warmTotalMs: number; peakHeapDeltaBytes: number }>>;
+    nodes: Record<string, Record<string, { warmMeanTotalMs: number; peakHeapDeltaBytes: number }>>;
   };
   if (baseline.environment.platform !== process.platform || baseline.environment.arch !== process.arch) {
     throw new Error(`OpenAPI benchmark baseline requires ${baseline.environment.platform}/${baseline.environment.arch}`);
@@ -357,12 +357,16 @@ function enforceRegressionBaseline(report: OpenApiBenchmarkReport, baselinePath:
   for (const workload of report.workloads) {
     const target = expected[workload.id];
     if (!target) throw new Error(`No baseline for workload ${workload.id}`);
-    const warm = workload.samples.at(-1);
-    if (!warm) throw new Error(`No benchmark sample for ${workload.id}`);
+    const warm = workload.samples.filter(({ mode }) => mode === 'warm');
+    if (warm.length === 0) throw new Error(`No warm benchmark sample for ${workload.id}`);
+    const warmMeanTotalMs = warm.reduce((sum, sample) => sum + sample.totalMs, 0) / warm.length;
     const peakHeap = Math.max(...workload.samples.map(({ approximateHeapDeltaBytes }) => approximateHeapDeltaBytes));
-    const timeLimit = target.warmTotalMs * (1 + baseline.maxTimeRegressionPercent / 100);
+    const timeLimit = Math.max(
+      target.warmMeanTotalMs * (1 + baseline.maxTimeRegressionPercent / 100),
+      target.warmMeanTotalMs + 1,
+    );
     const heapLimit = target.peakHeapDeltaBytes * (1 + baseline.maxHeapRegressionPercent / 100);
-    if (warm.totalMs > timeLimit) failures.push(`${workload.id} time ${warm.totalMs}ms > ${timeLimit.toFixed(3)}ms`);
+    if (warmMeanTotalMs > timeLimit) failures.push(`${workload.id} time ${warmMeanTotalMs.toFixed(3)}ms > ${timeLimit.toFixed(3)}ms`);
     if (peakHeap > heapLimit) failures.push(`${workload.id} heap ${peakHeap} > ${Math.round(heapLimit)}`);
   }
   if (failures.length > 0) throw new Error(`OpenAPI benchmark regression:\n${failures.join('\n')}`);

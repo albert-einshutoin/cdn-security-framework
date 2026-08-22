@@ -36,7 +36,7 @@
   },
   {
     "id": "openapi-analysis",
-    "patterns": ["src/openapi/**", "src/contract/security-ir.ts"],
+    "patterns": ["src/openapi/**", "src/contract/security-ir.ts", "src/contract/canonical-route.ts"],
     "dependsOn": []
   }
 ]

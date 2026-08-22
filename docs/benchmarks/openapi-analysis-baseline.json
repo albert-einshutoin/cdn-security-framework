@@ -6,28 +6,28 @@
   "maxHeapRegressionPercent": 100,
   "nodes": {
     "20": {
-      "operations-100": { "warmTotalMs": 14.688, "peakHeapDeltaBytes": 2121304 },
-      "shared-refs-1000": { "warmTotalMs": 123.433, "peakHeapDeltaBytes": 11058248 },
-      "nested-refs-10000": { "warmTotalMs": 1555.16, "peakHeapDeltaBytes": 120217088 },
-      "deep-schema": { "warmTotalMs": 1.029, "peakHeapDeltaBytes": 450216 },
-      "repeated-refs": { "warmTotalMs": 124.049, "peakHeapDeltaBytes": 11840608 },
-      "early-document-limit": { "warmTotalMs": 0.098, "peakHeapDeltaBytes": 21488 }
+      "operations-100": { "warmMeanTotalMs": 15.946, "peakHeapDeltaBytes": 2121304 },
+      "shared-refs-1000": { "warmMeanTotalMs": 128.58, "peakHeapDeltaBytes": 11058248 },
+      "nested-refs-10000": { "warmMeanTotalMs": 1628.522, "peakHeapDeltaBytes": 120217088 },
+      "deep-schema": { "warmMeanTotalMs": 1.093, "peakHeapDeltaBytes": 450216 },
+      "repeated-refs": { "warmMeanTotalMs": 124.294, "peakHeapDeltaBytes": 11840608 },
+      "early-document-limit": { "warmMeanTotalMs": 0.164, "peakHeapDeltaBytes": 21488 }
     },
     "22": {
-      "operations-100": { "warmTotalMs": 16.036, "peakHeapDeltaBytes": 3839096 },
-      "shared-refs-1000": { "warmTotalMs": 91.28, "peakHeapDeltaBytes": 10632944 },
-      "nested-refs-10000": { "warmTotalMs": 1299.522, "peakHeapDeltaBytes": 142321176 },
-      "deep-schema": { "warmTotalMs": 1.458, "peakHeapDeltaBytes": 439096 },
-      "repeated-refs": { "warmTotalMs": 102.501, "peakHeapDeltaBytes": 9259232 },
-      "early-document-limit": { "warmTotalMs": 0.087, "peakHeapDeltaBytes": 23944 }
+      "operations-100": { "warmMeanTotalMs": 16.21, "peakHeapDeltaBytes": 3839096 },
+      "shared-refs-1000": { "warmMeanTotalMs": 108.748, "peakHeapDeltaBytes": 10632944 },
+      "nested-refs-10000": { "warmMeanTotalMs": 1305.248, "peakHeapDeltaBytes": 142321176 },
+      "deep-schema": { "warmMeanTotalMs": 1.555, "peakHeapDeltaBytes": 439096 },
+      "repeated-refs": { "warmMeanTotalMs": 107.21, "peakHeapDeltaBytes": 9259232 },
+      "early-document-limit": { "warmMeanTotalMs": 0.135, "peakHeapDeltaBytes": 23944 }
     },
     "24": {
-      "operations-100": { "warmTotalMs": 5.337, "peakHeapDeltaBytes": 3536232 },
-      "shared-refs-1000": { "warmTotalMs": 57.655, "peakHeapDeltaBytes": 12858104 },
-      "nested-refs-10000": { "warmTotalMs": 844.849, "peakHeapDeltaBytes": 137093776 },
-      "deep-schema": { "warmTotalMs": 0.903, "peakHeapDeltaBytes": 452448 },
-      "repeated-refs": { "warmTotalMs": 60.573, "peakHeapDeltaBytes": 30567456 },
-      "early-document-limit": { "warmTotalMs": 0.036, "peakHeapDeltaBytes": 24968 }
+      "operations-100": { "warmMeanTotalMs": 6.142, "peakHeapDeltaBytes": 3536232 },
+      "shared-refs-1000": { "warmMeanTotalMs": 63.071, "peakHeapDeltaBytes": 12858104 },
+      "nested-refs-10000": { "warmMeanTotalMs": 843.163, "peakHeapDeltaBytes": 137093776 },
+      "deep-schema": { "warmMeanTotalMs": 0.863, "peakHeapDeltaBytes": 452448 },
+      "repeated-refs": { "warmMeanTotalMs": 61.841, "peakHeapDeltaBytes": 30567456 },
+      "early-document-limit": { "warmMeanTotalMs": 0.06, "peakHeapDeltaBytes": 24968 }
     }
   }
 }

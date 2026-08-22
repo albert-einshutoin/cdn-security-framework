@@ -78,7 +78,7 @@ function main(): void {
       maxHeapRegressionPercent: 0,
       nodes: {
         [process.versions.node.split('.')[0]]: {
-          'shared-refs-1000': { warmTotalMs: 0, peakHeapDeltaBytes: 0 },
+          'shared-refs-1000': { warmMeanTotalMs: 0, peakHeapDeltaBytes: 0 },
         },
       },
     }));
