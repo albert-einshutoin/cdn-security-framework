@@ -1,0 +1,10 @@
+import type { SecurityFindingV1 } from '../finding';
+import { type RequestDriftOptions } from './request';
+import { type ContractDriftInput } from './shared';
+export type { ContractDriftInput } from './shared';
+export type { RequestDriftOptions } from './request';
+export { compareAuthContracts } from './authentication';
+export { comparePathMethodContracts } from './path-method';
+export { compareRequestContracts } from './request';
+export type CompareSecurityContractsOptions = RequestDriftOptions;
+export declare function compareSecurityContracts(input: ContractDriftInput, options?: CompareSecurityContractsOptions): SecurityFindingV1[];

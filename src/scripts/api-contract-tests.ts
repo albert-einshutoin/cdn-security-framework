@@ -85,6 +85,7 @@ test('phase subpath exports expose public compiler contracts', () => {
   assert.strictEqual(typeof contract.createSecurityContract, 'function');
   assert.strictEqual(typeof contract.projectPolicyToAllowedSurface, 'function');
   assert.strictEqual(typeof contract.relateRoute, 'function');
+  assert.strictEqual(typeof contract.compareSecurityContracts, 'function');
   assert.strictEqual(typeof openapi.loadOpenApiDocument, 'function');
   assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
   assert.strictEqual(typeof openapi.serializeResolvedOpenApiGraph, 'function');

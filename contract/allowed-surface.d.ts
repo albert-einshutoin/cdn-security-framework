@@ -41,6 +41,7 @@ export interface AllowedDefaultsV1 {
     authenticationDecision: 'block';
     methods: string[];
     configuredMethods: string[];
+    methodSource?: 'configured' | 'runtime-default';
     corsOptionsBypass: boolean;
     corsPreflight: {
         method: 'OPTIONS';
@@ -70,6 +71,11 @@ export interface AllowedDefaultsV1 {
         maxUriLength: number;
         maxHeaderSize: number;
         maxHeaderCount: number;
+    };
+    limitSources?: Partial<Record<keyof AllowedDefaultsV1['limits'], 'configured' | 'runtime-default'>>;
+    requiredHeaders?: {
+        values: string[];
+        source: 'configured' | 'runtime-default';
     };
     pathNormalization: {
         collapseSlashes: boolean;
@@ -107,6 +113,10 @@ export interface AllowedRouteRuleV1 {
         preAuthBypassMethods: string[];
         preAuthBypassCondition: 'allowed-cors-origin-preflight' | 'none';
         credentialEnvironmentNames: string[];
+        credential?: {
+            location: 'header' | 'query';
+            names: string[];
+        };
         configuredAlgorithm?: string;
         effectiveAlgorithm?: 'HS256' | 'RS256' | 'HMAC-SHA256';
         verifiability: Record<AllowedSurfaceTarget, AuthVerifiability>;

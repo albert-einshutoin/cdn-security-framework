@@ -11,7 +11,8 @@ the stable rule ID form `SC-<CATEGORY>-<3 digits>`.
 | Exposure | `SC-EXPOSURE` | `SC-EXPOSURE-001`: undeclared Method allowed by Policy |
 | Authentication | `SC-AUTHN` | `SC-AUTHN-001`: authentication contract mismatch |
 | Authorization | `SC-AUTHZ` | `SC-AUTHZ-001`: authorization contract mismatch |
-| Resource limits | `SC-LIMIT` | `SC-LIMIT-001`: unnecessarily broad request limit |
+| Resource limits | `SC-LIMIT` | `SC-LIMIT-001`: request limit below a finite requirement |
+| Request validation | `SC-REQUEST` | `SC-REQUEST-001`: declared required header is not checked at Edge |
 | Misconfiguration | `SC-MISCONFIG` | `SC-MISCONFIG-001`: inconsistent security setting |
 | Governance | `SC-GOVERNANCE` | `SC-GOVERNANCE-001`: required review evidence missing |
 | Runtime evidence | `SC-RUNTIME` | `SC-RUNTIME-001`: observed contract drift candidate |
@@ -34,5 +35,61 @@ rules and are never emitted by the core compiler. Published IDs are not reused.
 - Confidence values follow [ADR 0003](adr/0003-security-contract-trust-model.md):
   `deterministic`, `high-confidence`, and `heuristic`.
 
-This contract is internal in v1 and is not exported from the package's public
-API. Rule implementations are added by later Security Compiler phases.
+The contract and drift comparators are exported from `cdn-security-framework/contract`.
+
+## OpenAPI and Policy drift rules
+
+`compareSecurityContracts({ declared, allowed, target }, options)` compares one
+normalized OpenAPI Security Contract with one effective Allowed Surface Model.
+The target is required because AWS and Cloudflare do not enforce every Policy
+capability in the same way. Monitor mode is retained in `actual`; a control that
+would block only in enforce mode is not reported as an enforce-mode Error.
+
+| Rule | Severity | Deterministic condition |
+| --- | --- | --- |
+| `SC-EXPOSURE-001` | Error; Warning in monitor mode | The effective method surface allows a method absent from a completely declared route. Monitor mode observes method rejection but permits the request. |
+| `SC-EXPOSURE-002` | Error; Warning in monitor mode | An OpenAPI operation is outside the effective method set. |
+| `SC-INVENTORY-002` | Error; Warning for partial route inventory | An exact Policy route has no same-shape OpenAPI route. Parameter names do not affect shape equality. |
+| `SC-EXPOSURE-003` | Warning | A broad prefix rule may extend beyond the declared surface. Unknown overlap is never promoted to Error. |
+| `SC-AUTHN-001` | Warning | An authenticated operation has no enforced Edge auth gate. |
+| `SC-AUTHN-002` | Error | An explicitly public operation is definitely covered by an enforced Edge auth gate. |
+| `SC-AUTHN-003` | Warning | Credential kind, location, or name is provably incompatible. |
+| `SC-AUTHN-004` | Info | Auth compatibility cannot be proved. |
+| `SC-LIMIT-001` | Error; Warning in monitor mode or for conditional CORS preflight | An effective limit is below a finite exact or upper-bound recommendation. |
+| `SC-LIMIT-002` | Warning | An effective limit is more than `materiallyBroaderRatio` times a positive finite recommendation. The default ratio is `2`; the recommendation already includes its documented safety margin. |
+| `SC-REQUEST-001` | Info | An OpenAPI-required header is not required at Edge. |
+| `SC-REQUEST-002` | Error; Warning in monitor mode or for conditional CORS preflight | Edge requires a header missing from a complete OpenAPI parameter contract. Effective runtime defaults are included. |
+| `SC-REQUEST-003` | Info | OpenAPI declares request content types, but the current Policy schema has no Edge content-type allowlist. |
+
+### Authentication compatibility
+
+OpenAPI alternatives remain OR branches; schemes inside an alternative remain
+AND requirements. The comparator reports compatibility only when one complete
+alternative is satisfied.
+
+| OpenAPI scheme | Edge gate | Result |
+| --- | --- | --- |
+| API key | Static token with the same header location and name | Compatible |
+| API key | Different kind, location, or name | Incompatible |
+| HTTP Basic | Basic auth | Compatible |
+| HTTP Basic | Other supported gate | Incompatible |
+| Bearer | JWT | Unknown; Bearer is not inferred to mean JWT |
+| Unsupported or incomplete scheme | Any | Unknown |
+
+All authentication findings describe only the selected Edge target. They do
+not claim that Application authentication is absent. Expected/actual evidence
+contains credential metadata, never credential values.
+
+### False-positive boundaries and remediation
+
+- Partial, unsupported, pattern, or unknown route relations do not produce a
+  deterministic Error. Review the evidence and make the contract complete
+  before tightening Policy.
+- Zero-valued recommendations do not trigger broad-limit warnings. Partial or
+  unknown request estimates do not produce limit Errors.
+- Header names are compared case-insensitively. API-key headers required by every
+  non-anonymous authentication alternative count as declared client headers. `SC-REQUEST-001` may be an
+  intentional Application-only validation boundary; `SC-REQUEST-002` means an
+  Edge requirement must be documented for clients or removed.
+- Content-type validation remains an Application responsibility until the
+  Policy schema and selected target expose that capability.

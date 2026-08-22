@@ -19,4 +19,5 @@ __exportStar(require("./finding-order"), exports);
 __exportStar(require("./canonical-route"), exports);
 __exportStar(require("./allowed-surface"), exports);
 __exportStar(require("./route-relation"), exports);
+__exportStar(require("./drift"), exports);
 __exportStar(require("./security-ir"), exports);
