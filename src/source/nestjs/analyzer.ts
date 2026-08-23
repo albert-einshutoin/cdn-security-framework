@@ -26,6 +26,7 @@ import {
   isUnsupportedNestJsDecorator,
   nestJsRouteDecorator,
   nestJsRouteDecoratorCandidate,
+  type NestJsRouteDecoratorCandidate,
   type NestJsRouteDecorator,
 } from './decorator-symbols';
 import { resolveStaticStrings } from './static-string-resolver';
@@ -44,6 +45,10 @@ const METHOD_DECORATORS: Readonly<Partial<Record<NestJsRouteDecorator, readonly 
   Put: ['PUT'],
   Sse: ['GET'],
 });
+function routeMethods(name: NestJsRouteDecoratorCandidate): readonly HttpMethod[] | undefined {
+  if (name === 'Unknown' || name === 'RequestMapping') return HTTP_METHODS;
+  return METHOD_DECORATORS[name];
+}
 const EMPTY_REQUEST = Object.freeze({
   contentTypes: [], requiredHeaders: [], queryParameters: [], pathParameters: [],
   headerParameters: [], cookieParameters: [],
@@ -237,7 +242,9 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
           addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', decorator);
         }
       }
-      const effectiveController = classCandidates.findIndex((match) => match?.name === 'Controller');
+      const effectiveController = classCandidates.findIndex((match) => (
+        match?.name === 'Controller' || match?.name === 'Unknown'
+      ));
       if (effectiveController === -1) continue;
       const controllers = classDecorators.map((decorator, index) => ({
         decorator,
@@ -253,7 +260,7 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
         const matches = methodDecorators.map((decorator) => nestJsRouteDecorator(decorator, checker));
         const versioned = classVersioned || candidates.some((match) => match?.name === 'Version');
         const effectiveRoute = candidates.findIndex((match) => Boolean(match && (
-          METHOD_DECORATORS[match.name] || match.name === 'RequestMapping' || match.name === 'Search'
+          routeMethods(match.name) || match.name === 'Search'
         )));
         if (effectiveRoute === -1) continue;
         for (const methodDecorator of methodDecorators) {
@@ -262,8 +269,7 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
           }
         }
         const effectiveCandidate = candidates[effectiveRoute]!;
-        const effectiveMethods = METHOD_DECORATORS[effectiveCandidate.name]
-          ?? (effectiveCandidate.name === 'RequestMapping' ? HTTP_METHODS : []);
+        const effectiveMethods = routeMethods(effectiveCandidate.name) ?? [];
         if (controllers.length === 0 || !effectiveCandidate.trusted) {
           if (effectiveMethods.length > 0) {
             addUnresolved(effectiveMethods, methodDecorators[effectiveRoute]!, 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');

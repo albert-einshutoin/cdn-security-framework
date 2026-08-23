@@ -461,15 +461,30 @@ describe('NestJS route analyzer', () => {
     });
 
     const aliasRoot = workspace(`
-      import { Controller, Get } from '@nestjs/common';
-      const AliasedGet = (Get as typeof Get) satisfies typeof Get;
-      @Controller('items') class ItemsController { @AliasedGet('actual') @Get('reported') one() {} }
+      import * as Nest from '@nestjs/common';
+      const { Get: ImportedGet } = Nest;
+      const AliasedGet = (ImportedGet as typeof ImportedGet) satisfies typeof ImportedGet;
+      @Nest.Controller('items') class ItemsController { @AliasedGet('actual') @Nest.Get('reported') one() {} }
     `);
     await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(aliasRoot))).resolves.toMatchObject({
       status: 'success',
       result: {
         contract: { operations: [] },
         unresolvedOperations: [{ methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }],
+      },
+    });
+
+    const computedAliasRoot = workspace(`
+      import * as Nest from '@nestjs/common';
+      const key = 'Get';
+      const { [key]: DynamicGet } = Nest;
+      @Nest.Controller('items') class ItemsController { @DynamicGet('actual') @Nest.Get('reported') one() {} }
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(computedAliasRoot))).resolves.toMatchObject({
+      status: 'success',
+      result: {
+        contract: { operations: [] },
+        unresolvedOperations: [{ methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }],
       },
     });
 

@@ -14,6 +14,7 @@ const typescript_1 = __importDefault(require("typescript"));
 exports.NESTJS_ROUTE_DECORATORS = [
     'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'RequestMapping', 'Search', 'Sse', 'Version',
 ];
+const UNKNOWN_NESTJS_ROUTE = Symbol('unknown-nestjs-route');
 function targetSymbol(node, checker) {
     const unwrap = (expression) => {
         let current = expression;
@@ -25,9 +26,11 @@ function targetSymbol(node, checker) {
     };
     const seen = new Set();
     let current = unwrap(node);
+    let selected;
     while (true) {
         const location = typescript_1.default.isPropertyAccessExpression(current) ? current.name : current;
-        const symbol = checker.getSymbolAtLocation(location);
+        const symbol = selected ?? checker.getSymbolAtLocation(location);
+        selected = undefined;
         if (!symbol)
             return undefined;
         const target = symbol.flags & typescript_1.default.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
@@ -38,10 +41,31 @@ function targetSymbol(node, checker) {
             && typescript_1.default.isVariableDeclarationList(declaration.parent)
             && Boolean(declaration.parent.flags & typescript_1.default.NodeFlags.Const)
             && declaration.initializer !== undefined));
-        if (!alias?.initializer)
+        if (alias?.initializer) {
+            const initializer = unwrap(alias.initializer);
+            if (!typescript_1.default.isIdentifier(initializer) && !typescript_1.default.isPropertyAccessExpression(initializer))
+                return target;
+            current = initializer;
+            continue;
+        }
+        const binding = target.declarations?.find((declaration) => (typescript_1.default.isBindingElement(declaration) && !declaration.dotDotDotToken
+            && typescript_1.default.isObjectBindingPattern(declaration.parent)
+            && typescript_1.default.isVariableDeclaration(declaration.parent.parent)
+            && typescript_1.default.isVariableDeclarationList(declaration.parent.parent.parent)
+            && Boolean(declaration.parent.parent.parent.flags & typescript_1.default.NodeFlags.Const)
+            && declaration.parent.parent.initializer !== undefined));
+        const property = binding?.propertyName ?? binding?.name;
+        if (!binding || !property)
             return target;
-        const initializer = unwrap(alias.initializer);
-        if (!typescript_1.default.isIdentifier(initializer) && !typescript_1.default.isPropertyAccessExpression(initializer))
+        const initializer = unwrap(binding.parent.parent.initializer);
+        if (typescript_1.default.isComputedPropertyName(property)) {
+            const namespaceType = checker.getTypeAtLocation(initializer);
+            return exports.NESTJS_ROUTE_DECORATORS.some((name) => (originatesFromNestJsCommon(namespaceType.getProperty(name)))) ? UNKNOWN_NESTJS_ROUTE : target;
+        }
+        if (!typescript_1.default.isIdentifier(property) && !typescript_1.default.isStringLiteral(property))
+            return target;
+        selected = checker.getTypeAtLocation(initializer).getProperty(property.text);
+        if (!selected)
             return target;
         current = initializer;
     }
@@ -116,6 +140,9 @@ function match(decorator, checker) {
     if (!typescript_1.default.isCallExpression(decorator.expression))
         return undefined;
     const symbol = targetSymbol(decorator.expression.expression, checker);
+    if (symbol === UNKNOWN_NESTJS_ROUTE) {
+        return { name: 'Unknown', call: decorator.expression, trusted: false, nestJsOrigin: true };
+    }
     const name = symbol?.getName();
     if (!name || !exports.NESTJS_ROUTE_DECORATORS.includes(name))
         return undefined;
@@ -136,7 +163,9 @@ function nestJsRouteDecoratorCandidate(decorator, checker) {
 }
 function nestJsRouteDecorator(decorator, checker) {
     const result = match(decorator, checker);
-    return result?.trusted ? { name: result.name, call: result.call } : undefined;
+    return result?.trusted && result.name !== 'Unknown'
+        ? { name: result.name, call: result.call }
+        : undefined;
 }
 function isUnsupportedNestJsDecorator(decorator, checker) {
     const result = match(decorator, checker);
