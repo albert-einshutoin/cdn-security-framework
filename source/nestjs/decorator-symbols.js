@@ -15,17 +15,17 @@ exports.NESTJS_ROUTE_DECORATORS = [
 const UNKNOWN_NESTJS_ROUTE = Symbol('unknown-nestjs-route');
 const MAX_COMPOSED_DECORATORS = 256;
 const NESTJS_ORIGIN_CACHE = new WeakMap();
+function unwrapExpression(expression) {
+    let current = expression;
+    while (typescript_1.default.isParenthesizedExpression(current) || typescript_1.default.isAsExpression(current)
+        || typescript_1.default.isTypeAssertionExpression(current) || typescript_1.default.isSatisfiesExpression(current)
+        || typescript_1.default.isNonNullExpression(current))
+        current = current.expression;
+    return current;
+}
 function targetSymbol(node, checker, check) {
-    const unwrap = (expression) => {
-        let current = expression;
-        while (typescript_1.default.isParenthesizedExpression(current) || typescript_1.default.isAsExpression(current)
-            || typescript_1.default.isTypeAssertionExpression(current) || typescript_1.default.isSatisfiesExpression(current)
-            || typescript_1.default.isNonNullExpression(current))
-            current = current.expression;
-        return current;
-    };
     const seen = new Set();
-    let current = unwrap(node);
+    let current = unwrapExpression(node);
     let selected;
     while (true) {
         check();
@@ -43,7 +43,7 @@ function targetSymbol(node, checker, check) {
             && Boolean(declaration.parent.flags & typescript_1.default.NodeFlags.Const)
             && declaration.initializer !== undefined));
         if (alias?.initializer) {
-            const initializer = unwrap(alias.initializer);
+            const initializer = unwrapExpression(alias.initializer);
             if (!typescript_1.default.isIdentifier(initializer) && !typescript_1.default.isPropertyAccessExpression(initializer))
                 return target;
             current = initializer;
@@ -58,7 +58,7 @@ function targetSymbol(node, checker, check) {
         const property = binding?.propertyName ?? binding?.name;
         if (!binding || !property)
             return target;
-        const initializer = unwrap(binding.parent.parent.initializer);
+        const initializer = unwrapExpression(binding.parent.parent.initializer);
         if (typescript_1.default.isComputedPropertyName(property)) {
             const namespaceType = checker.getTypeAtLocation(initializer);
             return exports.NESTJS_ROUTE_DECORATORS.some((name) => (originatesFromNestJsCommon(namespaceType.getProperty(name)))) ? UNKNOWN_NESTJS_ROUTE : target;
@@ -70,6 +70,15 @@ function targetSymbol(node, checker, check) {
             return target;
         current = initializer;
     }
+}
+function storedDecoratorCall(expression, checker, check) {
+    const symbol = targetSymbol(expression, checker, check);
+    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE)
+        return undefined;
+    const declaration = symbol.declarations?.find((candidate) => (typescript_1.default.isVariableDeclaration(candidate)
+        && candidate.initializer !== undefined));
+    const initializer = declaration?.initializer && unwrapExpression(declaration.initializer);
+    return initializer && typescript_1.default.isCallExpression(initializer) ? initializer : undefined;
 }
 function composesNestJsRoute(call, checker, check, budget) {
     return call.arguments.some((argument) => {
@@ -164,25 +173,32 @@ function matchesConsumerNestJsCommon(node, symbol) {
     }));
 }
 function match(decorator, checker, check) {
-    if (!typescript_1.default.isCallExpression(decorator.expression))
+    const storedCall = typescript_1.default.isCallExpression(decorator.expression)
+        ? undefined
+        : storedDecoratorCall(decorator.expression, checker, check);
+    const call = typescript_1.default.isCallExpression(decorator.expression) ? decorator.expression : storedCall;
+    if (!call)
         return undefined;
-    const symbol = targetSymbol(decorator.expression.expression, checker, check);
+    const symbol = targetSymbol(call.expression, checker, check);
     if (symbol === UNKNOWN_NESTJS_ROUTE) {
-        return { name: 'Unknown', call: decorator.expression, trusted: false, nestJsOrigin: true };
+        return { name: 'Unknown', call, trusted: false, nestJsOrigin: true };
     }
     const name = symbol?.getName();
+    if (storedCall && originatesFromNestJsCommon(symbol) && (exports.NESTJS_ROUTE_DECORATORS.includes(name)
+        || (name === 'applyDecorators' && composesNestJsRoute(call, checker, check, { remaining: MAX_COMPOSED_DECORATORS }))))
+        return { name: 'Unknown', call, trusted: false, nestJsOrigin: true };
     if (name === 'applyDecorators' && originatesFromNestJsCommon(symbol)
-        && composesNestJsRoute(decorator.expression, checker, check, { remaining: MAX_COMPOSED_DECORATORS })) {
-        return { name: 'Unknown', call: decorator.expression, trusted: false, nestJsOrigin: true };
+        && composesNestJsRoute(call, checker, check, { remaining: MAX_COMPOSED_DECORATORS })) {
+        return { name: 'Unknown', call, trusted: false, nestJsOrigin: true };
     }
     if (!name || !exports.NESTJS_ROUTE_DECORATORS.includes(name))
         return undefined;
     const nestJsOrigin = originatesFromNestJsCommon(symbol);
     return {
         name: name,
-        call: decorator.expression,
-        trusted: directNestJsImport(decorator.expression.expression, checker)
-            && matchesConsumerNestJsCommon(decorator.expression.expression, symbol),
+        call,
+        trusted: directNestJsImport(call.expression, checker)
+            && matchesConsumerNestJsCommon(call.expression, symbol),
         nestJsOrigin,
     };
 }

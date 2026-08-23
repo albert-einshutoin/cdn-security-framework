@@ -421,6 +421,32 @@ describe('NestJS route analyzer', () => {
     });
   });
 
+  test('fails closed for directly applied immutable stored decorators', async () => {
+    const root = workspace(`
+      import { Controller, Get, Version } from '@nestjs/common';
+      const storedVersion = Version('1');
+      const storedRoute = Get('health');
+      @Controller('versioned') @storedVersion
+      class VersionedController { @Get() list() {} }
+      @Controller('system') class SystemController {
+        @storedRoute health() {}
+      }
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success',
+      result: {
+        contract: { operations: [] },
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+        ]),
+        unresolvedOperations: expect.arrayContaining([
+          expect.objectContaining({ methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+          expect.objectContaining({ methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+        ]),
+      },
+    });
+  });
+
   test('ignores static and abstract methods and rejects URL suffixes', async () => {
     const root = workspace(`
       import { Controller, Get } from '@nestjs/common';
