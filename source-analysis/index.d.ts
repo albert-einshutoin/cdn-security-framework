@@ -39,7 +39,7 @@ export interface AnalyzerDiagnostic {
 export declare const SOURCE_ANALYZER_LOG_CODES: readonly ["SOURCE_ANALYZER_STARTED", "SOURCE_ANALYZER_COMPLETED", "SOURCE_ANALYZER_FAILED"];
 export type SourceAnalyzerLogCode = typeof SOURCE_ANALYZER_LOG_CODES[number];
 export interface SafeAnalyzerLogger {
-    log(code: SourceAnalyzerLogCode): void;
+    log(code: SourceAnalyzerLogCode): void | Promise<void>;
 }
 export interface SourceAnalysisContext {
     workspaceRoot: string;

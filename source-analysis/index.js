@@ -246,7 +246,7 @@ function exceededMetric(input, limits) {
     }
     return undefined;
 }
-function validateResult(input, workspaceRoot, plugin) {
+function validateResult(input, workspaceRoot, analyzerIdentity, capabilityStatuses) {
     if (!input || typeof input !== 'object') {
         throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
     }
@@ -266,10 +266,10 @@ function validateResult(input, workspaceRoot, plugin) {
         || metrics.diagnostics !== candidate.diagnostics.length) {
         throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
     }
-    const analyzerIdentity = `${plugin.id}@${plugin.version}`;
     if (contract.operations.some(({ provenance }) => provenance.some((evidence) => (evidence.source !== 'source-ast'
         || evidence.analyzer !== analyzerIdentity
         || !exports.SOURCE_ANALYZER_CAPABILITY_NAMES.includes(evidence.capability)
+        || capabilityStatuses[evidence.capability] === 'unsupported'
         || relativeSourceUri(evidence.uri, workspaceRoot) !== evidence.uri)))) {
         throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
     }
@@ -291,7 +291,7 @@ function validateResult(input, workspaceRoot, plugin) {
 }
 function log(logger, code) {
     try {
-        logger.log(code);
+        Promise.resolve(logger.log(code)).catch(() => { });
     }
     catch { /* Logging must not change analysis results. */ }
 }
@@ -350,6 +350,8 @@ async function runSourceAnalyzer(input, context) {
     }
     if (context.cancellationSignal?.aborted)
         return failed('SOURCE_ANALYZER_CANCELLED');
+    const analyzerIdentity = `${plugin.id}@${plugin.version}`;
+    const capabilityStatuses = Object.fromEntries(exports.SOURCE_ANALYZER_CAPABILITY_NAMES.map((name) => ([name, plugin.capabilities[name].status])));
     const prepared = preflight(context, limits);
     if ('status' in prepared)
         return prepared;
@@ -397,7 +399,7 @@ async function runSourceAnalyzer(input, context) {
         const limitCode = exceededMetric(result.metrics, limits);
         if (limitCode)
             throw new SourceAnalyzerContractError(limitCode);
-        const validated = validateResult(result, prepared.workspaceRoot, plugin);
+        const validated = validateResult(result, prepared.workspaceRoot, analyzerIdentity, capabilityStatuses);
         log(context.logger, 'SOURCE_ANALYZER_COMPLETED');
         return { status: 'success', result: validated };
     }

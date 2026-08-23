@@ -99,7 +99,7 @@ export const SOURCE_ANALYZER_LOG_CODES = [
 export type SourceAnalyzerLogCode = typeof SOURCE_ANALYZER_LOG_CODES[number];
 
 export interface SafeAnalyzerLogger {
-  log(code: SourceAnalyzerLogCode): void;
+  log(code: SourceAnalyzerLogCode): void | Promise<void>;
 }
 
 export interface SourceAnalysisContext {
@@ -334,7 +334,8 @@ function exceededMetric(input: unknown, limits: SourceAnalysisLimits): SourceAna
 function validateResult(
   input: unknown,
   workspaceRoot: string,
-  plugin: SourceAnalyzerPlugin,
+  analyzerIdentity: string,
+  capabilityStatuses: Readonly<Record<SourceAnalyzerCapabilityName, SourceAnalyzerCapabilityStatus>>,
 ): SourceAnalysisResult {
   if (!input || typeof input !== 'object') {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
@@ -354,11 +355,11 @@ function validateResult(
     || metrics.diagnostics !== candidate.diagnostics.length) {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
   }
-  const analyzerIdentity = `${plugin.id}@${plugin.version}`;
   if (contract.operations.some(({ provenance }) => provenance.some((evidence) => (
     evidence.source !== 'source-ast'
     || evidence.analyzer !== analyzerIdentity
     || !SOURCE_ANALYZER_CAPABILITY_NAMES.includes(evidence.capability as SourceAnalyzerCapabilityName)
+    || capabilityStatuses[evidence.capability as SourceAnalyzerCapabilityName] === 'unsupported'
     || relativeSourceUri(evidence.uri, workspaceRoot) !== evidence.uri
   )))) {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
@@ -383,7 +384,9 @@ function validateResult(
 }
 
 function log(logger: SafeAnalyzerLogger, code: SourceAnalyzerLogCode): void {
-  try { logger.log(code); } catch { /* Logging must not change analysis results. */ }
+  try {
+    Promise.resolve(logger.log(code)).catch(() => {});
+  } catch { /* Logging must not change analysis results. */ }
 }
 
 function preflight(context: SourceAnalysisContext, limits: SourceAnalysisLimits):
@@ -433,6 +436,10 @@ export async function runSourceAnalyzer(
     return failed(error instanceof SourceAnalyzerContractError ? error.code : 'SOURCE_ANALYZER_INTERNAL');
   }
   if (context.cancellationSignal?.aborted) return failed('SOURCE_ANALYZER_CANCELLED');
+  const analyzerIdentity = `${plugin.id}@${plugin.version}`;
+  const capabilityStatuses = Object.fromEntries(SOURCE_ANALYZER_CAPABILITY_NAMES.map((name) => (
+    [name, plugin.capabilities[name].status]
+  ))) as Record<SourceAnalyzerCapabilityName, SourceAnalyzerCapabilityStatus>;
   const prepared = preflight(context, limits);
   if ('status' in prepared) return prepared;
 
@@ -478,7 +485,7 @@ export async function runSourceAnalyzer(
     }
     const limitCode = exceededMetric((result as Partial<SourceAnalysisResult>).metrics, limits);
     if (limitCode) throw new SourceAnalyzerContractError(limitCode);
-    const validated = validateResult(result, prepared.workspaceRoot, plugin);
+    const validated = validateResult(result, prepared.workspaceRoot, analyzerIdentity, capabilityStatuses);
     log(context.logger, 'SOURCE_ANALYZER_COMPLETED');
     return { status: 'success', result: validated };
   } catch (error) {

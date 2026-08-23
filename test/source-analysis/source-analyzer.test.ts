@@ -194,6 +194,39 @@ describe('Source Analyzer contract', () => {
       expect(await runSourceAnalyzer(spoofed, context(root, entrypoint)))
         .toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_INVALID_RESULT' }] });
     }
+
+    const unsupportedEvidence = plugin({
+      capabilities: {
+        ...fakeSourceAnalyzer.capabilities,
+        routePaths: { status: 'unsupported', reason: 'Route extraction is not supported.' },
+      },
+    });
+    expect(await runSourceAnalyzer(unsupportedEvidence, context(root, entrypoint)))
+      .toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_INVALID_RESULT' }] });
+
+    const mutableCapabilities = {
+      ...fakeSourceAnalyzer.capabilities,
+      routePaths: { status: 'unsupported', reason: 'Route extraction is not supported.' },
+    } as SourceAnalyzerPlugin['capabilities'];
+    const mutatingEvidence = plugin({
+      capabilities: mutableCapabilities,
+      async analyze(ctx) {
+        (mutableCapabilities.routePaths as { status: string }).status = 'supported';
+        return fakeSourceAnalyzer.analyze(ctx);
+      },
+    });
+    expect(await runSourceAnalyzer(mutatingEvidence, context(root, entrypoint)))
+      .toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_INVALID_RESULT' }] });
+  });
+
+  test('ignores asynchronously rejected logger writes', async () => {
+    const { root, entrypoint } = workspace();
+    const execution = await runSourceAnalyzer(fakeSourceAnalyzer, {
+      ...context(root, entrypoint),
+      logger: { async log() { throw new Error('token=logger-secret'); } },
+    });
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(execution.status).toBe('success');
   });
 
   test('handles cancellation before and during analysis without treating it as an empty contract', async () => {
