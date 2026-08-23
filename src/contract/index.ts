@@ -1,6 +1,19 @@
 export * from './finding';
 export * from './finding-order';
-export * from './finding-exceptions';
+export {
+  WAIVABLE_FINDING_RULE_IDS,
+  applyFindingExceptions,
+  loadFindingExceptions,
+  validateFindingExceptionSet,
+  type FindingExceptionContext,
+  type FindingExceptionReportV1,
+  type FindingExceptionSelectorV1,
+  type FindingExceptionSetV1,
+  type FindingExceptionTarget,
+  type FindingExceptionV1,
+  type FindingExceptionValidationResult,
+  type LoadFindingExceptionsOptions,
+} from './finding-exceptions';
 export * from './canonical-route';
 export * from './allowed-surface';
 export * from './route-relation';

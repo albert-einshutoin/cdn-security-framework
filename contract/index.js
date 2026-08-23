@@ -14,10 +14,14 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.formatContractDiffText = exports.formatContractDiffJson = exports.diffSecurityContracts = exports.contractDiffExitCode = exports.ContractDiffInputError = exports.CONTRACT_DIFF_FAIL_ON = void 0;
+exports.formatContractDiffText = exports.formatContractDiffJson = exports.diffSecurityContracts = exports.contractDiffExitCode = exports.ContractDiffInputError = exports.CONTRACT_DIFF_FAIL_ON = exports.validateFindingExceptionSet = exports.loadFindingExceptions = exports.applyFindingExceptions = exports.WAIVABLE_FINDING_RULE_IDS = void 0;
 __exportStar(require("./finding"), exports);
 __exportStar(require("./finding-order"), exports);
-__exportStar(require("./finding-exceptions"), exports);
+var finding_exceptions_1 = require("./finding-exceptions");
+Object.defineProperty(exports, "WAIVABLE_FINDING_RULE_IDS", { enumerable: true, get: function () { return finding_exceptions_1.WAIVABLE_FINDING_RULE_IDS; } });
+Object.defineProperty(exports, "applyFindingExceptions", { enumerable: true, get: function () { return finding_exceptions_1.applyFindingExceptions; } });
+Object.defineProperty(exports, "loadFindingExceptions", { enumerable: true, get: function () { return finding_exceptions_1.loadFindingExceptions; } });
+Object.defineProperty(exports, "validateFindingExceptionSet", { enumerable: true, get: function () { return finding_exceptions_1.validateFindingExceptionSet; } });
 __exportStar(require("./canonical-route"), exports);
 __exportStar(require("./allowed-surface"), exports);
 __exportStar(require("./route-relation"), exports);

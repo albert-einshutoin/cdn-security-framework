@@ -39,6 +39,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.WAIVABLE_FINDING_RULE_IDS = void 0;
 exports.validateFindingExceptionSet = validateFindingExceptionSet;
 exports.loadFindingExceptions = loadFindingExceptions;
+exports.loadFindingExceptionsWithIdentity = loadFindingExceptionsWithIdentity;
 exports.applyFindingExceptions = applyFindingExceptions;
 const node_crypto_1 = require("node:crypto");
 const node_fs_1 = __importDefault(require("node:fs"));
@@ -165,7 +166,11 @@ function readBoundedRegularFile(filePath, root) {
         }
         if (total > MAX_FILE_BYTES)
             throw new Error('Finding exception file is too large');
-        return Buffer.concat(chunks, total).toString('utf8');
+        return {
+            content: Buffer.concat(chunks, total).toString('utf8'),
+            device: opened.dev,
+            inode: opened.ino,
+        };
     }
     finally {
         if (fd !== undefined)
@@ -173,6 +178,9 @@ function readBoundedRegularFile(filePath, root) {
     }
 }
 function loadFindingExceptions(options) {
+    return loadFindingExceptionsWithIdentity(options).exceptions;
+}
+function loadFindingExceptionsWithIdentity(options) {
     if (!options || typeof options.inputPath !== 'string' || typeof options.workspaceRoot !== 'string') {
         throw new Error('invalid Finding exception loader options');
     }
@@ -191,8 +199,11 @@ function loadFindingExceptions(options) {
     if (!within(root, resolved))
         throw new Error('Finding exception file is outside workspace');
     let parsed;
+    let sourceIdentity;
     try {
-        parsed = yaml.load(readBoundedRegularFile(resolved, root), {
+        const loaded = readBoundedRegularFile(resolved, root);
+        sourceIdentity = { sourcePath: resolved, device: loaded.device, inode: loaded.inode };
+        parsed = yaml.load(loaded.content, {
             schema: yaml.JSON_SCHEMA, json: false, maxAliases: 50, maxDepth: 64,
         });
     }
@@ -204,7 +215,7 @@ function loadFindingExceptions(options) {
     const validation = validateFindingExceptionSet(parsed, { currentDate: options.currentDate });
     if (!validation.valid)
         throw new Error(`invalid Finding exception file: ${validation.errors.join('; ')}`);
-    return parsed;
+    return { exceptions: parsed, sourceIdentity };
 }
 function globMatches(pattern, value) {
     if (!pattern.includes('*'))

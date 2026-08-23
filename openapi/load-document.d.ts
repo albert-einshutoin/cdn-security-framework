@@ -24,10 +24,13 @@ export interface LoadedOpenApiSourceDocument {
     byteSize: number;
     refStatus: 'unresolved';
 }
-export declare function loadedOpenApiDocumentMetadata(value: LoadedOpenApiDocument): {
+export interface LoadedOpenApiDocumentMetadata {
     workspaceRoot: string;
     sourcePath: string;
-};
+    device: number;
+    inode: number;
+}
+export declare function loadedOpenApiDocumentMetadata(value: LoadedOpenApiDocument | LoadedOpenApiSourceDocument): LoadedOpenApiDocumentMetadata;
 export declare function validateLoadedOpenApiDocumentLimits(value: LoadedOpenApiDocument, limits: Readonly<OpenApiAnalysisLimits>): void;
 export declare function isLoadedOpenApiDocument(value: unknown): value is LoadedOpenApiDocument;
 export declare function loadOpenApiSourceDocument(options: LoadOpenApiDocumentOptions): LoadedOpenApiSourceDocument;

@@ -93,6 +93,7 @@ function inspectOpenApiForCli(options) {
     return {
         report,
         sourcePaths: graph.documents.map(({ sourceUri }) => (node_path_1.default.resolve(workspaceRoot, ...sourceUri.split('/').map(decodeURIComponent)))),
+        sourceIdentities: (0, ref_resolver_1.resolvedOpenApiSourceIdentities)(graph),
     };
 }
 function inspectOpenApi(options) {

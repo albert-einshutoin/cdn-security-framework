@@ -49,7 +49,7 @@ function sameFile(left: fs.Stats, right: { device: number; inode: number }): boo
 
 function outputTarget(
   options: ContractDiffCliOptions,
-  sourcePaths: readonly string[],
+  sourceFiles: readonly { device: number; inode: number }[],
 ): OutputTarget {
   let root: string;
   try {
@@ -67,10 +67,6 @@ function outputTarget(
   const requested = path.join(parent, path.basename(lexical));
   const protectedDirectories = ['policy', 'dist'].flatMap((name) => {
     try { return [fs.realpathSync(path.join(root, name))]; } catch { return []; }
-  });
-  const sourceFiles = sourcePaths.map((sourcePath) => {
-    const stat = fs.statSync(fs.realpathSync(sourcePath));
-    return { device: stat.dev, inode: stat.ino };
   });
   if (!isPathWithinWorkspace(root, requested)
     || protectedDirectories.some((directory) => isPathWithinWorkspace(directory, requested))) {
@@ -93,7 +89,7 @@ function outputTarget(
     parent,
     parentDevice: parentStat.dev,
     parentInode: parentStat.ino,
-    sourceFiles,
+    sourceFiles: [...sourceFiles],
     expected: existing ? { device: existing.dev, inode: existing.ino } : undefined,
   };
 }
@@ -165,7 +161,7 @@ function run(options: ContractDiffCliOptions): void {
     : formatContractDiffText(execution.report, {
       color: !options.out && Boolean(process.stdout.isTTY) && !('NO_COLOR' in process.env),
     });
-  if (options.out) writeOutput(outputTarget(options, execution.sourcePaths), output);
+  if (options.out) writeOutput(outputTarget(options, execution.sourceIdentities), output);
   else process.stdout.write(output);
   process.exitCode = contractDiffExitCode(execution.report, options.failOn as ContractDiffFailOn);
 }

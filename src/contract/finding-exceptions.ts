@@ -66,6 +66,11 @@ export interface LoadFindingExceptionsOptions {
   currentDate: string;
 }
 
+export interface LoadedFindingExceptions {
+  exceptions: FindingExceptionSetV1;
+  sourceIdentity: { sourcePath: string; device: number; inode: number };
+}
+
 const MAX_FILE_BYTES = 1_048_576;
 const MAX_EXCEPTIONS = 10_000;
 const MAX_APPLY_VISITS = 1_000_000;
@@ -156,7 +161,10 @@ function within(root: string, candidate: string): boolean {
   return relative !== '' && !relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative);
 }
 
-function readBoundedRegularFile(filePath: string, root: string): string {
+function readBoundedRegularFile(
+  filePath: string,
+  root: string,
+): { content: string; device: number; inode: number } {
   let fd: number | undefined;
   try {
     fd = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK);
@@ -179,13 +187,23 @@ function readBoundedRegularFile(filePath: string, root: string): string {
       total += read;
     }
     if (total > MAX_FILE_BYTES) throw new Error('Finding exception file is too large');
-    return Buffer.concat(chunks, total).toString('utf8');
+    return {
+      content: Buffer.concat(chunks, total).toString('utf8'),
+      device: opened.dev,
+      inode: opened.ino,
+    };
   } finally {
     if (fd !== undefined) fs.closeSync(fd);
   }
 }
 
 export function loadFindingExceptions(options: LoadFindingExceptionsOptions): FindingExceptionSetV1 {
+  return loadFindingExceptionsWithIdentity(options).exceptions;
+}
+
+export function loadFindingExceptionsWithIdentity(
+  options: LoadFindingExceptionsOptions,
+): LoadedFindingExceptions {
   if (!options || typeof options.inputPath !== 'string' || typeof options.workspaceRoot !== 'string') {
     throw new Error('invalid Finding exception loader options');
   }
@@ -203,8 +221,11 @@ export function loadFindingExceptions(options: LoadFindingExceptionsOptions): Fi
   if (!within(root, resolved)) throw new Error('Finding exception file is outside workspace');
 
   let parsed: unknown;
+  let sourceIdentity: { sourcePath: string; device: number; inode: number };
   try {
-    parsed = yaml.load(readBoundedRegularFile(resolved, root), {
+    const loaded = readBoundedRegularFile(resolved, root);
+    sourceIdentity = { sourcePath: resolved, device: loaded.device, inode: loaded.inode };
+    parsed = yaml.load(loaded.content, {
       schema: yaml.JSON_SCHEMA, json: false, maxAliases: 50, maxDepth: 64,
     });
   } catch (error: unknown) {
@@ -213,7 +234,7 @@ export function loadFindingExceptions(options: LoadFindingExceptionsOptions): Fi
   }
   const validation = validateFindingExceptionSet(parsed, { currentDate: options.currentDate });
   if (!validation.valid) throw new Error(`invalid Finding exception file: ${validation.errors.join('; ')}`);
-  return parsed as FindingExceptionSetV1;
+  return { exceptions: parsed as FindingExceptionSetV1, sourceIdentity };
 }
 
 function globMatches(pattern: string, value: string): boolean {

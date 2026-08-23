@@ -42,10 +42,13 @@ export interface LoadedOpenApiSourceDocument {
 
 const FORBIDDEN_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
 const LOADED_OPENAPI_ROOTS = new WeakSet<object>();
-const LOADED_OPENAPI_METADATA = new WeakMap<object, {
+export interface LoadedOpenApiDocumentMetadata {
   workspaceRoot: string;
   sourcePath: string;
-}>();
+  device: number;
+  inode: number;
+}
+const LOADED_OPENAPI_METADATA = new WeakMap<object, LoadedOpenApiDocumentMetadata>();
 
 function freezeValue(value: unknown, seen = new WeakSet<object>()): void {
   if (value === null || typeof value !== 'object' || seen.has(value)) return;
@@ -57,17 +60,16 @@ function freezeValue(value: unknown, seen = new WeakSet<object>()): void {
 function markLoaded<T extends object>(
   value: T,
   kind: 'root' | 'source',
-  metadata: { workspaceRoot: string; sourcePath: string },
+  metadata: LoadedOpenApiDocumentMetadata,
 ): T {
   if (kind === 'root') LOADED_OPENAPI_ROOTS.add(value);
   LOADED_OPENAPI_METADATA.set(value, metadata);
   return Object.freeze(value);
 }
 
-export function loadedOpenApiDocumentMetadata(value: LoadedOpenApiDocument): {
-  workspaceRoot: string;
-  sourcePath: string;
-} {
+export function loadedOpenApiDocumentMetadata(
+  value: LoadedOpenApiDocument | LoadedOpenApiSourceDocument,
+): LoadedOpenApiDocumentMetadata {
   const metadata = LOADED_OPENAPI_METADATA.get(value);
   if (!metadata) throw new OpenApiAnalysisError('OPENAPI_INVALID_ROOT');
   return metadata;
@@ -240,9 +242,11 @@ export function loadOpenApiSourceDocument(
 
   let descriptor: number | undefined;
   let bytes: Buffer;
+  let identity: { device: number; inode: number } | undefined;
   try {
     descriptor = fs.openSync(resolvedPath, fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0));
     const opened = fs.fstatSync(descriptor);
+    identity = { device: opened.dev, inode: opened.ino };
     if (!opened.isFile() || opened.dev !== beforeRead.dev || opened.ino !== beforeRead.ino) {
       throw new OpenApiAnalysisError('OPENAPI_INPUT_NOT_FOUND', { sourceUri });
     }
@@ -285,13 +289,14 @@ export function loadOpenApiSourceDocument(
     nodes: 0,
   }, new Set<object>());
   freezeValue(parsed);
+  if (!identity) throw new OpenApiAnalysisError('OPENAPI_INPUT_NOT_FOUND', { sourceUri });
   return markLoaded({
     document: parsed,
     sourceUri,
     contentDigest: `sha256:${createHash('sha256').update(bytes).digest('hex')}`,
     byteSize: bytes.length,
     refStatus: 'unresolved',
-  }, 'source', { workspaceRoot: rootRealPath, sourcePath: resolvedPath });
+  }, 'source', { workspaceRoot: rootRealPath, sourcePath: resolvedPath, ...identity });
 }
 
 export function loadOpenApiDocument(options: LoadOpenApiDocumentOptions): LoadedOpenApiDocument {

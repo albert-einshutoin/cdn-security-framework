@@ -165,7 +165,10 @@ function readBoundedPolicyFile(root, filePath) {
             || Object.getPrototypeOf(parsed) !== Object.prototype) {
             throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy input root is invalid.');
         }
-        return { document: parsed, content, digest: digest(content), bytes };
+        return {
+            document: parsed, content, digest: digest(content), bytes,
+            device: stat.dev, inode: stat.ino,
+        };
     }
     catch (error) {
         if (error instanceof ContractDiffInputError)
@@ -208,7 +211,10 @@ function policySources(root, entryPath) {
             visit(parentPath);
         }
         active.delete(filePath);
-        sources.push({ filePath, digest: loaded.digest, content: loaded.content });
+        sources.push({
+            filePath, digest: loaded.digest, content: loaded.content,
+            device: loaded.device, inode: loaded.inode,
+        });
     };
     visit(entryPath);
     return sources;
@@ -310,17 +316,22 @@ function execute(options) {
     let exceptionDiagnostics = [];
     let appliedExceptionIds = [];
     let exceptionsDigest = null;
-    const sourcePaths = [...inspection.sourcePaths, ...loadedPolicy.sources.map(({ filePath }) => filePath)];
+    const sourceIdentities = [
+        ...inspection.sourceIdentities,
+        ...loadedPolicy.sources.map(({ filePath: sourcePath, device, inode }) => ({ sourcePath, device, inode })),
+    ];
     if (options.exceptionsPath) {
         const exceptionsPath = inputFile(root, options.exceptionsPath, 'CONTRACT_DIFF_EXCEPTIONS_INVALID', 'Finding exceptions input');
         let exceptions;
         try {
             const currentDate = options.currentDate ?? new Date().toISOString().slice(0, 10);
-            exceptions = (0, finding_exceptions_1.loadFindingExceptions)({
+            const loadedExceptions = (0, finding_exceptions_1.loadFindingExceptionsWithIdentity)({
                 inputPath: exceptionsPath,
                 workspaceRoot: root,
                 currentDate,
             });
+            exceptions = loadedExceptions.exceptions;
+            sourceIdentities.push(loadedExceptions.sourceIdentity);
             const applied = (0, finding_exceptions_1.applyFindingExceptions)(findings, exceptions, {
                 currentDate,
                 target: options.target,
@@ -331,7 +342,6 @@ function execute(options) {
             suppressedFindings = applied.suppressedFindings;
             appliedExceptionIds = applied.appliedExceptionIds;
             exceptionsDigest = semanticDigest({ exceptions, currentDate });
-            sourcePaths.push(exceptionsPath);
         }
         catch (error) {
             if (error instanceof ContractDiffInputError)
@@ -362,7 +372,9 @@ function execute(options) {
             analyzerDiagnostics: inspection.report.diagnostics,
             omittedComparisons: omittedComparisons(inspection.report.capabilities, policyCapabilities),
         },
-        sourcePaths: [...new Set(sourcePaths)].sort(compareText),
+        sourceIdentities: sourceIdentities
+            .filter((identity, index, values) => values.findIndex(({ device, inode }) => (device === identity.device && inode === identity.inode)) === index)
+            .sort((left, right) => compareText(left.sourcePath, right.sourcePath)),
     };
 }
 function diffSecurityContracts(options) {

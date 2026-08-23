@@ -301,6 +301,33 @@ exceptions:
     const inputBefore = fs.readFileSync(ok.openapiPath, 'utf8');
     expect(run([...common, '--format', 'json', '--out', ok.openapiPath, '--force']).status).toBe(2);
     expect(fs.readFileSync(ok.openapiPath, 'utf8')).toBe(inputBefore);
+    const movedInputOutput = path.join(ok.root, 'moved-input-report.json');
+    const movedInputPreload = path.join(ok.root, 'move-input-after-analysis.cjs');
+    fs.writeFileSync(movedInputPreload, `const fs = require('node:fs');
+const Module = require('node:module');
+const load = Module._load;
+Module._load = function (request, parent, isMain) {
+  const value = load.call(this, request, parent, isMain);
+  if (request.includes('contract/contract-diff')) {
+    return { ...value, diffSecurityContractsForCli(options) {
+      const execution = value.diffSecurityContractsForCli(options);
+      fs.renameSync(process.env.MOVED_INPUT_SOURCE, process.env.MOVED_INPUT_OUTPUT);
+      fs.writeFileSync(process.env.MOVED_INPUT_SOURCE, process.env.MOVED_INPUT_REPLACEMENT);
+      return execution;
+    } };
+  }
+  return value;
+};
+`);
+    const movedInput = run([...common, '--format', 'json', '--out', movedInputOutput, '--force'], {
+      NODE_OPTIONS: `--require=${movedInputPreload}`,
+      MOVED_INPUT_SOURCE: ok.openapiPath,
+      MOVED_INPUT_OUTPUT: movedInputOutput,
+      MOVED_INPUT_REPLACEMENT: inputBefore.replace('Contract', 'Replacement'),
+    });
+    expect(movedInput.status).toBe(2);
+    expect(fs.readFileSync(movedInputOutput, 'utf8')).toBe(inputBefore);
+    fs.writeFileSync(ok.openapiPath, inputBefore);
     const symlinkOutput = path.join(ok.root, 'symlink-report.json');
     fs.symlinkSync(ok.openapiPath, symlinkOutput);
     expect(run([...common, '--out', symlinkOutput, '--force']).status).toBe(2);

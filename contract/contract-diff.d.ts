@@ -49,7 +49,12 @@ export declare class ContractDiffInputError extends Error {
 }
 interface ContractDiffExecution {
     report: ContractDiffReportV1;
-    sourcePaths: string[];
+    sourceIdentities: SourceIdentity[];
+}
+interface SourceIdentity {
+    sourcePath: string;
+    device: number;
+    inode: number;
 }
 export declare function diffSecurityContracts(options: DiffSecurityContractsOptions): ContractDiffReportV1;
 export declare function diffSecurityContractsForCli(options: DiffSecurityContractsOptions): ContractDiffExecution;

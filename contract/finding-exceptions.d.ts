@@ -49,6 +49,15 @@ export interface LoadFindingExceptionsOptions {
     workspaceRoot: string;
     currentDate: string;
 }
+export interface LoadedFindingExceptions {
+    exceptions: FindingExceptionSetV1;
+    sourceIdentity: {
+        sourcePath: string;
+        device: number;
+        inode: number;
+    };
+}
 export declare function validateFindingExceptionSet(value: unknown, context: Pick<FindingExceptionContext, 'currentDate'>): FindingExceptionValidationResult;
 export declare function loadFindingExceptions(options: LoadFindingExceptionsOptions): FindingExceptionSetV1;
+export declare function loadFindingExceptionsWithIdentity(options: LoadFindingExceptionsOptions): LoadedFindingExceptions;
 export declare function applyFindingExceptions(findings: readonly SecurityFindingV1[], set: FindingExceptionSetV1, context: FindingExceptionContext): FindingExceptionReportV1;

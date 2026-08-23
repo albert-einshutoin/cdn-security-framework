@@ -13,7 +13,7 @@ import {
 import { compareSecurityContracts } from './drift';
 import {
   applyFindingExceptions,
-  loadFindingExceptions,
+  loadFindingExceptionsWithIdentity,
   type FindingExceptionSetV1,
 } from './finding-exceptions';
 import {
@@ -82,13 +82,21 @@ export class ContractDiffInputError extends Error {
 
 interface ContractDiffExecution {
   report: ContractDiffReportV1;
-  sourcePaths: string[];
+  sourceIdentities: SourceIdentity[];
+}
+
+interface SourceIdentity {
+  sourcePath: string;
+  device: number;
+  inode: number;
 }
 
 interface PolicySource {
   content: string;
   digest: string;
   filePath: string;
+  device: number;
+  inode: number;
 }
 
 const MAX_POLICY_FILE_BYTES = 1_048_576;
@@ -162,6 +170,8 @@ function readBoundedPolicyFile(root: string, filePath: string): {
   content: string;
   digest: string;
   bytes: number;
+  device: number;
+  inode: number;
 } {
   let descriptor: number | undefined;
   try {
@@ -204,7 +214,10 @@ function readBoundedPolicyFile(root: string, filePath: string): {
       || Object.getPrototypeOf(parsed) !== Object.prototype) {
       throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy input root is invalid.');
     }
-    return { document: parsed as Record<string, unknown>, content, digest: digest(content), bytes };
+    return {
+      document: parsed as Record<string, unknown>, content, digest: digest(content), bytes,
+      device: stat.dev, inode: stat.ino,
+    };
   } catch (error: unknown) {
     if (error instanceof ContractDiffInputError) throw error;
     throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy input could not be read safely.');
@@ -245,7 +258,10 @@ function policySources(root: string, entryPath: string): PolicySource[] {
       visit(parentPath);
     }
     active.delete(filePath);
-    sources.push({ filePath, digest: loaded.digest, content: loaded.content });
+    sources.push({
+      filePath, digest: loaded.digest, content: loaded.content,
+      device: loaded.device, inode: loaded.inode,
+    });
   };
   visit(entryPath);
   return sources;
@@ -363,7 +379,10 @@ function execute(options: DiffSecurityContractsOptions): ContractDiffExecution {
   let exceptionDiagnostics: SecurityFindingV1[] = [];
   let appliedExceptionIds: string[] = [];
   let exceptionsDigest: string | null = null;
-  const sourcePaths = [...inspection.sourcePaths, ...loadedPolicy.sources.map(({ filePath }) => filePath)];
+  const sourceIdentities: SourceIdentity[] = [
+    ...inspection.sourceIdentities,
+    ...loadedPolicy.sources.map(({ filePath: sourcePath, device, inode }) => ({ sourcePath, device, inode })),
+  ];
   if (options.exceptionsPath) {
     const exceptionsPath = inputFile(
       root,
@@ -374,11 +393,13 @@ function execute(options: DiffSecurityContractsOptions): ContractDiffExecution {
     let exceptions: FindingExceptionSetV1;
     try {
       const currentDate = options.currentDate ?? new Date().toISOString().slice(0, 10);
-      exceptions = loadFindingExceptions({
+      const loadedExceptions = loadFindingExceptionsWithIdentity({
         inputPath: exceptionsPath,
         workspaceRoot: root,
         currentDate,
       });
+      exceptions = loadedExceptions.exceptions;
+      sourceIdentities.push(loadedExceptions.sourceIdentity);
       const applied = applyFindingExceptions(findings, exceptions, {
         currentDate,
         target: options.target,
@@ -389,7 +410,6 @@ function execute(options: DiffSecurityContractsOptions): ContractDiffExecution {
       suppressedFindings = applied.suppressedFindings;
       appliedExceptionIds = applied.appliedExceptionIds;
       exceptionsDigest = semanticDigest({ exceptions, currentDate });
-      sourcePaths.push(exceptionsPath);
     } catch (error: unknown) {
       if (error instanceof ContractDiffInputError) throw error;
       throw new ContractDiffInputError('CONTRACT_DIFF_EXCEPTIONS_INVALID', 'Finding exceptions input is invalid.');
@@ -418,7 +438,11 @@ function execute(options: DiffSecurityContractsOptions): ContractDiffExecution {
       analyzerDiagnostics: inspection.report.diagnostics,
       omittedComparisons: omittedComparisons(inspection.report.capabilities, policyCapabilities),
     },
-    sourcePaths: [...new Set(sourcePaths)].sort(compareText),
+    sourceIdentities: sourceIdentities
+      .filter((identity, index, values) => values.findIndex(({ device, inode }) => (
+        device === identity.device && inode === identity.inode
+      )) === index)
+      .sort((left, right) => compareText(left.sourcePath, right.sourcePath)),
   };
 }
 

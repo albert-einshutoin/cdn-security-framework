@@ -1,5 +1,6 @@
 import type { ExposureV1, SecurityContractCapabilitiesV1, SecurityContractV1 } from '../contract';
 import { type OpenApiAnalysisLimits } from './analysis-limits';
+import { type OpenApiSourceIdentity } from './ref-resolver';
 export interface InspectOpenApiOptions {
     inputPath: string;
     workspaceRoot: string;
@@ -36,6 +37,7 @@ export interface OpenApiInspectionV1 {
 export interface OpenApiInspectionForCli {
     report: OpenApiInspectionV1;
     sourcePaths: readonly string[];
+    sourceIdentities: readonly OpenApiSourceIdentity[];
 }
 export declare function inspectOpenApiForCli(options: InspectOpenApiOptions): OpenApiInspectionForCli;
 export declare function inspectOpenApi(options: InspectOpenApiOptions): OpenApiInspectionV1;
