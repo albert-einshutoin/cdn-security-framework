@@ -61,7 +61,7 @@ describe('TypeScript project loader', () => {
     const root = workspace();
     write(root, 'tsconfig.json', `{
       // JSONC comments and trailing commas are supported.
-      "compilerOptions": { "target": "ES2022", "paths": { "@app/*": ["./src/*"] }, },
+      "compilerOptions": { "target": "ES2022", "ignoreDeprecations": "6.0", "baseUrl": "src", "paths": { "@app/*": ["../shared/*"] }, },
       "include": ["src/**/*"],
       "exclude": ["src/ignored.ts"],
     }`);
@@ -76,7 +76,7 @@ describe('TypeScript project loader', () => {
     expect(loaded.sourceFiles.map(({ fileName }) => path.relative(fs.realpathSync(root), fileName))).toEqual([
       'src/app.ts', 'src/common.cts', 'src/component.tsx', 'src/module.mts',
     ]);
-    expect(loaded.pathAliases).toEqual({ '@app/*': ['./src/*'] });
+    expect(loaded.pathAliases).toEqual({ '@app/*': ['../shared/*'] });
     expect(loaded.projectReferences).toBe('supported');
     expect(loaded.diagnostics).toEqual([]);
     expect(loaded.metrics).toMatchObject({ files: 4, cacheHits: 0, cacheMisses: 1, cacheInvalidations: 0 });
@@ -136,6 +136,17 @@ describe('TypeScript project loader', () => {
     await expectFailure(loadTypeScriptProject(options(root, {
       limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxAstNodes: 1 },
     })), 'TS_PROJECT_AST_NODE_LIMIT', root);
+
+    const baseConfig = '{ "compilerOptions": { "strict": true } }';
+    const rootConfig = '{ "extends": "./base.json", "files": ["src/one.ts"] }';
+    write(root, 'base.json', baseConfig);
+    write(root, 'tsconfig.json', rootConfig);
+    await expectFailure(loadTypeScriptProject(options(root, {
+      limits: {
+        ...DEFAULT_SOURCE_ANALYSIS_LIMITS,
+        maxTotalSourceBytes: Buffer.byteLength(baseConfig + rootConfig + 'export const one = 1;\n') - 1,
+      },
+    })), 'TS_PROJECT_TOTAL_BYTES_LIMIT', root);
 
     write(root, 'tsconfig.json', '{ "include": ["../outside.ts"] }');
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);

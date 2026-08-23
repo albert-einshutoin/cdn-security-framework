@@ -227,12 +227,15 @@ function validateConfigTree(fileSystem, workspaceRoot, configPath, limits, signa
             if (!compiler.paths || typeof compiler.paths !== 'object' || Array.isArray(compiler.paths)) {
                 throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
             }
+            const pathsBase = typeof compiler.baseUrl === 'string'
+                ? node_path_1.default.resolve(configDirectory, compiler.baseUrl)
+                : configDirectory;
             for (const values of Object.values(compiler.paths)) {
                 if (!Array.isArray(values) || values.some((value) => typeof value !== 'string')) {
                     throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
                 }
                 for (const value of values)
-                    safeConfigPath(fileSystem, workspaceRoot, configDirectory, value);
+                    safeConfigPath(fileSystem, workspaceRoot, pathsBase, value);
             }
         }
     }
@@ -387,7 +390,7 @@ async function loadTypeScriptProjectInternal(options) {
     checkInterruption(options.cancellationSignal, deadline);
     const rootNames = [];
     const rootContents = new Map();
-    let totalSourceBytes = 0;
+    let totalSourceBytes = configState.totalBytes;
     let largestFileBytes = 0;
     for (const fileName of parsed.fileNames) {
         checkInterruption(options.cancellationSignal, deadline);
@@ -406,8 +409,9 @@ async function loadTypeScriptProjectInternal(options) {
         rootNames.push(resolved.absolute);
         totalSourceBytes += size;
         largestFileBytes = Math.max(largestFileBytes, size);
-        if (rootNames.length > limits.maxFiles)
+        if (configState.digests.size + rootNames.length > limits.maxFiles) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_LIMIT');
+        }
         if (totalSourceBytes > limits.maxTotalSourceBytes) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_TOTAL_BYTES_LIMIT');
         }
@@ -477,7 +481,7 @@ async function loadTypeScriptProjectInternal(options) {
             metadataContents.set(safe.absolute, { relative, text });
             totalSourceBytes += size;
             largestFileBytes = Math.max(largestFileBytes, size);
-            if (workspaceContents.size + metadataContents.size > limits.maxFiles) {
+            if (configState.digests.size + workspaceContents.size + metadataContents.size > limits.maxFiles) {
                 throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_LIMIT');
             }
             if (totalSourceBytes > limits.maxTotalSourceBytes) {
@@ -503,8 +507,9 @@ async function loadTypeScriptProjectInternal(options) {
         workspaceContents.set(safe.absolute, { relative, text, size });
         totalSourceBytes += size;
         largestFileBytes = Math.max(largestFileBytes, size);
-        if (workspaceContents.size > limits.maxFiles)
+        if (configState.digests.size + workspaceContents.size > limits.maxFiles) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_LIMIT');
+        }
         if (totalSourceBytes > limits.maxTotalSourceBytes) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_TOTAL_BYTES_LIMIT');
         }
