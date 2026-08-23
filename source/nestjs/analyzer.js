@@ -97,15 +97,82 @@ function hasInheritedClassVersion(node, checker, projectSources, check, maxSteps
 }
 function methodsIncludingBaseChain(node, checker, projectSources, useDefineForClassFields, check, maxSteps) {
     const symbolKey = Symbol('symbol-method-key');
+    const unwrapPropertyExpression = (expression) => {
+        let current = expression;
+        while (typescript_1.default.isParenthesizedExpression(current) || typescript_1.default.isAsExpression(current)
+            || typescript_1.default.isTypeAssertionExpression(current) || typescript_1.default.isSatisfiesExpression(current)
+            || typescript_1.default.isNonNullExpression(current))
+            current = current.expression;
+        return current;
+    };
+    const staticName = (name) => (typescript_1.default.isIdentifier(name) || typescript_1.default.isStringLiteral(name) || typescript_1.default.isNumericLiteral(name)
+        || typescript_1.default.isNoSubstitutionTemplateLiteral(name) ? name.text : undefined);
+    const destructuredInitializer = (binding) => {
+        const steps = [];
+        let current = binding;
+        let declaration;
+        while (true) {
+            if (current.dotDotDotToken || current.initializer)
+                return undefined;
+            const pattern = current.parent;
+            if (typescript_1.default.isArrayBindingPattern(pattern)) {
+                const index = pattern.elements.indexOf(current);
+                if (index < 0)
+                    return undefined;
+                steps.push({ kind: 'array', index });
+            }
+            else if (typescript_1.default.isObjectBindingPattern(pattern)) {
+                const key = current.propertyName && staticName(current.propertyName)
+                    || (typescript_1.default.isIdentifier(current.name) ? current.name.text : undefined);
+                if (key === undefined)
+                    return undefined;
+                steps.push({ kind: 'object', key });
+            }
+            else
+                return undefined;
+            if (typescript_1.default.isVariableDeclaration(pattern.parent)) {
+                declaration = pattern.parent;
+                break;
+            }
+            if (!typescript_1.default.isBindingElement(pattern.parent))
+                return undefined;
+            current = pattern.parent;
+        }
+        if (!declaration.initializer || !projectSources.has(declaration.getSourceFile())
+            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+            return undefined;
+        let value = declaration.initializer;
+        for (const step of steps.reverse()) {
+            const node = unwrapPropertyExpression(value);
+            if (step.kind === 'array') {
+                if (!typescript_1.default.isArrayLiteralExpression(node) || node.elements.some(typescript_1.default.isSpreadElement))
+                    return undefined;
+                const element = node.elements[step.index];
+                if (!element || typescript_1.default.isOmittedExpression(element) || typescript_1.default.isSpreadElement(element))
+                    return undefined;
+                value = element;
+                continue;
+            }
+            if (step.key === '__proto__' || !typescript_1.default.isObjectLiteralExpression(node)
+                || node.properties.some((property) => (typescript_1.default.isSpreadAssignment(property) || !property.name || staticName(property.name) === undefined)))
+                return undefined;
+            const property = [...node.properties].reverse().find((candidate) => (candidate.name && staticName(candidate.name) === step.key));
+            if (!property)
+                return undefined;
+            if (typescript_1.default.isPropertyAssignment(property))
+                value = property.initializer;
+            else if (typescript_1.default.isShorthandPropertyAssignment(property))
+                value = property.name;
+            else
+                return undefined;
+        }
+        return value;
+    };
     const numericPropertyValue = (expression, resolving = new Set(), depth = 0) => {
         check();
         if (depth > 64)
             return undefined;
-        let node = expression;
-        while (typescript_1.default.isParenthesizedExpression(node) || typescript_1.default.isAsExpression(node)
-            || typescript_1.default.isTypeAssertionExpression(node) || typescript_1.default.isSatisfiesExpression(node)
-            || typescript_1.default.isNonNullExpression(node))
-            node = node.expression;
+        const node = unwrapPropertyExpression(expression);
         const value = typescript_1.default.isNumericLiteral(node)
             ? Number(node.text)
             : typescript_1.default.isBigIntLiteral(node)
@@ -130,13 +197,19 @@ function methodsIncludingBaseChain(node, checker, projectSources, useDefineForCl
             symbol = checker.getAliasedSymbol(symbol);
         if (resolving.has(symbol))
             return undefined;
-        const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
-        const declaration = declarations.length === 1 ? declarations[0] : undefined;
-        if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
-            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+        const declarations = symbol.declarations ?? [];
+        if (declarations.length !== 1)
+            return undefined;
+        const declaration = declarations[0];
+        const initializer = typescript_1.default.isVariableDeclaration(declaration)
+            ? declaration.initializer
+            : typescript_1.default.isBindingElement(declaration) ? destructuredInitializer(declaration) : undefined;
+        if (!initializer || !projectSources.has(declaration.getSourceFile())
+            || (typescript_1.default.isVariableDeclaration(declaration)
+                && !(declaration.parent.flags & typescript_1.default.NodeFlags.Const)))
             return undefined;
         resolving.add(symbol);
-        const result = numericPropertyValue(declaration.initializer, resolving, depth + 1);
+        const result = numericPropertyValue(initializer, resolving, depth + 1);
         resolving.delete(symbol);
         return result;
     };

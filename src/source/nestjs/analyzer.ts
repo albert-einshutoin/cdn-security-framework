@@ -125,6 +125,67 @@ function methodsIncludingBaseChain(
   maxSteps: number,
 ): ts.MethodDeclaration[] {
   const symbolKey = Symbol('symbol-method-key');
+  const unwrapPropertyExpression = (expression: ts.Expression): ts.Expression => {
+    let current = expression;
+    while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current)
+      || ts.isTypeAssertionExpression(current) || ts.isSatisfiesExpression(current)
+      || ts.isNonNullExpression(current)) current = current.expression;
+    return current;
+  };
+  const staticName = (name: ts.PropertyName): string | undefined => (
+    ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)
+      || ts.isNoSubstitutionTemplateLiteral(name) ? name.text : undefined
+  );
+  const destructuredInitializer = (binding: ts.BindingElement): ts.Expression | undefined => {
+    const steps: ({ kind: 'array'; index: number } | { kind: 'object'; key: string })[] = [];
+    let current = binding;
+    let declaration: ts.VariableDeclaration | undefined;
+    while (true) {
+      if (current.dotDotDotToken || current.initializer) return undefined;
+      const pattern = current.parent;
+      if (ts.isArrayBindingPattern(pattern)) {
+        const index = pattern.elements.indexOf(current);
+        if (index < 0) return undefined;
+        steps.push({ kind: 'array', index });
+      } else if (ts.isObjectBindingPattern(pattern)) {
+        const key = current.propertyName && staticName(current.propertyName)
+          || (ts.isIdentifier(current.name) ? current.name.text : undefined);
+        if (key === undefined) return undefined;
+        steps.push({ kind: 'object', key });
+      } else return undefined;
+      if (ts.isVariableDeclaration(pattern.parent)) {
+        declaration = pattern.parent;
+        break;
+      }
+      if (!ts.isBindingElement(pattern.parent)) return undefined;
+      current = pattern.parent;
+    }
+    if (!declaration.initializer || !projectSources.has(declaration.getSourceFile())
+      || !(declaration.parent.flags & ts.NodeFlags.Const)) return undefined;
+    let value = declaration.initializer;
+    for (const step of steps.reverse()) {
+      const node = unwrapPropertyExpression(value);
+      if (step.kind === 'array') {
+        if (!ts.isArrayLiteralExpression(node) || node.elements.some(ts.isSpreadElement)) return undefined;
+        const element = node.elements[step.index];
+        if (!element || ts.isOmittedExpression(element) || ts.isSpreadElement(element)) return undefined;
+        value = element;
+        continue;
+      }
+      if (step.key === '__proto__' || !ts.isObjectLiteralExpression(node)
+        || node.properties.some((property) => (
+          ts.isSpreadAssignment(property) || !property.name || staticName(property.name) === undefined
+        ))) return undefined;
+      const property = [...node.properties].reverse().find((candidate) => (
+        candidate.name && staticName(candidate.name) === step.key
+      ));
+      if (!property) return undefined;
+      if (ts.isPropertyAssignment(property)) value = property.initializer;
+      else if (ts.isShorthandPropertyAssignment(property)) value = property.name;
+      else return undefined;
+    }
+    return value;
+  };
   const numericPropertyValue = (
     expression: ts.Expression,
     resolving = new Set<ts.Symbol>(),
@@ -132,10 +193,7 @@ function methodsIncludingBaseChain(
   ): number | bigint | undefined => {
     check();
     if (depth > 64) return undefined;
-    let node = expression;
-    while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)
-      || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)
-      || ts.isNonNullExpression(node)) node = node.expression;
+    const node = unwrapPropertyExpression(expression);
     const value = ts.isNumericLiteral(node)
       ? Number(node.text)
       : ts.isBigIntLiteral(node)
@@ -155,12 +213,17 @@ function methodsIncludingBaseChain(
     if (!symbol) return undefined;
     if (symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
     if (resolving.has(symbol)) return undefined;
-    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
-    const declaration = declarations.length === 1 ? declarations[0] : undefined;
-    if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
-      || !(declaration.parent.flags & ts.NodeFlags.Const)) return undefined;
+    const declarations = symbol.declarations ?? [];
+    if (declarations.length !== 1) return undefined;
+    const declaration = declarations[0];
+    const initializer = ts.isVariableDeclaration(declaration)
+      ? declaration.initializer
+      : ts.isBindingElement(declaration) ? destructuredInitializer(declaration) : undefined;
+    if (!initializer || !projectSources.has(declaration.getSourceFile())
+      || (ts.isVariableDeclaration(declaration)
+        && !(declaration.parent.flags & ts.NodeFlags.Const))) return undefined;
     resolving.add(symbol);
-    const result = numericPropertyValue(declaration.initializer, resolving, depth + 1);
+    const result = numericPropertyValue(initializer, resolving, depth + 1);
     resolving.delete(symbol);
     return result;
   };

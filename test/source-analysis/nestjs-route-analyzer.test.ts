@@ -392,6 +392,59 @@ describe('NestJS route analyzer', () => {
     });
   });
 
+  test('resolves destructured numeric aliases when filtering inherited routes', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      const [ARRAY_KEY] = [1] as const;
+      const { key: OBJECT_KEY } = { key: 2 } as const;
+      class BaseController { @Get('array') '1'() {} @Get('object') '2'() {} }
+      class MiddleController extends BaseController { [ARRAY_KEY]() {} [OBJECT_KEY]() {} }
+      @Controller('derived') class DerivedController extends MiddleController {}
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success', result: { contract: { operations: [] } },
+    });
+  });
+
+  test('does not resolve destructured numeric aliases across array spreads', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      const [, KEY] = [...[0, 1], 2] as const;
+      class BaseController { @Get('spread') '2'() {} }
+      class MiddleController extends BaseController { [KEY]() {} }
+      @Controller('derived') class DerivedController extends MiddleController {}
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success', result: { contract: { operations: [{ routeKey: 'GET /derived/spread' }] } },
+    });
+  });
+
+  test('does not skip computed overrides in destructured object aliases', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      const { key: KEY } = { key: 2, ['key']: 1 } as const;
+      class BaseController { @Get('computed') '2'() {} }
+      class MiddleController extends BaseController { [KEY]() {} }
+      @Controller('derived') class DerivedController extends MiddleController {}
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success', result: { contract: { operations: [{ routeKey: 'GET /derived/computed' }] } },
+    });
+  });
+
+  test('does not treat object __proto__ setters as destructured data values', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      const { __proto__: KEY } = { __proto__: 2 };
+      class BaseController { @Get('proto') '2'() {} }
+      class MiddleController extends BaseController { [KEY]() {} }
+      @Controller('derived') class DerivedController extends MiddleController {}
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success', result: { contract: { operations: [{ routeKey: 'GET /derived/proto' }] } },
+    });
+  });
+
   test('reports unsupported Search routes instead of silently dropping them', async () => {
     const root = workspace(`
       import { Controller, Get, Search } from '@nestjs/common';
