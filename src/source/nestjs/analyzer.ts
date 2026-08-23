@@ -125,9 +125,27 @@ function methodsIncludingBaseChain(
   maxSteps: number,
 ): ts.MethodDeclaration[] {
   const symbolKey = Symbol('symbol-method-key');
+  const numericPropertyValue = (expression: ts.Expression): number | bigint | undefined => {
+    const value = ts.isNumericLiteral(expression)
+      ? Number(expression.text)
+      : ts.isBigIntLiteral(expression)
+        ? BigInt(expression.text.slice(0, -1))
+        : undefined;
+    if (value !== undefined) return value;
+    if (!ts.isPrefixUnaryExpression(expression)
+      || (expression.operator !== ts.SyntaxKind.PlusToken
+        && expression.operator !== ts.SyntaxKind.MinusToken)) return undefined;
+    const operand = numericPropertyValue(expression.operand);
+    if (operand === undefined) return undefined;
+    return expression.operator === ts.SyntaxKind.MinusToken
+      ? (typeof operand === 'bigint' ? -operand : -operand)
+      : Number(operand);
+  };
   const propertyKey = ({ name }: ts.NamedDeclaration): string | typeof symbolKey | undefined => {
     if (!name) return undefined;
     if (ts.isComputedPropertyName(name)) {
+      const numeric = numericPropertyValue(name.expression);
+      if (numeric !== undefined) return String(numeric);
       const values = resolveStaticStrings(name.expression, checker, projectSources, { check, maxSteps });
       if (values?.length === 1) return values[0];
       return checker.getTypeAtLocation(name.expression).flags & ts.TypeFlags.ESSymbolLike

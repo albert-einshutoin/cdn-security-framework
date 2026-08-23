@@ -97,10 +97,32 @@ function hasInheritedClassVersion(node, checker, projectSources, check, maxSteps
 }
 function methodsIncludingBaseChain(node, checker, projectSources, useDefineForClassFields, check, maxSteps) {
     const symbolKey = Symbol('symbol-method-key');
+    const numericPropertyValue = (expression) => {
+        const value = typescript_1.default.isNumericLiteral(expression)
+            ? Number(expression.text)
+            : typescript_1.default.isBigIntLiteral(expression)
+                ? BigInt(expression.text.slice(0, -1))
+                : undefined;
+        if (value !== undefined)
+            return value;
+        if (!typescript_1.default.isPrefixUnaryExpression(expression)
+            || (expression.operator !== typescript_1.default.SyntaxKind.PlusToken
+                && expression.operator !== typescript_1.default.SyntaxKind.MinusToken))
+            return undefined;
+        const operand = numericPropertyValue(expression.operand);
+        if (operand === undefined)
+            return undefined;
+        return expression.operator === typescript_1.default.SyntaxKind.MinusToken
+            ? (typeof operand === 'bigint' ? -operand : -operand)
+            : Number(operand);
+    };
     const propertyKey = ({ name }) => {
         if (!name)
             return undefined;
         if (typescript_1.default.isComputedPropertyName(name)) {
+            const numeric = numericPropertyValue(name.expression);
+            if (numeric !== undefined)
+                return String(numeric);
             const values = (0, static_string_resolver_1.resolveStaticStrings)(name.expression, checker, projectSources, { check, maxSteps });
             if (values?.length === 1)
                 return values[0];
