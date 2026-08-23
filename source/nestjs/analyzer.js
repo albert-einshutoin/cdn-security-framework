@@ -70,12 +70,14 @@ function directBaseClass(node, checker) {
         symbol = checker.getAliasedSymbol(symbol);
     return symbol?.declarations?.find(typescript_1.default.isClassDeclaration);
 }
-function methodsIncludingDirectBase(node, checker, projectSources) {
+function methodsIncludingDirectBase(node, checker, projectSources, check, maxSteps) {
     const propertyKey = ({ name }) => {
-        const value = typescript_1.default.isComputedPropertyName(name) ? name.expression : name;
-        return typescript_1.default.isIdentifier(value) || typescript_1.default.isPrivateIdentifier(value)
-            || typescript_1.default.isStringLiteral(value) || typescript_1.default.isNumericLiteral(value)
-            || typescript_1.default.isNoSubstitutionTemplateLiteral(value) ? value.text : undefined;
+        if (typescript_1.default.isComputedPropertyName(name)) {
+            const values = (0, static_string_resolver_1.resolveStaticStrings)(name.expression, checker, projectSources, { check, maxSteps });
+            return values?.length === 1 ? values[0] : undefined;
+        }
+        return typescript_1.default.isIdentifier(name) || typescript_1.default.isStringLiteral(name) || typescript_1.default.isNumericLiteral(name)
+            || typescript_1.default.isNoSubstitutionTemplateLiteral(name) ? name.text : undefined;
     };
     const allOwn = node.members.filter(typescript_1.default.isMethodDeclaration);
     const concrete = (method) => Boolean(method.body)
@@ -200,10 +202,10 @@ async function analyze(context) {
             const controllers = classDecorators.map((decorator) => ({
                 decorator,
                 match: (0, decorator_symbols_1.nestJsRouteDecorator)(decorator, checker),
-            })).filter(({ match }) => match?.name === 'Controller');
+            })).filter(({ match }) => match?.name === 'Controller').slice(0, 1);
             if (controllers.length === 0)
                 continue;
-            for (const method of methodsIncludingDirectBase(statement, checker, projectSources)) {
+            for (const method of methodsIncludingDirectBase(statement, checker, projectSources, check, context.limits.maxAstNodes)) {
                 await checkpoint();
                 const methodDecorators = decorators(method);
                 const matches = methodDecorators.map((decorator) => (0, decorator_symbols_1.nestJsRouteDecorator)(decorator, checker));

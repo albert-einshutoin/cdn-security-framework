@@ -106,7 +106,7 @@ describe('NestJS route analyzer', () => {
         @Nest.Head('inherited') inherited() {}
       }
 
-      @HttpController('/' + PREFIX + '/')
+      @HttpController('/' + PREFIX + '/') @HttpController('inner')
       class UsersController extends BaseController {
         @Read([':id', DETAILS]) list() {}
         @Nest.Post() @Nest.Put('/save/') save() {}
@@ -138,6 +138,7 @@ describe('NestJS route analyzer', () => {
     ]));
     expect(routeKeys).not.toContain('PUT /users/save');
     expect(routeKeys).not.toContain('OPTIONS /users/versioned');
+    expect(routeKeys.some((routeKey) => routeKey.includes('/inner'))).toBe(false);
     expect(routeKeys.some((routeKey) => routeKey.endsWith('/fake'))).toBe(false);
     expect(routeKeys.some((routeKey) => routeKey.endsWith('/ignored'))).toBe(false);
     expect(contract.capabilities.routes).toBe('partial');
@@ -258,6 +259,8 @@ describe('NestJS route analyzer', () => {
   test('ignores static and abstract methods and rejects URL suffixes', async () => {
     const root = workspace(`
       import { Controller, Get } from '@nestjs/common';
+      const QUOTED = 'quoted';
+      const COMPUTED = 'comp' + 'uted';
       abstract class BaseController {
         @Get('abstract') abstract missing(): void;
         @Get('static') static staticRoute() {}
@@ -269,8 +272,8 @@ describe('NestJS route analyzer', () => {
         @Get('abstract-shadow') abstractShadow() {}
       }
       @Controller('items') abstract class ItemsController extends BaseController {
-        'quoted'() {}
-        ['computed']() {}
+        [QUOTED]() {}
+        [COMPUTED]() {}
         abstract abstractShadow(): void;
         @Get('query?secret=value') query() {}
         @Get('hash#part') hash() {}

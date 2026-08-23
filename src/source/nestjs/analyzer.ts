@@ -91,12 +91,16 @@ function methodsIncludingDirectBase(
   node: ts.ClassDeclaration,
   checker: ts.TypeChecker,
   projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+  maxSteps: number,
 ): ts.MethodDeclaration[] {
   const propertyKey = ({ name }: ts.MethodDeclaration): string | undefined => {
-    const value = ts.isComputedPropertyName(name) ? name.expression : name;
-    return ts.isIdentifier(value) || ts.isPrivateIdentifier(value)
-      || ts.isStringLiteral(value) || ts.isNumericLiteral(value)
-      || ts.isNoSubstitutionTemplateLiteral(value) ? value.text : undefined;
+    if (ts.isComputedPropertyName(name)) {
+      const values = resolveStaticStrings(name.expression, checker, projectSources, { check, maxSteps });
+      return values?.length === 1 ? values[0] : undefined;
+    }
+    return ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)
+      || ts.isNoSubstitutionTemplateLiteral(name) ? name.text : undefined;
   };
   const allOwn = node.members.filter(ts.isMethodDeclaration);
   const concrete = (method: ts.MethodDeclaration) => Boolean(method.body)
@@ -222,9 +226,11 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
       const controllers = classDecorators.map((decorator) => ({
         decorator,
         match: nestJsRouteDecorator(decorator, checker),
-      })).filter(({ match }) => match?.name === 'Controller');
+      })).filter(({ match }) => match?.name === 'Controller').slice(0, 1);
       if (controllers.length === 0) continue;
-      for (const method of methodsIncludingDirectBase(statement, checker, projectSources)) {
+      for (const method of methodsIncludingDirectBase(
+        statement, checker, projectSources, check, context.limits.maxAstNodes,
+      )) {
         await checkpoint();
         const methodDecorators = decorators(method);
         const matches = methodDecorators.map((decorator) => nestJsRouteDecorator(decorator, checker));
