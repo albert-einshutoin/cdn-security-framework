@@ -232,7 +232,6 @@ function safeConfigPath(
 interface ConfigState {
   readonly digests: Map<string, string>;
   totalBytes: number;
-  hasReferences: boolean;
 }
 
 function resolveExtendsCandidate(
@@ -319,26 +318,11 @@ function validateConfigTree(
       if (!compiler.paths || typeof compiler.paths !== 'object' || Array.isArray(compiler.paths)) {
         throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
       }
-      const pathsBase = typeof compiler.baseUrl === 'string'
-        ? path.resolve(configDirectory, compiler.baseUrl)
-        : configDirectory;
       for (const values of Object.values(compiler.paths as Record<string, unknown>)) {
         if (!Array.isArray(values) || values.some((value) => typeof value !== 'string')) {
           throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
         }
-        for (const value of values as string[]) safeConfigPath(fileSystem, workspaceRoot, pathsBase, value);
       }
-    }
-  }
-  const references = config.references;
-  if (references !== undefined) {
-    if (!Array.isArray(references)) throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
-    state.hasReferences ||= references.length > 0;
-    for (const reference of references) {
-      if (!reference || typeof reference !== 'object' || typeof (reference as { path?: unknown }).path !== 'string') {
-        throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
-      }
-      safeConfigPath(fileSystem, workspaceRoot, configDirectory, (reference as { path: string }).path);
     }
   }
   const extended = config.extends;
@@ -462,7 +446,7 @@ async function loadTypeScriptProjectInternal(
   }
   const configPath = path.resolve(workspaceRoot, options.tsconfigPath);
   const resolvedConfig = realFileWithin(fileSystem, workspaceRoot, configPath, 'TS_PROJECT_CONFIG_MISSING');
-  const configState: ConfigState = { digests: new Map(), totalBytes: 0, hasReferences: false };
+  const configState: ConfigState = { digests: new Map(), totalBytes: 0 };
   validateConfigTree(
     fileSystem,
     workspaceRoot,
@@ -496,6 +480,27 @@ async function loadTypeScriptProjectInternal(
       sourceUri: resolvedConfig.relative,
       typescriptCode: parsed.errors[0].code,
     });
+  }
+  const pathsBase = parsed.options.baseUrl
+    ?? (parsed.options as ts.CompilerOptions & { pathsBasePath?: string }).pathsBasePath
+    ?? path.dirname(resolvedConfig.absolute);
+  for (const values of Object.values(parsed.options.paths ?? {})) {
+    for (const value of values) safeConfigPath(fileSystem, workspaceRoot, pathsBase, value);
+  }
+  for (const reference of parsed.projectReferences ?? []) {
+    const absolute = path.resolve(reference.path);
+    if (!relativeWithin(workspaceRoot, absolute)) {
+      throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
+    }
+    if (fileSystem.exists(absolute)) {
+      let realPath: string;
+      try { realPath = fileSystem.realpath(absolute); } catch {
+        throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
+      }
+      if (!relativeWithin(workspaceRoot, realPath)) {
+        throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
+      }
+    }
   }
   checkInterruption(options.cancellationSignal, deadline);
 
@@ -683,15 +688,21 @@ async function loadTypeScriptProjectInternal(
   }
 
   const diagnostics: TypeScriptProjectDiagnostic[] = [];
-  if (configState.hasReferences) diagnostics.push(diagnostic('TS_PROJECT_REFERENCES_PARTIAL'));
-  const compilerDiagnostics = ts.getPreEmitDiagnostics(program);
-  checkInterruption(options.cancellationSignal, deadline);
-  for (const value of compilerDiagnostics) {
-    checkInterruption(options.cancellationSignal, deadline);
-    diagnostics.push(safeTypeScriptDiagnostic(value, workspaceRoot));
-    if (diagnostics.length > limits.maxDiagnostics) {
-      throw new TypeScriptProjectLoadError('TS_PROJECT_DIAGNOSTIC_LIMIT');
+  if ((parsed.projectReferences?.length ?? 0) > 0) diagnostics.push(diagnostic('TS_PROJECT_REFERENCES_PARTIAL'));
+  for (const sourceFile of sourceFiles) {
+    const syntaxDiagnostics = (sourceFile as ts.SourceFile & {
+      parseDiagnostics?: readonly ts.Diagnostic[];
+    }).parseDiagnostics ?? [];
+    for (const value of syntaxDiagnostics) {
+      checkInterruption(options.cancellationSignal, deadline);
+      diagnostics.push(safeTypeScriptDiagnostic(value, workspaceRoot));
+      if (diagnostics.length > limits.maxDiagnostics) {
+        throw new TypeScriptProjectLoadError('TS_PROJECT_DIAGNOSTIC_LIMIT');
+      }
     }
+  }
+  if (diagnostics.length > limits.maxDiagnostics) {
+    throw new TypeScriptProjectLoadError('TS_PROJECT_DIAGNOSTIC_LIMIT');
   }
   const sources = [
     ...[...workspaceContents.values()].map(({ relative, text }) => ({ relative, text })),
@@ -719,7 +730,7 @@ async function loadTypeScriptProjectInternal(
     pathAliases: Object.freeze(Object.fromEntries(Object.entries(compilerOptions.paths ?? {}).map(([name, values]) => (
       [name, Object.freeze([...(values ?? [])])]
     )))),
-    projectReferences: configState.hasReferences ? 'partial' : 'supported',
+    projectReferences: (parsed.projectReferences?.length ?? 0) > 0 ? 'partial' : 'supported',
     diagnostics: Object.freeze(diagnostics.map((value) => Object.freeze(value))),
     metrics: Object.freeze({
       files: sourceFiles.length,

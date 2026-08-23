@@ -62,7 +62,8 @@ TypeScript's `lib*.d.ts` standard-library files, plus bounded `node_modules/**/p
 metadata needed for type resolution, and applies file, byte, AST-node,
 diagnostic, depth, cooperative deadline, and cancellation limits before returning. Project references are detected
 but not loaded in v1, so the result carries a fixed partial-capability diagnostic.
-TypeScript messages and source snippets are discarded; diagnostics retain only
+Already-materialized syntax diagnostics are bounded and normalized; the loader
+does not eagerly compute the full semantic diagnostic set. TypeScript messages and source snippets are discarded; diagnostics retain only
 a fixed safe message, numeric TypeScript code, and optional workspace-relative
 position.
 

@@ -118,6 +118,25 @@ describe('TypeScript project loader', () => {
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
   });
 
+  test('uses inherited baseUrl for child paths and ignores base-only project references', async () => {
+    const root = workspace();
+    write(root, 'config/base.json', `{
+      "compilerOptions": { "baseUrl": "../src", "ignoreDeprecations": "6.0" },
+      "references": [{ "path": "../../outside-project" }]
+    }`);
+    write(root, 'tsconfig.json', `{
+      "extends": "./config/base.json",
+      "compilerOptions": { "paths": { "@x/*": ["../shared/*"] } },
+      "files": ["src/app.ts"]
+    }`);
+    write(root, 'src/app.ts', 'export const value = 1;\n');
+
+    const loaded = await loadTypeScriptProject(options(root));
+    expect(loaded.pathAliases).toEqual({ '@x/*': ['../shared/*'] });
+    expect(loaded.projectReferences).toBe('supported');
+    expect(loaded.diagnostics).toEqual([]);
+  });
+
   test('rejects outside includes and enforces file, byte, and AST node limits', async () => {
     const root = workspace();
     write(root, 'tsconfig.json', '{ "include": ["src/**/*.ts"] }');
@@ -130,6 +149,12 @@ describe('TypeScript project loader', () => {
     await expectFailure(loadTypeScriptProject(options(root, {
       limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxTotalSourceBytes: 1 },
     })), 'TS_PROJECT_TOTAL_BYTES_LIMIT', root);
+
+    write(root, 'tsconfig.json', '{ "files": ["src/one.ts"] }');
+    write(root, 'src/one.ts', 'export const = ;\nexport const = ;\n');
+    await expectFailure(loadTypeScriptProject(options(root, {
+      limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxDiagnostics: 1 },
+    })), 'TS_PROJECT_DIAGNOSTIC_LIMIT', root);
     await expectFailure(loadTypeScriptProject(options(root, {
       limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxFileBytes: 1 },
     })), 'TS_PROJECT_FILE_BYTES_LIMIT', root);

@@ -52,6 +52,7 @@ Loaderはsourceをreal pathで解決し、workspace内File、TypeScriptの`lib*.
 型解決に必要な制限済み`node_modules/**/package.json` metadataだけを許可します。
 File数、bytes、AST node、Diagnostic、depth、協調的deadline、cancellationのLimitを戻り値生成前に強制します。
 Project referenceは検出しますがv1ではloadせず、固定のpartial-capability Diagnosticを返します。
+Program構築時に生成済みのSyntax Diagnosticだけを制限・正規化し、全Semantic Diagnosticは一括生成しません。
 TypeScript messageとsource snippetは破棄し、固定safe message、数値code、任意のworkspace-relative
 位置だけを保持します。
 
