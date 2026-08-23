@@ -189,8 +189,19 @@ async function analyze(context) {
         });
     };
     for (const sourceFile of projectSources) {
-        for (const statement of sourceFile.statements) {
+        const statements = [...sourceFile.statements].reverse();
+        while (statements.length > 0) {
+            const statement = statements.pop();
             await checkpoint();
+            if (typescript_1.default.isModuleDeclaration(statement)) {
+                if (statement.body && typescript_1.default.isModuleBlock(statement.body)) {
+                    statements.push(...[...statement.body.statements].reverse());
+                }
+                else if (statement.body && typescript_1.default.isModuleDeclaration(statement.body)) {
+                    statements.push(statement.body);
+                }
+                continue;
+            }
             if (!typescript_1.default.isClassDeclaration(statement))
                 continue;
             const classDecorators = decorators(statement);

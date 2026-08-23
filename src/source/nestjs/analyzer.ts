@@ -215,8 +215,18 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
   };
 
   for (const sourceFile of projectSources) {
-    for (const statement of sourceFile.statements) {
+    const statements: ts.Statement[] = [...sourceFile.statements].reverse();
+    while (statements.length > 0) {
+      const statement = statements.pop()!;
       await checkpoint();
+      if (ts.isModuleDeclaration(statement)) {
+        if (statement.body && ts.isModuleBlock(statement.body)) {
+          statements.push(...[...statement.body.statements].reverse());
+        } else if (statement.body && ts.isModuleDeclaration(statement.body)) {
+          statements.push(statement.body);
+        }
+        continue;
+      }
       if (!ts.isClassDeclaration(statement)) continue;
       const classDecorators = decorators(statement);
       const classCandidates = classDecorators.map((decorator) => nestJsRouteDecoratorCandidate(decorator, checker));

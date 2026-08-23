@@ -15,8 +15,16 @@ exports.NESTJS_ROUTE_DECORATORS = [
     'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'RequestMapping', 'Search', 'Sse', 'Version',
 ];
 function targetSymbol(node, checker) {
+    const unwrap = (expression) => {
+        let current = expression;
+        while (typescript_1.default.isParenthesizedExpression(current) || typescript_1.default.isAsExpression(current)
+            || typescript_1.default.isTypeAssertionExpression(current) || typescript_1.default.isSatisfiesExpression(current)
+            || typescript_1.default.isNonNullExpression(current))
+            current = current.expression;
+        return current;
+    };
     const seen = new Set();
-    let current = node;
+    let current = unwrap(node);
     while (true) {
         const location = typescript_1.default.isPropertyAccessExpression(current) ? current.name : current;
         const symbol = checker.getSymbolAtLocation(location);
@@ -30,10 +38,12 @@ function targetSymbol(node, checker) {
             && typescript_1.default.isVariableDeclarationList(declaration.parent)
             && Boolean(declaration.parent.flags & typescript_1.default.NodeFlags.Const)
             && declaration.initializer !== undefined));
-        if (!alias?.initializer
-            || (!typescript_1.default.isIdentifier(alias.initializer) && !typescript_1.default.isPropertyAccessExpression(alias.initializer)))
+        if (!alias?.initializer)
             return target;
-        current = alias.initializer;
+        const initializer = unwrap(alias.initializer);
+        if (!typescript_1.default.isIdentifier(initializer) && !typescript_1.default.isPropertyAccessExpression(initializer))
+            return target;
+        current = initializer;
     }
 }
 function importDeclaration(declaration) {

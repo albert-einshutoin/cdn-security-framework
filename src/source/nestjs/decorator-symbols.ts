@@ -14,8 +14,15 @@ function targetSymbol(
   node: ts.Expression,
   checker: ts.TypeChecker,
 ): ts.Symbol | undefined {
+  const unwrap = (expression: ts.Expression): ts.Expression => {
+    let current = expression;
+    while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current)
+      || ts.isTypeAssertionExpression(current) || ts.isSatisfiesExpression(current)
+      || ts.isNonNullExpression(current)) current = current.expression;
+    return current;
+  };
   const seen = new Set<ts.Symbol>();
-  let current = node;
+  let current = unwrap(node);
   while (true) {
     const location = ts.isPropertyAccessExpression(current) ? current.name : current;
     const symbol = checker.getSymbolAtLocation(location);
@@ -29,9 +36,10 @@ function targetSymbol(
       && Boolean(declaration.parent.flags & ts.NodeFlags.Const)
       && declaration.initializer !== undefined
     ));
-    if (!alias?.initializer
-      || (!ts.isIdentifier(alias.initializer) && !ts.isPropertyAccessExpression(alias.initializer))) return target;
-    current = alias.initializer;
+    if (!alias?.initializer) return target;
+    const initializer = unwrap(alias.initializer);
+    if (!ts.isIdentifier(initializer) && !ts.isPropertyAccessExpression(initializer)) return target;
+    current = initializer;
   }
 }
 

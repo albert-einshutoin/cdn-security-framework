@@ -290,6 +290,18 @@ describe('NestJS route analyzer', () => {
     });
   });
 
+  test('discovers controllers declared in nested namespaces', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      namespace Api.V1 {
+        @Controller('users') export class UsersController { @Get() list() {} }
+      }
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success', result: { contract: { operations: [{ routeKey: 'GET /users' }] } },
+    });
+  });
+
   test('reports unsupported Search routes instead of silently dropping them', async () => {
     const root = workspace(`
       import { Controller, Get, Search } from '@nestjs/common';
@@ -450,7 +462,7 @@ describe('NestJS route analyzer', () => {
 
     const aliasRoot = workspace(`
       import { Controller, Get } from '@nestjs/common';
-      const AliasedGet = Get;
+      const AliasedGet = (Get as typeof Get) satisfies typeof Get;
       @Controller('items') class ItemsController { @AliasedGet('actual') @Get('reported') one() {} }
     `);
     await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(aliasRoot))).resolves.toMatchObject({
