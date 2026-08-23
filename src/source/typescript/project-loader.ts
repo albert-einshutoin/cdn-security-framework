@@ -750,7 +750,9 @@ async function loadTypeScriptProjectInternal(
   }
   checkInterruption(options.cancellationSignal, deadline);
 
+  type ProgramPathIdentity = { canonical: string; dev: number; ino: number };
   const rootNames: string[] = [];
+  const rootPathIdentities = new Map<string, ProgramPathIdentity>();
   const rootContents = new Map<string, { relative: string; text: string; size: number }>();
   let totalSourceBytes = configState.totalBytes;
   let largestFileBytes = configState.largestFileBytes;
@@ -770,6 +772,9 @@ async function loadTypeScriptProjectInternal(
     if (totalSourceBytes + resolved.stat.size > limits.maxTotalSourceBytes) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_TOTAL_BYTES_LIMIT');
     }
+    rootPathIdentities.set(resolved.absolute, {
+      canonical: resolved.absolute, dev: resolved.stat.dev, ino: resolved.stat.ino,
+    });
     const text = fileSystem.readFileBounded(resolved.absolute, limits.maxFileBytes);
     const size = Buffer.byteLength(text);
     if (size > limits.maxFileBytes) {
@@ -878,9 +883,19 @@ async function loadTypeScriptProjectInternal(
       throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
     }
   };
-  const resolvedProgramPaths = new Map(rootNames.map((candidate) => {
-    const absolute = path.resolve(candidate);
-    return [absolute, absolute];
+  const programPathIdentity = (canonical: string): ProgramPathIdentity => {
+    let stat: fs.Stats;
+    try { stat = fileSystem.stat(canonical); } catch {
+      throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+    }
+    if (!stat.isFile()) throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+    return { canonical, dev: stat.dev, ino: stat.ino };
+  };
+  const resolvedProgramPaths = new Map<string, ProgramPathIdentity>(rootNames.map((candidate) => {
+    const canonical = path.resolve(candidate);
+    const identity = rootPathIdentities.get(canonical);
+    if (!identity) throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+    return [canonical, identity];
   }));
   const isHoistedNodeModulesPath = (candidate: string): boolean => {
     let current = path.resolve(candidate);
@@ -896,12 +911,19 @@ async function loadTypeScriptProjectInternal(
     const safe = safeExistingPath(candidate);
     if (safe) {
       const canonical = path.resolve(safe.absolute);
+      const identity = programPathIdentity(canonical);
       const previous = resolvedProgramPaths.get(lexical);
-      if (previous !== undefined && previous !== canonical) {
+      if (previous !== undefined && (previous.canonical !== canonical
+        || previous.dev !== identity.dev || previous.ino !== identity.ino)) {
         throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
       }
-      resolvedProgramPaths.set(lexical, canonical);
-      if (!resolvedProgramPaths.has(canonical)) resolvedProgramPaths.set(canonical, canonical);
+      const canonicalPrevious = resolvedProgramPaths.get(canonical);
+      if (canonicalPrevious !== undefined
+        && (canonicalPrevious.dev !== identity.dev || canonicalPrevious.ino !== identity.ino)) {
+        throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+      }
+      resolvedProgramPaths.set(lexical, identity);
+      if (!canonicalPrevious) resolvedProgramPaths.set(canonical, identity);
       return safe;
     }
     if (resolvedProgramPaths.has(lexical)) throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
@@ -925,6 +947,7 @@ async function loadTypeScriptProjectInternal(
       if (existingLibrary !== undefined) return existingLibrary;
       preflightProgramRead(safe.absolute);
       const text = defaultHost.readFile(safe.absolute);
+      resolveProgramPath(candidate);
       if (text !== undefined) {
         const size = Buffer.byteLength(text);
         if (size > limits.maxFileBytes) throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT');
@@ -947,6 +970,7 @@ async function loadTypeScriptProjectInternal(
       if (!relative) throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
       preflightProgramRead(safe.absolute, relative);
       const text = fileSystem.readFileBounded(safe.absolute, limits.maxFileBytes);
+      resolveProgramPath(candidate);
       const size = Buffer.byteLength(text);
       if (size > limits.maxFileBytes) {
         throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', { sourceUri: relative });
@@ -975,6 +999,7 @@ async function loadTypeScriptProjectInternal(
     }
     preflightProgramRead(safe.absolute, relative);
     const text = fileSystem.readFileBounded(safe.absolute, limits.maxFileBytes);
+    resolveProgramPath(candidate);
     const size = Buffer.byteLength(text);
     if (size > limits.maxFileBytes) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', { sourceUri: relative });

@@ -528,6 +528,23 @@ describe('TypeScript project loader', () => {
       },
     })), 'TS_PROJECT_INTERNAL', deletedRoot);
 
+    const samePathRoot = workspace();
+    write(samePathRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    write(samePathRoot, 'src/app.ts', 'export const value = 1;\n');
+    await expectFailure(loadTypeScriptProject(options(samePathRoot, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        readFileBounded(filePath, maxBytes) {
+          const text = nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
+          if (filePath.endsWith('src/app.ts')) {
+            fs.renameSync(filePath, `${filePath}.safe`);
+            write(samePathRoot, 'src/app.ts', 'export const value = 2;\n');
+          }
+          return text;
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', samePathRoot);
+
     const dependencyRoot = workspace();
     write(dependencyRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
     write(dependencyRoot, 'src/app.ts', 'import { value } from "./dep";\nexport { value };\n');
@@ -565,6 +582,25 @@ describe('TypeScript project loader', () => {
         },
       },
     })), 'TS_PROJECT_INTERNAL', inWorkspaceRetargetRoot);
+
+    const samePathRetargetRoot = workspace();
+    write(samePathRetargetRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    write(samePathRetargetRoot, 'src/app.ts', 'import { value } from "./dep";\nexport { value };\n');
+    write(samePathRetargetRoot, 'src/dep.ts', 'export const value = 1;\n');
+    let samePathResolutions = 0;
+    await expectFailure(loadTypeScriptProject(options(samePathRetargetRoot, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        realpath(filePath) {
+          const absolute = nodeTypeScriptProjectFileSystem.realpath(filePath);
+          if (filePath.endsWith('src/dep.ts') && ++samePathResolutions === 2) {
+            fs.renameSync(filePath, `${filePath}.safe`);
+            write(samePathRetargetRoot, 'src/dep.ts', 'export const value = 2;\n');
+          }
+          return absolute;
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', samePathRetargetRoot);
 
     const deletedDependencyRoot = workspace();
     write(deletedDependencyRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
