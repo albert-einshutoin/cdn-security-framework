@@ -995,6 +995,19 @@ async function loadTypeScriptProjectInternal(
   let astNodes = 0;
   let maxDepth = 0;
   const accountedSourceFiles = new WeakSet<ts.SourceFile>();
+  type JsxImportSourcePragma = { arguments?: { factory?: unknown } };
+  const validateJsxImportSourcePragma = (sourceFile: ts.SourceFile, kind: string | undefined): void => {
+    if (kind !== 'workspace' || !sourceFile.fileName.endsWith('.tsx')) return;
+    const pragmas = (sourceFile as ts.SourceFile & {
+      pragmas?: ReadonlyMap<string, JsxImportSourcePragma | readonly JsxImportSourcePragma[]>;
+    }).pragmas;
+    const values = pragmas?.get('jsximportsource');
+    const pragma = Array.isArray(values) ? values.at(-1) : values;
+    const specifier = pragma?.arguments?.factory;
+    if (typeof specifier === 'string' && isPathLikeSpecifier(specifier)) {
+      safeConfigPath(fileSystem, workspaceRoot, path.dirname(sourceFile.fileName), normalizeRelative(specifier));
+    }
+  };
   const accountSourceFile = (sourceFile: ts.SourceFile): void => {
     if (accountedSourceFiles.has(sourceFile)) return;
     accountedSourceFiles.add(sourceFile);
@@ -1024,6 +1037,7 @@ async function loadTypeScriptProjectInternal(
       const text = readProgramFile(candidate);
       if (text === undefined) return undefined;
       const sourceFile = ts.createSourceFile(candidate, text, languageVersion, true);
+      validateJsxImportSourcePragma(sourceFile, kind);
       if (kind === 'workspace' || kind === 'library') accountSourceFile(sourceFile);
       return sourceFile;
     },

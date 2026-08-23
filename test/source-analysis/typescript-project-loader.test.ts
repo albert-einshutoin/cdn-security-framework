@@ -287,6 +287,12 @@ describe('TypeScript project loader', () => {
 
     write(root, 'tsconfig.json', '{ "compilerOptions": { "jsxImportSource": 1 }, "files": ["src/app.tsx"] }');
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_INVALID_CONFIG', root);
+
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "jsx": "react-jsx", "noLib": true }, "files": ["src/app.tsx"] }');
+    write(root, 'src/app.tsx', '/** @jsxImportSource @scope/pkg */\nexport const node = <div />;\n');
+    await expect(loadTypeScriptProject(options(root))).resolves.toBeDefined();
+    write(root, 'src/app.tsx', '/** @jsxImportSource ../../outside */\nexport const node = <div />;\n');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
   });
 
   test('rejects workspace imports with unsupported program extensions', async () => {
