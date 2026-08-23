@@ -187,6 +187,40 @@ exceptions:
       workspaceRoot: inherited.root,
     }).summary.total).toBe(0);
 
+    const retargeted = workspace();
+    const basePolicy = path.join(retargeted.root, 'base.yml');
+    const overridePolicy = path.join(retargeted.root, 'override.yml');
+    const policyAlias = path.join(retargeted.root, 'policy-alias.yml');
+    fs.writeFileSync(basePolicy, fs.readFileSync(retargeted.policyPath, 'utf8')
+      .replace('allow_methods: [GET]', 'allow_methods: [POST]'));
+    fs.writeFileSync(overridePolicy, `extends: base.yml\n${fs.readFileSync(retargeted.policyPath, 'utf8')}`);
+    fs.symlinkSync(path.basename(overridePolicy), policyAlias);
+    fs.writeFileSync(retargeted.policyPath, 'extends: policy-alias.yml\nversion: 1\n');
+    const expectedRetargeted = diffSecurityContracts({
+      openapiPath: retargeted.openapiPath,
+      policyPath: retargeted.policyPath,
+      target: 'aws',
+      workspaceRoot: retargeted.root,
+    });
+    parser.parsePolicyFile = (options) => {
+      fs.unlinkSync(policyAlias);
+      fs.symlinkSync(path.basename(basePolicy), policyAlias);
+      try { return originalParse(options); } finally {
+        fs.unlinkSync(policyAlias);
+        fs.symlinkSync(path.basename(overridePolicy), policyAlias);
+      }
+    };
+    try {
+      expect(diffSecurityContracts({
+        openapiPath: retargeted.openapiPath,
+        policyPath: retargeted.policyPath,
+        target: 'aws',
+        workspaceRoot: retargeted.root,
+      })).toEqual(expectedRetargeted);
+    } finally {
+      parser.parsePolicyFile = originalParse;
+    }
+
     const nativeFs = require('node:fs') as typeof fs;
     const originalOpen = nativeFs.openSync;
     nativeFs.openSync = ((filePath: fs.PathLike, ...args: unknown[]) => {
@@ -297,6 +331,33 @@ Module._load = function (request, parent, isMain) {
     expect(rootRetarget.status, rootRetarget.stderr).toBe(0);
     expect(JSON.parse(fs.readFileSync(path.join(ok.root, rootRetargetOutput), 'utf8')).schemaVersion).toBe(1);
     expect(fs.existsSync(path.join(outsideWorkspace, rootRetargetOutput))).toBe(false);
+
+    const outputParent = path.join(ok.root, 'reports');
+    const movedOutputParent = path.join(outsideWorkspace, 'moved-reports');
+    fs.mkdirSync(outputParent);
+    const parentRetargetPreload = path.join(ok.root, 'retarget-output-parent.cjs');
+    fs.writeFileSync(parentRetargetPreload, `const fs = require('node:fs');
+const chdir = process.chdir;
+const target = fs.realpathSync(process.env.OUTPUT_PARENT);
+let swapped = false;
+process.chdir = function (directory) {
+  let current;
+  try { current = fs.realpathSync(String(directory)); } catch {}
+  if (!swapped && current === target) {
+    swapped = true;
+    fs.renameSync(target, process.env.MOVED_OUTPUT_PARENT);
+    fs.symlinkSync(process.env.MOVED_OUTPUT_PARENT, target);
+  }
+  return chdir.call(process, directory);
+};
+`);
+    const parentRetarget = run([...common, '--format', 'json', '--out', path.join(outputParent, 'report.json')], {
+      NODE_OPTIONS: `--require=${parentRetargetPreload}`,
+      OUTPUT_PARENT: outputParent,
+      MOVED_OUTPUT_PARENT: movedOutputParent,
+    });
+    expect(parentRetarget.status).toBe(2);
+    expect(fs.existsSync(path.join(movedOutputParent, 'report.json'))).toBe(false);
 
     const mismatch = workspace('POST');
     const finding = run([

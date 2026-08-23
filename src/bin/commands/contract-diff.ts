@@ -39,7 +39,9 @@ interface OutputTarget {
   parent: string;
   parentDevice: number;
   parentInode: number;
+  protectedDirectories: string[];
   sourceFiles: Array<{ device: number; inode: number }>;
+  workspaceRoot: string;
   expected?: { device: number; inode: number };
 }
 
@@ -90,7 +92,9 @@ function outputTarget(
     parent,
     parentDevice: parentStat.dev,
     parentInode: parentStat.ino,
+    protectedDirectories,
     sourceFiles: [...sourceFiles],
+    workspaceRoot: root,
     expected: existing ? { device: existing.dev, inode: existing.ino } : undefined,
   };
 }
@@ -102,6 +106,11 @@ function writeOutput(target: OutputTarget, content: string): void {
     process.chdir(target.parent);
     if (!sameFile(fs.statSync('.'), { device: target.parentDevice, inode: target.parentInode })) {
       throw new Error('parent changed');
+    }
+    const currentOutput = path.join(fs.realpathSync('.'), target.basename);
+    if (!isPathWithinWorkspace(target.workspaceRoot, currentOutput)
+      || target.protectedDirectories.some((directory) => isPathWithinWorkspace(directory, currentOutput))) {
+      throw new Error('parent moved');
     }
     descriptor = fs.openSync(
       target.basename,

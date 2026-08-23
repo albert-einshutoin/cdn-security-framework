@@ -100,6 +100,11 @@ interface PolicySource {
   inode: number;
 }
 
+interface PolicySnapshot {
+  aliases: Map<string, string>;
+  sources: PolicySource[];
+}
+
 const MAX_POLICY_FILE_BYTES = 1_048_576;
 const MAX_POLICY_GRAPH_BYTES = 4_194_304;
 const MAX_POLICY_SOURCES = 32;
@@ -227,19 +232,22 @@ function readBoundedPolicyFile(root: string, filePath: string): {
   }
 }
 
-function policySources(root: string, entryPath: string): PolicySource[] {
+function policySources(root: string, entryPath: string): PolicySnapshot {
   const sources: PolicySource[] = [];
+  const aliases = new Map<string, string>();
   const active = new Set<string>();
   let totalBytes = 0;
-  const visit = (filePath: string): void => {
-    if (active.has(filePath)) {
+  let visits = 0;
+  const visit = (filePath: string, lexicalPath = filePath): void => {
+    aliases.set(lexicalPath, filePath);
+    if (active.has(lexicalPath)) {
       throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy extends contains a cycle.');
     }
-    if (sources.some((source) => source.filePath === filePath)) return;
-    if (sources.length + active.size >= MAX_POLICY_SOURCES) {
+    visits += 1;
+    if (visits > MAX_POLICY_SOURCES) {
       throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_LIMIT', 'Policy source count limit was exceeded.');
     }
-    active.add(filePath);
+    active.add(lexicalPath);
     const loaded = readBoundedPolicyFile(root, filePath);
     totalBytes += loaded.bytes;
     if (totalBytes > MAX_POLICY_GRAPH_BYTES) {
@@ -250,22 +258,25 @@ function policySources(root: string, entryPath: string): PolicySource[] {
       if (typeof parent !== 'string' || !parent.trim()) {
         throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy extends is invalid.');
       }
+      const lexicalParentPath = path.resolve(path.dirname(lexicalPath), parent.trim());
       const parentPath = inputFile(
         root,
-        path.resolve(path.dirname(filePath), parent.trim()),
+        lexicalParentPath,
         'CONTRACT_DIFF_POLICY_OUTSIDE_ROOT',
         'Policy extends target',
       );
-      visit(parentPath);
+      visit(parentPath, lexicalParentPath);
     }
-    active.delete(filePath);
-    sources.push({
-      filePath, digest: loaded.digest, content: loaded.content,
-      device: loaded.device, inode: loaded.inode,
-    });
+    active.delete(lexicalPath);
+    if (!sources.some((source) => source.filePath === filePath)) {
+      sources.push({
+        filePath, digest: loaded.digest, content: loaded.content,
+        device: loaded.device, inode: loaded.inode,
+      });
+    }
   };
   visit(entryPath);
-  return sources;
+  return { aliases, sources };
 }
 
 function loadPolicy(root: string, policyPath: string): {
@@ -275,12 +286,12 @@ function loadPolicy(root: string, policyPath: string): {
   const { parsePolicyFile } = require(path.join(packageRoot(), 'parser')) as typeof import('../parser');
   const { validatePolicy } = require(path.join(packageRoot(), 'validator')) as typeof import('../validator');
   const before = policySources(root, policyPath);
-  const snapshots = new Map(before.map(({ filePath, content }) => [filePath, content]));
+  const snapshots = new Map(before.sources.map(({ filePath, content }) => [filePath, content]));
   const parsed = parsePolicyFile({
     policyPath,
     readPolicyFile: (absolutePath) => {
-      let resolvedPath: string;
-      try { resolvedPath = fs.realpathSync(path.resolve(absolutePath)); } catch { throw new Error('policy source is outside the verified snapshot'); }
+      const lexicalPath = path.resolve(absolutePath);
+      const resolvedPath = before.aliases.get(lexicalPath) ?? lexicalPath;
       const content = snapshots.get(resolvedPath);
       if (content === undefined) throw new Error('policy source is outside the verified snapshot');
       return content;
@@ -294,11 +305,14 @@ function loadPolicy(root: string, policyPath: string): {
     throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy input failed schema validation.');
   }
   const after = policySources(root, policyPath);
-  const identity = (sources: PolicySource[]) => sources.map(({ filePath, digest }) => ({ filePath, digest }));
+  const identity = ({ aliases, sources }: PolicySnapshot) => ({
+    aliases: [...aliases].sort(([left], [right]) => compareText(left, right)),
+    sources: sources.map(({ filePath, digest }) => ({ filePath, digest })),
+  });
   if (canonicalJson(identity(before)) !== canonicalJson(identity(after))) {
     throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_CHANGED', 'Policy input changed during analysis.');
   }
-  return { policy: parsed.policy as CDNSecurityFrameworkPolicy, sources: before };
+  return { policy: parsed.policy as CDNSecurityFrameworkPolicy, sources: before.sources };
 }
 
 function sourceUri(root: string, filePath: string): string {
