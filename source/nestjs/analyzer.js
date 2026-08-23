@@ -194,14 +194,16 @@ async function analyze(context) {
             if (!typescript_1.default.isClassDeclaration(statement))
                 continue;
             const classDecorators = decorators(statement);
+            const classMatches = classDecorators.map((decorator) => (0, decorator_symbols_1.nestJsRouteDecorator)(decorator, checker));
+            const classVersioned = classMatches.some((match) => match?.name === 'Version');
             for (const decorator of classDecorators) {
                 if ((0, decorator_symbols_1.isUnsupportedNestJsDecorator)(decorator, checker)) {
                     addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', decorator);
                 }
             }
-            const controllers = classDecorators.map((decorator) => ({
+            const controllers = classDecorators.map((decorator, index) => ({
                 decorator,
-                match: (0, decorator_symbols_1.nestJsRouteDecorator)(decorator, checker),
+                match: classMatches[index],
             })).filter(({ match }) => match?.name === 'Controller').slice(0, 1);
             if (controllers.length === 0)
                 continue;
@@ -209,7 +211,7 @@ async function analyze(context) {
                 await checkpoint();
                 const methodDecorators = decorators(method);
                 const matches = methodDecorators.map((decorator) => (0, decorator_symbols_1.nestJsRouteDecorator)(decorator, checker));
-                const versioned = matches.some((match) => match?.name === 'Version');
+                const versioned = classVersioned || matches.some((match) => match?.name === 'Version');
                 const effectiveRoute = matches.findIndex((match) => Boolean(match && METHOD_DECORATORS[match.name]));
                 for (const [index, methodDecorator] of methodDecorators.entries()) {
                     await checkpoint();
@@ -218,6 +220,9 @@ async function analyze(context) {
                     if (!match || !methods) {
                         if ((0, decorator_symbols_1.isUnsupportedNestJsDecorator)(methodDecorator, checker)) {
                             addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
+                        }
+                        if (match?.name === 'RequestMapping') {
+                            addUnresolved(canonical_route_1.HTTP_METHODS, methodDecorator, 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');
                         }
                         continue;
                     }

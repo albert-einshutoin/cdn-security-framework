@@ -36,7 +36,9 @@ function installNestJsCommon(root: string, packageRoot = 'node_modules/@nestjs/c
     export declare function Head(path?: string | readonly string[]): MethodDecorator;
     export declare function All(path?: string | readonly string[]): MethodDecorator;
     export declare function Sse(path?: string | readonly string[]): MethodDecorator;
-    export declare function Version(value: string): MethodDecorator;
+    export declare function Version(value: string): MethodDecorator & ClassDecorator;
+    export declare function RequestMapping(options?: object): MethodDecorator;
+    export declare enum RequestMethod { GET }
     export declare const fake: { Get: typeof Get };
   `);
 }
@@ -253,6 +255,30 @@ describe('NestJS route analyzer', () => {
 
     await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
       status: 'success', result: { contract: { operations: [{ routeKey: 'GET /items' }] } },
+    });
+  });
+
+  test('fails closed for class versions and RequestMapping routes', async () => {
+    const root = workspace(`
+      import { Controller, Get, RequestMapping, RequestMethod, Version } from '@nestjs/common';
+      @Version('1') @Controller('users')
+      class UsersController { @Get('list') list() {} }
+      @Controller('system')
+      class SystemController {
+        @RequestMapping({ path: 'health', method: RequestMethod.GET }) health() {}
+      }
+    `);
+
+    const execution = await runSourceAnalyzer(nestJsSourceAnalyzer, context(root));
+    expect(execution).toMatchObject({
+      status: 'success',
+      result: {
+        contract: { operations: [] },
+        unresolvedOperations: expect.arrayContaining([
+          expect.objectContaining({ methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+          expect.objectContaining({ methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+        ]),
+      },
     });
   });
 
