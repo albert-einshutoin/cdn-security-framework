@@ -267,7 +267,41 @@ describe('TypeScript project loader', () => {
     fs.symlinkSync(outside, path.join(root, 'src/linked'));
     write(root, 'src/app.ts', 'import { value } from "./linked/outside.js";\nexport { value };\n');
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+
+    fs.unlinkSync(path.join(root, 'src/linked'));
+    write(outside, 'package.json', '{ "types": "index.ts" }');
+    write(outside, 'index.ts', 'export const value = 1;\n');
+    const outsideSpecifier = path.relative(path.join(root, 'src'), outside).replaceAll(path.sep, '/');
+    write(root, 'src/app.ts', `import { value } from ${JSON.stringify(outsideSpecifier)};\nexport { value };\n`);
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+
+    write(root, 'src/app.ts', `const value = require(${JSON.stringify(outsideSpecifier)});\nexport { value };\n`);
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
   }, 15_000);
+
+  test('rejects non-regular dependency inputs before bounded reads', async () => {
+    const root = workspace();
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    write(root, 'src/app.ts', 'import { value } from "./dep";\nexport { value };\n');
+    write(root, 'src/dep.ts', 'export const value = 1;\n');
+    let dependencyRead = false;
+
+    await expectFailure(loadTypeScriptProject(options(root, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        stat(filePath) {
+          const stat = nodeTypeScriptProjectFileSystem.stat(filePath);
+          if (filePath.endsWith('src/dep.ts')) stat.isFile = () => false;
+          return stat;
+        },
+        readFileBounded(filePath, maxBytes) {
+          if (filePath.endsWith('src/dep.ts')) dependencyRead = true;
+          return nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', root);
+    expect(dependencyRead).toBe(false);
+  });
 
   test('uses bounded workspace package metadata to resolve package imports maps', async () => {
     const root = workspace();

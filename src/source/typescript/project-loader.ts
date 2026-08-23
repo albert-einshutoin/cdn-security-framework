@@ -107,13 +107,17 @@ export const nodeTypeScriptProjectFileSystem: TypeScriptProjectFileSystem = Obje
   readFileBounded: (filePath: string, maxBytes: number) => {
     let descriptor: number | undefined;
     try {
-      descriptor = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      descriptor = fs.openSync(
+        filePath,
+        fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK,
+      );
       const opened = fs.fstatSync(descriptor);
       const currentPath = fs.realpathSync(filePath);
       const current = fs.statSync(filePath);
       if (currentPath !== filePath || opened.dev !== current.dev || opened.ino !== current.ino) {
         throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
       }
+      if (!opened.isFile()) throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
       if (opened.size > maxBytes) throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT');
       const chunks: Buffer[] = [];
       const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes + 1));
@@ -755,10 +759,12 @@ async function loadTypeScriptProjectInternal(
   const metadataContents = new Map<string, { relative: string; text: string }>();
   let directoryEntriesEnumerated = 0;
   const preflightProgramRead = (absolute: string, sourceUri?: string): void => {
-    let size: number;
-    try { size = fileSystem.stat(absolute).size; } catch {
+    let stat: fs.Stats;
+    try { stat = fileSystem.stat(absolute); } catch {
       throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
     }
+    if (!stat.isFile()) throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+    const size = stat.size;
     if (size > limits.maxFileBytes) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', sourceUri ? { sourceUri } : {});
     }
@@ -769,8 +775,17 @@ async function loadTypeScriptProjectInternal(
     }
   };
   const validateReferences = (text: string, relative: string): void => {
-    const references = ts.preProcessFile(text).referencedFiles;
+    const preprocessed = ts.preProcessFile(text, true, true);
+    const references = [...preprocessed.referencedFiles, ...preprocessed.importedFiles];
+    const sourceDirectory = path.dirname(path.resolve(workspaceRoot, relative));
     if (references.some(({ fileName }) => path.isAbsolute(fileName) || /^[a-z][a-z0-9+.-]*:/iu.test(fileName))) {
+      throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT', { sourceUri: relative });
+    }
+    if (references.some(({ fileName }) => {
+      if (!fileName.startsWith('.')) return false;
+      const candidate = path.resolve(sourceDirectory, fileName);
+      return candidate !== workspaceRoot && relativeWithin(workspaceRoot, candidate) === undefined;
+    })) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT', { sourceUri: relative });
     }
     checkInterruption(options.cancellationSignal, deadline);
