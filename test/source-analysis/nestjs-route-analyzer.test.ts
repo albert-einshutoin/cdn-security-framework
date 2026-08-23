@@ -378,6 +378,20 @@ describe('NestJS route analyzer', () => {
     });
   });
 
+  test('resolves immutable numeric aliases when filtering inherited routes', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      const BASE_KEY = 1;
+      const KEY = ((BASE_KEY as number) satisfies number);
+      class BaseController { @Get('numeric') '1'() {} }
+      class MiddleController extends BaseController { [KEY]() {} }
+      @Controller('derived') class DerivedController extends MiddleController {}
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success', result: { contract: { operations: [] } },
+    });
+  });
+
   test('reports unsupported Search routes instead of silently dropping them', async () => {
     const root = workspace(`
       import { Controller, Get, Search } from '@nestjs/common';

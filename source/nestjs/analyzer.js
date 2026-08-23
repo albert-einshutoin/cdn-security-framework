@@ -97,24 +97,48 @@ function hasInheritedClassVersion(node, checker, projectSources, check, maxSteps
 }
 function methodsIncludingBaseChain(node, checker, projectSources, useDefineForClassFields, check, maxSteps) {
     const symbolKey = Symbol('symbol-method-key');
-    const numericPropertyValue = (expression) => {
-        const value = typescript_1.default.isNumericLiteral(expression)
-            ? Number(expression.text)
-            : typescript_1.default.isBigIntLiteral(expression)
-                ? BigInt(expression.text.slice(0, -1))
+    const numericPropertyValue = (expression, resolving = new Set(), depth = 0) => {
+        check();
+        if (depth > 64)
+            return undefined;
+        let node = expression;
+        while (typescript_1.default.isParenthesizedExpression(node) || typescript_1.default.isAsExpression(node)
+            || typescript_1.default.isTypeAssertionExpression(node) || typescript_1.default.isSatisfiesExpression(node)
+            || typescript_1.default.isNonNullExpression(node))
+            node = node.expression;
+        const value = typescript_1.default.isNumericLiteral(node)
+            ? Number(node.text)
+            : typescript_1.default.isBigIntLiteral(node)
+                ? BigInt(node.text.slice(0, -1))
                 : undefined;
         if (value !== undefined)
             return value;
-        if (!typescript_1.default.isPrefixUnaryExpression(expression)
-            || (expression.operator !== typescript_1.default.SyntaxKind.PlusToken
-                && expression.operator !== typescript_1.default.SyntaxKind.MinusToken))
+        if (typescript_1.default.isPrefixUnaryExpression(node)
+            && (node.operator === typescript_1.default.SyntaxKind.PlusToken || node.operator === typescript_1.default.SyntaxKind.MinusToken)) {
+            const operand = numericPropertyValue(node.operand, resolving, depth + 1);
+            if (operand === undefined || (node.operator === typescript_1.default.SyntaxKind.PlusToken && typeof operand === 'bigint')) {
+                return undefined;
+            }
+            return node.operator === typescript_1.default.SyntaxKind.MinusToken ? -operand : Number(operand);
+        }
+        if (!typescript_1.default.isIdentifier(node))
             return undefined;
-        const operand = numericPropertyValue(expression.operand);
-        if (operand === undefined)
+        let symbol = checker.getSymbolAtLocation(node);
+        if (!symbol)
             return undefined;
-        return expression.operator === typescript_1.default.SyntaxKind.MinusToken
-            ? (typeof operand === 'bigint' ? -operand : -operand)
-            : Number(operand);
+        if (symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        if (resolving.has(symbol))
+            return undefined;
+        const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+            return undefined;
+        resolving.add(symbol);
+        const result = numericPropertyValue(declaration.initializer, resolving, depth + 1);
+        resolving.delete(symbol);
+        return result;
     };
     const propertyKey = ({ name }) => {
         if (!name)

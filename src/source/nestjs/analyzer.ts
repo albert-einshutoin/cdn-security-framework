@@ -125,21 +125,44 @@ function methodsIncludingBaseChain(
   maxSteps: number,
 ): ts.MethodDeclaration[] {
   const symbolKey = Symbol('symbol-method-key');
-  const numericPropertyValue = (expression: ts.Expression): number | bigint | undefined => {
-    const value = ts.isNumericLiteral(expression)
-      ? Number(expression.text)
-      : ts.isBigIntLiteral(expression)
-        ? BigInt(expression.text.slice(0, -1))
+  const numericPropertyValue = (
+    expression: ts.Expression,
+    resolving = new Set<ts.Symbol>(),
+    depth = 0,
+  ): number | bigint | undefined => {
+    check();
+    if (depth > 64) return undefined;
+    let node = expression;
+    while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)
+      || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)
+      || ts.isNonNullExpression(node)) node = node.expression;
+    const value = ts.isNumericLiteral(node)
+      ? Number(node.text)
+      : ts.isBigIntLiteral(node)
+        ? BigInt(node.text.slice(0, -1))
         : undefined;
     if (value !== undefined) return value;
-    if (!ts.isPrefixUnaryExpression(expression)
-      || (expression.operator !== ts.SyntaxKind.PlusToken
-        && expression.operator !== ts.SyntaxKind.MinusToken)) return undefined;
-    const operand = numericPropertyValue(expression.operand);
-    if (operand === undefined) return undefined;
-    return expression.operator === ts.SyntaxKind.MinusToken
-      ? (typeof operand === 'bigint' ? -operand : -operand)
-      : Number(operand);
+    if (ts.isPrefixUnaryExpression(node)
+      && (node.operator === ts.SyntaxKind.PlusToken || node.operator === ts.SyntaxKind.MinusToken)) {
+      const operand = numericPropertyValue(node.operand, resolving, depth + 1);
+      if (operand === undefined || (node.operator === ts.SyntaxKind.PlusToken && typeof operand === 'bigint')) {
+        return undefined;
+      }
+      return node.operator === ts.SyntaxKind.MinusToken ? -operand : Number(operand);
+    }
+    if (!ts.isIdentifier(node)) return undefined;
+    let symbol = checker.getSymbolAtLocation(node);
+    if (!symbol) return undefined;
+    if (symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (resolving.has(symbol)) return undefined;
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+      || !(declaration.parent.flags & ts.NodeFlags.Const)) return undefined;
+    resolving.add(symbol);
+    const result = numericPropertyValue(declaration.initializer, resolving, depth + 1);
+    resolving.delete(symbol);
+    return result;
   };
   const propertyKey = ({ name }: ts.NamedDeclaration): string | typeof symbolKey | undefined => {
     if (!name) return undefined;
