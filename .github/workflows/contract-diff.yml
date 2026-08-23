@@ -1,0 +1,100 @@
+name: Security Contract Diff
+
+on:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: contract-diff-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contract-diff:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Generate contract diff reports
+        id: contract_diff
+        continue-on-error: true
+        shell: bash
+        run: |
+          mkdir -p reports
+          set +e
+          node bin/cli.js contract diff \
+            --openapi examples/github-actions/fixtures/openapi.yaml \
+            --policy examples/github-actions/fixtures/policy.yml \
+            --target aws --workspace-root . --format json --fail-on never \
+            --out reports/contract-diff.json
+          status=$?
+          if [ "$status" -eq 0 ]; then
+            node bin/cli.js contract diff \
+              --openapi examples/github-actions/fixtures/openapi.yaml \
+              --policy examples/github-actions/fixtures/policy.yml \
+              --target aws --workspace-root . --format sarif --fail-on never \
+              --out reports/cdn-security.sarif
+            status=$?
+          fi
+          if [ "$status" -eq 0 ]; then
+            node bin/cli.js contract diff \
+              --openapi examples/github-actions/fixtures/openapi.yaml \
+              --policy examples/github-actions/fixtures/policy.yml \
+              --target aws --workspace-root . --format github-summary --fail-on error \
+              --out reports/github-summary.md
+            status=$?
+          fi
+          echo "exit-code=$status" >> "$GITHUB_OUTPUT"
+          exit "$status"
+
+      - name: Publish job summary
+        if: always()
+        shell: bash
+        run: |
+          if [ -f reports/github-summary.md ]; then
+            cat reports/github-summary.md >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo '# CDN Security Contract Diff' >> "$GITHUB_STEP_SUMMARY"
+            echo 'Report generation failed before the summary was available.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+          case "${{ steps.contract_diff.outputs.exit-code }}" in
+            0) echo 'Result: clean.' >> "$GITHUB_STEP_SUMMARY" ;;
+            1) echo 'Result: finding threshold failed.' >> "$GITHUB_STEP_SUMMARY" ;;
+            2) echo 'Result: input or configuration error.' >> "$GITHUB_STEP_SUMMARY" ;;
+            3) echo 'Result: unexpected tool failure.' >> "$GITHUB_STEP_SUMMARY" ;;
+            *) echo 'Result: unexpected runner error.' >> "$GITHUB_STEP_SUMMARY" ;;
+          esac
+
+      - name: Upload contract diff reports
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: contract-diff-${{ github.event.pull_request.number }}-${{ github.run_attempt }}
+          path: reports/
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Enforce contract diff gate
+        if: always()
+        shell: bash
+        run: |
+          case "${{ steps.contract_diff.outputs.exit-code }}" in
+            0) exit 0 ;;
+            1) echo 'Security contract findings exceeded --fail-on error.' >&2; exit 1 ;;
+            2) echo 'Contract diff input or configuration failed.' >&2; exit 2 ;;
+            3) echo 'Unexpected contract diff tool failure.' >&2; exit 3 ;;
+            *) echo 'Contract diff did not report a valid exit code.' >&2; exit 3 ;;
+          esac

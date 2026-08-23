@@ -1,0 +1,8 @@
+version: 1
+defaults: { mode: enforce }
+request:
+  allow_methods: [GET]
+  limits: { max_uri_length: 21 }
+  block: { header_missing: [] }
+routes: []
+response_headers: {}

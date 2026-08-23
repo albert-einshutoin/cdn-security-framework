@@ -5,6 +5,7 @@ const childProcess = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const yaml = require('js-yaml');
 
 const repoRoot = path.join(__dirname, '..');
 const packageName = require(path.join(repoRoot, 'package.json')).name;
@@ -80,6 +81,19 @@ function assertSchemaHints(installRoot: string) {
   });
 }
 
+function assertContractDiffWorkflow(filePath: string) {
+  const content = fs.readFileSync(filePath, 'utf8');
+  const workflow = yaml.load(content, { schema: yaml.JSON_SCHEMA });
+  assert.ok(workflow.on.pull_request, `${filePath} must use pull_request`);
+  assert.strictEqual(workflow.permissions.contents, 'read');
+  assert.strictEqual(workflow.concurrency['cancel-in-progress'], true);
+  assert.ok(!content.includes('pull_request_target'));
+  assert.ok(!content.includes('${{ secrets.'));
+  assert.ok(content.includes("3) echo 'Unexpected contract diff tool failure.' >&2; exit 3 ;;"));
+  const actionRefs = [...content.matchAll(/uses:\s+[^\s@]+@([^\s]+)/g)].map((match) => match[1]);
+  assert.ok(actionRefs.length > 0 && actionRefs.every((ref) => /^[a-f0-9]{40}$/.test(ref)));
+}
+
 function withTempDir(prefix: string, fn: (tmpDir: string) => void) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), prefix));
   try {
@@ -115,6 +129,8 @@ function assertPackageContents(pack: PackResult) {
     'contract/contract-diff.d.ts',
     'reporters/sarif.js',
     'reporters/sarif.d.ts',
+    'reporters/github-summary.js',
+    'reporters/github-summary.d.ts',
     'contract/allowed-surface.js',
     'contract/allowed-surface.d.ts',
     'contract/drift/index.js',
@@ -156,9 +172,14 @@ function assertPackageContents(pack: PackResult) {
     'docs/openapi-integration.ja.md',
     'docs/finding-exceptions.md',
     'docs/finding-exceptions.ja.md',
+    'docs/ci-integration.md',
+    'docs/ci-integration.ja.md',
     'examples/openapi/README.md',
     'examples/openapi/README.ja.md',
     'examples/openapi/openapi.yaml',
+    'examples/github-actions/contract-diff.yml',
+    'examples/github-actions/fixtures/openapi.yaml',
+    'examples/github-actions/fixtures/policy.yml',
     'scripts/compile.js',
     'scripts/compile.d.ts',
     'scripts/policy-lint.js',
@@ -230,6 +251,7 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof contract.applyFindingExceptions, 'function');
       assert.strictEqual(typeof contract.diffSecurityContracts, 'function');
       assert.strictEqual(typeof contract.renderFindingsAsSarif, 'function');
+      assert.strictEqual(typeof contract.renderContractDiffGitHubSummary, 'function');
       assert.strictEqual(typeof openapi.loadOpenApiDocument, 'function');
       assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
       assert.strictEqual(typeof openapi.normalizeOpenApiOperations, 'function');
@@ -280,6 +302,19 @@ function smokeInstalledPackage(tarballPath: string) {
     ));
     assert.strictEqual(sarif.version, '2.1.0');
     assert.strictEqual(sarif.runs[0].tool.driver.name, 'cdn-security-framework');
+    const ciOpenApi = path.join(installedRoot, 'examples', 'github-actions', 'fixtures', 'openapi.yaml');
+    const ciPolicy = path.join(installedRoot, 'examples', 'github-actions', 'fixtures', 'policy.yml');
+    run(cliPath, [
+      'contract', 'diff', '--openapi', ciOpenApi, '--policy', ciPolicy,
+      '--target', 'aws', '--workspace-root', installDir, '--format', 'github-summary',
+      '--fail-on', 'error', '--out', 'reports/github-summary.md',
+    ], { cwd: installDir });
+    const githubSummary = fs.readFileSync(
+      path.join(installDir, 'reports', 'github-summary.md'), 'utf8',
+    );
+    assert.ok(githubSummary.includes('# CDN Security Contract Diff'));
+    assert.ok(githubSummary.includes('**Gate: passing**'));
+    assertContractDiffWorkflow(path.join(installedRoot, 'examples', 'github-actions', 'contract-diff.yml'));
     run(cliPath, [
       'openapi', 'generate-policy', '--input', openApiPath, '--workspace-root', installDir,
       '--profile', 'balanced', '--out', 'openapi.candidate.yml',
@@ -315,6 +350,9 @@ function smokeInstalledPackage(tarballPath: string) {
     assert.ok(fs.existsSync(path.join(installDir, 'dist-cloudflare', 'edge', 'cloudflare', 'index.ts')));
   });
 }
+
+assertContractDiffWorkflow(path.join(repoRoot, '.github', 'workflows', 'contract-diff.yml'));
+assertContractDiffWorkflow(path.join(repoRoot, 'examples', 'github-actions', 'contract-diff.yml'));
 
 withTempDir('cdn-security-pack-', (packDir) => {
   const packJson = run('npm', ['pack', '--json', '--pack-destination', packDir]);

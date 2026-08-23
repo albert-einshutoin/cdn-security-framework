@@ -153,6 +153,7 @@
     "examples/openapi/README.md",
     "examples/openapi/README.ja.md",
     "examples/openapi/openapi.yaml",
+    "examples/github-actions/",
     "policy/base.yml",
     "policy/profiles/",
     "policy/archetypes/",
