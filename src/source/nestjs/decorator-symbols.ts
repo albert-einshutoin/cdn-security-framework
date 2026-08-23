@@ -5,7 +5,7 @@ import path from 'node:path';
 import ts from 'typescript';
 
 export const NESTJS_ROUTE_DECORATORS = [
-  'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'RequestMapping', 'Sse', 'Version',
+  'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'RequestMapping', 'Search', 'Sse', 'Version',
 ] as const;
 
 export type NestJsRouteDecorator = typeof NESTJS_ROUTE_DECORATORS[number];
@@ -100,5 +100,6 @@ export function isUnsupportedNestJsDecorator(
   checker: ts.TypeChecker,
 ): boolean {
   const result = match(decorator, checker);
-  return Boolean(result && (!result.trusted || result.name === 'RequestMapping' || result.name === 'Version'));
+  return Boolean(result && (!result.trusted
+    || result.name === 'RequestMapping' || result.name === 'Search' || result.name === 'Version'));
 }

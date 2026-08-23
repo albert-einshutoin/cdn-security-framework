@@ -11,7 +11,7 @@ const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
 const typescript_1 = __importDefault(require("typescript"));
 exports.NESTJS_ROUTE_DECORATORS = [
-    'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'RequestMapping', 'Sse', 'Version',
+    'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'RequestMapping', 'Search', 'Sse', 'Version',
 ];
 function targetSymbol(node, checker) {
     const location = typescript_1.default.isPropertyAccessExpression(node) ? node.name : node;
@@ -96,5 +96,6 @@ function nestJsRouteDecorator(decorator, checker) {
 }
 function isUnsupportedNestJsDecorator(decorator, checker) {
     const result = match(decorator, checker);
-    return Boolean(result && (!result.trusted || result.name === 'RequestMapping' || result.name === 'Version'));
+    return Boolean(result && (!result.trusted
+        || result.name === 'RequestMapping' || result.name === 'Search' || result.name === 'Version'));
 }

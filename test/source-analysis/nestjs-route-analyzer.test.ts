@@ -38,6 +38,7 @@ function installNestJsCommon(root: string, packageRoot = 'node_modules/@nestjs/c
     export declare function Sse(path?: string | readonly string[]): MethodDecorator;
     export declare function Version(value: string): MethodDecorator & ClassDecorator;
     export declare function RequestMapping(options?: object): MethodDecorator;
+    export declare function Search(path?: string): MethodDecorator;
     export declare enum RequestMethod { GET }
     export declare const fake: { Get: typeof Get };
   `);
@@ -278,6 +279,20 @@ describe('NestJS route analyzer', () => {
           expect.objectContaining({ methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
           expect.objectContaining({ methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
         ]),
+      },
+    });
+  });
+
+  test('reports unsupported Search routes instead of silently dropping them', async () => {
+    const root = workspace(`
+      import { Controller, Search } from '@nestjs/common';
+      @Controller('items') class ItemsController { @Search() search() {} }
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success',
+      result: {
+        contract: { operations: [] },
+        diagnostics: [{ code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }],
       },
     });
   });
