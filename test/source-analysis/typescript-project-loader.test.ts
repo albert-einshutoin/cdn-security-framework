@@ -327,6 +327,19 @@ describe('TypeScript project loader', () => {
       },
     })), 'TS_PROJECT_CANCELLED', root);
 
+    const scheduled = new AbortController();
+    await expectFailure(loadTypeScriptProject(options(root, {
+      cancellationSignal: scheduled.signal,
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        readFile(filePath) {
+          const text = nodeTypeScriptProjectFileSystem.readFile(filePath);
+          if (filePath.endsWith('src/app.ts')) setTimeout(() => scheduled.abort(), 0);
+          return text;
+        },
+      },
+    })), 'TS_PROJECT_CANCELLED', root);
+
     await expectFailure(loadTypeScriptProject(options(root, {
       fileSystem: {
         ...nodeTypeScriptProjectFileSystem,

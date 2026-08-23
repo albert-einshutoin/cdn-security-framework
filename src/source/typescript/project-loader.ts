@@ -241,6 +241,11 @@ function checkInterruption(signal: AbortSignal | undefined, deadline: number): v
   if (performance.now() >= deadline) throw new TypeScriptProjectLoadError('TS_PROJECT_TIMEOUT');
 }
 
+async function yieldAndCheckInterruption(signal: AbortSignal | undefined, deadline: number): Promise<void> {
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  checkInterruption(signal, deadline);
+}
+
 function normalizeRelative(value: string): string {
   return value.replaceAll('\\', '/');
 }
@@ -536,7 +541,6 @@ async function loadTypeScriptProjectInternal(
     configState,
     new Set(),
   );
-  checkInterruption(options.cancellationSignal, deadline);
 
   const read = ts.readConfigFile(resolvedConfig.absolute, (candidate) => {
     try { return fileSystem.readFile(candidate); } catch { return undefined; }
@@ -567,6 +571,7 @@ async function loadTypeScriptProjectInternal(
       typescriptCode: parsed.errors[0].code,
     });
   }
+  await yieldAndCheckInterruption(options.cancellationSignal, deadline);
   const pathsBase = parsed.options.baseUrl
     ?? (parsed.options as ts.CompilerOptions & { pathsBasePath?: string }).pathsBasePath
     ?? path.dirname(resolvedConfig.absolute);
@@ -616,7 +621,11 @@ async function loadTypeScriptProjectInternal(
     if (totalSourceBytes > limits.maxTotalSourceBytes) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_TOTAL_BYTES_LIMIT');
     }
+    if (rootNames.length % 64 === 0) {
+      await yieldAndCheckInterruption(options.cancellationSignal, deadline);
+    }
   }
+  await yieldAndCheckInterruption(options.cancellationSignal, deadline);
 
   const compilerOptions: ts.CompilerOptions = { ...parsed.options, noEmit: true, plugins: [] };
   const identity = projectIdentity(workspaceRoot, resolvedConfig.relative);
@@ -765,7 +774,7 @@ async function loadTypeScriptProjectInternal(
     throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
   }
   if (boundaryViolation) throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
-  checkInterruption(options.cancellationSignal, deadline);
+  await yieldAndCheckInterruption(options.cancellationSignal, deadline);
 
   const sourceFiles = program.getSourceFiles().filter(({ fileName }) => {
     try { return relativeWithin(workspaceRoot, fileSystem.realpath(fileName)) !== undefined; } catch { return false; }
@@ -784,6 +793,9 @@ async function loadTypeScriptProjectInternal(
       if (astNodes > limits.maxAstNodes) throw new TypeScriptProjectLoadError('TS_PROJECT_AST_NODE_LIMIT');
       if (depth > limits.maxAnalysisDepth) throw new TypeScriptProjectLoadError('TS_PROJECT_DEPTH_LIMIT');
       node.forEachChild((child) => { stack.push([child, depth + 1]); });
+      if (astNodes % 1_024 === 0) {
+        await yieldAndCheckInterruption(options.cancellationSignal, deadline);
+      }
     }
   }
 
@@ -799,6 +811,9 @@ async function loadTypeScriptProjectInternal(
       if (diagnostics.length > limits.maxDiagnostics) {
         throw new TypeScriptProjectLoadError('TS_PROJECT_DIAGNOSTIC_LIMIT');
       }
+      if (diagnostics.length % 64 === 0) {
+        await yieldAndCheckInterruption(options.cancellationSignal, deadline);
+      }
     }
   }
   if (diagnostics.length > limits.maxDiagnostics) {
@@ -810,7 +825,7 @@ async function loadTypeScriptProjectInternal(
     ...[...metadataContents.values()].map(({ relative, text }) => ({ relative, text })),
   ];
   const key = contentKey(configState.digests, compilerOptions, sources);
-  checkInterruption(options.cancellationSignal, deadline);
+  await yieldAndCheckInterruption(options.cancellationSignal, deadline);
   const cached = options.cache?.read(identity, key);
   if (cached?.value) {
     return {

@@ -146,6 +146,10 @@ function checkInterruption(signal, deadline) {
     if (performance.now() >= deadline)
         throw new TypeScriptProjectLoadError('TS_PROJECT_TIMEOUT');
 }
+async function yieldAndCheckInterruption(signal, deadline) {
+    await new Promise((resolve) => setImmediate(resolve));
+    checkInterruption(signal, deadline);
+}
 function normalizeRelative(value) {
     return value.replaceAll('\\', '/');
 }
@@ -401,7 +405,6 @@ async function loadTypeScriptProjectInternal(options) {
     const resolvedConfig = realFileWithin(fileSystem, workspaceRoot, configPath, 'TS_PROJECT_CONFIG_MISSING');
     const configState = { digests: new Map(), totalBytes: 0, largestFileBytes: 0 };
     validateConfigTree(fileSystem, workspaceRoot, resolvedConfig.absolute, limits, options.cancellationSignal, deadline, configState, new Set());
-    checkInterruption(options.cancellationSignal, deadline);
     const read = typescript_1.default.readConfigFile(resolvedConfig.absolute, (candidate) => {
         try {
             return fileSystem.readFile(candidate);
@@ -423,6 +426,7 @@ async function loadTypeScriptProjectInternal(options) {
             typescriptCode: parsed.errors[0].code,
         });
     }
+    await yieldAndCheckInterruption(options.cancellationSignal, deadline);
     const pathsBase = parsed.options.baseUrl
         ?? parsed.options.pathsBasePath
         ?? node_path_1.default.dirname(resolvedConfig.absolute);
@@ -476,7 +480,11 @@ async function loadTypeScriptProjectInternal(options) {
         if (totalSourceBytes > limits.maxTotalSourceBytes) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_TOTAL_BYTES_LIMIT');
         }
+        if (rootNames.length % 64 === 0) {
+            await yieldAndCheckInterruption(options.cancellationSignal, deadline);
+        }
     }
+    await yieldAndCheckInterruption(options.cancellationSignal, deadline);
     const compilerOptions = { ...parsed.options, noEmit: true, plugins: [] };
     const identity = projectIdentity(workspaceRoot, resolvedConfig.relative);
     const defaultHost = typescript_1.default.createCompilerHost(compilerOptions, true);
@@ -639,7 +647,7 @@ async function loadTypeScriptProjectInternal(options) {
     }
     if (boundaryViolation)
         throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
-    checkInterruption(options.cancellationSignal, deadline);
+    await yieldAndCheckInterruption(options.cancellationSignal, deadline);
     const sourceFiles = program.getSourceFiles().filter(({ fileName }) => {
         try {
             return relativeWithin(workspaceRoot, fileSystem.realpath(fileName)) !== undefined;
@@ -665,6 +673,9 @@ async function loadTypeScriptProjectInternal(options) {
             if (depth > limits.maxAnalysisDepth)
                 throw new TypeScriptProjectLoadError('TS_PROJECT_DEPTH_LIMIT');
             node.forEachChild((child) => { stack.push([child, depth + 1]); });
+            if (astNodes % 1_024 === 0) {
+                await yieldAndCheckInterruption(options.cancellationSignal, deadline);
+            }
         }
     }
     const diagnostics = [];
@@ -678,6 +689,9 @@ async function loadTypeScriptProjectInternal(options) {
             if (diagnostics.length > limits.maxDiagnostics) {
                 throw new TypeScriptProjectLoadError('TS_PROJECT_DIAGNOSTIC_LIMIT');
             }
+            if (diagnostics.length % 64 === 0) {
+                await yieldAndCheckInterruption(options.cancellationSignal, deadline);
+            }
         }
     }
     if (diagnostics.length > limits.maxDiagnostics) {
@@ -689,7 +703,7 @@ async function loadTypeScriptProjectInternal(options) {
         ...[...metadataContents.values()].map(({ relative, text }) => ({ relative, text })),
     ];
     const key = contentKey(configState.digests, compilerOptions, sources);
-    checkInterruption(options.cancellationSignal, deadline);
+    await yieldAndCheckInterruption(options.cancellationSignal, deadline);
     const cached = options.cache?.read(identity, key);
     if (cached?.value) {
         return {
