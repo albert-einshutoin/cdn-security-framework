@@ -93,6 +93,9 @@ describe('TypeScript project loader', () => {
     expect(loaded.program.getRootFileNames()).toHaveLength(1);
     expect(loaded.sourceFiles.map(({ fileName }) => path.basename(fileName))).toContain('app.ts');
     expect(loaded.diagnostics.map(({ typescriptCode }) => typescriptCode)).not.toContain(2307);
+    await expectFailure(loadTypeScriptProject(options(root, {
+      limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxFiles: 3 },
+    })), 'TS_PROJECT_FILE_LIMIT', root);
   }, 15_000);
 
   test('supports local extends and rejects package, outside, and symlink escapes', async () => {

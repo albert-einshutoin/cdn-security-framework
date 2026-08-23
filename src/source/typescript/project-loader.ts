@@ -618,7 +618,7 @@ async function loadTypeScriptProjectInternal(
     workspaceContents.set(safe.absolute, { relative, text, size });
     totalSourceBytes += size;
     largestFileBytes = Math.max(largestFileBytes, size);
-    if (configState.digests.size + workspaceContents.size > limits.maxFiles) {
+    if (configState.digests.size + workspaceContents.size + metadataContents.size > limits.maxFiles) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_LIMIT');
     }
     if (totalSourceBytes > limits.maxTotalSourceBytes) {
