@@ -245,7 +245,7 @@ function loadPolicy(root, policyPath) {
     if (canonicalJson(identity(before)) !== canonicalJson(identity(after))) {
         throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_CHANGED', 'Policy input changed during analysis.');
     }
-    return { policy: parsed.policy, sources: after };
+    return { policy: parsed.policy, sources: before };
 }
 function sourceUri(root, filePath) {
     return node_path_1.default.relative(root, filePath).split(node_path_1.default.sep).map(encodeURIComponent).join('/');

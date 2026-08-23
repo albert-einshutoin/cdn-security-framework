@@ -328,6 +328,32 @@ Module._load = function (request, parent, isMain) {
     expect(movedInput.status).toBe(2);
     expect(fs.readFileSync(movedInputOutput, 'utf8')).toBe(inputBefore);
     fs.writeFileSync(ok.openapiPath, inputBefore);
+    const policyBefore = fs.readFileSync(ok.policyPath, 'utf8');
+    const movedPolicyOutput = path.join(ok.root, 'moved-policy-report.json');
+    const movedPolicyPreload = path.join(ok.root, 'move-policy-before-verification.cjs');
+    fs.writeFileSync(movedPolicyPreload, `const fs = require('node:fs');
+const open = fs.openSync;
+const source = process.env.MOVED_POLICY_SOURCE
+  ? fs.realpathSync(process.env.MOVED_POLICY_SOURCE)
+  : undefined;
+let reads = 0;
+fs.openSync = function (filePath, flags, ...rest) {
+  if (source && fs.realpathSync(String(filePath)) === source
+    && ++reads === 2) {
+    fs.renameSync(process.env.MOVED_POLICY_SOURCE, process.env.MOVED_POLICY_OUTPUT);
+    fs.writeFileSync(process.env.MOVED_POLICY_SOURCE, process.env.MOVED_POLICY_REPLACEMENT);
+  }
+  return open.call(this, filePath, flags, ...rest);
+};
+`);
+    const movedPolicy = run([...common, '--format', 'json', '--out', movedPolicyOutput, '--force'], {
+      NODE_OPTIONS: `--require=${movedPolicyPreload}`,
+      MOVED_POLICY_SOURCE: ok.policyPath,
+      MOVED_POLICY_OUTPUT: movedPolicyOutput,
+      MOVED_POLICY_REPLACEMENT: policyBefore,
+    });
+    expect(movedPolicy.status).toBe(2);
+    expect(fs.readFileSync(movedPolicyOutput, 'utf8')).toBe(policyBefore);
     const symlinkOutput = path.join(ok.root, 'symlink-report.json');
     fs.symlinkSync(ok.openapiPath, symlinkOutput);
     expect(run([...common, '--out', symlinkOutput, '--force']).status).toBe(2);

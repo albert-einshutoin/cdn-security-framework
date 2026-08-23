@@ -295,7 +295,7 @@ function loadPolicy(root: string, policyPath: string): {
   if (canonicalJson(identity(before)) !== canonicalJson(identity(after))) {
     throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_CHANGED', 'Policy input changed during analysis.');
   }
-  return { policy: parsed.policy as CDNSecurityFrameworkPolicy, sources: after };
+  return { policy: parsed.policy as CDNSecurityFrameworkPolicy, sources: before };
 }
 
 function sourceUri(root: string, filePath: string): string {
