@@ -404,6 +404,11 @@ function validateConfigTree(fileSystem, workspaceRoot, configPath, limits, signa
                 }
             }
         }
+        if (compiler.jsxImportSource !== undefined) {
+            if (typeof compiler.jsxImportSource !== 'string') {
+                throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
+            }
+        }
         if (compiler.paths !== undefined) {
             if (!compiler.paths || typeof compiler.paths !== 'object' || Array.isArray(compiler.paths)) {
                 throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
@@ -738,6 +743,10 @@ async function loadTypeScriptProjectInternal(options) {
             return undefined;
         if (safe.kind === 'unsupported')
             return undefined;
+        if (safe.kind === 'workspace' && safe.absolute.endsWith('.tsx')
+            && compilerOptions.jsxImportSource && isPathLikeSpecifier(compilerOptions.jsxImportSource)) {
+            safeConfigPath(fileSystem, workspaceRoot, node_path_1.default.dirname(safe.absolute), normalizeRelative(compilerOptions.jsxImportSource));
+        }
         if (safe.kind === 'library') {
             const existingLibrary = libraryContents.get(safe.absolute);
             if (existingLibrary !== undefined)

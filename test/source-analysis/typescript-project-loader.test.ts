@@ -259,6 +259,36 @@ describe('TypeScript project loader', () => {
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
   });
 
+  test('validates jsxImportSource without rejecting package specifiers', async () => {
+    const root = workspace();
+    write(root, 'src/app.tsx', 'export const node = <div />;\n');
+    for (const jsxImportSource of ['react', '@scope/pkg']) {
+      write(root, 'tsconfig.json', JSON.stringify({
+        compilerOptions: { jsx: 'react-jsx', jsxImportSource, noLib: true },
+        files: ['src/app.tsx'],
+      }));
+      await expect(loadTypeScriptProject(options(root))).resolves.toBeDefined();
+    }
+
+    for (const jsxImportSource of ['../../outside', 'pkg/../../../outside', '\\\\server\\share', 'C:/outside']) {
+      write(root, 'tsconfig.json', JSON.stringify({
+        compilerOptions: { jsx: 'react-jsx', jsxImportSource },
+        files: ['src/app.tsx'],
+      }));
+      await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+    }
+
+    write(root, 'config/base.json', JSON.stringify({
+      compilerOptions: { jsx: 'react-jsx', jsxImportSource: '../outside' },
+    }));
+    write(root, 'app.tsx', 'export const inherited = <div />;\n');
+    write(root, 'tsconfig.json', '{ "extends": "./config/base.json", "files": ["app.tsx"] }');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "jsxImportSource": 1 }, "files": ["src/app.tsx"] }');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_INVALID_CONFIG', root);
+  });
+
   test('rejects workspace imports with unsupported program extensions', async () => {
     const root = workspace();
     write(root, 'tsconfig.json', '{ "compilerOptions": { "resolveJsonModule": true }, "files": ["src/app.ts"] }');
