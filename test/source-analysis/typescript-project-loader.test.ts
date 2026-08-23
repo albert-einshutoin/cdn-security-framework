@@ -193,6 +193,16 @@ describe('TypeScript project loader', () => {
       },
     })), 'TS_PROJECT_TOTAL_BYTES_LIMIT', root);
 
+    const duplicateConfig = '{ "extends": ["./base.json", "./base.json"], "compilerOptions": { "noLib": true }, "files": ["src/one.ts"] }';
+    write(root, 'tsconfig.json', duplicateConfig);
+    write(root, 'src/one.ts', 'export const one = 1;\n');
+    await expect(loadTypeScriptProject(options(root, {
+      limits: {
+        ...DEFAULT_SOURCE_ANALYSIS_LIMITS,
+        maxTotalSourceBytes: Buffer.byteLength(baseConfig + duplicateConfig + 'export const one = 1;\n'),
+      },
+    }))).resolves.toBeDefined();
+
     write(root, 'tsconfig.json', '{ "include": ["../outside.ts"] }');
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
 
@@ -209,6 +219,29 @@ describe('TypeScript project loader', () => {
     fs.symlinkSync(outside, path.join(root, 'src/linked'));
     write(root, 'tsconfig.json', '{ "include": ["src/**/*.ts"] }');
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+
+    fs.unlinkSync(path.join(root, 'src/linked'));
+    const outsideNonSource = workspace();
+    write(outsideNonSource, 'only.txt', 'outside');
+    fs.symlinkSync(outsideNonSource, path.join(root, 'src/linked'));
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+  });
+
+  test('rejects workspace imports with unsupported program extensions', async () => {
+    const root = workspace();
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "resolveJsonModule": true }, "files": ["src/app.ts"] }');
+    write(root, 'src/app.ts', 'import data from "./data.json";\nexport const value = data.value;\n');
+    write(root, 'src/data.json', '{ "value": 1 }');
+
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_EXTENSION_UNSUPPORTED', root);
+
+    write(root, 'package.json', '{ "value": 1 }');
+    write(root, 'src/app.ts', 'import data from "../package.json";\nexport const value = data.value;\n');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_EXTENSION_UNSUPPORTED', root);
+
+    write(root, 'node_modules/example/package.json', '{ "value": 1 }');
+    write(root, 'src/app.ts', 'import data from "../node_modules/example/package.json";\nexport const value = data.value;\n');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_EXTENSION_UNSUPPORTED', root);
   });
 
   test('returns partial project-reference diagnostics without loading referenced projects', async () => {

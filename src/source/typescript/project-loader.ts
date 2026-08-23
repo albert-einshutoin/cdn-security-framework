@@ -76,6 +76,7 @@ export interface TypeScriptProjectFileSystem {
     depth?: number,
     maxEntries?: number,
     checkInterruption?: () => void,
+    boundaryRoot?: string,
   ): string[];
 }
 
@@ -106,6 +107,7 @@ export const nodeTypeScriptProjectFileSystem: TypeScriptProjectFileSystem = Obje
     depth?: number,
     maxEntries = Number.POSITIVE_INFINITY,
     check = () => {},
+    boundaryRoot?: string,
   ) => {
     let entriesEnumerated = 0;
     const matchesExtension = (name: string): boolean => extensions.some((extension) => (
@@ -141,6 +143,12 @@ export const nodeTypeScriptProjectFileSystem: TypeScriptProjectFileSystem = Obje
               if (stat.isFile()) {
                 if (matchesExtension(entry.name)) files.push(entry.name);
               } else if (stat.isDirectory()) {
+                if (boundaryRoot) {
+                  const realDirectory = fs.realpathSync(path.join(directory, entry.name));
+                  if (realDirectory !== boundaryRoot && !relativeWithin(boundaryRoot, realDirectory)) {
+                    throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
+                  }
+                }
                 directories.push(entry.name);
               }
             }
@@ -334,11 +342,12 @@ function validateConfigTree(
   state: ConfigState,
   visiting: Set<string>,
   depth = 1,
-): Record<string, unknown> {
+): void {
   checkInterruption(signal, deadline);
   if (depth > limits.maxAnalysisDepth) throw new TypeScriptProjectLoadError('TS_PROJECT_DEPTH_LIMIT');
   const resolved = realFileWithin(fileSystem, workspaceRoot, configPath, 'TS_PROJECT_CONFIG_MISSING');
   if (visiting.has(resolved.absolute)) throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
+  if (state.digests.has(resolved.relative)) return;
   if (resolved.stat.size > limits.maxFileBytes) {
     throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', { sourceUri: resolved.relative });
   }
@@ -425,7 +434,6 @@ function validateConfigTree(
       visiting.delete(resolved.absolute);
     }
   }
-  return config;
 }
 
 function createParseHost(
@@ -464,6 +472,7 @@ function createParseHost(
         depth,
         maxEnumerationEntries,
         () => checkInterruption(signal, deadline),
+        workspaceRoot,
       );
       checkInterruption(signal, deadline);
       if (files.length > limits.maxFiles) throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_LIMIT');
@@ -679,7 +688,7 @@ async function loadTypeScriptProjectInternal(
   };
   const safeExistingPath = (candidate: string): {
     absolute: string;
-    kind: 'workspace' | 'library' | 'package-metadata';
+    kind: 'workspace' | 'library' | 'package-metadata' | 'unsupported';
   } | undefined => {
     try {
       const absolute = fileSystem.realpath(candidate);
@@ -692,6 +701,9 @@ async function loadTypeScriptProjectInternal(
         && normalizeRelative(workspaceRelative).split('/').includes('node_modules')) {
         return { absolute, kind: 'package-metadata' };
       }
+      if (workspaceRelative && /\.(?:[cm]?js|jsx|json)$/iu.test(workspaceRelative)) {
+        return { absolute, kind: 'unsupported' };
+      }
       if (SOURCE_EXTENSIONS.some((extension) => absolute.endsWith(extension))) boundaryViolation = true;
       return undefined;
     } catch { return undefined; }
@@ -699,6 +711,7 @@ async function loadTypeScriptProjectInternal(
   const readProgramFile = (candidate: string): string | undefined => {
     const safe = safeExistingPath(candidate);
     if (!safe) return undefined;
+    if (safe.kind === 'unsupported') return undefined;
     if (safe.kind === 'library') {
       const existingLibrary = libraryContents.get(safe.absolute);
       if (existingLibrary !== undefined) return existingLibrary;
@@ -777,6 +790,10 @@ async function loadTypeScriptProjectInternal(
     readFile: readProgramFile,
     getSourceFile: (candidate, languageVersion) => {
       checkInterruption(options.cancellationSignal, deadline);
+      const kind = safeExistingPath(candidate)?.kind;
+      if (kind === 'unsupported' || kind === 'package-metadata') {
+        throw new TypeScriptProjectLoadError('TS_PROJECT_EXTENSION_UNSUPPORTED');
+      }
       const text = readProgramFile(candidate);
       return text === undefined ? undefined : ts.createSourceFile(candidate, text, languageVersion, true);
     },

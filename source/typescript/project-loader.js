@@ -35,7 +35,7 @@ exports.nodeTypeScriptProjectFileSystem = Object.freeze({
     readFile: (filePath) => node_fs_1.default.readFileSync(filePath, 'utf8'),
     stat: node_fs_1.default.statSync,
     exists: node_fs_1.default.existsSync,
-    readDirectory: (rootDir, extensions, excludes, includes, depth, maxEntries = Number.POSITIVE_INFINITY, check = () => { }) => {
+    readDirectory: (rootDir, extensions, excludes, includes, depth, maxEntries = Number.POSITIVE_INFINITY, check = () => { }, boundaryRoot) => {
         let entriesEnumerated = 0;
         const matchesExtension = (name) => extensions.some((extension) => (typescript_1.default.sys.useCaseSensitiveFileNames
             ? name.endsWith(extension)
@@ -66,6 +66,12 @@ exports.nodeTypeScriptProjectFileSystem = Object.freeze({
                                 files.push(entry.name);
                         }
                         else if (stat.isDirectory()) {
+                            if (boundaryRoot) {
+                                const realDirectory = node_fs_1.default.realpathSync(node_path_1.default.join(directory, entry.name));
+                                if (realDirectory !== boundaryRoot && !relativeWithin(boundaryRoot, realDirectory)) {
+                                    throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
+                                }
+                            }
                             directories.push(entry.name);
                         }
                     }
@@ -224,6 +230,8 @@ function validateConfigTree(fileSystem, workspaceRoot, configPath, limits, signa
     const resolved = realFileWithin(fileSystem, workspaceRoot, configPath, 'TS_PROJECT_CONFIG_MISSING');
     if (visiting.has(resolved.absolute))
         throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
+    if (state.digests.has(resolved.relative))
+        return;
     if (resolved.stat.size > limits.maxFileBytes) {
         throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', { sourceUri: resolved.relative });
     }
@@ -317,7 +325,6 @@ function validateConfigTree(fileSystem, workspaceRoot, configPath, limits, signa
             visiting.delete(resolved.absolute);
         }
     }
-    return config;
 }
 function createParseHost(fileSystem, workspaceRoot, limits, signal, deadline, maxEnumerationEntries) {
     const safeRealPath = (candidate) => {
@@ -344,7 +351,7 @@ function createParseHost(fileSystem, workspaceRoot, limits, signal, deadline, ma
             checkInterruption(signal, deadline);
             if (!relativeWithin(workspaceRoot, node_path_1.default.resolve(rootDir)) && node_path_1.default.resolve(rootDir) !== workspaceRoot)
                 return [];
-            const files = fileSystem.readDirectory(rootDir, extensions, excludes, includes, depth, maxEnumerationEntries, () => checkInterruption(signal, deadline));
+            const files = fileSystem.readDirectory(rootDir, extensions, excludes, includes, depth, maxEnumerationEntries, () => checkInterruption(signal, deadline), workspaceRoot);
             checkInterruption(signal, deadline);
             if (files.length > limits.maxFiles)
                 throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_LIMIT');
@@ -550,6 +557,9 @@ async function loadTypeScriptProjectInternal(options) {
                 && normalizeRelative(workspaceRelative).split('/').includes('node_modules')) {
                 return { absolute, kind: 'package-metadata' };
             }
+            if (workspaceRelative && /\.(?:[cm]?js|jsx|json)$/iu.test(workspaceRelative)) {
+                return { absolute, kind: 'unsupported' };
+            }
             if (SOURCE_EXTENSIONS.some((extension) => absolute.endsWith(extension)))
                 boundaryViolation = true;
             return undefined;
@@ -561,6 +571,8 @@ async function loadTypeScriptProjectInternal(options) {
     const readProgramFile = (candidate) => {
         const safe = safeExistingPath(candidate);
         if (!safe)
+            return undefined;
+        if (safe.kind === 'unsupported')
             return undefined;
         if (safe.kind === 'library') {
             const existingLibrary = libraryContents.get(safe.absolute);
@@ -645,6 +657,10 @@ async function loadTypeScriptProjectInternal(options) {
         readFile: readProgramFile,
         getSourceFile: (candidate, languageVersion) => {
             checkInterruption(options.cancellationSignal, deadline);
+            const kind = safeExistingPath(candidate)?.kind;
+            if (kind === 'unsupported' || kind === 'package-metadata') {
+                throw new TypeScriptProjectLoadError('TS_PROJECT_EXTENSION_UNSUPPORTED');
+            }
             const text = readProgramFile(candidate);
             return text === undefined ? undefined : typescript_1.default.createSourceFile(candidate, text, languageVersion, true);
         },
