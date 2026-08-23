@@ -27,6 +27,12 @@ export declare function resolveDecoratorCallSymbol(call: ts.CallExpression, chec
     nestJsCommon: boolean;
     trustedNestJsCommon: boolean;
 } | undefined;
+export declare function resolveStaticDecoratorWrapperCall(call: ts.CallExpression, checker: ts.TypeChecker, projectSources: ReadonlySet<ts.SourceFile>, check: () => void): {
+    call?: ts.CallExpression;
+    symbol: ts.Symbol;
+    stable: boolean;
+    dynamic: boolean;
+} | undefined;
 export declare function resolveStaticSymbolName(expression: ts.Expression, checker: ts.TypeChecker, check: () => void): string | undefined;
 export declare function isStaticSymbolFrom(expression: ts.Expression, checker: ts.TypeChecker, check: () => void, moduleName: string, importedName: string): boolean;
 export declare function isStaticShorthandSymbolFrom(shorthand: ts.ShorthandPropertyAssignment, checker: ts.TypeChecker, check: () => void, moduleName: string, importedName: string): boolean;

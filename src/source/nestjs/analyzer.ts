@@ -35,6 +35,7 @@ import {
   resolveBareDecoratorName,
   resolveDecoratorCallSymbol,
   resolveDecoratorSymbol,
+  resolveStaticDecoratorWrapperCall,
   resolveStaticSymbolName,
   type NestJsRouteDecoratorCandidate,
   type NestJsRouteDecorator,
@@ -205,15 +206,20 @@ function ownAuthMetadata(
   config: Readonly<NestJsAuthConfig>,
   check: () => void,
   maxSteps: number,
+  maxDepth: number,
 ): AuthDecoratorMetadata {
   const result = emptyAuthMetadata();
+  const resolvingWrappers = new Set<ts.Symbol>();
   const applyResolved = (
     resolved: NonNullable<ReturnType<typeof resolveDecoratorCallSymbol>>,
     evidence: ts.Decorator,
     depth: number,
   ): boolean => {
     check();
-    if (depth > maxSteps) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+    if (depth > maxDepth) {
+      result.guardDynamic = true;
+      return true;
+    }
     if (resolved.name === 'applyDecorators' && resolved.trustedNestJsCommon) {
       for (const argument of resolved.call.arguments) {
         if (!ts.isCallExpression(argument)) {
@@ -244,30 +250,54 @@ function ownAuthMetadata(
       }
       return true;
     }
+    const wrapperCall = resolveStaticDecoratorWrapperCall(
+      resolved.call, checker, projectSources, check,
+    );
     if (config.public_decorators.includes(resolved.name)) {
       result.publicPresent = true;
       result.explicitPublic = false;
       result.publicDynamic = false;
       result.publicEvidence = [evidence];
-      if (resolved.call.arguments.length === 0) result.explicitPublic = true;
+      if (wrapperCall && (!wrapperCall.stable || wrapperCall.dynamic)) result.publicDynamic = true;
+      else if (resolved.call.arguments.length === 0) result.explicitPublic = true;
       else result.publicDynamic = true;
       return true;
     }
-    if (!config.roles_decorators.includes(resolved.name)) return false;
-    result.rolesPresent = true;
-    result.roles = [];
-    result.rolesDynamic = false;
-    result.authorizationEvidence = [evidence];
-    for (const argument of resolved.call.arguments) {
-      if (ts.isSpreadElement(argument)) {
-        result.rolesDynamic = true;
-        continue;
+    if (config.roles_decorators.includes(resolved.name)) {
+      result.rolesPresent = true;
+      result.roles = [];
+      result.rolesDynamic = Boolean(wrapperCall && (!wrapperCall.stable || wrapperCall.dynamic));
+      result.authorizationEvidence = [evidence];
+      for (const argument of resolved.call.arguments) {
+        if (ts.isSpreadElement(argument)) {
+          result.rolesDynamic = true;
+          continue;
+        }
+        const values = resolveStaticStrings(argument, checker, projectSources, { check, maxSteps });
+        if (values) result.roles.push(...values);
+        else result.rolesDynamic = true;
       }
-      const values = resolveStaticStrings(argument, checker, projectSources, { check, maxSteps });
-      if (values) result.roles.push(...values);
-      else result.rolesDynamic = true;
+      return true;
     }
-    return true;
+    if (wrapperCall?.dynamic) {
+      result.guardDynamic = true;
+      return true;
+    }
+    const wrapper = wrapperCall?.call
+      && resolveDecoratorCallSymbol(wrapperCall.call, checker, check);
+    if (!wrapper) return false;
+    if (!wrapperCall.stable || resolvingWrappers.has(wrapperCall.symbol)
+      || depth >= maxDepth) {
+      result.guardDynamic = true;
+      return true;
+    }
+    resolvingWrappers.add(wrapperCall.symbol);
+    try {
+      if (!applyResolved(wrapper, evidence, depth + 1)) result.guardDynamic = true;
+      return true;
+    } finally {
+      resolvingWrappers.delete(wrapperCall.symbol);
+    }
   };
   for (const decorator of [...decorators(node)].reverse()) {
     const resolved = resolveDecoratorSymbol(decorator, checker, check);
@@ -294,6 +324,7 @@ function effectiveClassAuthMetadata(
   config: Readonly<NestJsAuthConfig>,
   check: () => void,
   maxSteps: number,
+  maxDepth: number,
 ): AuthDecoratorMetadata {
   const result = emptyAuthMetadata();
   const seen = new Set<ts.ClassLikeDeclaration>();
@@ -304,7 +335,9 @@ function effectiveClassAuthMetadata(
     steps += 1;
     if (steps > maxSteps) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
     seen.add(current);
-    const own = ownAuthMetadata(current, checker, projectSources, config, check, maxSteps);
+    const own = ownAuthMetadata(
+      current, checker, projectSources, config, check, maxSteps, maxDepth,
+    );
     if (own.guardsPresent) {
       result.guardsPresent = true;
       result.guards = [...own.guards, ...result.guards];
@@ -732,10 +765,17 @@ async function analyze(
         if (!globalGuardFound) addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.expression);
         globalGuardFound = true;
       }
+      const propertyNames = ts.isPropertyAssignment(node) && ts.isComputedPropertyName(node.name)
+        ? resolveStaticStrings(node.name.expression, checker, projectSources, {
+          check, maxSteps: context.limits.maxAstNodes,
+        })
+        : undefined;
       const globalGuardProvider = ts.isPropertyAssignment(node)
-        && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))
-        && node.name.text === 'provide'
-        ? isStaticSymbolFrom(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD')
+        && isStaticSymbolFrom(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD')
+        ? (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))
+          ? node.name.text === 'provide'
+          : ts.isComputedPropertyName(node.name) && (propertyNames === undefined
+            || (propertyNames.length === 1 && propertyNames[0] === 'provide'))
         : ts.isShorthandPropertyAssignment(node) && node.name.text === 'provide'
           ? isStaticShorthandSymbolFrom(node, checker, check, '@nestjs/core', 'APP_GUARD')
           : false;
@@ -779,7 +819,8 @@ async function analyze(
       const trustedController = effectiveController.classification.route?.name === 'Controller';
       const classAuthMetadata = trustedController
         ? effectiveClassAuthMetadata(
-          statement, checker, projectSources, authConfig, check, context.limits.maxAstNodes,
+          statement, checker, projectSources, authConfig, check,
+          context.limits.maxAstNodes, context.limits.maxAnalysisDepth,
         )
         : emptyAuthMetadata();
       if (trustedController && classAuthMetadata.dynamic) {
@@ -819,7 +860,8 @@ async function analyze(
           continue;
         }
         const methodAuthMetadata = ownAuthMetadata(
-          method, checker, projectSources, authConfig, check, context.limits.maxAstNodes,
+          method, checker, projectSources, authConfig, check,
+          context.limits.maxAstNodes, context.limits.maxAnalysisDepth,
         );
         if (methodAuthMetadata.dynamic) {
           addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', method);

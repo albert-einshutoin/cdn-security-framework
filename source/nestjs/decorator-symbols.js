@@ -8,6 +8,7 @@ exports.classifyNestJsRouteDecorator = classifyNestJsRouteDecorator;
 exports.resolveDecoratorSymbol = resolveDecoratorSymbol;
 exports.resolveBareDecoratorName = resolveBareDecoratorName;
 exports.resolveDecoratorCallSymbol = resolveDecoratorCallSymbol;
+exports.resolveStaticDecoratorWrapperCall = resolveStaticDecoratorWrapperCall;
 exports.resolveStaticSymbolName = resolveStaticSymbolName;
 exports.isStaticSymbolFrom = isStaticSymbolFrom;
 exports.isStaticShorthandSymbolFrom = isStaticShorthandSymbolFrom;
@@ -30,6 +31,41 @@ function unwrapExpression(expression) {
         current = current.expression;
     return current;
 }
+function staticPropertyKey(input, checker, check) {
+    const seen = new Set();
+    let current = input;
+    while (true) {
+        check();
+        const expression = unwrapExpression(current);
+        if (typescript_1.default.isStringLiteral(expression) || typescript_1.default.isNumericLiteral(expression)
+            || typescript_1.default.isNoSubstitutionTemplateLiteral(expression))
+            return expression.text;
+        if (!typescript_1.default.isIdentifier(expression))
+            return undefined;
+        let symbol = checker.getSymbolAtLocation(expression);
+        if (!symbol)
+            return undefined;
+        if (symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        if (seen.has(symbol))
+            return undefined;
+        seen.add(symbol);
+        const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (!declaration?.initializer || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+            return undefined;
+        current = declaration.initializer;
+    }
+}
+function isNamespaceImportAccess(expression, checker) {
+    const callee = unwrapExpression(expression);
+    const receiver = typescript_1.default.isPropertyAccessExpression(callee) || typescript_1.default.isElementAccessExpression(callee)
+        ? unwrapExpression(callee.expression)
+        : undefined;
+    return Boolean(receiver && typescript_1.default.isIdentifier(receiver)
+        && checker.getSymbolAtLocation(receiver)?.declarations?.some(typescript_1.default.isNamespaceImport));
+}
 function targetSymbol(node, checker, check) {
     const seen = new Set();
     let current = unwrapExpression(node);
@@ -37,7 +73,12 @@ function targetSymbol(node, checker, check) {
     while (true) {
         check();
         const location = typescript_1.default.isPropertyAccessExpression(current) ? current.name : current;
-        const symbol = selected ?? checker.getSymbolAtLocation(location);
+        const elementKey = typescript_1.default.isElementAccessExpression(current) && current.argumentExpression
+            ? staticPropertyKey(current.argumentExpression, checker, check)
+            : undefined;
+        const symbol = selected ?? (elementKey === undefined
+            ? checker.getSymbolAtLocation(location)
+            : checker.getTypeAtLocation(current.expression).getProperty(elementKey));
         selected = undefined;
         if (!symbol)
             return undefined;
@@ -51,7 +92,8 @@ function targetSymbol(node, checker, check) {
             && declaration.initializer !== undefined));
         if (alias?.initializer) {
             const initializer = unwrapExpression(alias.initializer);
-            if (!typescript_1.default.isIdentifier(initializer) && !typescript_1.default.isPropertyAccessExpression(initializer))
+            if (!typescript_1.default.isIdentifier(initializer) && !typescript_1.default.isPropertyAccessExpression(initializer)
+                && !typescript_1.default.isElementAccessExpression(initializer))
                 return target;
             current = initializer;
             continue;
@@ -208,10 +250,11 @@ function matchesConsumerNestJsCommon(node, symbol) {
     return matchesConsumerModule(node, symbol, '@nestjs/common');
 }
 function match(decorator, checker, check) {
-    const storedCall = typescript_1.default.isCallExpression(decorator.expression)
+    const expression = unwrapExpression(decorator.expression);
+    const storedCall = typescript_1.default.isCallExpression(expression)
         ? undefined
-        : storedDecoratorCall(decorator.expression, checker, check);
-    const call = typescript_1.default.isCallExpression(decorator.expression) ? decorator.expression : storedCall;
+        : storedDecoratorCall(expression, checker, check);
+    const call = typescript_1.default.isCallExpression(expression) ? expression : storedCall;
     if (!call)
         return undefined;
     const symbol = targetSymbol(call.expression, checker, check);
@@ -251,21 +294,26 @@ function classifyNestJsRouteDecorator(decorator, checker, check) {
     };
 }
 function resolveDecoratorSymbol(decorator, checker, check) {
-    const call = typescript_1.default.isCallExpression(decorator.expression) ? decorator.expression : undefined;
+    const expression = unwrapExpression(decorator.expression);
+    const call = typescript_1.default.isCallExpression(expression) ? expression : undefined;
     if (!call)
         return undefined;
     return resolveDecoratorCallSymbol(call, checker, check);
 }
 function resolveBareDecoratorName(decorator, checker, check) {
-    if (typescript_1.default.isCallExpression(decorator.expression))
+    const expression = unwrapExpression(decorator.expression);
+    if (typescript_1.default.isCallExpression(expression))
         return undefined;
-    const symbol = targetSymbol(decorator.expression, checker, check);
+    const symbol = targetSymbol(expression, checker, check);
     return !symbol || symbol === UNKNOWN_NESTJS_ROUTE ? undefined : symbol.getName();
 }
 function resolveDecoratorCallSymbol(call, checker, check) {
     const symbol = targetSymbol(call.expression, checker, check);
-    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE)
-        return undefined;
+    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) {
+        return !symbol && typescript_1.default.isElementAccessExpression(unwrapExpression(call.expression))
+            ? { name: '', call, nestJsCommon: false, trustedNestJsCommon: false }
+            : undefined;
+    }
     const nestJsCommon = originatesFromNestJsCommon(symbol);
     return {
         name: symbol.getName(),
@@ -274,6 +322,89 @@ function resolveDecoratorCallSymbol(call, checker, check) {
         trustedNestJsCommon: nestJsCommon && directNestJsImport(call.expression, checker)
             && matchesConsumerNestJsCommon(call.expression, symbol),
     };
+}
+function resolveStaticDecoratorWrapperCall(call, checker, projectSources, check) {
+    const symbol = targetSymbol(call.expression, checker, check);
+    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) {
+        const callee = unwrapExpression(call.expression);
+        const base = typescript_1.default.isElementAccessExpression(callee)
+            ? targetSymbol(callee.expression, checker, check)
+            : undefined;
+        return base && base !== UNKNOWN_NESTJS_ROUTE && base.declarations?.some((candidate) => (projectSources.has(candidate.getSourceFile()))) ? { symbol: base, stable: false, dynamic: true } : undefined;
+    }
+    const declaration = symbol.declarations?.find((candidate) => projectSources.has(candidate.getSourceFile()) && ((typescript_1.default.isFunctionDeclaration(candidate) && candidate.body !== undefined)
+        || (typescript_1.default.isVariableDeclaration(candidate) && candidate.initializer !== undefined
+            && (typescript_1.default.isArrowFunction(candidate.initializer) || typescript_1.default.isFunctionExpression(candidate.initializer)))
+        || (typescript_1.default.isPropertyAssignment(candidate)
+            && (typescript_1.default.isArrowFunction(candidate.initializer) || typescript_1.default.isFunctionExpression(candidate.initializer)))));
+    if (!declaration && symbol.declarations?.some((candidate) => (projectSources.has(candidate.getSourceFile()))))
+        return { symbol, stable: false, dynamic: true };
+    const implementation = declaration && (typescript_1.default.isVariableDeclaration(declaration)
+        || typescript_1.default.isPropertyAssignment(declaration))
+        ? declaration.initializer
+        : declaration;
+    if (!implementation || (!typescript_1.default.isFunctionDeclaration(implementation)
+        && !typescript_1.default.isArrowFunction(implementation) && !typescript_1.default.isFunctionExpression(implementation)))
+        return undefined;
+    const unwrappedCallee = unwrapExpression(call.expression);
+    const objectAccess = typescript_1.default.isPropertyAccessExpression(unwrappedCallee)
+        || typescript_1.default.isElementAccessExpression(unwrappedCallee);
+    const stable = Boolean((!objectAccess || isNamespaceImportAccess(unwrappedCallee, checker))
+        && declaration && typescript_1.default.isVariableDeclaration(declaration)
+        && typescript_1.default.isVariableDeclarationList(declaration.parent)
+        && declaration.parent.flags & typescript_1.default.NodeFlags.Const);
+    const { body } = implementation;
+    if (!body)
+        return undefined;
+    const resolveReturnedCall = (input, resolving, depth) => {
+        check();
+        if (depth > 64)
+            return { dynamic: true };
+        const expression = unwrapExpression(input);
+        if (typescript_1.default.isCallExpression(expression))
+            return { call: expression, dynamic: false };
+        if (typescript_1.default.isFunctionLike(expression) || typescript_1.default.isClassLike(expression))
+            return undefined;
+        if (typescript_1.default.isIdentifier(expression)) {
+            const valueSymbol = targetSymbol(expression, checker, check);
+            if (!valueSymbol || valueSymbol === UNKNOWN_NESTJS_ROUTE || resolving.has(valueSymbol)) {
+                return { dynamic: true };
+            }
+            const declarations = valueSymbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+            const value = declarations.length === 1 ? declarations[0] : undefined;
+            if (!value?.initializer || !projectSources.has(value.getSourceFile())
+                || !typescript_1.default.isVariableDeclarationList(value.parent)
+                || !(value.parent.flags & typescript_1.default.NodeFlags.Const))
+                return { dynamic: true };
+            resolving.add(valueSymbol);
+            const resolved = resolveReturnedCall(value.initializer, resolving, depth + 1);
+            resolving.delete(valueSymbol);
+            return resolved;
+        }
+        const nodes = [expression];
+        while (nodes.length > 0) {
+            const node = nodes.pop();
+            check();
+            if (typescript_1.default.isCallExpression(node))
+                return { dynamic: true };
+            if (typescript_1.default.isFunctionLike(node) || typescript_1.default.isClassLike(node))
+                continue;
+            typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+        }
+        return { dynamic: true };
+    };
+    if (!typescript_1.default.isBlock(body)) {
+        const resolved = resolveReturnedCall(body, new Set(), 0);
+        return resolved && { ...resolved, symbol, stable };
+    }
+    if (body.statements.length === 1 && typescript_1.default.isReturnStatement(body.statements[0])
+        && body.statements[0].expression) {
+        const expression = unwrapExpression(body.statements[0].expression);
+        if (typescript_1.default.isCallExpression(expression)) {
+            return { call: expression, symbol, stable, dynamic: false };
+        }
+    }
+    return { symbol, stable, dynamic: true };
 }
 function resolveStaticSymbolName(expression, checker, check) {
     const symbol = targetSymbol(expression, checker, check);

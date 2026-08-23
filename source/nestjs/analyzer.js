@@ -136,12 +136,15 @@ function emptyAuthMetadata() {
         authorizationEvidence: [],
     };
 }
-function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps) {
+function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps, maxDepth) {
     const result = emptyAuthMetadata();
+    const resolvingWrappers = new Set();
     const applyResolved = (resolved, evidence, depth) => {
         check();
-        if (depth > maxSteps)
-            throw new source_analysis_1.SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+        if (depth > maxDepth) {
+            result.guardDynamic = true;
+            return true;
+        }
         if (resolved.name === 'applyDecorators' && resolved.trustedNestJsCommon) {
             for (const argument of resolved.call.arguments) {
                 if (!typescript_1.default.isCallExpression(argument)) {
@@ -175,35 +178,60 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps)
             }
             return true;
         }
+        const wrapperCall = (0, decorator_symbols_1.resolveStaticDecoratorWrapperCall)(resolved.call, checker, projectSources, check);
         if (config.public_decorators.includes(resolved.name)) {
             result.publicPresent = true;
             result.explicitPublic = false;
             result.publicDynamic = false;
             result.publicEvidence = [evidence];
-            if (resolved.call.arguments.length === 0)
+            if (wrapperCall && (!wrapperCall.stable || wrapperCall.dynamic))
+                result.publicDynamic = true;
+            else if (resolved.call.arguments.length === 0)
                 result.explicitPublic = true;
             else
                 result.publicDynamic = true;
             return true;
         }
-        if (!config.roles_decorators.includes(resolved.name))
-            return false;
-        result.rolesPresent = true;
-        result.roles = [];
-        result.rolesDynamic = false;
-        result.authorizationEvidence = [evidence];
-        for (const argument of resolved.call.arguments) {
-            if (typescript_1.default.isSpreadElement(argument)) {
-                result.rolesDynamic = true;
-                continue;
+        if (config.roles_decorators.includes(resolved.name)) {
+            result.rolesPresent = true;
+            result.roles = [];
+            result.rolesDynamic = Boolean(wrapperCall && (!wrapperCall.stable || wrapperCall.dynamic));
+            result.authorizationEvidence = [evidence];
+            for (const argument of resolved.call.arguments) {
+                if (typescript_1.default.isSpreadElement(argument)) {
+                    result.rolesDynamic = true;
+                    continue;
+                }
+                const values = (0, static_string_resolver_1.resolveStaticStrings)(argument, checker, projectSources, { check, maxSteps });
+                if (values)
+                    result.roles.push(...values);
+                else
+                    result.rolesDynamic = true;
             }
-            const values = (0, static_string_resolver_1.resolveStaticStrings)(argument, checker, projectSources, { check, maxSteps });
-            if (values)
-                result.roles.push(...values);
-            else
-                result.rolesDynamic = true;
+            return true;
         }
-        return true;
+        if (wrapperCall?.dynamic) {
+            result.guardDynamic = true;
+            return true;
+        }
+        const wrapper = wrapperCall?.call
+            && (0, decorator_symbols_1.resolveDecoratorCallSymbol)(wrapperCall.call, checker, check);
+        if (!wrapper)
+            return false;
+        if (!wrapperCall.stable || resolvingWrappers.has(wrapperCall.symbol)
+            || depth >= maxDepth) {
+            result.guardDynamic = true;
+            return true;
+        }
+        resolvingWrappers.add(wrapperCall.symbol);
+        try {
+            if (!applyResolved(wrapper, evidence, depth + 1))
+                result.guardDynamic = true;
+            return true;
+        }
+        finally {
+            resolvingWrappers.delete(wrapperCall.symbol);
+        }
     };
     for (const decorator of [...decorators(node)].reverse()) {
         const resolved = (0, decorator_symbols_1.resolveDecoratorSymbol)(decorator, checker, check);
@@ -222,7 +250,7 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps)
     result.dynamic = result.guardDynamic || result.publicDynamic || result.rolesDynamic;
     return result;
 }
-function effectiveClassAuthMetadata(node, checker, projectSources, config, check, maxSteps) {
+function effectiveClassAuthMetadata(node, checker, projectSources, config, check, maxSteps, maxDepth) {
     const result = emptyAuthMetadata();
     const seen = new Set();
     let current = node;
@@ -233,7 +261,7 @@ function effectiveClassAuthMetadata(node, checker, projectSources, config, check
         if (steps > maxSteps)
             throw new source_analysis_1.SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
         seen.add(current);
-        const own = ownAuthMetadata(current, checker, projectSources, config, check, maxSteps);
+        const own = ownAuthMetadata(current, checker, projectSources, config, check, maxSteps, maxDepth);
         if (own.guardsPresent) {
             result.guardsPresent = true;
             result.guards = [...own.guards, ...result.guards];
@@ -653,10 +681,17 @@ async function analyze(context, authConfig) {
                     addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.expression);
                 globalGuardFound = true;
             }
+            const propertyNames = typescript_1.default.isPropertyAssignment(node) && typescript_1.default.isComputedPropertyName(node.name)
+                ? (0, static_string_resolver_1.resolveStaticStrings)(node.name.expression, checker, projectSources, {
+                    check, maxSteps: context.limits.maxAstNodes,
+                })
+                : undefined;
             const globalGuardProvider = typescript_1.default.isPropertyAssignment(node)
-                && (typescript_1.default.isIdentifier(node.name) || typescript_1.default.isStringLiteral(node.name))
-                && node.name.text === 'provide'
-                ? (0, decorator_symbols_1.isStaticSymbolFrom)(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD')
+                && (0, decorator_symbols_1.isStaticSymbolFrom)(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD')
+                ? (typescript_1.default.isIdentifier(node.name) || typescript_1.default.isStringLiteral(node.name))
+                    ? node.name.text === 'provide'
+                    : typescript_1.default.isComputedPropertyName(node.name) && (propertyNames === undefined
+                        || (propertyNames.length === 1 && propertyNames[0] === 'provide'))
                 : typescript_1.default.isShorthandPropertyAssignment(node) && node.name.text === 'provide'
                     ? (0, decorator_symbols_1.isStaticShorthandSymbolFrom)(node, checker, check, '@nestjs/core', 'APP_GUARD')
                     : false;
@@ -693,7 +728,7 @@ async function analyze(context, authConfig) {
                 continue;
             const trustedController = effectiveController.classification.route?.name === 'Controller';
             const classAuthMetadata = trustedController
-                ? effectiveClassAuthMetadata(statement, checker, projectSources, authConfig, check, context.limits.maxAstNodes)
+                ? effectiveClassAuthMetadata(statement, checker, projectSources, authConfig, check, context.limits.maxAstNodes, context.limits.maxAnalysisDepth)
                 : emptyAuthMetadata();
             if (trustedController && classAuthMetadata.dynamic) {
                 addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', statement);
@@ -724,7 +759,7 @@ async function analyze(context, authConfig) {
                     }
                     continue;
                 }
-                const methodAuthMetadata = ownAuthMetadata(method, checker, projectSources, authConfig, check, context.limits.maxAstNodes);
+                const methodAuthMetadata = ownAuthMetadata(method, checker, projectSources, authConfig, check, context.limits.maxAstNodes, context.limits.maxAnalysisDepth);
                 if (methodAuthMetadata.dynamic) {
                     addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', method);
                 }

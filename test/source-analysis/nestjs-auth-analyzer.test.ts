@@ -289,7 +289,7 @@ describe('NestJS auth metadata analyzer', () => {
   test('accumulates inherited class guards and treats empty method UseGuards as a no-op', async () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
-      import { ApiKeyGuard, JwtAuthGuard } from './auth';
+      import { ApiKeyGuard, JwtAuthGuard, Public } from './auth';
       @UseGuards(JwtAuthGuard) class BaseController {}
       @Controller('inherited') @UseGuards(ApiKeyGuard)
       class InheritedController extends BaseController {
@@ -325,7 +325,8 @@ describe('NestJS auth metadata analyzer', () => {
       @Controller('composed') @UseGuards(JwtAuthGuard)
       class ComposedController {
         @Get() @applyDecorators(UseGuards(ApiKeyGuard)) read() {}
-        @Get('unknown') @applyDecorators(Auth()) unknown() {}
+        @Get('wrapped') @Auth() wrapped() {}
+        @Get('nested') @applyDecorators(Auth()) nested() {}
       }
     `, {
       'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
@@ -350,9 +351,197 @@ describe('NestJS auth metadata analyzer', () => {
         },
       },
     });
-    expect(operations['GET /composed/unknown']).toMatchObject({
-      exposure: 'unknown',
-      auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+    for (const routeKey of ['GET /composed/wrapped', 'GET /composed/nested']) {
+      expect(operations[routeKey]).toMatchObject({
+        exposure: 'authenticated',
+        auth: {
+          mode: 'alternatives',
+          analysis: {
+            guards: [
+              { symbol: 'JwtAuthGuard', authKind: 'bearer' },
+              { symbol: 'ApiKeyGuard', authKind: 'api-key' },
+            ],
+            enforcementConfidence: 'high',
+          },
+        },
+      });
+    }
+  });
+
+  test('resolves decorators stored before a wrapper returns them', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard, JwtAuthGuard, Public } from './auth';
+      const storedGuard = UseGuards(ApiKeyGuard);
+      const StoredGuard = (): MethodDecorator => storedGuard;
+      const storedPublic = Public();
+      const StoredPublic = (): MethodDecorator => storedPublic;
+      @Controller('stored') @UseGuards(JwtAuthGuard)
+      class StoredController {
+        @Get('guard') @StoredGuard() guard() {}
+        @Get('public') @StoredPublic() publicRoute() {}
+      }
+    `, {
+      'src/auth.ts': `
+        export class JwtAuthGuard {}
+        export class ApiKeyGuard {}
+        export const Public = (): MethodDecorator => () => {};
+      `,
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    const operations = Object.fromEntries(execution.result.contract.operations.map((operation) => (
+      [operation.routeKey, operation]
+    )));
+    expect(operations['GET /stored/guard']).toMatchObject({
+      exposure: 'authenticated',
+      auth: { analysis: { guards: [
+        { symbol: 'JwtAuthGuard', authKind: 'bearer' },
+        { symbol: 'ApiKeyGuard', authKind: 'api-key' },
+      ] } },
+    });
+    expect(operations['GET /stored/public']).toMatchObject({
+      exposure: 'public',
+      auth: { mode: 'none', analysis: { explicitPublic: true } },
+    });
+  });
+
+  test('fails closed on mutable, parameter-dependent, and cyclic guard wrappers', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard, JwtAuthGuard, Public } from './auth';
+      const Noop = (): MethodDecorator => () => {};
+      declare const flag: boolean;
+      let Mutable = (): MethodDecorator => UseGuards(ApiKeyGuard);
+      Mutable = Noop;
+      const Parameter = (guard: unknown): MethodDecorator => UseGuards(guard);
+      const A = (): MethodDecorator => B();
+      const B = (): MethodDecorator => A();
+      const MultiStatement = (): MethodDecorator => {
+        const decorator = UseGuards(ApiKeyGuard);
+        return decorator;
+      };
+      const MultiPublic = (): MethodDecorator => {
+        const decorator = Public();
+        return decorator;
+      };
+      const Conditional = (): MethodDecorator => flag ? UseGuards(ApiKeyGuard) : Noop();
+      const selectedFactory = flag ? (() => UseGuards(ApiKeyGuard)) : Noop;
+      const UnknownCall = (): MethodDecorator => selectedFactory();
+      const Identity = (decorator: MethodDecorator): MethodDecorator => decorator;
+      @Controller('wrappers') @UseGuards(JwtAuthGuard)
+      class WrapperController {
+        @Get('mutable') @Mutable() mutable() {}
+        @Get('parameter') @Parameter(ApiKeyGuard) parameter() {}
+        @Get('cycle') @A() cycle() {}
+        @Get('multi') @MultiStatement() multi() {}
+        @Get('multi-public') @MultiPublic() multiPublic() {}
+        @Get('conditional') @Conditional() conditional() {}
+        @Get('unknown-call') @UnknownCall() unknownCall() {}
+        @Get('identity') @Identity(UseGuards(ApiKeyGuard)) identity() {}
+      }
+    `, {
+      'src/auth.ts': `
+        export class JwtAuthGuard {}
+        export class ApiKeyGuard {}
+        export const Public = (): MethodDecorator => () => {};
+      `,
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    for (const operation of execution.result.contract.operations) {
+      expect(operation).toMatchObject({
+        exposure: 'unknown',
+        auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+      });
+    }
+  });
+
+  test('fails closed on object-property decorator wrappers', async () => {
+    const aliases = ["const key3000 = 'Public' as const;"];
+    for (let index = 2_999; index >= 0; index -= 1) {
+      aliases.push(`const key${index} = key${index + 1};`);
+    }
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard, JwtAuthGuard, Public } from './auth';
+      const Shorthand = (): MethodDecorator => Public();
+      const wrappers = {
+        Auth: (): MethodDecorator => UseGuards(ApiKeyGuard),
+        MethodAuth(): MethodDecorator { return Public(); },
+        Shorthand,
+      };
+      declare const flag: boolean;
+      const named = {
+        Public: (): MethodDecorator => Public(),
+        Trace: (): MethodDecorator => () => {},
+      };
+      const staticKey = 'Public' as const;
+      const dynamicKey = flag ? 'Public' : 'Trace';
+      ${aliases.join('\n')}
+      @Controller('objects') @UseGuards(JwtAuthGuard)
+      class ObjectWrapperController {
+        @Get('property') @wrappers.Auth() property() {}
+        @Get('method') @wrappers.MethodAuth() method() {}
+        @Get('shorthand') @wrappers.Shorthand() shorthand() {}
+        @Get('element') @(named['Public']()) element() {}
+        @Get('static-element') @(named[staticKey]()) staticElement() {}
+        @Get('dynamic-element') @(named[dynamicKey]()) dynamicElement() {}
+        @Get('long-alias') @(named[key0]()) longAlias() {}
+      }
+    `, {
+      'src/auth.ts': `
+        export class JwtAuthGuard {}
+        export class ApiKeyGuard {}
+        export const Public = (): MethodDecorator => () => {};
+      `,
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    for (const operation of execution.result.contract.operations) {
+      expect(operation).toMatchObject({
+        exposure: 'unknown',
+        auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+      });
+    }
+  });
+
+  test('keeps namespace-import decorator properties static', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import * as auth from './auth';
+      @Controller('namespace') @UseGuards(auth.JwtAuthGuard)
+      class NamespaceController {
+        @Get('public') @auth.Public() publicRoute() {}
+        @Get('roles') @auth.Roles('admin') roles() {}
+      }
+    `, {
+      'src/auth.ts': `
+        declare const metadata: (...values: unknown[]) => MethodDecorator;
+        export class JwtAuthGuard {}
+        export const Public = (): MethodDecorator => metadata('public');
+        export const Roles = (...roles: string[]): MethodDecorator => metadata('roles', roles);
+      `,
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    const operations = Object.fromEntries(execution.result.contract.operations.map((operation) => (
+      [operation.routeKey, operation]
+    )));
+    expect(operations['GET /namespace/public']).toMatchObject({
+      exposure: 'public', auth: { mode: 'none' },
+    });
+    expect(operations['GET /namespace/roles']).toMatchObject({
+      exposure: 'authenticated',
+      auth: { mode: 'alternatives', analysis: { roles: ['admin'] } },
     });
   });
 
@@ -382,8 +571,8 @@ describe('NestJS auth metadata analyzer', () => {
       import { JwtAuthGuard } from './auth';
       import { GLOBAL_GUARD } from './global-guard';
       const GUARD_TOKEN = GLOBAL_GUARD;
-      const provide = GUARD_TOKEN;
-      export const providers = [{ provide, useClass: JwtAuthGuard }];
+      const keys = { provider: 'provide' } as const;
+      export const providers = [{ [keys.provider]: GUARD_TOKEN, useClass: JwtAuthGuard }];
       @Controller('global') class GlobalController { @Get() @UseGuards(JwtAuthGuard) read() {} }
       throw new Error('must not execute');
     `, {
@@ -439,12 +628,22 @@ describe('NestJS auth metadata analyzer', () => {
       export const providers = [{ provide, useClass: JwtAuthGuard }];
       @Controller('mutable') class MutableController { @Get() @UseGuards(JwtAuthGuard) read() {} }
     `, nestCoreFiles);
+    const computedRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      const providerKey = 'provide';
+      export const providers = [{ [providerKey]: APP_GUARD, useClass: JwtAuthGuard }];
+      @Controller('computed') class ComputedController { @Get() @UseGuards(JwtAuthGuard) read() {} }
+    `, nestCoreFiles);
 
     const direct = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(directRoot));
     const mutable = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(mutableRoot));
+    const computed = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(computedRoot));
     expect(direct.status).toBe('success');
     expect(mutable.status).toBe('success');
-    if (direct.status !== 'success' || mutable.status !== 'success') return;
+    expect(computed.status).toBe('success');
+    if (direct.status !== 'success' || mutable.status !== 'success' || computed.status !== 'success') return;
     expect(direct.result.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
@@ -453,6 +652,10 @@ describe('NestJS auth metadata analyzer', () => {
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
     expect(mutable.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(computed.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(computed.result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
   });
 
   test('fails closed on bootstrap global guards and external controller inheritance', async () => {

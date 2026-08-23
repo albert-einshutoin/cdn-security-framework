@@ -22,6 +22,41 @@ function unwrapExpression(expression: ts.Expression): ts.Expression {
   return current;
 }
 
+function staticPropertyKey(
+  input: ts.Expression,
+  checker: ts.TypeChecker,
+  check: () => void,
+): string | undefined {
+  const seen = new Set<ts.Symbol>();
+  let current = input;
+  while (true) {
+    check();
+    const expression = unwrapExpression(current);
+    if (ts.isStringLiteral(expression) || ts.isNumericLiteral(expression)
+      || ts.isNoSubstitutionTemplateLiteral(expression)) return expression.text;
+    if (!ts.isIdentifier(expression)) return undefined;
+    let symbol = checker.getSymbolAtLocation(expression);
+    if (!symbol) return undefined;
+    if (symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (seen.has(symbol)) return undefined;
+    seen.add(symbol);
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration?.initializer || !ts.isVariableDeclarationList(declaration.parent)
+      || !(declaration.parent.flags & ts.NodeFlags.Const)) return undefined;
+    current = declaration.initializer;
+  }
+}
+
+function isNamespaceImportAccess(expression: ts.Expression, checker: ts.TypeChecker): boolean {
+  const callee = unwrapExpression(expression);
+  const receiver = ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)
+    ? unwrapExpression(callee.expression)
+    : undefined;
+  return Boolean(receiver && ts.isIdentifier(receiver)
+    && checker.getSymbolAtLocation(receiver)?.declarations?.some(ts.isNamespaceImport));
+}
+
 function targetSymbol(
   node: ts.Expression,
   checker: ts.TypeChecker,
@@ -33,7 +68,12 @@ function targetSymbol(
   while (true) {
     check();
     const location = ts.isPropertyAccessExpression(current) ? current.name : current;
-    const symbol = selected ?? checker.getSymbolAtLocation(location);
+    const elementKey = ts.isElementAccessExpression(current) && current.argumentExpression
+      ? staticPropertyKey(current.argumentExpression, checker, check)
+      : undefined;
+    const symbol = selected ?? (elementKey === undefined
+      ? checker.getSymbolAtLocation(location)
+      : checker.getTypeAtLocation((current as ts.ElementAccessExpression).expression).getProperty(elementKey));
     selected = undefined;
     if (!symbol) return undefined;
     const target = symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
@@ -47,7 +87,8 @@ function targetSymbol(
     ));
     if (alias?.initializer) {
       const initializer = unwrapExpression(alias.initializer);
-      if (!ts.isIdentifier(initializer) && !ts.isPropertyAccessExpression(initializer)) return target;
+      if (!ts.isIdentifier(initializer) && !ts.isPropertyAccessExpression(initializer)
+        && !ts.isElementAccessExpression(initializer)) return target;
       current = initializer;
       continue;
     }
@@ -218,10 +259,11 @@ function match(
   checker: ts.TypeChecker,
   check: () => void,
 ): { name: NestJsRouteDecoratorCandidate; call: ts.CallExpression; trusted: boolean; nestJsOrigin: boolean } | undefined {
-  const storedCall = ts.isCallExpression(decorator.expression)
+  const expression = unwrapExpression(decorator.expression);
+  const storedCall = ts.isCallExpression(expression)
     ? undefined
-    : storedDecoratorCall(decorator.expression, checker, check);
-  const call = ts.isCallExpression(decorator.expression) ? decorator.expression : storedCall;
+    : storedDecoratorCall(expression, checker, check);
+  const call = ts.isCallExpression(expression) ? expression : storedCall;
   if (!call) return undefined;
   const symbol = targetSymbol(call.expression, checker, check);
   if (symbol === UNKNOWN_NESTJS_ROUTE) {
@@ -283,7 +325,8 @@ export function resolveDecoratorSymbol(
   nestJsCommon: boolean;
   trustedNestJsCommon: boolean;
 } | undefined {
-  const call = ts.isCallExpression(decorator.expression) ? decorator.expression : undefined;
+  const expression = unwrapExpression(decorator.expression);
+  const call = ts.isCallExpression(expression) ? expression : undefined;
   if (!call) return undefined;
   return resolveDecoratorCallSymbol(call, checker, check);
 }
@@ -293,8 +336,9 @@ export function resolveBareDecoratorName(
   checker: ts.TypeChecker,
   check: () => void,
 ): string | undefined {
-  if (ts.isCallExpression(decorator.expression)) return undefined;
-  const symbol = targetSymbol(decorator.expression, checker, check);
+  const expression = unwrapExpression(decorator.expression);
+  if (ts.isCallExpression(expression)) return undefined;
+  const symbol = targetSymbol(expression, checker, check);
   return !symbol || symbol === UNKNOWN_NESTJS_ROUTE ? undefined : symbol.getName();
 }
 
@@ -309,7 +353,11 @@ export function resolveDecoratorCallSymbol(
   trustedNestJsCommon: boolean;
 } | undefined {
   const symbol = targetSymbol(call.expression, checker, check);
-  if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) return undefined;
+  if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) {
+    return !symbol && ts.isElementAccessExpression(unwrapExpression(call.expression))
+      ? { name: '', call, nestJsCommon: false, trustedNestJsCommon: false }
+      : undefined;
+  }
   const nestJsCommon = originatesFromNestJsCommon(symbol);
   return {
     name: symbol.getName(),
@@ -318,6 +366,98 @@ export function resolveDecoratorCallSymbol(
     trustedNestJsCommon: nestJsCommon && directNestJsImport(call.expression, checker)
       && matchesConsumerNestJsCommon(call.expression, symbol),
   };
+}
+
+export function resolveStaticDecoratorWrapperCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+): { call?: ts.CallExpression; symbol: ts.Symbol; stable: boolean; dynamic: boolean } | undefined {
+  const symbol = targetSymbol(call.expression, checker, check);
+  if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) {
+    const callee = unwrapExpression(call.expression);
+    const base = ts.isElementAccessExpression(callee)
+      ? targetSymbol(callee.expression, checker, check)
+      : undefined;
+    return base && base !== UNKNOWN_NESTJS_ROUTE && base.declarations?.some((candidate) => (
+      projectSources.has(candidate.getSourceFile())
+    )) ? { symbol: base, stable: false, dynamic: true } : undefined;
+  }
+  const declaration = symbol.declarations?.find((candidate): candidate is (
+    ts.FunctionDeclaration | ts.VariableDeclaration | ts.PropertyAssignment
+  ) => projectSources.has(candidate.getSourceFile()) && (
+    (ts.isFunctionDeclaration(candidate) && candidate.body !== undefined)
+    || (ts.isVariableDeclaration(candidate) && candidate.initializer !== undefined
+      && (ts.isArrowFunction(candidate.initializer) || ts.isFunctionExpression(candidate.initializer)))
+    || (ts.isPropertyAssignment(candidate)
+      && (ts.isArrowFunction(candidate.initializer) || ts.isFunctionExpression(candidate.initializer)))
+  ));
+  if (!declaration && symbol.declarations?.some((candidate) => (
+    projectSources.has(candidate.getSourceFile())
+  ))) return { symbol, stable: false, dynamic: true };
+  const implementation = declaration && (ts.isVariableDeclaration(declaration)
+    || ts.isPropertyAssignment(declaration))
+    ? declaration.initializer
+    : declaration;
+  if (!implementation || (!ts.isFunctionDeclaration(implementation)
+    && !ts.isArrowFunction(implementation) && !ts.isFunctionExpression(implementation))) return undefined;
+  const unwrappedCallee = unwrapExpression(call.expression);
+  const objectAccess = ts.isPropertyAccessExpression(unwrappedCallee)
+    || ts.isElementAccessExpression(unwrappedCallee);
+  const stable = Boolean((!objectAccess || isNamespaceImportAccess(unwrappedCallee, checker))
+    && declaration && ts.isVariableDeclaration(declaration)
+    && ts.isVariableDeclarationList(declaration.parent)
+    && declaration.parent.flags & ts.NodeFlags.Const);
+  const { body } = implementation;
+  if (!body) return undefined;
+  const resolveReturnedCall = (
+    input: ts.Expression,
+    resolving: Set<ts.Symbol>,
+    depth: number,
+  ): { call?: ts.CallExpression; dynamic: boolean } | undefined => {
+    check();
+    if (depth > 64) return { dynamic: true };
+    const expression = unwrapExpression(input);
+    if (ts.isCallExpression(expression)) return { call: expression, dynamic: false };
+    if (ts.isFunctionLike(expression) || ts.isClassLike(expression)) return undefined;
+    if (ts.isIdentifier(expression)) {
+      const valueSymbol = targetSymbol(expression, checker, check);
+      if (!valueSymbol || valueSymbol === UNKNOWN_NESTJS_ROUTE || resolving.has(valueSymbol)) {
+        return { dynamic: true };
+      }
+      const declarations = valueSymbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+      const value = declarations.length === 1 ? declarations[0] : undefined;
+      if (!value?.initializer || !projectSources.has(value.getSourceFile())
+        || !ts.isVariableDeclarationList(value.parent)
+        || !(value.parent.flags & ts.NodeFlags.Const)) return { dynamic: true };
+      resolving.add(valueSymbol);
+      const resolved = resolveReturnedCall(value.initializer, resolving, depth + 1);
+      resolving.delete(valueSymbol);
+      return resolved;
+    }
+    const nodes: ts.Node[] = [expression];
+    while (nodes.length > 0) {
+      const node = nodes.pop()!;
+      check();
+      if (ts.isCallExpression(node)) return { dynamic: true };
+      if (ts.isFunctionLike(node) || ts.isClassLike(node)) continue;
+      ts.forEachChild(node, (child) => { nodes.push(child); });
+    }
+    return { dynamic: true };
+  };
+  if (!ts.isBlock(body)) {
+    const resolved = resolveReturnedCall(body, new Set(), 0);
+    return resolved && { ...resolved, symbol, stable };
+  }
+  if (body.statements.length === 1 && ts.isReturnStatement(body.statements[0])
+    && body.statements[0].expression) {
+    const expression = unwrapExpression(body.statements[0].expression);
+    if (ts.isCallExpression(expression)) {
+      return { call: expression, symbol, stable, dynamic: false };
+    }
+  }
+  return { symbol, stable, dynamic: true };
 }
 
 export function resolveStaticSymbolName(
