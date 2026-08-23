@@ -446,6 +446,35 @@ describe('TypeScript project loader', () => {
     expect(retargeted).toBe(true);
   });
 
+  test('rejects an in-workspace config inode replacement during its bounded read', async () => {
+    const root = workspace();
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    write(root, 'src/app.ts', 'export const value = 1;\n');
+    write(root, 'src/other.ts', 'export const other = 2;\n');
+    let retargeted = false;
+
+    await expectFailure(loadTypeScriptProject(options(root, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        readFileBounded(filePath, maxBytes, expectedIdentity) {
+          if (!retargeted && filePath.endsWith('tsconfig.json')) {
+            retargeted = true;
+            fs.renameSync(filePath, `${filePath}.safe`);
+            write(root, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/other.ts"] }');
+            try {
+              return nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes, expectedIdentity);
+            } finally {
+              fs.unlinkSync(filePath);
+              fs.renameSync(`${filePath}.safe`, filePath);
+            }
+          }
+          return nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes, expectedIdentity);
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', root);
+    expect(retargeted).toBe(true);
+  });
+
   test('reuses each validated config snapshot after an in-workspace retarget', async () => {
     const root = workspace();
     write(root, 'base.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/other.ts"] }');
