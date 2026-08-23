@@ -225,13 +225,20 @@ describe('NestJS route analyzer', () => {
       export declare function Controller(path?: string): ClassDecorator;
       export declare function Get(path?: string): MethodDecorator;
     `);
+    write(root, 'vendor/node_modules/@nestjs/common/package.json', JSON.stringify({
+      name: '@nestjs/common', main: 'index.js', types: 'index.d.ts',
+    }));
+    write(root, 'vendor/node_modules/@nestjs/common/index.js', 'module.exports = {};\n');
 
     const execution = await runSourceAnalyzer(nestJsSourceAnalyzer, context(root));
     expect(execution).toMatchObject({
       status: 'success',
       result: {
         contract: { operations: [] },
-        diagnostics: [{ code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }],
+        diagnostics: [
+          { code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
+          { code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
+        ],
       },
     });
   });
@@ -438,6 +445,33 @@ describe('NestJS route analyzer', () => {
           expect.objectContaining({ methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
           expect.objectContaining({ methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
         ]),
+      },
+    });
+
+    const aliasRoot = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      const AliasedGet = Get;
+      @Controller('items') class ItemsController { @AliasedGet('actual') @Get('reported') one() {} }
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(aliasRoot))).resolves.toMatchObject({
+      status: 'success',
+      result: {
+        contract: { operations: [] },
+        unresolvedOperations: [{ methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }],
+      },
+    });
+
+    const nestedInstallRoot = workspace(`
+      import { Controller, Get } from '../packages/wrapper';
+      @Controller('items') class ItemsController { @Get() one() {} }
+    `);
+    installNestJsCommon(nestedInstallRoot, 'packages/wrapper/node_modules/@nestjs/common');
+    write(nestedInstallRoot, 'packages/wrapper/index.ts', "export { Controller, Get } from '@nestjs/common';\n");
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(nestedInstallRoot))).resolves.toMatchObject({
+      status: 'success',
+      result: {
+        contract: { operations: [] },
+        unresolvedOperations: [{ methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }],
       },
     });
 

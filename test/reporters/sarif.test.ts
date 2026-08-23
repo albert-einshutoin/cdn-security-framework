@@ -191,4 +191,13 @@ describe('SARIF 2.1.0 reporter', () => {
     expect(renderFindingsAsSarif(input).runs[0].results[0].locations?.[0].physicalLocation.region)
       .toEqual({ startLine: 7, startColumn: 11 });
   });
+
+  test('keeps unsafe numeric source coordinates as logical pointers', () => {
+    const input = report();
+    const pointer = `line:${'9'.repeat(309)}:column:1`;
+    input.findings[1].evidence = input.findings[1].evidence.map((evidence) => ({ ...evidence, pointer }));
+    const location = renderFindingsAsSarif(input).runs[0].results[0].locations?.[0];
+    expect(location?.physicalLocation.region).toBeUndefined();
+    expect(location?.logicalLocations).toEqual([{ name: pointer, fullyQualifiedName: pointer, kind: 'jsonPointer' }]);
+  });
 });

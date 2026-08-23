@@ -15,11 +15,26 @@ exports.NESTJS_ROUTE_DECORATORS = [
     'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'RequestMapping', 'Search', 'Sse', 'Version',
 ];
 function targetSymbol(node, checker) {
-    const location = typescript_1.default.isPropertyAccessExpression(node) ? node.name : node;
-    const symbol = checker.getSymbolAtLocation(location);
-    if (!symbol)
-        return undefined;
-    return symbol.flags & typescript_1.default.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+    const seen = new Set();
+    let current = node;
+    while (true) {
+        const location = typescript_1.default.isPropertyAccessExpression(current) ? current.name : current;
+        const symbol = checker.getSymbolAtLocation(location);
+        if (!symbol)
+            return undefined;
+        const target = symbol.flags & typescript_1.default.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+        if (seen.has(target))
+            return undefined;
+        seen.add(target);
+        const alias = target.declarations?.find((declaration) => (typescript_1.default.isVariableDeclaration(declaration)
+            && typescript_1.default.isVariableDeclarationList(declaration.parent)
+            && Boolean(declaration.parent.flags & typescript_1.default.NodeFlags.Const)
+            && declaration.initializer !== undefined));
+        if (!alias?.initializer
+            || (!typescript_1.default.isIdentifier(alias.initializer) && !typescript_1.default.isPropertyAccessExpression(alias.initializer)))
+            return target;
+        current = alias.initializer;
+    }
 }
 function importDeclaration(declaration) {
     let current = declaration;
@@ -45,27 +60,37 @@ function directNestJsImport(node, checker) {
             && imported.moduleSpecifier.text === '@nestjs/common';
     }));
 }
-function originatesFromNestJsCommon(node, symbol, checker) {
-    const importSymbol = checker.getSymbolAtLocation(typescript_1.default.isPropertyAccessExpression(node) ? node.expression : node);
-    const sourceFile = importSymbol?.declarations?.[0]?.getSourceFile();
-    if (!sourceFile)
-        return false;
-    const packageRoot = (fileName) => {
-        let directory = node_path_1.default.dirname(node_path_1.default.resolve(fileName));
-        while (true) {
-            if (node_path_1.default.basename(directory) === 'common'
-                && node_path_1.default.basename(node_path_1.default.dirname(directory)) === '@nestjs'
-                && node_path_1.default.basename(node_path_1.default.dirname(node_path_1.default.dirname(directory))) === 'node_modules')
-                return directory;
-            const parent = node_path_1.default.dirname(directory);
-            if (parent === directory)
-                return undefined;
-            directory = parent;
+function packageRoot(fileName) {
+    let directory = node_path_1.default.dirname(node_path_1.default.resolve(fileName));
+    while (true) {
+        if (node_path_1.default.basename(directory) === 'common'
+            && node_path_1.default.basename(node_path_1.default.dirname(directory)) === '@nestjs'
+            && node_path_1.default.basename(node_path_1.default.dirname(node_path_1.default.dirname(directory))) === 'node_modules')
+            return directory;
+        const parent = node_path_1.default.dirname(directory);
+        if (parent === directory)
+            return undefined;
+        directory = parent;
+    }
+}
+function originatesFromNestJsCommon(symbol) {
+    return Boolean(symbol?.declarations?.some((declaration) => {
+        const targetRoot = packageRoot(declaration.getSourceFile().fileName);
+        if (!targetRoot)
+            return false;
+        try {
+            const resolvedRoot = packageRoot((0, node_module_1.createRequire)(declaration.getSourceFile().fileName).resolve('@nestjs/common'));
+            return resolvedRoot !== undefined && node_fs_1.default.realpathSync(targetRoot) === node_fs_1.default.realpathSync(resolvedRoot);
         }
-    };
+        catch {
+            return false;
+        }
+    }));
+}
+function matchesConsumerNestJsCommon(node, symbol) {
     let resolvedRoot;
     try {
-        resolvedRoot = packageRoot((0, node_module_1.createRequire)(sourceFile.fileName).resolve('@nestjs/common'));
+        resolvedRoot = packageRoot((0, node_module_1.createRequire)(node.getSourceFile().fileName).resolve('@nestjs/common'));
     }
     catch {
         return false;
@@ -84,11 +109,12 @@ function match(decorator, checker) {
     const name = symbol?.getName();
     if (!name || !exports.NESTJS_ROUTE_DECORATORS.includes(name))
         return undefined;
-    const nestJsOrigin = originatesFromNestJsCommon(decorator.expression.expression, symbol, checker);
+    const nestJsOrigin = originatesFromNestJsCommon(symbol);
     return {
         name,
         call: decorator.expression,
-        trusted: directNestJsImport(decorator.expression.expression, checker) && nestJsOrigin,
+        trusted: directNestJsImport(decorator.expression.expression, checker)
+            && matchesConsumerNestJsCommon(decorator.expression.expression, symbol),
         nestJsOrigin,
     };
 }

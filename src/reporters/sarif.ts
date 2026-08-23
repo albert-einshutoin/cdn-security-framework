@@ -91,15 +91,18 @@ function evidenceKey(evidence: FindingEvidenceV1): string {
 function location(evidence: FindingEvidenceV1, id?: number): SarifLocation {
   const pointer = evidence.pointer?.trim();
   const sourcePosition = /^line:([1-9]\d*):column:([1-9]\d*)$/u.exec(pointer ?? '');
+  const startLine = Number(sourcePosition?.[1]);
+  const startColumn = Number(sourcePosition?.[2]);
+  const physicalPosition = sourcePosition && Number.isSafeInteger(startLine) && Number.isSafeInteger(startColumn);
   return {
     ...(id === undefined ? {} : { id }),
     ...(id === undefined ? {} : { message: { text: `${evidence.source} evidence` } }),
     physicalLocation: {
       artifactLocation: { uri: safeUri(evidence.uri), uriBaseId: '%SRCROOT%' },
-      ...(sourcePosition ? {
+      ...(physicalPosition ? {
         region: {
-          startLine: Number(sourcePosition[1]),
-          startColumn: Number(sourcePosition[2]),
+          startLine,
+          startColumn,
         },
       } : {}),
       properties: {
@@ -110,7 +113,7 @@ function location(evidence: FindingEvidenceV1, id?: number): SarifLocation {
         complete: evidence.complete,
       },
     },
-    ...(pointer && !sourcePosition ? {
+    ...(pointer && !physicalPosition ? {
       logicalLocations: [{ name: pointer, fullyQualifiedName: pointer, kind: 'jsonPointer' as const }],
     } : {}),
   };

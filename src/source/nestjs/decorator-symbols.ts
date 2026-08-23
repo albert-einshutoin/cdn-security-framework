@@ -10,11 +10,29 @@ export const NESTJS_ROUTE_DECORATORS = [
 
 export type NestJsRouteDecorator = typeof NESTJS_ROUTE_DECORATORS[number];
 
-function targetSymbol(node: ts.Expression, checker: ts.TypeChecker): ts.Symbol | undefined {
-  const location = ts.isPropertyAccessExpression(node) ? node.name : node;
-  const symbol = checker.getSymbolAtLocation(location);
-  if (!symbol) return undefined;
-  return symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+function targetSymbol(
+  node: ts.Expression,
+  checker: ts.TypeChecker,
+): ts.Symbol | undefined {
+  const seen = new Set<ts.Symbol>();
+  let current = node;
+  while (true) {
+    const location = ts.isPropertyAccessExpression(current) ? current.name : current;
+    const symbol = checker.getSymbolAtLocation(location);
+    if (!symbol) return undefined;
+    const target = symbol.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+    if (seen.has(target)) return undefined;
+    seen.add(target);
+    const alias = target.declarations?.find((declaration): declaration is ts.VariableDeclaration => (
+      ts.isVariableDeclaration(declaration)
+      && ts.isVariableDeclarationList(declaration.parent)
+      && Boolean(declaration.parent.flags & ts.NodeFlags.Const)
+      && declaration.initializer !== undefined
+    ));
+    if (!alias?.initializer
+      || (!ts.isIdentifier(alias.initializer) && !ts.isPropertyAccessExpression(alias.initializer))) return target;
+    current = alias.initializer;
+  }
 }
 
 function importDeclaration(declaration: ts.Declaration): ts.ImportDeclaration | undefined {
@@ -41,28 +59,33 @@ function directNestJsImport(node: ts.Expression, checker: ts.TypeChecker): boole
   }));
 }
 
-function originatesFromNestJsCommon(
-  node: ts.Expression,
-  symbol: ts.Symbol | undefined,
-  checker: ts.TypeChecker,
-): boolean {
-  const importSymbol = checker.getSymbolAtLocation(ts.isPropertyAccessExpression(node) ? node.expression : node);
-  const sourceFile = importSymbol?.declarations?.[0]?.getSourceFile();
-  if (!sourceFile) return false;
-  const packageRoot = (fileName: string): string | undefined => {
-    let directory = path.dirname(path.resolve(fileName));
-    while (true) {
-      if (path.basename(directory) === 'common'
-        && path.basename(path.dirname(directory)) === '@nestjs'
-        && path.basename(path.dirname(path.dirname(directory))) === 'node_modules') return directory;
-      const parent = path.dirname(directory);
-      if (parent === directory) return undefined;
-      directory = parent;
-    }
-  };
+function packageRoot(fileName: string): string | undefined {
+  let directory = path.dirname(path.resolve(fileName));
+  while (true) {
+    if (path.basename(directory) === 'common'
+      && path.basename(path.dirname(directory)) === '@nestjs'
+      && path.basename(path.dirname(path.dirname(directory))) === 'node_modules') return directory;
+    const parent = path.dirname(directory);
+    if (parent === directory) return undefined;
+    directory = parent;
+  }
+}
+
+function originatesFromNestJsCommon(symbol: ts.Symbol | undefined): boolean {
+  return Boolean(symbol?.declarations?.some((declaration) => {
+    const targetRoot = packageRoot(declaration.getSourceFile().fileName);
+    if (!targetRoot) return false;
+    try {
+      const resolvedRoot = packageRoot(createRequire(declaration.getSourceFile().fileName).resolve('@nestjs/common'));
+      return resolvedRoot !== undefined && fs.realpathSync(targetRoot) === fs.realpathSync(resolvedRoot);
+    } catch { return false; }
+  }));
+}
+
+function matchesConsumerNestJsCommon(node: ts.Expression, symbol: ts.Symbol | undefined): boolean {
   let resolvedRoot: string | undefined;
   try {
-    resolvedRoot = packageRoot(createRequire(sourceFile.fileName).resolve('@nestjs/common'));
+    resolvedRoot = packageRoot(createRequire(node.getSourceFile().fileName).resolve('@nestjs/common'));
   } catch { return false; }
   if (!resolvedRoot) return false;
   return Boolean(symbol?.declarations?.some((declaration) => {
@@ -79,11 +102,12 @@ function match(
   const symbol = targetSymbol(decorator.expression.expression, checker);
   const name = symbol?.getName() as NestJsRouteDecorator | undefined;
   if (!name || !NESTJS_ROUTE_DECORATORS.includes(name)) return undefined;
-  const nestJsOrigin = originatesFromNestJsCommon(decorator.expression.expression, symbol, checker);
+  const nestJsOrigin = originatesFromNestJsCommon(symbol);
   return {
     name,
     call: decorator.expression,
-    trusted: directNestJsImport(decorator.expression.expression, checker) && nestJsOrigin,
+    trusted: directNestJsImport(decorator.expression.expression, checker)
+      && matchesConsumerNestJsCommon(decorator.expression.expression, symbol),
     nestJsOrigin,
   };
 }
