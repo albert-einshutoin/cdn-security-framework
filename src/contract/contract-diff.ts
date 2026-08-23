@@ -1,0 +1,492 @@
+import { createHash } from 'node:crypto';
+import fs from 'node:fs';
+import path from 'node:path';
+import * as yaml from 'js-yaml';
+
+import type { OpenApiInspectionDiagnosticV1 } from '../openapi/inspect';
+import type { CDNSecurityFrameworkPolicy } from '../types/policy';
+import {
+  projectPolicyToAllowedSurface,
+  type AllowedSurfaceTarget,
+  type AllowedTargetCapabilityV1,
+} from './allowed-surface';
+import { compareSecurityContracts } from './drift';
+import {
+  applyFindingExceptions,
+  loadFindingExceptions,
+  type FindingExceptionSetV1,
+} from './finding-exceptions';
+import {
+  FINDING_CATEGORIES,
+  FINDING_CONFIDENCES,
+  FINDING_SEVERITIES,
+  type FindingCategory,
+  type FindingConfidence,
+  type FindingSeverity,
+  type SecurityFindingV1,
+} from './finding';
+import { sortFindings } from './finding-order';
+import { serializeSecurityContract, type SecurityContractCapabilitiesV1 } from './security-ir';
+
+export const CONTRACT_DIFF_FAIL_ON = ['error', 'warning', 'never'] as const;
+export type ContractDiffFailOn = typeof CONTRACT_DIFF_FAIL_ON[number];
+
+export interface DiffSecurityContractsOptions {
+  openapiPath: string;
+  policyPath: string;
+  target: AllowedSurfaceTarget;
+  workspaceRoot: string;
+  exceptionsPath?: string;
+  currentDate?: string;
+  includeSuppressed?: boolean;
+}
+
+export interface ContractDiffSummaryV1 {
+  total: number;
+  error: number;
+  warning: number;
+  info: number;
+  suppressed: number;
+  bySeverity: Record<FindingSeverity, number>;
+  byConfidence: Record<FindingConfidence, number>;
+  byCategory: Record<FindingCategory, number>;
+}
+
+export interface ContractDiffReportV1 {
+  schemaVersion: 1;
+  inputDigests: {
+    openapi: string;
+    policy: string;
+    exceptions: string | null;
+  };
+  target: AllowedSurfaceTarget;
+  summary: ContractDiffSummaryV1;
+  findings: SecurityFindingV1[];
+  suppressedFindings: SecurityFindingV1[];
+  exceptionDiagnostics: SecurityFindingV1[];
+  appliedExceptionIds: string[];
+  analyzerCapabilities: {
+    openapi: SecurityContractCapabilitiesV1;
+    policy: AllowedTargetCapabilityV1[];
+  };
+  analyzerDiagnostics: OpenApiInspectionDiagnosticV1[];
+  omittedComparisons: string[];
+}
+
+export class ContractDiffInputError extends Error {
+  constructor(readonly code: string, message: string) {
+    super(message);
+    this.name = 'ContractDiffInputError';
+  }
+}
+
+interface ContractDiffExecution {
+  report: ContractDiffReportV1;
+  sourcePaths: string[];
+}
+
+interface PolicySource {
+  content: string;
+  digest: string;
+  filePath: string;
+}
+
+const MAX_POLICY_FILE_BYTES = 1_048_576;
+const MAX_POLICY_GRAPH_BYTES = 4_194_304;
+const MAX_POLICY_SOURCES = 32;
+
+function compareText(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function within(root: string, candidate: string): boolean {
+  const relative = path.relative(root, candidate);
+  return relative !== '' && relative !== '..' && !relative.startsWith(`..${path.sep}`)
+    && !path.isAbsolute(relative);
+}
+
+function packageRoot(): string {
+  const compiled = path.join(__dirname, '..');
+  return fs.existsSync(path.join(compiled, 'policy', 'schema.json'))
+    ? compiled
+    : path.join(__dirname, '..', '..');
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort(compareText)
+      .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(',')}}`;
+  }
+  return JSON.stringify(value) ?? 'null';
+}
+
+function digest(value: string): string {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+function semanticDigest(value: unknown): string {
+  return digest(canonicalJson(value));
+}
+
+function workspaceRoot(input: string): string {
+  if (typeof input !== 'string' || !input.trim()) {
+    throw new ContractDiffInputError('CONTRACT_DIFF_WORKSPACE_INVALID', 'Workspace root is invalid.');
+  }
+  try {
+    const root = fs.realpathSync(path.resolve(input));
+    if (!fs.statSync(root).isDirectory()) throw new Error('not a directory');
+    return root;
+  } catch {
+    throw new ContractDiffInputError('CONTRACT_DIFF_WORKSPACE_INVALID', 'Workspace root was not found.');
+  }
+}
+
+function inputFile(root: string, input: string, code: string, label: string): string {
+  if (typeof input !== 'string' || !input.trim()) {
+    throw new ContractDiffInputError(code, `${label} path is required.`);
+  }
+  const candidate = path.resolve(root, input);
+  try {
+    const resolved = fs.realpathSync(candidate);
+    if (!within(root, resolved) || !fs.statSync(resolved).isFile()) throw new Error('invalid input');
+    return resolved;
+  } catch {
+    throw new ContractDiffInputError(code, `${label} was not found inside the workspace root.`);
+  }
+}
+
+function readBoundedPolicyFile(root: string, filePath: string): {
+  document: Record<string, unknown>;
+  content: string;
+  digest: string;
+  bytes: number;
+} {
+  let descriptor: number | undefined;
+  try {
+    descriptor = fs.openSync(
+      filePath,
+      fs.constants.O_RDONLY | (fs.constants.O_NOFOLLOW ?? 0) | (fs.constants.O_NONBLOCK ?? 0),
+    );
+    const stat = fs.fstatSync(descriptor);
+    const currentPath = fs.realpathSync(filePath);
+    const currentStat = fs.statSync(currentPath);
+    if (!within(root, currentPath) || currentStat.dev !== stat.dev || currentStat.ino !== stat.ino) {
+      throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_OUTSIDE_ROOT', 'Policy input changed outside the workspace boundary.');
+    }
+    if (!stat.isFile() || stat.size > MAX_POLICY_FILE_BYTES) {
+      throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy input is not a bounded regular file.');
+    }
+    const source = Buffer.allocUnsafe(MAX_POLICY_FILE_BYTES + 1);
+    let bytes = 0;
+    while (bytes < source.length) {
+      const count = fs.readSync(descriptor, source, bytes, source.length - bytes, bytes);
+      if (count === 0) break;
+      bytes += count;
+    }
+    if (bytes > MAX_POLICY_FILE_BYTES) {
+      throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_LIMIT', 'Policy input exceeds the file size limit.');
+    }
+    const content = source.subarray(0, bytes).toString('utf8');
+    let parsed: unknown;
+    try {
+      parsed = yaml.load(content, {
+        schema: yaml.JSON_SCHEMA,
+        json: false,
+        maxAliases: 50,
+        maxDepth: 64,
+      });
+    } catch {
+      throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy input could not be parsed safely.');
+    }
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)
+      || Object.getPrototypeOf(parsed) !== Object.prototype) {
+      throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy input root is invalid.');
+    }
+    return { document: parsed as Record<string, unknown>, content, digest: digest(content), bytes };
+  } catch (error: unknown) {
+    if (error instanceof ContractDiffInputError) throw error;
+    throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy input could not be read safely.');
+  } finally {
+    if (descriptor !== undefined) try { fs.closeSync(descriptor); } catch {}
+  }
+}
+
+function policySources(root: string, entryPath: string): PolicySource[] {
+  const sources: PolicySource[] = [];
+  const active = new Set<string>();
+  let totalBytes = 0;
+  const visit = (filePath: string): void => {
+    if (active.has(filePath)) {
+      throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy extends contains a cycle.');
+    }
+    if (sources.some((source) => source.filePath === filePath)) return;
+    if (sources.length + active.size >= MAX_POLICY_SOURCES) {
+      throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_LIMIT', 'Policy source count limit was exceeded.');
+    }
+    active.add(filePath);
+    const loaded = readBoundedPolicyFile(root, filePath);
+    totalBytes += loaded.bytes;
+    if (totalBytes > MAX_POLICY_GRAPH_BYTES) {
+      throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_LIMIT', 'Policy source size limit was exceeded.');
+    }
+    const parent = loaded.document.extends;
+    if (parent !== undefined) {
+      if (typeof parent !== 'string' || !parent.trim()) {
+        throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy extends is invalid.');
+      }
+      const parentPath = inputFile(
+        root,
+        path.resolve(path.dirname(filePath), parent.trim()),
+        'CONTRACT_DIFF_POLICY_OUTSIDE_ROOT',
+        'Policy extends target',
+      );
+      visit(parentPath);
+    }
+    active.delete(filePath);
+    sources.push({ filePath, digest: loaded.digest, content: loaded.content });
+  };
+  visit(entryPath);
+  return sources;
+}
+
+function loadPolicy(root: string, policyPath: string): {
+  policy: CDNSecurityFrameworkPolicy;
+  sources: PolicySource[];
+} {
+  const { parsePolicyFile } = require(path.join(packageRoot(), 'parser')) as typeof import('../parser');
+  const { validatePolicy } = require(path.join(packageRoot(), 'validator')) as typeof import('../validator');
+  const before = policySources(root, policyPath);
+  const snapshots = new Map(before.map(({ filePath, content }) => [filePath, content]));
+  const parsed = parsePolicyFile({
+    policyPath,
+    readPolicyFile: (absolutePath) => {
+      const content = snapshots.get(path.resolve(absolutePath));
+      if (content === undefined) throw new Error('policy source is outside the verified snapshot');
+      return content;
+    },
+  });
+  if (!parsed.ok || !parsed.policy) {
+    throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy input is invalid.');
+  }
+  const validation = validatePolicy({ policy: parsed.policy, pkgRoot: packageRoot(), env: {} });
+  if (!validation.ok) {
+    throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy input failed schema validation.');
+  }
+  const after = policySources(root, policyPath);
+  const identity = (sources: PolicySource[]) => sources.map(({ filePath, digest }) => ({ filePath, digest }));
+  if (canonicalJson(identity(before)) !== canonicalJson(identity(after))) {
+    throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_CHANGED', 'Policy input changed during analysis.');
+  }
+  return { policy: parsed.policy as CDNSecurityFrameworkPolicy, sources: after };
+}
+
+function sourceUri(root: string, filePath: string): string {
+  return path.relative(root, filePath).split(path.sep).map(encodeURIComponent).join('/');
+}
+
+function emptyCounts<T extends string>(values: readonly T[]): Record<T, number> {
+  return Object.fromEntries(values.map((value) => [value, 0])) as Record<T, number>;
+}
+
+function summary(
+  active: readonly SecurityFindingV1[],
+  suppressed: readonly SecurityFindingV1[],
+): ContractDiffSummaryV1 {
+  const bySeverity = emptyCounts(FINDING_SEVERITIES);
+  const byConfidence = emptyCounts(FINDING_CONFIDENCES);
+  const byCategory = emptyCounts(FINDING_CATEGORIES);
+  for (const finding of active) {
+    bySeverity[finding.severity] += 1;
+    byConfidence[finding.confidence] += 1;
+    byCategory[finding.category] += 1;
+  }
+  return {
+    total: active.length,
+    error: bySeverity.error,
+    warning: bySeverity.warning,
+    info: bySeverity.info,
+    suppressed: suppressed.length,
+    bySeverity,
+    byConfidence,
+    byCategory,
+  };
+}
+
+function omittedComparisons(
+  capabilities: SecurityContractCapabilitiesV1,
+  policyCapabilities: readonly AllowedTargetCapabilityV1[],
+): string[] {
+  return [
+    ...Object.entries(capabilities)
+      .filter(([, status]) => status !== 'complete')
+      .map(([name, status]) => `openapi.${name}:${status}`),
+    ...policyCapabilities
+      .filter(({ status }) => status === 'unsupported' || status === 'warning-only')
+      .map(({ id, status }) => `policy.${id}:${status}`),
+  ].sort(compareText);
+}
+
+function execute(options: DiffSecurityContractsOptions): ContractDiffExecution {
+  if (!options || !['aws', 'cloudflare'].includes(options.target)) {
+    throw new ContractDiffInputError('CONTRACT_DIFF_TARGET_INVALID', 'Target must be aws or cloudflare.');
+  }
+  const root = workspaceRoot(options.workspaceRoot);
+  const openapiPath = inputFile(root, options.openapiPath, 'CONTRACT_DIFF_OPENAPI_INVALID', 'OpenAPI input');
+  const policyPath = inputFile(root, options.policyPath, 'CONTRACT_DIFF_POLICY_INVALID', 'Policy input');
+  const { inspectOpenApiForCli } = require(path.join(
+    packageRoot(), 'openapi', 'inspect',
+  )) as typeof import('../openapi/inspect');
+  const inspection = inspectOpenApiForCli({ inputPath: openapiPath, workspaceRoot: root });
+  const loadedPolicy = loadPolicy(root, policyPath);
+  const policyDigest = semanticDigest(loadedPolicy.policy);
+  const allowed = projectPolicyToAllowedSurface(loadedPolicy.policy, {
+    policyDigest,
+    sourceUri: sourceUri(root, policyPath),
+  });
+  let findings: SecurityFindingV1[];
+  try {
+    findings = compareSecurityContracts({
+      declared: inspection.report.contract,
+      allowed,
+      target: options.target,
+    });
+  } catch (error: unknown) {
+    if (error instanceof Error && /invalid contract drift input|visit budget/.test(error.message)) {
+      throw new ContractDiffInputError('CONTRACT_DIFF_COMPARISON_LIMIT', 'Contract comparison input is invalid or exceeds its limit.');
+    }
+    throw error;
+  }
+
+  let suppressedFindings: SecurityFindingV1[] = [];
+  let exceptionDiagnostics: SecurityFindingV1[] = [];
+  let appliedExceptionIds: string[] = [];
+  let exceptionsDigest: string | null = null;
+  const sourcePaths = [...inspection.sourcePaths, ...loadedPolicy.sources.map(({ filePath }) => filePath)];
+  if (options.exceptionsPath) {
+    const exceptionsPath = inputFile(
+      root,
+      options.exceptionsPath,
+      'CONTRACT_DIFF_EXCEPTIONS_INVALID',
+      'Finding exceptions input',
+    );
+    let exceptions: FindingExceptionSetV1;
+    try {
+      const currentDate = options.currentDate ?? new Date().toISOString().slice(0, 10);
+      exceptions = loadFindingExceptions({
+        inputPath: exceptionsPath,
+        workspaceRoot: root,
+        currentDate,
+      });
+      const applied = applyFindingExceptions(findings, exceptions, {
+        currentDate,
+        target: options.target,
+        sourceUri: sourceUri(root, exceptionsPath),
+      });
+      findings = applied.findings.filter(({ category }) => category !== 'governance');
+      exceptionDiagnostics = applied.findings.filter(({ category }) => category === 'governance');
+      suppressedFindings = applied.suppressedFindings;
+      appliedExceptionIds = applied.appliedExceptionIds;
+      exceptionsDigest = semanticDigest({ exceptions, currentDate });
+      sourcePaths.push(exceptionsPath);
+    } catch (error: unknown) {
+      if (error instanceof ContractDiffInputError) throw error;
+      throw new ContractDiffInputError('CONTRACT_DIFF_EXCEPTIONS_INVALID', 'Finding exceptions input is invalid.');
+    }
+  }
+  const active = [...findings, ...exceptionDiagnostics];
+  const policyCapabilities = allowed.targetCapabilities[options.target];
+  return {
+    report: {
+      schemaVersion: 1,
+      inputDigests: {
+        openapi: digest(serializeSecurityContract(inspection.report.contract)),
+        policy: policyDigest,
+        exceptions: exceptionsDigest,
+      },
+      target: options.target,
+      summary: summary(active, suppressedFindings),
+      findings,
+      suppressedFindings: options.includeSuppressed ? suppressedFindings : [],
+      exceptionDiagnostics,
+      appliedExceptionIds,
+      analyzerCapabilities: {
+        openapi: inspection.report.capabilities,
+        policy: policyCapabilities,
+      },
+      analyzerDiagnostics: inspection.report.diagnostics,
+      omittedComparisons: omittedComparisons(inspection.report.capabilities, policyCapabilities),
+    },
+    sourcePaths: [...new Set(sourcePaths)].sort(compareText),
+  };
+}
+
+export function diffSecurityContracts(options: DiffSecurityContractsOptions): ContractDiffReportV1 {
+  return execute(options).report;
+}
+
+export function diffSecurityContractsForCli(options: DiffSecurityContractsOptions): ContractDiffExecution {
+  return execute(options);
+}
+
+export function contractDiffExitCode(
+  report: ContractDiffReportV1,
+  failOn: ContractDiffFailOn,
+): 0 | 1 {
+  if (!CONTRACT_DIFF_FAIL_ON.includes(failOn)) {
+    throw new ContractDiffInputError('CONTRACT_DIFF_FAIL_ON_INVALID', 'fail-on must be error, warning, or never.');
+  }
+  if (failOn === 'never') return 0;
+  if (report.summary.error > 0) return 1;
+  return failOn === 'warning' && report.summary.warning > 0 ? 1 : 0;
+}
+
+export function formatContractDiffJson(report: ContractDiffReportV1): string {
+  return `${JSON.stringify(report, null, 2)}\n`;
+}
+
+function terminalText(value: string): string {
+  return value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (
+    `\\u{${character.codePointAt(0)?.toString(16).padStart(4, '0')}}`
+  ));
+}
+
+function findingLines(finding: SecurityFindingV1, color: boolean): string[] {
+  const labels = { error: '\u001b[31mERROR\u001b[0m', warning: '\u001b[33mWARNING\u001b[0m', info: '\u001b[36mINFO\u001b[0m' };
+  const label = color ? labels[finding.severity] : finding.severity.toUpperCase();
+  const route = finding.route ? `${finding.route.method ?? '*'} ${finding.route.path ?? '*'}` : '-';
+  const details = [
+    finding.expected === undefined ? undefined : `expected=${terminalText(JSON.stringify(finding.expected) ?? 'null')}`,
+    finding.actual === undefined ? undefined : `actual=${terminalText(JSON.stringify(finding.actual) ?? 'null')}`,
+  ].filter((value): value is string => Boolean(value)).join(' ');
+  return [
+    `${label} ${finding.ruleId} ${terminalText(route)} ${terminalText(finding.title)}`,
+    ...(details ? [`  ${details}`] : []),
+    ...finding.evidence.map(({ uri, pointer }) => `  evidence=${terminalText(uri)}${terminalText(pointer ?? '')}`),
+    ...(finding.remediation ? [`  remediation=${terminalText(finding.remediation.summary)}`] : []),
+  ];
+}
+
+export function formatContractDiffText(
+  report: ContractDiffReportV1,
+  options: { color?: boolean } = {},
+): string {
+  const active = sortFindings([...report.findings, ...report.exceptionDiagnostics]);
+  return [
+    `Summary: total=${report.summary.total} error=${report.summary.error}`
+      + ` warning=${report.summary.warning} info=${report.summary.info}`
+      + ` suppressed=${report.summary.suppressed}`,
+    `Target: ${report.target}`,
+    `OpenAPI digest: ${report.inputDigests.openapi}`,
+    `Policy digest: ${report.inputDigests.policy}`,
+    `Omitted/unknown comparisons: ${report.omittedComparisons.length || 'none'}`,
+    'Findings:',
+    ...(active.length > 0 ? active.flatMap((finding) => findingLines(finding, Boolean(options.color))) : ['(none)']),
+    ...(report.suppressedFindings.length > 0 ? [
+      'Suppressed findings:',
+      ...report.suppressedFindings.flatMap((finding) => findingLines(finding, Boolean(options.color))),
+    ] : []),
+    '',
+  ].join('\n');
+}

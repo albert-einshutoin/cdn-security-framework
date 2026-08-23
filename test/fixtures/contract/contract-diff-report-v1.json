@@ -1,0 +1,63 @@
+{
+  "schemaVersion": 1,
+  "inputDigests": {
+    "openapi": "sha256:b0746306e64401e0d7aab6fca3aefd591a862e32325415fb55fee8897c431f94",
+    "policy": "sha256:87a4fa1463a6c734ffe66e8e29db236d858004da164396ba5b8f87c47cd2c2e9",
+    "exceptions": null
+  },
+  "target": "aws",
+  "summary": {
+    "total": 0,
+    "error": 0,
+    "warning": 0,
+    "info": 0,
+    "suppressed": 0,
+    "bySeverity": { "error": 0, "warning": 0, "info": 0 },
+    "byConfidence": { "deterministic": 0, "high-confidence": 0, "heuristic": 0 },
+    "byCategory": {
+      "inventory": 0,
+      "exposure": 0,
+      "authentication": 0,
+      "authorization": 0,
+      "resource-limit": 0,
+      "misconfiguration": 0,
+      "governance": 0,
+      "runtime-evidence": 0
+    }
+  },
+  "findings": [],
+  "suppressedFindings": [],
+  "exceptionDiagnostics": [],
+  "appliedExceptionIds": [],
+  "analyzerCapabilities": {
+    "openapi": {
+      "routes": "complete",
+      "parameters": "complete",
+      "requestBodies": "complete",
+      "authentication": "complete"
+    },
+    "policy": [
+      { "id": "request.allow_methods", "status": "supported" },
+      { "id": "request.allowed_hosts", "status": "supported" },
+      { "id": "routes.request.allow_methods", "status": "unsupported" },
+      { "id": "request.uri_query_limits", "status": "supported" },
+      { "id": "request.header_limits", "status": "partial" },
+      { "id": "request.content_type", "status": "unsupported" },
+      { "id": "request.path_normalization", "status": "supported" },
+      { "id": "auth.route_gates", "status": "supported" },
+      { "id": "routes.response.cache_control", "status": "supported" },
+      { "id": "response.security_headers", "status": "supported" },
+      { "id": "response.csp_nonce", "status": "unsupported" },
+      { "id": "request.graphql_guard", "status": "warning-only" },
+      { "id": "response.response_dlp", "status": "warning-only" }
+    ]
+  },
+  "analyzerDiagnostics": [],
+  "omittedComparisons": [
+    "policy.request.content_type:unsupported",
+    "policy.request.graphql_guard:warning-only",
+    "policy.response.csp_nonce:unsupported",
+    "policy.response.response_dlp:warning-only",
+    "policy.routes.request.allow_methods:unsupported"
+  ]
+}

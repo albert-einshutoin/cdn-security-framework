@@ -6,6 +6,7 @@ import type { CDNSecurityFrameworkPolicy } from '../types/policy';
 
 export type ParsePolicyOptions = {
   policyPath?: string;
+  readPolicyFile?: (absolutePath: string) => string;
 };
 
 export type ParsePolicyResult = {
@@ -83,7 +84,12 @@ function mergePolicyValues(
   return base;
 }
 
-function loadPolicyFile(policyPath: string, stack: string[], warnings: string[]): unknown {
+function loadPolicyFile(
+  policyPath: string,
+  stack: string[],
+  warnings: string[],
+  readPolicyFile: (absolutePath: string) => string,
+): unknown {
   const absPath = path.resolve(policyPath);
   if (stack.includes(absPath)) {
     const cycle = [...stack, absPath].join(' -> ');
@@ -92,7 +98,7 @@ function loadPolicyFile(policyPath: string, stack: string[], warnings: string[])
 
   let raw: unknown;
   try {
-    raw = yaml.load(fs.readFileSync(absPath, 'utf8'));
+    raw = yaml.load(readPolicyFile(absPath));
   } catch (e: unknown) {
     if (e && typeof e === 'object' && 'code' in e && e.code === 'ENOENT') {
       throw e;
@@ -118,7 +124,7 @@ function loadPolicyFile(policyPath: string, stack: string[], warnings: string[])
   const nextPath = path.resolve(path.dirname(absPath), extendsPath.trim());
   let parent: unknown;
   try {
-    parent = loadPolicyFile(nextPath, [...stack, absPath], warnings);
+    parent = loadPolicyFile(nextPath, [...stack, absPath], warnings, readPolicyFile);
   } catch (e) {
     if (e && typeof e === 'object' && (e as { __error?: string }).__error) {
       throw e;
@@ -151,7 +157,9 @@ export function parsePolicyFile(opts: ParsePolicyOptions = {}): ParsePolicyResul
 
   try {
     const warnings: string[] = [];
-    const policy = loadPolicyFile(policyPath, [], warnings);
+    const readPolicyFile = opts.readPolicyFile
+      ?? ((absolutePath: string) => fs.readFileSync(absolutePath, 'utf8'));
+    const policy = loadPolicyFile(policyPath, [], warnings, readPolicyFile);
     if (isPlainObject(policy)) {
       return { ok: true, errors: [], warnings, policy: policy as Partial<CDNSecurityFrameworkPolicy> };
     }

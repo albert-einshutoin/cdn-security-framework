@@ -45,7 +45,9 @@ test('package metadata exposes typed root api and bounded exports', () => {
     './openapi',
     './parser',
     './recommendation',
+    './schemas/contract-diff-report-v1.schema.json',
     './schemas/finding-exceptions-v1.schema.json',
+    './schemas/finding-v1.schema.json',
     './schemas/openapi-inspection-v1.schema.json',
     './schemas/security-ir-v1.schema.json',
     './validator',
@@ -93,6 +95,8 @@ test('phase subpath exports expose public compiler contracts', () => {
   assert.strictEqual(typeof contract.compareSecurityContracts, 'function');
   assert.strictEqual(typeof contract.loadFindingExceptions, 'function');
   assert.strictEqual(typeof contract.applyFindingExceptions, 'function');
+  assert.strictEqual(typeof contract.diffSecurityContracts, 'function');
+  assert.strictEqual(typeof contract.contractDiffExitCode, 'function');
   assert.strictEqual(typeof openapi.loadOpenApiDocument, 'function');
   assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
   assert.strictEqual(typeof openapi.serializeResolvedOpenApiGraph, 'function');
@@ -110,6 +114,8 @@ test('phase subpath exports expose public compiler contracts', () => {
     const dts = fs.readFileSync(path.join(repoRoot, file), 'utf8');
     assert.ok(dts.includes(`export declare function ${name}`), `${file} must declare ${name}`);
   }
+  const contractDeclarations = fs.readFileSync(path.join(repoRoot, 'contract/index.d.ts'), 'utf8');
+  assert.ok(contractDeclarations.includes('diffSecurityContracts'));
 });
 
 test('root type declarations expose public programmatic api', () => {

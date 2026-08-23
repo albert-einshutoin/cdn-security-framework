@@ -25,6 +25,29 @@ npx cdn-security <subcommand> [options]
 | `migrate` | スキーマのバージョン間マイグレーション（現状 v1 のみの stub）。 |
 | `openapi inspect` | Policyやbuild出力を変更せず、ローカルOpenAPIのSecurity Contractを決定的なText/JSONで確認。 |
 | `openapi generate-policy` | 非破壊・review専用Policy Candidateとmeta sidecarを生成。 |
+| `contract diff` | OpenAPI宣言と有効Policyを比較し、Security Findingを出力。 |
+
+---
+
+## `contract diff`
+
+```bash
+npx cdn-security contract diff \
+  --openapi openapi.yaml --policy policy/security.yml --target aws
+npx cdn-security contract diff \
+  --openapi openapi.yaml --policy policy/security.yml --target cloudflare \
+  --exceptions policy/finding-exceptions.yml --format json \
+  --out reports/contract-diff.json --fail-on warning
+```
+
+- `--openapi`、`--policy`、`--target aws|cloudflare`は必須です。全inputとlocal refは`--workspace-root`内に限定されます。
+- `--format text|json`の既定はtextです。JSONは[`contract-diff-report-v1.schema.json`](../schemas/contract-diff-report-v1.schema.json)に従い、timestamp、absolute path、raw specification、secretを含みません。
+- `--exceptions`は既存のFinding Exception契約を適用します。抑制件数は常に集計し、`--include-suppressed`指定時だけ抑制Finding本体を含めます。再現可能なCI reportでは`--current-date YYYY-MM-DD`で有効期限の評価日を固定します。
+- `--fail-on error|warning|never`の既定は`error`です。終了コードはthreshold未満が`0`、到達時が`1`、input/config/safety errorが`2`、予期しない内部errorが`3`です。
+- `--out`はworkspace内の存在するdirectoryにだけ出力します。既存regular fileの上書きには`--force`が必要で、Policy、build出力、解析したsource fileは保護されます。
+- Textはsummaryから始まり、rule、route、expected/actual、evidence、remediationを表示します。色はTTYでのみ有効で、`NO_COLOR`で無効化できます。
+
+明示的なreport出力以外は読み取り専用です。未対応・部分対応の解析項目は推測せず、omitted comparisonとして報告します。
 
 ---
 

@@ -3206,6 +3206,13 @@ registerOpenApiInspectCommand(program, {
   evaluatePolicyCapabilities,
   validatePolicy: validatePolicyCandidate,
 });
+const { registerContractDiffCommand } = require(path.join(
+  pkgRoot,
+  'bin',
+  'commands',
+  'contract-diff.js',
+));
+registerContractDiffCommand(program);
 
 program
   .command('init')
