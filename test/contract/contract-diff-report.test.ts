@@ -338,8 +338,9 @@ const source = process.env.MOVED_POLICY_SOURCE
   : undefined;
 let reads = 0;
 fs.openSync = function (filePath, flags, ...rest) {
-  if (source && fs.realpathSync(String(filePath)) === source
-    && ++reads === 2) {
+  let matches = false;
+  try { matches = source !== undefined && fs.realpathSync(String(filePath)) === source; } catch {}
+  if (matches && ++reads === 2) {
     fs.renameSync(process.env.MOVED_POLICY_SOURCE, process.env.MOVED_POLICY_OUTPUT);
     fs.writeFileSync(process.env.MOVED_POLICY_SOURCE, process.env.MOVED_POLICY_REPLACEMENT);
   }
