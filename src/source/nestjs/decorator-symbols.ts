@@ -277,6 +277,19 @@ export function resolveDecoratorSymbol(
 } | undefined {
   const call = ts.isCallExpression(decorator.expression) ? decorator.expression : undefined;
   if (!call) return undefined;
+  return resolveDecoratorCallSymbol(call, checker, check);
+}
+
+export function resolveDecoratorCallSymbol(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+  check: () => void,
+): {
+  name: string;
+  call: ts.CallExpression;
+  nestJsCommon: boolean;
+  trustedNestJsCommon: boolean;
+} | undefined {
   const symbol = targetSymbol(call.expression, checker, check);
   if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) return undefined;
   const nestJsCommon = originatesFromNestJsCommon(symbol);

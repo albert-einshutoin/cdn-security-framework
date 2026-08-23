@@ -42,6 +42,7 @@ function workspace(source: string, extraFiles: Record<string, string> = {}): str
     export declare function Controller(path?: string): ClassDecorator;
     export declare function Get(path?: string): MethodDecorator;
     export declare function UseGuards(...guards: unknown[]): ClassDecorator & MethodDecorator;
+    export declare function applyDecorators(...decorators: Array<ClassDecorator | MethodDecorator>): ClassDecorator & MethodDecorator;
   `);
   write(root, 'src/controller.ts', source);
   for (const [relative, contents] of Object.entries(extraFiles)) write(root, relative, contents);
@@ -294,6 +295,65 @@ describe('NestJS auth metadata analyzer', () => {
     });
   });
 
+  test('extracts guards composed with applyDecorators', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards, applyDecorators } from '@nestjs/common';
+      import { ApiKeyGuard, JwtAuthGuard } from './auth';
+      const Auth = (): MethodDecorator => UseGuards(ApiKeyGuard);
+      @Controller('composed') @UseGuards(JwtAuthGuard)
+      class ComposedController {
+        @Get() @applyDecorators(UseGuards(ApiKeyGuard)) read() {}
+        @Get('unknown') @applyDecorators(Auth()) unknown() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    const operations = Object.fromEntries(execution.result.contract.operations.map((operation) => (
+      [operation.routeKey, operation]
+    )));
+    expect(operations['GET /composed']).toMatchObject({
+      exposure: 'authenticated',
+      auth: {
+        mode: 'alternatives',
+        analysis: {
+          guards: [
+            { symbol: 'JwtAuthGuard', authKind: 'bearer' },
+            { symbol: 'ApiKeyGuard', authKind: 'api-key' },
+          ],
+          enforcementConfidence: 'high',
+        },
+      },
+    });
+    expect(operations['GET /composed/unknown']).toMatchObject({
+      exposure: 'unknown',
+      auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+    });
+  });
+
+  test('does not analyze auth metadata for an untrusted composed controller', async () => {
+    const root = workspace(`
+      import { Controller, Get, applyDecorators } from '@nestjs/common';
+      import { Roles } from './auth';
+      declare const dynamicRole: string;
+      @applyDecorators(Controller('untrusted')) @Roles(dynamicRole)
+      class UntrustedController { @Get() read() {} }
+    `, {
+      'src/auth.ts': 'export const Roles = (..._roles: unknown[]): ClassDecorator => () => {};\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations).toEqual([]);
+    expect(execution.result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA' }),
+    ]));
+  });
+
   test('reports APP_GUARD as a partial global capability without executing module code', async () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
@@ -371,6 +431,45 @@ describe('NestJS auth metadata analyzer', () => {
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
     expect(mutable.result.contract.operations[0].auth.mode).toBe('alternatives');
+  });
+
+  test('fails closed on bootstrap global guards and external controller inheritance', async () => {
+    const globalRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare const app: { useGlobalGuards(...guards: unknown[]): void };
+      app.useGlobalGuards(new JwtAuthGuard());
+      @Controller('bootstrap') class BootstrapController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const externalRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ExternalController } from 'external-base';
+      import { JwtAuthGuard } from './auth';
+      @Controller('external') @UseGuards(JwtAuthGuard)
+      class LocalController extends ExternalController { @Get() read() {} }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-base/package.json': JSON.stringify({
+        name: 'external-base', version: '1.0.0', types: 'index.d.ts',
+      }),
+      'node_modules/external-base/index.d.ts': 'export declare class ExternalController {}\n',
+    });
+
+    const global = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(globalRoot));
+    const external = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(externalRoot));
+    expect(global.status).toBe('success');
+    expect(external.status).toBe('success');
+    if (global.status !== 'success' || external.status !== 'success') return;
+    expect(global.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(global.result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+    expect(external.result.contract.operations[0]).toMatchObject({
+      exposure: 'unknown',
+      auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+    });
   });
 
   test('fails closed when duplicate routes have conflicting auth metadata', async () => {

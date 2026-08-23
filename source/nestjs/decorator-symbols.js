@@ -6,6 +6,7 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.NESTJS_ROUTE_DECORATORS = void 0;
 exports.classifyNestJsRouteDecorator = classifyNestJsRouteDecorator;
 exports.resolveDecoratorSymbol = resolveDecoratorSymbol;
+exports.resolveDecoratorCallSymbol = resolveDecoratorCallSymbol;
 exports.resolveStaticSymbolName = resolveStaticSymbolName;
 exports.isStaticSymbolFrom = isStaticSymbolFrom;
 exports.isStaticShorthandSymbolFrom = isStaticShorthandSymbolFrom;
@@ -248,6 +249,9 @@ function resolveDecoratorSymbol(decorator, checker, check) {
     const call = typescript_1.default.isCallExpression(decorator.expression) ? decorator.expression : undefined;
     if (!call)
         return undefined;
+    return resolveDecoratorCallSymbol(call, checker, check);
+}
+function resolveDecoratorCallSymbol(call, checker, check) {
     const symbol = targetSymbol(call.expression, checker, check);
     if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE)
         return undefined;

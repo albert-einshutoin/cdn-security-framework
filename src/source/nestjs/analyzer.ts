@@ -31,6 +31,7 @@ import {
   classifyNestJsRouteDecorator,
   isStaticShorthandSymbolFrom,
   isStaticSymbolFrom,
+  resolveDecoratorCallSymbol,
   resolveDecoratorSymbol,
   resolveStaticSymbolName,
   type NestJsRouteDecoratorCandidate,
@@ -204,15 +205,33 @@ function ownAuthMetadata(
   maxSteps: number,
 ): AuthDecoratorMetadata {
   const result = emptyAuthMetadata();
-  for (const decorator of [...decorators(node)].reverse()) {
-    const resolved = resolveDecoratorSymbol(decorator, checker, check);
-    if (!resolved) continue;
+  const applyResolved = (
+    resolved: NonNullable<ReturnType<typeof resolveDecoratorCallSymbol>>,
+    evidence: ts.Decorator,
+    depth: number,
+  ): boolean => {
+    check();
+    if (depth > maxSteps) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+    if (resolved.name === 'applyDecorators' && resolved.trustedNestJsCommon) {
+      for (const argument of resolved.call.arguments) {
+        if (!ts.isCallExpression(argument)) {
+          result.guardDynamic = true;
+          continue;
+        }
+        const nested = resolveDecoratorCallSymbol(argument, checker, check);
+        if (nested) {
+          if (!applyResolved(nested, evidence, depth + 1)) result.guardDynamic = true;
+        }
+        else result.guardDynamic = true;
+      }
+      return true;
+    }
     if (resolved.name === 'UseGuards' && resolved.trustedNestJsCommon) {
       result.guardsPresent = true;
-      result.guardEvidence.push(decorator);
+      result.guardEvidence.push(evidence);
       if (resolved.call.arguments.some(ts.isSpreadElement)) {
         result.guardDynamic = true;
-        continue;
+        return true;
       }
       for (const argument of resolved.call.arguments) {
         const symbol = resolveStaticSymbolName(argument, checker, check);
@@ -221,22 +240,22 @@ function ownAuthMetadata(
           result.guardDynamic = true;
         }
       }
-      continue;
+      return true;
     }
     if (config.public_decorators.includes(resolved.name)) {
       result.publicPresent = true;
       result.explicitPublic = false;
       result.publicDynamic = false;
-      result.publicEvidence = [decorator];
+      result.publicEvidence = [evidence];
       if (resolved.call.arguments.length === 0) result.explicitPublic = true;
       else result.publicDynamic = true;
-      continue;
+      return true;
     }
-    if (!config.roles_decorators.includes(resolved.name)) continue;
+    if (!config.roles_decorators.includes(resolved.name)) return false;
     result.rolesPresent = true;
     result.roles = [];
     result.rolesDynamic = false;
-    result.authorizationEvidence = [decorator];
+    result.authorizationEvidence = [evidence];
     for (const argument of resolved.call.arguments) {
       if (ts.isSpreadElement(argument)) {
         result.rolesDynamic = true;
@@ -246,6 +265,11 @@ function ownAuthMetadata(
       if (values) result.roles.push(...values);
       else result.rolesDynamic = true;
     }
+    return true;
+  };
+  for (const decorator of [...decorators(node)].reverse()) {
+    const resolved = resolveDecoratorSymbol(decorator, checker, check);
+    if (resolved) applyResolved(resolved, decorator, 0);
   }
   result.dynamic = result.guardDynamic || result.publicDynamic || result.rolesDynamic;
   return result;
@@ -290,7 +314,13 @@ function effectiveClassAuthMetadata(
       result.dynamic ||= own.rolesDynamic;
       result.authorizationEvidence.push(...own.authorizationEvidence);
     }
-    current = directBaseClass(current, checker);
+    const base = directBaseClass(current, checker);
+    if (base && !projectSources.has(base.getSourceFile())) {
+      result.guardDynamic = true;
+      result.dynamic = true;
+      break;
+    }
+    current = base;
   }
   return result;
 }
@@ -686,6 +716,11 @@ async function analyze(
     while (nodes.length > 0) {
       const node = nodes.pop()!;
       await checkpoint();
+      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
+        && node.expression.name.text === 'useGlobalGuards') {
+        if (!globalGuardFound) addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.expression);
+        globalGuardFound = true;
+      }
       const globalGuardProvider = ts.isPropertyAssignment(node)
         && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))
         && node.name.text === 'provide'
@@ -730,13 +765,16 @@ async function analyze(
         statement, checker, projectSources, check, context.limits.maxAstNodes,
       );
       if (!effectiveController) continue;
-      const classAuthMetadata = effectiveClassAuthMetadata(
-        statement, checker, projectSources, authConfig, check, context.limits.maxAstNodes,
-      );
-      if (classAuthMetadata.dynamic) {
+      const trustedController = effectiveController.classification.route?.name === 'Controller';
+      const classAuthMetadata = trustedController
+        ? effectiveClassAuthMetadata(
+          statement, checker, projectSources, authConfig, check, context.limits.maxAstNodes,
+        )
+        : emptyAuthMetadata();
+      if (trustedController && classAuthMetadata.dynamic) {
         addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', statement);
       }
-      const controllers = effectiveController.classification.route?.name === 'Controller'
+      const controllers = trustedController
         ? [{ decorator: effectiveController.decorator, match: effectiveController.classification.route }]
         : [];
       for (const method of methodsIncludingBaseChain(
@@ -756,15 +794,6 @@ async function analyze(
           routeMethods(match.name) || match.name === 'Search'
         )));
         if (effectiveRoute === -1) continue;
-        const methodAuthMetadata = ownAuthMetadata(
-          method, checker, projectSources, authConfig, check, context.limits.maxAstNodes,
-        );
-        if (methodAuthMetadata.dynamic) {
-          addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', method);
-        }
-        const operationAuth = composeAuth(
-          classAuthMetadata, methodAuthMetadata, authConfig, globalGuardFound,
-        );
         for (const [index, methodDecorator] of methodDecorators.entries()) {
           if (classifications[index]?.unsupported) {
             addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
@@ -778,6 +807,15 @@ async function analyze(
           }
           continue;
         }
+        const methodAuthMetadata = ownAuthMetadata(
+          method, checker, projectSources, authConfig, check, context.limits.maxAstNodes,
+        );
+        if (methodAuthMetadata.dynamic) {
+          addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', method);
+        }
+        const operationAuth = composeAuth(
+          classAuthMetadata, methodAuthMetadata, authConfig, globalGuardFound,
+        );
         for (const [index, methodDecorator] of methodDecorators.entries()) {
           await checkpoint();
           const match = matches[index];
