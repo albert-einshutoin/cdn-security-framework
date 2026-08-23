@@ -72,13 +72,32 @@ function targetSymbol(node, checker, check) {
     }
 }
 function storedDecoratorCall(expression, checker, check) {
-    const symbol = targetSymbol(expression, checker, check);
-    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE)
-        return undefined;
-    const declaration = symbol.declarations?.find((candidate) => (typescript_1.default.isVariableDeclaration(candidate)
-        && candidate.initializer !== undefined));
-    const initializer = declaration?.initializer && unwrapExpression(declaration.initializer);
-    return initializer && typescript_1.default.isCallExpression(initializer) ? initializer : undefined;
+    const seen = new Set();
+    let current = expression;
+    while (true) {
+        const symbol = targetSymbol(current, checker, check);
+        if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE || seen.has(symbol))
+            return undefined;
+        seen.add(symbol);
+        const declaration = symbol.declarations?.find((candidate) => ((typescript_1.default.isVariableDeclaration(candidate) || typescript_1.default.isPropertyAssignment(candidate))
+            ? candidate.initializer !== undefined
+            : typescript_1.default.isShorthandPropertyAssignment(candidate)));
+        let initializer = declaration && !typescript_1.default.isShorthandPropertyAssignment(declaration)
+            ? declaration.initializer
+            : undefined;
+        if (declaration && typescript_1.default.isShorthandPropertyAssignment(declaration)) {
+            const valueSymbol = checker.getShorthandAssignmentValueSymbol(declaration);
+            initializer = valueSymbol?.declarations?.find((candidate) => (typescript_1.default.isVariableDeclaration(candidate) && candidate.initializer !== undefined))?.initializer;
+        }
+        const unwrapped = initializer && unwrapExpression(initializer);
+        if (!unwrapped)
+            return undefined;
+        if (typescript_1.default.isCallExpression(unwrapped))
+            return unwrapped;
+        if (!typescript_1.default.isIdentifier(unwrapped) && !typescript_1.default.isPropertyAccessExpression(unwrapped))
+            return undefined;
+        current = unwrapped;
+    }
 }
 function composesNestJsRoute(call, checker, check, budget) {
     return call.arguments.some((argument) => {

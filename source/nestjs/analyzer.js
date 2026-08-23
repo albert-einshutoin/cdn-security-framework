@@ -95,7 +95,7 @@ function hasInheritedClassVersion(node, checker, projectSources, check, maxSteps
     }
     return false;
 }
-function methodsIncludingDirectBase(node, checker, projectSources, useDefineForClassFields, check, maxSteps) {
+function methodsIncludingBaseChain(node, checker, projectSources, useDefineForClassFields, check, maxSteps) {
     const propertyKey = ({ name }) => {
         if (!name)
             return undefined;
@@ -106,10 +106,8 @@ function methodsIncludingDirectBase(node, checker, projectSources, useDefineForC
         return typescript_1.default.isIdentifier(name) || typescript_1.default.isStringLiteral(name) || typescript_1.default.isNumericLiteral(name)
             || typescript_1.default.isNoSubstitutionTemplateLiteral(name) ? name.text : undefined;
     };
-    const allOwn = node.members.filter(typescript_1.default.isMethodDeclaration);
     const concrete = (method) => Boolean(method.body)
         && !method.modifiers?.some(({ kind }) => (kind === typescript_1.default.SyntaxKind.StaticKeyword || kind === typescript_1.default.SyntaxKind.AbstractKeyword));
-    const own = allOwn.filter(concrete);
     const runtimeMember = (member) => {
         const modifiers = typescript_1.default.canHaveModifiers(member) ? typescript_1.default.getModifiers(member) : undefined;
         return !modifiers?.some(({ kind }) => (kind === typescript_1.default.SyntaxKind.StaticKeyword || kind === typescript_1.default.SyntaxKind.AbstractKeyword
@@ -117,14 +115,30 @@ function methodsIncludingDirectBase(node, checker, projectSources, useDefineForC
             && (useDefineForClassFields || member.initializer !== undefined)) || ((typescript_1.default.isMethodDeclaration(member) || typescript_1.default.isGetAccessorDeclaration(member) || typescript_1.default.isSetAccessorDeclaration(member))
             && Boolean(member.body)));
     };
-    const ownNames = new Set(node.members.filter(runtimeMember).map(propertyKey)
-        .filter((name) => name !== undefined));
-    const base = directBaseClass(node, checker);
-    const inherited = base && projectSources.has(base.getSourceFile())
-        ? base.members.filter(typescript_1.default.isMethodDeclaration).filter(concrete)
-            .filter((method) => !ownNames.has(propertyKey(method) ?? ''))
-        : [];
-    return [...own, ...inherited];
+    const methods = [];
+    const shadowed = new Set();
+    const seen = new Set();
+    let current = node;
+    let steps = 0;
+    while (current && projectSources.has(current.getSourceFile()) && !seen.has(current)) {
+        check();
+        steps += 1;
+        if (steps > maxSteps)
+            throw new source_analysis_1.SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+        seen.add(current);
+        methods.push(...current.members.filter(typescript_1.default.isMethodDeclaration).filter(concrete)
+            .filter((method) => {
+            const key = propertyKey(method);
+            return key === undefined || !shadowed.has(key);
+        }));
+        for (const member of current.members.filter(runtimeMember)) {
+            const key = propertyKey(member);
+            if (key !== undefined)
+                shadowed.add(key);
+        }
+        current = directBaseClass(current, checker);
+    }
+    return methods;
 }
 function mapLoaderError(error) {
     const code = error.diagnostics[0]?.code;
@@ -255,7 +269,7 @@ async function analyze(context) {
                 match: classMatches[index],
                 index,
             })).filter(({ match, index }) => match?.name === 'Controller' && index === effectiveController);
-            for (const method of methodsIncludingDirectBase(statement, checker, projectSources, useDefineForClassFields, check, context.limits.maxAstNodes)) {
+            for (const method of methodsIncludingBaseChain(statement, checker, projectSources, useDefineForClassFields, check, context.limits.maxAstNodes)) {
                 await checkpoint();
                 const methodDecorators = decorators(method);
                 const classifications = methodDecorators.map((decorator) => ((0, decorator_symbols_1.classifyNestJsRouteDecorator)(decorator, checker, check)));

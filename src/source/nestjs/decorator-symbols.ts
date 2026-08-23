@@ -80,14 +80,34 @@ function storedDecoratorCall(
   checker: ts.TypeChecker,
   check: () => void,
 ): ts.CallExpression | undefined {
-  const symbol = targetSymbol(expression, checker, check);
-  if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) return undefined;
-  const declaration = symbol.declarations?.find((candidate): candidate is ts.VariableDeclaration => (
-    ts.isVariableDeclaration(candidate)
-    && candidate.initializer !== undefined
-  ));
-  const initializer = declaration?.initializer && unwrapExpression(declaration.initializer);
-  return initializer && ts.isCallExpression(initializer) ? initializer : undefined;
+  const seen = new Set<ts.Symbol>();
+  let current = expression;
+  while (true) {
+    const symbol = targetSymbol(current, checker, check);
+    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE || seen.has(symbol)) return undefined;
+    seen.add(symbol);
+    const declaration = symbol.declarations?.find((candidate): candidate is (
+      ts.VariableDeclaration | ts.PropertyAssignment | ts.ShorthandPropertyAssignment
+    ) => (
+      (ts.isVariableDeclaration(candidate) || ts.isPropertyAssignment(candidate))
+        ? candidate.initializer !== undefined
+        : ts.isShorthandPropertyAssignment(candidate)
+    ));
+    let initializer = declaration && !ts.isShorthandPropertyAssignment(declaration)
+      ? declaration.initializer
+      : undefined;
+    if (declaration && ts.isShorthandPropertyAssignment(declaration)) {
+      const valueSymbol = checker.getShorthandAssignmentValueSymbol(declaration);
+      initializer = valueSymbol?.declarations?.find((candidate): candidate is ts.VariableDeclaration => (
+        ts.isVariableDeclaration(candidate) && candidate.initializer !== undefined
+      ))?.initializer;
+    }
+    const unwrapped = initializer && unwrapExpression(initializer);
+    if (!unwrapped) return undefined;
+    if (ts.isCallExpression(unwrapped)) return unwrapped;
+    if (!ts.isIdentifier(unwrapped) && !ts.isPropertyAccessExpression(unwrapped)) return undefined;
+    current = unwrapped;
+  }
 }
 
 function composesNestJsRoute(

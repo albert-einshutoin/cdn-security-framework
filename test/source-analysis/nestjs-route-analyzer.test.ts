@@ -338,6 +338,21 @@ describe('NestJS route analyzer', () => {
     });
   });
 
+  test('discovers routes through the full controller prototype chain', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      class BaseController {
+        @Get('items') list() {}
+        @Get('hidden') hidden() {}
+      }
+      class MiddleController extends BaseController { hidden() {} }
+      @Controller('derived') class DerivedController extends MiddleController {}
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success', result: { contract: { operations: [{ routeKey: 'GET /derived/items' }] } },
+    });
+  });
+
   test('reports unsupported Search routes instead of silently dropping them', async () => {
     const root = workspace(`
       import { Controller, Get, Search } from '@nestjs/common';
@@ -442,6 +457,28 @@ describe('NestJS route analyzer', () => {
         unresolvedOperations: expect.arrayContaining([
           expect.objectContaining({ methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
           expect.objectContaining({ methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+        ]),
+      },
+    });
+  });
+
+  test('fails closed for stored decorators in readonly properties', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      const Routes = { health: Get('health') } as const;
+      @Controller('system') class SystemController {
+        @Routes.health health() {}
+      }
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success',
+      result: {
+        contract: { operations: [] },
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+        ]),
+        unresolvedOperations: expect.arrayContaining([
+          expect.objectContaining({ methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
         ]),
       },
     });

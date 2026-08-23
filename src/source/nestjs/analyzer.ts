@@ -116,7 +116,7 @@ function hasInheritedClassVersion(
   return false;
 }
 
-function methodsIncludingDirectBase(
+function methodsIncludingBaseChain(
   node: ts.ClassLikeDeclaration,
   checker: ts.TypeChecker,
   projectSources: ReadonlySet<ts.SourceFile>,
@@ -133,12 +133,10 @@ function methodsIncludingDirectBase(
     return ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)
       || ts.isNoSubstitutionTemplateLiteral(name) ? name.text : undefined;
   };
-  const allOwn = node.members.filter(ts.isMethodDeclaration);
   const concrete = (method: ts.MethodDeclaration) => Boolean(method.body)
     && !method.modifiers?.some(({ kind }) => (
       kind === ts.SyntaxKind.StaticKeyword || kind === ts.SyntaxKind.AbstractKeyword
     ));
-  const own = allOwn.filter(concrete);
   const runtimeMember = (member: ts.ClassElement) => {
     const modifiers = ts.canHaveModifiers(member) ? ts.getModifiers(member) : undefined;
     return !modifiers?.some(({ kind }) => (
@@ -150,14 +148,28 @@ function methodsIncludingDirectBase(
       && Boolean(member.body)
     ));
   };
-  const ownNames = new Set(node.members.filter(runtimeMember).map(propertyKey)
-    .filter((name): name is string => name !== undefined));
-  const base = directBaseClass(node, checker);
-  const inherited = base && projectSources.has(base.getSourceFile())
-    ? base.members.filter(ts.isMethodDeclaration).filter(concrete)
-      .filter((method) => !ownNames.has(propertyKey(method) ?? ''))
-    : [];
-  return [...own, ...inherited];
+  const methods: ts.MethodDeclaration[] = [];
+  const shadowed = new Set<string>();
+  const seen = new Set<ts.ClassLikeDeclaration>();
+  let current: ts.ClassLikeDeclaration | undefined = node;
+  let steps = 0;
+  while (current && projectSources.has(current.getSourceFile()) && !seen.has(current)) {
+    check();
+    steps += 1;
+    if (steps > maxSteps) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+    seen.add(current);
+    methods.push(...current.members.filter(ts.isMethodDeclaration).filter(concrete)
+      .filter((method) => {
+        const key = propertyKey(method);
+        return key === undefined || !shadowed.has(key);
+      }));
+    for (const member of current.members.filter(runtimeMember)) {
+      const key = propertyKey(member);
+      if (key !== undefined) shadowed.add(key);
+    }
+    current = directBaseClass(current, checker);
+  }
+  return methods;
 }
 
 function mapLoaderError(error: TypeScriptProjectLoadError): SourceAnalyzerDiagnosticCode {
@@ -294,7 +306,7 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
         match: classMatches[index],
         index,
       })).filter(({ match, index }) => match?.name === 'Controller' && index === effectiveController);
-      for (const method of methodsIncludingDirectBase(
+      for (const method of methodsIncludingBaseChain(
         statement, checker, projectSources, useDefineForClassFields, check, context.limits.maxAstNodes,
       )) {
         await checkpoint();
