@@ -304,6 +304,12 @@ exceptions:
     const success = run([...common, '--format', 'json']);
     expect(success.status, success.stderr).toBe(0);
     expect(JSON.parse(success.stdout).schemaVersion).toBe(1);
+    const sarif = run([...common, '--format', 'sarif']);
+    expect(sarif.status, sarif.stderr).toBe(0);
+    expect(JSON.parse(sarif.stdout)).toMatchObject({
+      version: '2.1.0',
+      runs: [{ tool: { driver: { name: 'cdn-security-framework' } } }],
+    });
 
     const workspaceAlias = path.join(os.tmpdir(), `contract-diff-alias-${path.basename(ok.root)}`);
     const outsideWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'contract-diff-retarget-'));

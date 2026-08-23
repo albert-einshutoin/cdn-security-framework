@@ -14,7 +14,7 @@ var __exportStar = (this && this.__exportStar) || function(m, exports) {
     for (var p in m) if (p !== "default" && !Object.prototype.hasOwnProperty.call(exports, p)) __createBinding(exports, m, p);
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.formatContractDiffText = exports.formatContractDiffJson = exports.diffSecurityContracts = exports.contractDiffExitCode = exports.ContractDiffInputError = exports.CONTRACT_DIFF_FAIL_ON = exports.validateFindingExceptionSet = exports.loadFindingExceptions = exports.applyFindingExceptions = exports.WAIVABLE_FINDING_RULE_IDS = void 0;
+exports.formatContractDiffText = exports.formatContractDiffJson = exports.diffSecurityContracts = exports.contractDiffExitCode = exports.ContractDiffInputError = exports.CONTRACT_DIFF_FAIL_ON = exports.renderFindingsAsSarif = exports.validateFindingExceptionSet = exports.loadFindingExceptions = exports.applyFindingExceptions = exports.WAIVABLE_FINDING_RULE_IDS = void 0;
 __exportStar(require("./finding"), exports);
 __exportStar(require("./finding-order"), exports);
 var finding_exceptions_1 = require("./finding-exceptions");
@@ -27,6 +27,8 @@ __exportStar(require("./allowed-surface"), exports);
 __exportStar(require("./route-relation"), exports);
 __exportStar(require("./drift"), exports);
 __exportStar(require("./security-ir"), exports);
+var sarif_1 = require("../reporters/sarif");
+Object.defineProperty(exports, "renderFindingsAsSarif", { enumerable: true, get: function () { return sarif_1.renderFindingsAsSarif; } });
 var contract_diff_1 = require("./contract-diff");
 Object.defineProperty(exports, "CONTRACT_DIFF_FAIL_ON", { enumerable: true, get: function () { return contract_diff_1.CONTRACT_DIFF_FAIL_ON; } });
 Object.defineProperty(exports, "ContractDiffInputError", { enumerable: true, get: function () { return contract_diff_1.ContractDiffInputError; } });

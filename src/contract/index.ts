@@ -19,6 +19,7 @@ export * from './allowed-surface';
 export * from './route-relation';
 export * from './drift';
 export * from './security-ir';
+export { renderFindingsAsSarif, type SarifLog } from '../reporters/sarif';
 export {
   CONTRACT_DIFF_FAIL_ON,
   ContractDiffInputError,

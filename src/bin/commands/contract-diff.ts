@@ -13,6 +13,7 @@ import {
   type ContractDiffFailOn,
 } from '../../contract/contract-diff';
 import { isPathWithinWorkspace, OpenApiAnalysisError } from '../../openapi';
+import { renderFindingsAsSarif } from '../../reporters/sarif';
 
 interface ContractDiffCliOptions {
   openapi?: string;
@@ -147,8 +148,8 @@ function required(value: string | undefined, name: string): string {
 }
 
 function run(options: ContractDiffCliOptions): void {
-  if (!['text', 'json'].includes(options.format)) {
-    throw new ContractDiffCliError('CONTRACT_DIFF_FORMAT_INVALID', '--format must be text or json.');
+  if (!['text', 'json', 'sarif'].includes(options.format)) {
+    throw new ContractDiffCliError('CONTRACT_DIFF_FORMAT_INVALID', '--format must be text, json, or sarif.');
   }
   if (!CONTRACT_DIFF_FAIL_ON.includes(options.failOn as ContractDiffFailOn)) {
     throw new ContractDiffCliError('CONTRACT_DIFF_FAIL_ON_INVALID', '--fail-on must be error, warning, or never.');
@@ -172,9 +173,9 @@ function run(options: ContractDiffCliOptions): void {
     includeSuppressed: options.includeSuppressed,
     workspaceRoot: options.workspaceRoot,
   });
-  const output = options.format === 'json'
-    ? formatContractDiffJson(execution.report)
-    : formatContractDiffText(execution.report, {
+  const output = options.format === 'sarif'
+    ? `${JSON.stringify(renderFindingsAsSarif(execution.report), null, 2)}\n`
+    : options.format === 'json' ? formatContractDiffJson(execution.report) : formatContractDiffText(execution.report, {
       color: !options.out && Boolean(process.stdout.isTTY) && !('NO_COLOR' in process.env),
     });
   if (options.out) writeOutput(outputTarget(options, execution.sourceIdentities, execution.workspace), output);
@@ -196,7 +197,7 @@ export function registerContractDiffCommand(program: Command): void {
     .option('--exceptions <path>', 'Finding exceptions YAML file')
     .option('--current-date <date>', 'Exception evaluation date in YYYY-MM-DD')
     .option('--environment <name>', 'Deployment environment for scoped finding exceptions')
-    .option('--format <format>', 'Output format: text | json', 'text')
+    .option('--format <format>', 'Output format: text | json | sarif', 'text')
     .option('--out <path>', 'Write the report inside the workspace')
     .option('--fail-on <severity>', 'Failure threshold: error | warning | never', 'error')
     .option('--include-suppressed', 'Include suppressed findings in the report')

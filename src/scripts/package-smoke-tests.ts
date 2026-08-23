@@ -113,6 +113,8 @@ function assertPackageContents(pack: PackResult) {
     'contract/finding-exceptions.d.ts',
     'contract/contract-diff.js',
     'contract/contract-diff.d.ts',
+    'reporters/sarif.js',
+    'reporters/sarif.d.ts',
     'contract/allowed-surface.js',
     'contract/allowed-surface.d.ts',
     'contract/drift/index.js',
@@ -227,6 +229,7 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof contract.loadFindingExceptions, 'function');
       assert.strictEqual(typeof contract.applyFindingExceptions, 'function');
       assert.strictEqual(typeof contract.diffSecurityContracts, 'function');
+      assert.strictEqual(typeof contract.renderFindingsAsSarif, 'function');
       assert.strictEqual(typeof openapi.loadOpenApiDocument, 'function');
       assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
       assert.strictEqual(typeof openapi.normalizeOpenApiOperations, 'function');
@@ -267,6 +270,16 @@ function smokeInstalledPackage(tarballPath: string) {
       path.join(installDir, 'reports', 'contract-diff.json'), 'utf8',
     ));
     assert.strictEqual(contractDiff.schemaVersion, 1);
+    run(cliPath, [
+      'contract', 'diff', '--openapi', openApiPath, '--policy', installedBasePolicy,
+      '--target', 'aws', '--workspace-root', installDir, '--format', 'sarif',
+      '--fail-on', 'never', '--out', 'reports/cdn-security.sarif',
+    ], { cwd: installDir });
+    const sarif = JSON.parse(fs.readFileSync(
+      path.join(installDir, 'reports', 'cdn-security.sarif'), 'utf8',
+    ));
+    assert.strictEqual(sarif.version, '2.1.0');
+    assert.strictEqual(sarif.runs[0].tool.driver.name, 'cdn-security-framework');
     run(cliPath, [
       'openapi', 'generate-policy', '--input', openApiPath, '--workspace-root', installDir,
       '--profile', 'balanced', '--out', 'openapi.candidate.yml',
