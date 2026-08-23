@@ -66,6 +66,7 @@ export interface LoadedTypeScriptProject {
 export interface TypeScriptProjectFileSystem {
   realpath(filePath: string): string;
   readFile(filePath: string): string;
+  readFileBounded(filePath: string, maxBytes: number): string;
   stat(filePath: string): fs.Stats;
   exists(filePath: string): boolean;
   readDirectory(
@@ -74,6 +75,12 @@ export interface TypeScriptProjectFileSystem {
     excludes: readonly string[] | undefined,
     includes: readonly string[],
     depth?: number,
+    maxEntries?: number,
+    checkInterruption?: () => void,
+    boundaryRoot?: string,
+  ): string[];
+  getDirectories(
+    rootDir: string,
     maxEntries?: number,
     checkInterruption?: () => void,
     boundaryRoot?: string,
@@ -97,6 +104,35 @@ const matchFiles = (ts as typeof ts & { matchFiles: TypeScriptMatchFiles }).matc
 export const nodeTypeScriptProjectFileSystem: TypeScriptProjectFileSystem = Object.freeze({
   realpath: fs.realpathSync,
   readFile: (filePath: string) => fs.readFileSync(filePath, 'utf8'),
+  readFileBounded: (filePath: string, maxBytes: number) => {
+    let descriptor: number | undefined;
+    try {
+      descriptor = fs.openSync(filePath, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW);
+      const opened = fs.fstatSync(descriptor);
+      const currentPath = fs.realpathSync(filePath);
+      const current = fs.statSync(filePath);
+      if (currentPath !== filePath || opened.dev !== current.dev || opened.ino !== current.ino) {
+        throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
+      }
+      if (opened.size > maxBytes) throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT');
+      const chunks: Buffer[] = [];
+      const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, maxBytes + 1));
+      let total = 0;
+      for (;;) {
+        const bytesRead = fs.readSync(descriptor, chunk, 0, chunk.length, null);
+        if (bytesRead === 0) break;
+        total += bytesRead;
+        if (total > maxBytes) throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT');
+        chunks.push(Buffer.from(chunk.subarray(0, bytesRead)));
+      }
+      return Buffer.concat(chunks, total).toString('utf8');
+    } catch (error) {
+      if (error instanceof TypeScriptProjectLoadError) throw error;
+      throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+    } finally {
+      if (descriptor !== undefined) fs.closeSync(descriptor);
+    }
+  },
   stat: fs.statSync,
   exists: fs.existsSync,
   readDirectory: (
@@ -165,6 +201,41 @@ export const nodeTypeScriptProjectFileSystem: TypeScriptProjectFileSystem = Obje
     } catch (error) {
       if (error instanceof TypeScriptProjectLoadError) throw error;
       throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+    }
+  },
+  getDirectories: (
+    rootDir: string,
+    maxEntries = Number.POSITIVE_INFINITY,
+    check = () => {},
+    boundaryRoot?: string,
+  ) => {
+    const directories: string[] = [];
+    let handle: fs.Dir | undefined;
+    try {
+      handle = fs.opendirSync(rootDir);
+      let entriesEnumerated = 0;
+      for (let entry = handle.readSync(); entry; entry = handle.readSync()) {
+        check();
+        entriesEnumerated += 1;
+        if (entriesEnumerated > maxEntries) throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_LIMIT');
+        let stat: fs.Dirent | fs.Stats = entry;
+        if (entry.isSymbolicLink()) stat = fs.statSync(path.join(rootDir, entry.name));
+        if (!stat.isDirectory()) continue;
+        if (boundaryRoot) {
+          const realDirectory = fs.realpathSync(path.join(rootDir, entry.name));
+          if (realDirectory !== boundaryRoot && !relativeWithin(boundaryRoot, realDirectory)) {
+            throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
+          }
+        }
+        directories.push(entry.name);
+      }
+      return directories;
+    } catch (error) {
+      if (error instanceof TypeScriptProjectLoadError) throw error;
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return [];
+      throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+    } finally {
+      handle?.closeSync();
     }
   },
 });
@@ -665,6 +736,7 @@ async function loadTypeScriptProjectInternal(
   const workspaceContents = new Map(rootContents);
   const libraryContents = new Map<string, string>();
   const metadataContents = new Map<string, { relative: string; text: string }>();
+  let directoryEntriesEnumerated = 0;
   const preflightProgramRead = (absolute: string, sourceUri?: string): void => {
     let size: number;
     try { size = fileSystem.stat(absolute).size; } catch {
@@ -694,17 +766,20 @@ async function loadTypeScriptProjectInternal(
       const absolute = fileSystem.realpath(candidate);
       if (isStandardLibrary(absolute)) return { absolute, kind: 'library' };
       const workspaceRelative = relativeWithin(workspaceRoot, absolute);
+      if (!workspaceRelative) {
+        if (SOURCE_EXTENSIONS.some((extension) => absolute.endsWith(extension))
+          || /\.(?:[cm]?js|jsx|json)$/iu.test(absolute)) boundaryViolation = true;
+        return undefined;
+      }
       if (workspaceRelative && SOURCE_EXTENSIONS.some((extension) => workspaceRelative.endsWith(extension))) {
         return { absolute, kind: 'workspace' };
       }
-      if (workspaceRelative && path.basename(workspaceRelative) === 'package.json'
-        && normalizeRelative(workspaceRelative).split('/').includes('node_modules')) {
+      if (workspaceRelative && path.basename(workspaceRelative) === 'package.json') {
         return { absolute, kind: 'package-metadata' };
       }
       if (workspaceRelative && /\.(?:[cm]?js|jsx|json)$/iu.test(workspaceRelative)) {
         return { absolute, kind: 'unsupported' };
       }
-      if (SOURCE_EXTENSIONS.some((extension) => absolute.endsWith(extension))) boundaryViolation = true;
       return undefined;
     } catch { return undefined; }
   };
@@ -738,7 +813,7 @@ async function loadTypeScriptProjectInternal(
       const relative = relativeWithin(workspaceRoot, safe.absolute);
       if (!relative) throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
       preflightProgramRead(safe.absolute, relative);
-      const text = fileSystem.readFile(safe.absolute);
+      const text = fileSystem.readFileBounded(safe.absolute, limits.maxFileBytes);
       const size = Buffer.byteLength(text);
       if (size > limits.maxFileBytes) {
         throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', { sourceUri: relative });
@@ -800,18 +875,47 @@ async function loadTypeScriptProjectInternal(
     realpath: (candidate) => safeExistingPath(candidate)?.absolute ?? candidate,
     directoryExists: (candidate) => {
       try {
+        const lexical = path.resolve(candidate);
         const absolute = fileSystem.realpath(candidate);
+        if ((lexical === workspaceRoot || relativeWithin(workspaceRoot, lexical) !== undefined)
+          && absolute !== workspaceRoot && relativeWithin(workspaceRoot, absolute) === undefined) {
+          boundaryViolation = true;
+          return false;
+        }
         return absolute === workspaceRoot || relativeWithin(workspaceRoot, absolute) !== undefined
           || absolute === defaultLibraryRoot;
       } catch { return false; }
     },
-    getDirectories: (candidate) => (defaultHost.getDirectories?.(candidate) ?? []).filter((directory) => {
+    getDirectories: (candidate) => {
       try {
-        const absolute = fileSystem.realpath(path.isAbsolute(directory) ? directory : path.join(candidate, directory));
-        return absolute === workspaceRoot || relativeWithin(workspaceRoot, absolute) !== undefined
-          || absolute === defaultLibraryRoot;
-      } catch { return false; }
-    }),
+        const lexical = path.resolve(candidate);
+        const absolute = fileSystem.realpath(candidate);
+        const boundaryRoot = absolute === defaultLibraryRoot ? defaultLibraryRoot : workspaceRoot;
+        if (absolute !== defaultLibraryRoot && absolute !== workspaceRoot
+          && relativeWithin(workspaceRoot, absolute) === undefined) {
+          if (lexical === workspaceRoot || relativeWithin(workspaceRoot, lexical) !== undefined) {
+            throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
+          }
+          return [];
+        }
+        const filesConsumed = configState.digests.size + workspaceContents.size
+          + metadataContents.size + libraryContents.size;
+        const remainingEntries = limits.maxFiles - filesConsumed - directoryEntriesEnumerated;
+        if (remainingEntries <= 0) throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_LIMIT');
+        return fileSystem.getDirectories(
+          absolute,
+          remainingEntries,
+          () => {
+            directoryEntriesEnumerated += 1;
+            checkInterruption(options.cancellationSignal, deadline);
+          },
+          boundaryRoot,
+        );
+      } catch (error) {
+        if (error instanceof TypeScriptProjectLoadError) throw error;
+        return [];
+      }
+    },
   };
   let program: ts.Program;
   try {

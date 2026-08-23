@@ -244,6 +244,68 @@ describe('TypeScript project loader', () => {
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_EXTENSION_UNSUPPORTED', root);
   });
 
+  test('rejects unsupported imports that resolve outside the workspace', async () => {
+    const root = workspace();
+    const outside = workspace();
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "allowJs": true, "resolveJsonModule": true }, "files": ["src/app.ts"] }');
+    write(outside, 'outside.js', 'export const value = 1;\n');
+    write(root, 'src/app.ts', 'import { value } from "./outside.js";\nexport { value };\n');
+    fs.symlinkSync(path.join(outside, 'outside.js'), path.join(root, 'src/outside.js'));
+
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+
+    fs.unlinkSync(path.join(root, 'src/outside.js'));
+    write(outside, 'outside.json', '{ "value": 1 }');
+    fs.symlinkSync(path.join(outside, 'outside.json'), path.join(root, 'src/outside.json'));
+    write(root, 'src/app.ts', 'import data from "./outside.json";\nexport const value = data.value;\n');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+
+    fs.unlinkSync(path.join(root, 'src/outside.json'));
+    fs.symlinkSync(outside, path.join(root, 'src/linked'));
+    write(root, 'src/app.ts', 'import { value } from "./linked/outside.js";\nexport { value };\n');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+  });
+
+  test('uses bounded workspace package metadata to resolve package imports maps', async () => {
+    const root = workspace();
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "module": "NodeNext", "moduleResolution": "NodeNext", "noLib": true }, "files": ["src/app.ts"] }');
+    write(root, 'package.json', '{ "type": "module", "imports": { "#dep": "./src/dep.ts" } }');
+    write(root, 'src/app.ts', 'import { value } from "#dep";\nexport { value };\n');
+    write(root, 'src/dep.ts', 'export const value = 1;\n');
+
+    const loaded = await loadTypeScriptProject(options(root));
+
+    expect(loaded.sourceFiles.map(({ fileName }) => path.basename(fileName))).toContain('dep.ts');
+    expect(loaded.diagnostics.map(({ typescriptCode }) => typescriptCode)).not.toContain(2307);
+  });
+
+  test('rejects package metadata retargeted outside before the bounded read', async () => {
+    const root = workspace();
+    const outside = workspace();
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "module": "NodeNext", "moduleResolution": "NodeNext", "noLib": true }, "files": ["src/app.ts"] }');
+    write(root, 'src/package.json', '{ "type": "module", "imports": { "#dep": "./dep.ts" } }');
+    write(root, 'src/app.ts', 'import { value } from "#dep";\nexport { value };\n');
+    write(root, 'src/dep.ts', 'export const value = 1;\n');
+    write(outside, 'package.json', '{ "type": "module", "imports": { "#dep": "./outside.ts" } }');
+    write(outside, 'outside.ts', 'export const value = 2;\n');
+    let retargeted = false;
+
+    await expectFailure(loadTypeScriptProject(options(root, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        readFileBounded(filePath, maxBytes) {
+          if (!retargeted && filePath.endsWith('src/package.json')) {
+            retargeted = true;
+            fs.renameSync(path.join(root, 'src'), path.join(root, 'src-safe'));
+            fs.symlinkSync(outside, path.join(root, 'src'));
+          }
+          return nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
+        },
+      },
+    })), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+    expect(retargeted).toBe(true);
+  });
+
   test('returns partial project-reference diagnostics without loading referenced projects', async () => {
     const root = workspace();
     write(root, 'tsconfig.json', '{ "files": ["src/app.ts"], "references": [{ "path": "./other" }] }');
@@ -313,6 +375,32 @@ describe('TypeScript project loader', () => {
       path.join(root, 'missing'), ['.ts'], undefined, ['**/*'], undefined, 2,
     )).toThrow('TypeScript project loading failed unexpectedly.');
 
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "noLib": true, "types": ["*"] }, "files": ["src/app.ts"] }');
+    for (const name of ['one', 'two', 'three', 'four']) {
+      fs.mkdirSync(path.join(root, 'node_modules/@types', name), { recursive: true });
+    }
+    let compilerEnumerationLimit: number | undefined;
+    await expectFailure(loadTypeScriptProject(options(root, {
+      limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxFiles: 3 },
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        getDirectories(...args) {
+          compilerEnumerationLimit = args[1];
+          return nodeTypeScriptProjectFileSystem.getDirectories(...args);
+        },
+      },
+    })), 'TS_PROJECT_FILE_LIMIT', root);
+    expect(compilerEnumerationLimit).toBe(1);
+
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "noLib": true, "types": ["*"], "typeRoots": ["types/one", "types/two"] }, "files": ["src/app.ts"] }');
+    for (const rootName of ['one', 'two']) {
+      for (const packageName of ['a', 'b']) fs.mkdirSync(path.join(root, 'types', rootName, packageName), { recursive: true });
+    }
+    await expectFailure(loadTypeScriptProject(options(root, {
+      limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxFiles: 5 },
+    })), 'TS_PROJECT_FILE_LIMIT', root);
+
+    write(root, 'tsconfig.json', '{ "include": ["src/**/*.ts"] }');
     let enumerationLimit: number | undefined;
     await expectFailure(loadTypeScriptProject(options(root, {
       limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxFiles: 1 },
