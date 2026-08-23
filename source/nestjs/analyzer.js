@@ -76,7 +76,7 @@ function directBaseClass(node, checker) {
     return symbol?.declarations?.find(typescript_1.default.isClassLike)
         ?? checker.getTypeAtLocation(expression).getSymbol()?.declarations?.find(typescript_1.default.isClassLike);
 }
-function methodsIncludingDirectBase(node, checker, projectSources, check, maxSteps) {
+function methodsIncludingDirectBase(node, checker, projectSources, useDefineForClassFields, check, maxSteps) {
     const propertyKey = ({ name }) => {
         if (!name)
             return undefined;
@@ -94,7 +94,8 @@ function methodsIncludingDirectBase(node, checker, projectSources, check, maxSte
     const runtimeMember = (member) => {
         const modifiers = typescript_1.default.canHaveModifiers(member) ? typescript_1.default.getModifiers(member) : undefined;
         return !modifiers?.some(({ kind }) => (kind === typescript_1.default.SyntaxKind.StaticKeyword || kind === typescript_1.default.SyntaxKind.AbstractKeyword
-            || kind === typescript_1.default.SyntaxKind.DeclareKeyword)) && (typescript_1.default.isPropertyDeclaration(member) || ((typescript_1.default.isMethodDeclaration(member) || typescript_1.default.isGetAccessorDeclaration(member) || typescript_1.default.isSetAccessorDeclaration(member))
+            || kind === typescript_1.default.SyntaxKind.DeclareKeyword)) && ((typescript_1.default.isPropertyDeclaration(member)
+            && (useDefineForClassFields || member.initializer !== undefined)) || ((typescript_1.default.isMethodDeclaration(member) || typescript_1.default.isGetAccessorDeclaration(member) || typescript_1.default.isSetAccessorDeclaration(member))
             && Boolean(member.body)));
     };
     const ownNames = new Set(node.members.filter(runtimeMember).map(propertyKey)
@@ -166,6 +167,9 @@ async function analyze(context) {
     };
     const loaded = await loadProject(context.workspaceRoot, context.entrypoints[0], context);
     const checker = loaded.program.getTypeChecker();
+    const compilerOptions = loaded.program.getCompilerOptions();
+    const useDefineForClassFields = compilerOptions.useDefineForClassFields
+        ?? (compilerOptions.target ?? typescript_1.default.ScriptTarget.ES5) >= typescript_1.default.ScriptTarget.ES2022;
     const projectSources = new Set(loaded.sourceFiles.filter((sourceFile) => (!sourceFile.isDeclarationFile && !sourceFile.fileName.replaceAll('\\', '/').includes('/node_modules/'))));
     const operations = new Map();
     const diagnostics = [];
@@ -231,7 +235,7 @@ async function analyze(context) {
                 match: classMatches[index],
                 index,
             })).filter(({ match, index }) => match?.name === 'Controller' && index === effectiveController);
-            for (const method of methodsIncludingDirectBase(statement, checker, projectSources, check, context.limits.maxAstNodes)) {
+            for (const method of methodsIncludingDirectBase(statement, checker, projectSources, useDefineForClassFields, check, context.limits.maxAstNodes)) {
                 await checkpoint();
                 const methodDecorators = decorators(method);
                 const classifications = methodDecorators.map((decorator) => ((0, decorator_symbols_1.classifyNestJsRouteDecorator)(decorator, checker, check)));

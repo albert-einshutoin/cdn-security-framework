@@ -356,9 +356,11 @@ describe('NestJS route analyzer', () => {
     const root = workspace(`
       import { applyDecorators, Controller, Get } from '@nestjs/common';
       function noop(): MethodDecorator { return () => {}; }
+      const spread = [Get('spread')] as const;
       @Controller('system') class SystemController {
         @applyDecorators(Get('health')) health() {}
         @applyDecorators(${Array.from({ length: 256 }, () => 'noop()').join(', ')}, Get('late')) late() {}
+        @applyDecorators(...spread) spreadRoute() {}
       }
     `);
     await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
@@ -368,8 +370,10 @@ describe('NestJS route analyzer', () => {
         diagnostics: [
           { code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
           { code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
+          { code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
         ],
         unresolvedOperations: [
+          { methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
           { methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
           { methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
         ],
@@ -397,6 +401,8 @@ describe('NestJS route analyzer', () => {
         [QUOTED]() {}
         [COMPUTED]() {}
         get accessor() { return () => {}; }
+        // @ts-ignore verifies no-emit fields do not shadow runtime methods
+        inherited!: unknown;
         abstract abstractShadow(): void;
         @Get('query?secret=value') query() {}
         @Get('hash#part') hash() {}
@@ -436,6 +442,27 @@ describe('NestJS route analyzer', () => {
     expect(second).toEqual(first);
     await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root, HTTP_METHODS.length - 1))).resolves.toMatchObject({
       status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_OPERATION_LIMIT' }],
+    });
+  });
+
+  test('uses class-field emit semantics when filtering inherited routes', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      class BaseController { @Get('inherited') inherited() {} }
+      @Controller('items') class ItemsController extends BaseController {
+        // @ts-ignore verifies define-semantics fields shadow runtime methods
+        inherited!: unknown;
+      }
+    `);
+    write(root, 'tsconfig.json', JSON.stringify({
+      compilerOptions: {
+        experimentalDecorators: true, moduleResolution: 'node', noLib: true, types: [],
+        useDefineForClassFields: true,
+      },
+      files: ['src/controller.ts'],
+    }));
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success', result: { contract: { operations: [] } },
     });
   });
 

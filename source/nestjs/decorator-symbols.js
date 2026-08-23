@@ -77,6 +77,8 @@ function composesNestJsRoute(call, checker, check, budget) {
         budget.remaining -= 1;
         if (budget.remaining < 0)
             return true;
+        if (typescript_1.default.isSpreadElement(argument))
+            return true;
         if (!typescript_1.default.isCallExpression(argument))
             return false;
         const symbol = targetSymbol(argument.expression, checker, check);

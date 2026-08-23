@@ -96,6 +96,7 @@ function methodsIncludingDirectBase(
   node: ts.ClassLikeDeclaration,
   checker: ts.TypeChecker,
   projectSources: ReadonlySet<ts.SourceFile>,
+  useDefineForClassFields: boolean,
   check: () => void,
   maxSteps: number,
 ): ts.MethodDeclaration[] {
@@ -119,7 +120,8 @@ function methodsIncludingDirectBase(
     return !modifiers?.some(({ kind }) => (
       kind === ts.SyntaxKind.StaticKeyword || kind === ts.SyntaxKind.AbstractKeyword
       || kind === ts.SyntaxKind.DeclareKeyword
-    )) && (ts.isPropertyDeclaration(member) || (
+    )) && ((ts.isPropertyDeclaration(member)
+      && (useDefineForClassFields || member.initializer !== undefined)) || (
       (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member))
       && Boolean(member.body)
     ));
@@ -186,6 +188,9 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
   };
   const loaded = await loadProject(context.workspaceRoot, context.entrypoints[0], context);
   const checker = loaded.program.getTypeChecker();
+  const compilerOptions = loaded.program.getCompilerOptions();
+  const useDefineForClassFields = compilerOptions.useDefineForClassFields
+    ?? (compilerOptions.target ?? ts.ScriptTarget.ES5) >= ts.ScriptTarget.ES2022;
   const projectSources = new Set(loaded.sourceFiles.filter((sourceFile) => (
     !sourceFile.isDeclarationFile && !sourceFile.fileName.replaceAll('\\', '/').includes('/node_modules/')
   )));
@@ -261,7 +266,7 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
         index,
       })).filter(({ match, index }) => match?.name === 'Controller' && index === effectiveController);
       for (const method of methodsIncludingDirectBase(
-        statement, checker, projectSources, check, context.limits.maxAstNodes,
+        statement, checker, projectSources, useDefineForClassFields, check, context.limits.maxAstNodes,
       )) {
         await checkpoint();
         const methodDecorators = decorators(method);
