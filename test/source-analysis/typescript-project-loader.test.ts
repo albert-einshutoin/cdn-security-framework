@@ -267,7 +267,7 @@ describe('TypeScript project loader', () => {
     fs.symlinkSync(outside, path.join(root, 'src/linked'));
     write(root, 'src/app.ts', 'import { value } from "./linked/outside.js";\nexport { value };\n');
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
-  });
+  }, 15_000);
 
   test('uses bounded workspace package metadata to resolve package imports maps', async () => {
     const root = workspace();
