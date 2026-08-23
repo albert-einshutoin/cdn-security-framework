@@ -107,11 +107,6 @@ function writeOutput(target: OutputTarget, content: string): void {
     if (!sameFile(fs.statSync('.'), { device: target.parentDevice, inode: target.parentInode })) {
       throw new Error('parent changed');
     }
-    const currentOutput = path.join(fs.realpathSync('.'), target.basename);
-    if (!isPathWithinWorkspace(target.workspaceRoot, currentOutput)
-      || target.protectedDirectories.some((directory) => isPathWithinWorkspace(directory, currentOutput))) {
-      throw new Error('parent moved');
-    }
     descriptor = fs.openSync(
       target.basename,
       fs.constants.O_WRONLY | fs.constants.O_CREAT
@@ -125,6 +120,15 @@ function writeOutput(target: OutputTarget, content: string): void {
       || target.sourceFiles.some((source) => sameFile(opened, source))
       || (target.expected && !sameFile(opened, target.expected))) {
       throw new Error('output changed');
+    }
+    const currentOutput = path.join(fs.realpathSync('.'), target.basename);
+    if (!isPathWithinWorkspace(target.workspaceRoot, currentOutput)
+      || target.protectedDirectories.some((directory) => isPathWithinWorkspace(directory, currentOutput))) {
+      if (!target.expected) {
+        const created = fs.lstatSync(target.basename);
+        if (sameFile(created, { device: opened.dev, inode: opened.ino })) fs.unlinkSync(target.basename);
+      }
+      throw new Error('parent moved');
     }
     fs.ftruncateSync(descriptor, 0);
     fs.writeFileSync(descriptor, content, 'utf8');

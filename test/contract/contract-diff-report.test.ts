@@ -360,6 +360,35 @@ process.chdir = function (directory) {
     expect(parentRetarget.status).toBe(2);
     expect(fs.existsSync(path.join(movedOutputParent, 'report.json'))).toBe(false);
 
+    const openRaceParent = path.join(ok.root, 'open-race');
+    const movedOpenRaceParent = path.join(outsideWorkspace, 'moved-open-race');
+    fs.mkdirSync(openRaceParent);
+    const openRaceOutput = path.join(openRaceParent, 'report.json');
+    fs.writeFileSync(openRaceOutput, 'existing\n');
+    const openRacePreload = path.join(ok.root, 'move-output-parent-before-open.cjs');
+    fs.writeFileSync(openRacePreload, `const fs = require('node:fs');
+const open = fs.openSync;
+const targetParent = fs.realpathSync(process.env.OPEN_RACE_PARENT);
+let swapped = false;
+fs.openSync = function (filePath, flags, ...rest) {
+  if (!swapped && String(filePath) === process.env.OPEN_RACE_BASENAME
+    && fs.realpathSync('.') === targetParent) {
+    swapped = true;
+    fs.renameSync(process.env.OPEN_RACE_PARENT, process.env.MOVED_OPEN_RACE_PARENT);
+    fs.symlinkSync(process.env.MOVED_OPEN_RACE_PARENT, process.env.OPEN_RACE_PARENT);
+  }
+  return open.call(this, filePath, flags, ...rest);
+};
+`);
+    const openRace = run([...common, '--format', 'json', '--out', openRaceOutput, '--force'], {
+      NODE_OPTIONS: `--require=${openRacePreload}`,
+      OPEN_RACE_BASENAME: path.basename(openRaceOutput),
+      OPEN_RACE_PARENT: openRaceParent,
+      MOVED_OPEN_RACE_PARENT: movedOpenRaceParent,
+    });
+    expect(openRace.status).toBe(2);
+    expect(fs.readFileSync(path.join(movedOpenRaceParent, 'report.json'), 'utf8')).toBe('existing\n');
+
     const mismatch = workspace('POST');
     const finding = run([
       '--openapi', mismatch.openapiPath, '--policy', mismatch.policyPath, '--target', 'aws',
