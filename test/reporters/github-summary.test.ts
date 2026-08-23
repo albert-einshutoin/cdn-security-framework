@@ -81,6 +81,7 @@ describe('GitHub Step Summary reporter', () => {
     expect(summary).toContain('| Extra / blocked methods | 1 |');
     expect(summary).toContain('| Authentication / authorization drift | 1 |');
     expect(summary).toContain('| Limit / header / content-type drift | 2 |');
+    expect(summary).toContain('**Coverage warning:** 1 comparison(s) omitted or unknown.');
     expect(summary).toContain('`GET /admin`');
     expect(summary).not.toMatch(/raw-secret|token=|cookie=/i);
     expect(summary).not.toContain('\u202E');
@@ -110,5 +111,10 @@ describe('GitHub Step Summary reporter', () => {
       .toContain('**Gate: failing**');
     expect(renderContractDiffGitHubSummary(input, { failOn: 'never' }))
       .toContain('**Gate: passing**');
+  });
+
+  test('omits the coverage warning when every comparison ran', () => {
+    expect(renderContractDiffGitHubSummary({ ...report(), omittedComparisons: [] }))
+      .not.toContain('Coverage warning');
   });
 });

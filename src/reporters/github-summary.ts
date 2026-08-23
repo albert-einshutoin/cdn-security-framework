@@ -34,6 +34,9 @@ export function renderContractDiffGitHubSummary(
     contractDiffExitCode(report, options.failOn ?? 'error') === 1
       ? `**Gate: failing** (findings crossed the ${options.failOn ?? 'error'} threshold)`
       : '**Gate: passing**',
+    ...(report.omittedComparisons.length > 0
+      ? [`**Coverage warning:** ${report.omittedComparisons.length} comparison(s) omitted or unknown.`]
+      : []),
     '',
     '| Error | Warning | Info | Suppressed | Expired exceptions |',
     '| ---: | ---: | ---: | ---: | ---: |',
