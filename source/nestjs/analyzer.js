@@ -71,15 +71,21 @@ function directBaseClass(node, checker) {
     return symbol?.declarations?.find(typescript_1.default.isClassDeclaration);
 }
 function methodsIncludingDirectBase(node, checker, projectSources) {
+    const propertyKey = ({ name }) => {
+        const value = typescript_1.default.isComputedPropertyName(name) ? name.expression : name;
+        return typescript_1.default.isIdentifier(value) || typescript_1.default.isPrivateIdentifier(value)
+            || typescript_1.default.isStringLiteral(value) || typescript_1.default.isNumericLiteral(value)
+            || typescript_1.default.isNoSubstitutionTemplateLiteral(value) ? value.text : undefined;
+    };
     const allOwn = node.members.filter(typescript_1.default.isMethodDeclaration);
     const concrete = (method) => Boolean(method.body)
         && !method.modifiers?.some(({ kind }) => (kind === typescript_1.default.SyntaxKind.StaticKeyword || kind === typescript_1.default.SyntaxKind.AbstractKeyword));
     const own = allOwn.filter(concrete);
-    const ownNames = new Set(allOwn.map(({ name }) => name.getText()));
+    const ownNames = new Set(own.map(propertyKey).filter((name) => name !== undefined));
     const base = directBaseClass(node, checker);
     const inherited = base && projectSources.has(base.getSourceFile())
         ? base.members.filter(typescript_1.default.isMethodDeclaration).filter(concrete)
-            .filter(({ name }) => !ownNames.has(name.getText()))
+            .filter((method) => !ownNames.has(propertyKey(method) ?? ''))
         : [];
     return [...own, ...inherited];
 }
@@ -200,10 +206,12 @@ async function analyze(context) {
             for (const method of methodsIncludingDirectBase(statement, checker, projectSources)) {
                 await checkpoint();
                 const methodDecorators = decorators(method);
-                const versioned = methodDecorators.some((decorator) => ((0, decorator_symbols_1.nestJsRouteDecorator)(decorator, checker)?.name === 'Version'));
-                for (const methodDecorator of methodDecorators) {
+                const matches = methodDecorators.map((decorator) => (0, decorator_symbols_1.nestJsRouteDecorator)(decorator, checker));
+                const versioned = matches.some((match) => match?.name === 'Version');
+                const effectiveRoute = matches.findIndex((match) => Boolean(match && METHOD_DECORATORS[match.name]));
+                for (const [index, methodDecorator] of methodDecorators.entries()) {
                     await checkpoint();
-                    const match = (0, decorator_symbols_1.nestJsRouteDecorator)(methodDecorator, checker);
+                    const match = matches[index];
                     const methods = match && METHOD_DECORATORS[match.name];
                     if (!match || !methods) {
                         if ((0, decorator_symbols_1.isUnsupportedNestJsDecorator)(methodDecorator, checker)) {
@@ -211,6 +219,8 @@ async function analyze(context) {
                         }
                         continue;
                     }
+                    if (index !== effectiveRoute)
+                        continue;
                     if (versioned) {
                         addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
                         addUnresolved(methods, methodDecorator, 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');

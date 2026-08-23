@@ -134,9 +134,9 @@ describe('NestJS route analyzer', () => {
       'HEAD /users/inherited',
       'GET /users/events',
       'POST /users',
-      'PUT /users/save',
       ...HTTP_METHODS.map((method) => `${method} /users/*`),
     ]));
+    expect(routeKeys).not.toContain('PUT /users/save');
     expect(routeKeys).not.toContain('OPTIONS /users/versioned');
     expect(routeKeys.some((routeKey) => routeKey.endsWith('/fake'))).toBe(false);
     expect(routeKeys.some((routeKey) => routeKey.endsWith('/ignored'))).toBe(false);
@@ -195,7 +195,6 @@ describe('NestJS route analyzer', () => {
       result: {
         contract: { operations: [
           { routeKey: 'POST /items/one' },
-          { routeKey: 'POST /items/three' },
           { routeKey: 'POST /items/two' },
         ] },
         diagnostics: expect.arrayContaining([
@@ -265,8 +264,14 @@ describe('NestJS route analyzer', () => {
         @Get('overload') overloaded(value: string): void;
         overloaded(_value: string) {}
         @Get('inherited') inherited() {}
+        @Get('quoted') quoted() {}
+        @Get('computed') computed() {}
+        @Get('abstract-shadow') abstractShadow() {}
       }
-      @Controller('items') class ItemsController extends BaseController {
+      @Controller('items') abstract class ItemsController extends BaseController {
+        'quoted'() {}
+        ['computed']() {}
+        abstract abstractShadow(): void;
         @Get('query?secret=value') query() {}
         @Get('hash#part') hash() {}
       }
@@ -276,7 +281,10 @@ describe('NestJS route analyzer', () => {
     expect(execution).toMatchObject({
       status: 'success',
       result: {
-        contract: { operations: [{ routeKey: 'GET /items/inherited' }] },
+        contract: { operations: [
+          { routeKey: 'GET /items/abstract-shadow' },
+          { routeKey: 'GET /items/inherited' },
+        ] },
         unresolvedOperations: [
           { methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
           { methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },

@@ -92,17 +92,23 @@ function methodsIncludingDirectBase(
   checker: ts.TypeChecker,
   projectSources: ReadonlySet<ts.SourceFile>,
 ): ts.MethodDeclaration[] {
+  const propertyKey = ({ name }: ts.MethodDeclaration): string | undefined => {
+    const value = ts.isComputedPropertyName(name) ? name.expression : name;
+    return ts.isIdentifier(value) || ts.isPrivateIdentifier(value)
+      || ts.isStringLiteral(value) || ts.isNumericLiteral(value)
+      || ts.isNoSubstitutionTemplateLiteral(value) ? value.text : undefined;
+  };
   const allOwn = node.members.filter(ts.isMethodDeclaration);
   const concrete = (method: ts.MethodDeclaration) => Boolean(method.body)
     && !method.modifiers?.some(({ kind }) => (
       kind === ts.SyntaxKind.StaticKeyword || kind === ts.SyntaxKind.AbstractKeyword
     ));
   const own = allOwn.filter(concrete);
-  const ownNames = new Set(allOwn.map(({ name }) => name.getText()));
+  const ownNames = new Set(own.map(propertyKey).filter((name): name is string => name !== undefined));
   const base = directBaseClass(node, checker);
   const inherited = base && projectSources.has(base.getSourceFile())
     ? base.members.filter(ts.isMethodDeclaration).filter(concrete)
-      .filter(({ name }) => !ownNames.has(name.getText()))
+      .filter((method) => !ownNames.has(propertyKey(method) ?? ''))
     : [];
   return [...own, ...inherited];
 }
@@ -221,12 +227,12 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
       for (const method of methodsIncludingDirectBase(statement, checker, projectSources)) {
         await checkpoint();
         const methodDecorators = decorators(method);
-        const versioned = methodDecorators.some((decorator) => (
-          nestJsRouteDecorator(decorator, checker)?.name === 'Version'
-        ));
-        for (const methodDecorator of methodDecorators) {
+        const matches = methodDecorators.map((decorator) => nestJsRouteDecorator(decorator, checker));
+        const versioned = matches.some((match) => match?.name === 'Version');
+        const effectiveRoute = matches.findIndex((match) => Boolean(match && METHOD_DECORATORS[match.name]));
+        for (const [index, methodDecorator] of methodDecorators.entries()) {
           await checkpoint();
-          const match = nestJsRouteDecorator(methodDecorator, checker);
+          const match = matches[index];
           const methods = match && METHOD_DECORATORS[match.name];
           if (!match || !methods) {
             if (isUnsupportedNestJsDecorator(methodDecorator, checker)) {
@@ -234,6 +240,7 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
             }
             continue;
           }
+          if (index !== effectiveRoute) continue;
           if (versioned) {
             addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
             addUnresolved(methods, methodDecorator, 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');
