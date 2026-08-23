@@ -26,19 +26,6 @@ function isConstDeclaration(declaration: ts.VariableDeclaration): boolean {
   return Boolean(declaration.parent.flags & ts.NodeFlags.Const);
 }
 
-function isConstAssertion(expression: ts.Expression): boolean {
-  let current = expression;
-  while (ts.isParenthesizedExpression(current) || ts.isSatisfiesExpression(current)) current = current.expression;
-  return (ts.isAsExpression(current) || ts.isTypeAssertionExpression(current))
-    && current.type.getText(current.getSourceFile()) === 'const';
-}
-
-function isReadonlyTuple(declaration: ts.VariableDeclaration): boolean {
-  return Boolean(declaration.type && ts.isTypeOperatorNode(declaration.type)
-    && declaration.type.operator === ts.SyntaxKind.ReadonlyKeyword
-    && ts.isTupleTypeNode(declaration.type.type));
-}
-
 export function resolveStaticStrings(
   expression: ts.Expression | undefined,
   checker: ts.TypeChecker,
@@ -90,10 +77,7 @@ export function resolveStaticStrings(
     resolving.add(symbol);
     const result = resolve(declarations[0].initializer, depth + 1);
     resolving.delete(symbol);
-    const immutable = !result?.array || isConstAssertion(declarations[0].initializer)
-      || isReadonlyTuple(declarations[0])
-      || ts.isIdentifier(unwrap(declarations[0].initializer));
-    const safeResult = result && immutable ? result : undefined;
+    const safeResult = result && !result.array ? result : undefined;
     memo.set(symbol, safeResult ?? null);
     return safeResult;
   };

@@ -18,18 +18,6 @@ function unwrap(expression) {
 function isConstDeclaration(declaration) {
     return Boolean(declaration.parent.flags & typescript_1.default.NodeFlags.Const);
 }
-function isConstAssertion(expression) {
-    let current = expression;
-    while (typescript_1.default.isParenthesizedExpression(current) || typescript_1.default.isSatisfiesExpression(current))
-        current = current.expression;
-    return (typescript_1.default.isAsExpression(current) || typescript_1.default.isTypeAssertionExpression(current))
-        && current.type.getText(current.getSourceFile()) === 'const';
-}
-function isReadonlyTuple(declaration) {
-    return Boolean(declaration.type && typescript_1.default.isTypeOperatorNode(declaration.type)
-        && declaration.type.operator === typescript_1.default.SyntaxKind.ReadonlyKeyword
-        && typescript_1.default.isTupleTypeNode(declaration.type.type));
-}
 function resolveStaticStrings(expression, checker, projectSources, options = {}) {
     if (!expression)
         return [''];
@@ -87,10 +75,7 @@ function resolveStaticStrings(expression, checker, projectSources, options = {})
         resolving.add(symbol);
         const result = resolve(declarations[0].initializer, depth + 1);
         resolving.delete(symbol);
-        const immutable = !result?.array || isConstAssertion(declarations[0].initializer)
-            || isReadonlyTuple(declarations[0])
-            || typescript_1.default.isIdentifier(unwrap(declarations[0].initializer));
-        const safeResult = result && immutable ? result : undefined;
+        const safeResult = result && !result.array ? result : undefined;
         memo.set(symbol, safeResult ?? null);
         return safeResult;
     };

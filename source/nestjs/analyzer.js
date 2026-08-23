@@ -95,6 +95,26 @@ function hasInheritedClassVersion(node, checker, projectSources, check, maxSteps
     }
     return false;
 }
+function effectiveControllerInChain(node, checker, projectSources, check, maxSteps) {
+    const seen = new Set();
+    let current = node;
+    let steps = 0;
+    while (current && projectSources.has(current.getSourceFile()) && !seen.has(current)) {
+        check();
+        steps += 1;
+        if (steps > maxSteps)
+            throw new source_analysis_1.SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+        seen.add(current);
+        for (const decorator of decorators(current)) {
+            const classification = (0, decorator_symbols_1.classifyNestJsRouteDecorator)(decorator, checker, check);
+            if (classification.candidate?.name === 'Controller'
+                || classification.candidate?.name === 'Unknown')
+                return { decorator, classification };
+        }
+        current = directBaseClass(current, checker);
+    }
+    return undefined;
+}
 function methodsIncludingBaseChain(node, checker, projectSources, useDefineForClassFields, check, maxSteps) {
     const symbolKey = Symbol('symbol-method-key');
     const unwrapPropertyExpression = (expression) => {
@@ -377,7 +397,6 @@ async function analyze(context) {
             const classDecorators = decorators(statement);
             const classClassifications = classDecorators.map((decorator) => ((0, decorator_symbols_1.classifyNestJsRouteDecorator)(decorator, checker, check)));
             const classCandidates = classClassifications.map(({ candidate }) => candidate);
-            const classMatches = classClassifications.map(({ route }) => route);
             const classVersioned = classCandidates.some((match) => (match?.name === 'Version' || match?.name === 'Unknown'))
                 || hasInheritedClassVersion(statement, checker, projectSources, check, context.limits.maxAstNodes);
             for (const [index, decorator] of classDecorators.entries()) {
@@ -385,14 +404,12 @@ async function analyze(context) {
                     addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', decorator);
                 }
             }
-            const effectiveController = classCandidates.findIndex((match) => (match?.name === 'Controller' || match?.name === 'Unknown'));
-            if (effectiveController === -1)
+            const effectiveController = effectiveControllerInChain(statement, checker, projectSources, check, context.limits.maxAstNodes);
+            if (!effectiveController)
                 continue;
-            const controllers = classDecorators.map((decorator, index) => ({
-                decorator,
-                match: classMatches[index],
-                index,
-            })).filter(({ match, index }) => match?.name === 'Controller' && index === effectiveController);
+            const controllers = effectiveController.classification.route?.name === 'Controller'
+                ? [{ decorator: effectiveController.decorator, match: effectiveController.classification.route }]
+                : [];
             for (const method of methodsIncludingBaseChain(statement, checker, projectSources, useDefineForClassFields, check, context.limits.maxAstNodes)) {
                 await checkpoint();
                 const methodDecorators = decorators(method);

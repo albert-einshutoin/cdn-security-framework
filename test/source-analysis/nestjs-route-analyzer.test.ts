@@ -181,7 +181,7 @@ describe('NestJS route analyzer', () => {
       + unresolvedOperations.reduce((total, candidate) => total + candidate.methods.length, 0));
   }, 15_000);
 
-  test('accepts immutable tuples but rejects mutable paths and property imports', async () => {
+  test('rejects identifier-backed arrays and property imports', async () => {
     const root = workspace(`
       import { Controller, Get, Post, fake } from '@nestjs/common';
       const MUTABLE = ['mutable'];
@@ -198,14 +198,28 @@ describe('NestJS route analyzer', () => {
     expect(execution).toMatchObject({
       status: 'success',
       result: {
-        contract: { operations: [
-          { routeKey: 'POST /items/one' },
-          { routeKey: 'POST /items/two' },
-        ] },
+        contract: { operations: [] },
         diagnostics: expect.arrayContaining([
           expect.objectContaining({ code: 'SOURCE_ANALYZER_DYNAMIC_ROUTE' }),
           expect.objectContaining({ code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
         ]),
+      },
+    });
+  });
+
+  test('does not trust compile-time readonly arrays as runtime-immutable routes', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      const PATHS = ['old'] as const;
+      (PATHS as unknown as string[])[0] = 'new';
+      @Controller(PATHS) class ItemsController { @Get() list() {} }
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success',
+      result: {
+        contract: { operations: [] },
+        diagnostics: [{ code: 'SOURCE_ANALYZER_DYNAMIC_ROUTE' }],
+        unresolvedOperations: [{ methods: ['GET'], reason: 'SOURCE_ANALYZER_DYNAMIC_ROUTE' }],
       },
     });
   });
@@ -350,6 +364,22 @@ describe('NestJS route analyzer', () => {
     `);
     await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
       status: 'success', result: { contract: { operations: [{ routeKey: 'GET /derived/items' }] } },
+    });
+  });
+
+  test('inherits controller path metadata for undecorated subclasses', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      @Controller('base') class BaseController { @Get('inherited') inherited() {} }
+      class DerivedController extends BaseController { @Get('child') child() {} }
+    `);
+    const execution = await runSourceAnalyzer(nestJsSourceAnalyzer, context(root));
+    expect(execution).toMatchObject({
+      status: 'success',
+      result: { contract: { operations: expect.arrayContaining([
+        expect.objectContaining({ routeKey: 'GET /base/inherited' }),
+        expect.objectContaining({ routeKey: 'GET /base/child' }),
+      ]) } },
     });
   });
 

@@ -116,6 +116,34 @@ function hasInheritedClassVersion(
   return false;
 }
 
+function effectiveControllerInChain(
+  node: ts.ClassLikeDeclaration,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+  maxSteps: number,
+): {
+  decorator: ts.Decorator;
+  classification: ReturnType<typeof classifyNestJsRouteDecorator>;
+} | undefined {
+  const seen = new Set<ts.ClassLikeDeclaration>();
+  let current: ts.ClassLikeDeclaration | undefined = node;
+  let steps = 0;
+  while (current && projectSources.has(current.getSourceFile()) && !seen.has(current)) {
+    check();
+    steps += 1;
+    if (steps > maxSteps) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+    seen.add(current);
+    for (const decorator of decorators(current)) {
+      const classification = classifyNestJsRouteDecorator(decorator, checker, check);
+      if (classification.candidate?.name === 'Controller'
+        || classification.candidate?.name === 'Unknown') return { decorator, classification };
+    }
+    current = directBaseClass(current, checker);
+  }
+  return undefined;
+}
+
 function methodsIncludingBaseChain(
   node: ts.ClassLikeDeclaration,
   checker: ts.TypeChecker,
@@ -393,7 +421,6 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
         classifyNestJsRouteDecorator(decorator, checker, check)
       ));
       const classCandidates = classClassifications.map(({ candidate }) => candidate);
-      const classMatches = classClassifications.map(({ route }) => route);
       const classVersioned = classCandidates.some((match) => (
         match?.name === 'Version' || match?.name === 'Unknown'
       ))
@@ -405,15 +432,13 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
           addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', decorator);
         }
       }
-      const effectiveController = classCandidates.findIndex((match) => (
-        match?.name === 'Controller' || match?.name === 'Unknown'
-      ));
-      if (effectiveController === -1) continue;
-      const controllers = classDecorators.map((decorator, index) => ({
-        decorator,
-        match: classMatches[index],
-        index,
-      })).filter(({ match, index }) => match?.name === 'Controller' && index === effectiveController);
+      const effectiveController = effectiveControllerInChain(
+        statement, checker, projectSources, check, context.limits.maxAstNodes,
+      );
+      if (!effectiveController) continue;
+      const controllers = effectiveController.classification.route?.name === 'Controller'
+        ? [{ decorator: effectiveController.decorator, match: effectiveController.classification.route }]
+        : [];
       for (const method of methodsIncludingBaseChain(
         statement, checker, projectSources, useDefineForClassFields, check, context.limits.maxAstNodes,
       )) {
