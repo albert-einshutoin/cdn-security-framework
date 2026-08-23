@@ -433,7 +433,9 @@ function execute(options: DiffSecurityContractsOptions): ContractDiffExecution {
       exceptionDiagnostics = applied.findings.filter(({ category }) => category === 'governance');
       suppressedFindings = applied.suppressedFindings;
       appliedExceptionIds = applied.appliedExceptionIds;
-      exceptionsDigest = semanticDigest({ exceptions, currentDate });
+      exceptionsDigest = semanticDigest({
+        exceptions, currentDate, environment: options.environment ?? null,
+      });
     } catch (error: unknown) {
       if (error instanceof ContractDiffInputError) throw error;
       throw new ContractDiffInputError('CONTRACT_DIFF_EXCEPTIONS_INVALID', 'Finding exceptions input is invalid.');

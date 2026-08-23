@@ -121,12 +121,14 @@ exceptions:
     owner: security-team
     expires_at: 2026-12-01
 `);
-    expect(diffSecurityContracts({ ...options, exceptionsPath }).summary.suppressed).toBe(0);
+    const withoutEnvironment = diffSecurityContracts({ ...options, exceptionsPath });
+    expect(withoutEnvironment.summary.suppressed).toBe(0);
     const hidden = diffSecurityContracts({ ...options, exceptionsPath, environment: 'production' });
     const included = diffSecurityContracts({
       ...options, exceptionsPath, environment: 'production', includeSuppressed: true,
     });
     expect(hidden.summary.suppressed).toBe(1);
+    expect(hidden.inputDigests.exceptions).not.toBe(withoutEnvironment.inputDigests.exceptions);
     expect(hidden.suppressedFindings).toEqual([]);
     expect(included.suppressedFindings).toHaveLength(1);
     expect(included.appliedExceptionIds).toEqual(['EXC-2026-291']);

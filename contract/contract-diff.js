@@ -357,7 +357,9 @@ function execute(options) {
             exceptionDiagnostics = applied.findings.filter(({ category }) => category === 'governance');
             suppressedFindings = applied.suppressedFindings;
             appliedExceptionIds = applied.appliedExceptionIds;
-            exceptionsDigest = semanticDigest({ exceptions, currentDate });
+            exceptionsDigest = semanticDigest({
+                exceptions, currentDate, environment: options.environment ?? null,
+            });
         }
         catch (error) {
             if (error instanceof ContractDiffInputError)
