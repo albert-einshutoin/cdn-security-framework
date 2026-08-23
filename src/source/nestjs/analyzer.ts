@@ -84,17 +84,18 @@ function routePath(controllerPath: string, methodPath: string): { path: string; 
   };
 }
 
-function directBaseClass(node: ts.ClassDeclaration, checker: ts.TypeChecker): ts.ClassDeclaration | undefined {
+function directBaseClass(node: ts.ClassLikeDeclaration, checker: ts.TypeChecker): ts.ClassLikeDeclaration | undefined {
   const expression = node.heritageClauses?.find(({ token }) => token === ts.SyntaxKind.ExtendsKeyword)
     ?.types[0]?.expression;
   if (!expression) return undefined;
   let symbol = checker.getSymbolAtLocation(expression);
   if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-  return symbol?.declarations?.find(ts.isClassDeclaration);
+  return symbol?.declarations?.find(ts.isClassLike)
+    ?? checker.getTypeAtLocation(expression).getSymbol()?.declarations?.find(ts.isClassLike);
 }
 
 function methodsIncludingDirectBase(
-  node: ts.ClassDeclaration,
+  node: ts.ClassLikeDeclaration,
   checker: ts.TypeChecker,
   projectSources: ReadonlySet<ts.SourceFile>,
   check: () => void,
@@ -220,19 +221,14 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
   };
 
   for (const sourceFile of projectSources) {
-    const statements: ts.Statement[] = [...sourceFile.statements].reverse();
-    while (statements.length > 0) {
-      const statement = statements.pop()!;
+    const nodes: ts.Node[] = [...sourceFile.statements].reverse();
+    while (nodes.length > 0) {
+      const statement = nodes.pop()!;
       await checkpoint();
-      if (ts.isModuleDeclaration(statement)) {
-        if (statement.body && ts.isModuleBlock(statement.body)) {
-          statements.push(...[...statement.body.statements].reverse());
-        } else if (statement.body && ts.isModuleDeclaration(statement.body)) {
-          statements.push(statement.body);
-        }
-        continue;
-      }
-      if (!ts.isClassDeclaration(statement)) continue;
+      const children: ts.Node[] = [];
+      ts.forEachChild(statement, (child) => { children.push(child); });
+      nodes.push(...children.reverse());
+      if (!ts.isClassLike(statement)) continue;
       const classDecorators = decorators(statement);
       const classCandidates = classDecorators.map((decorator) => nestJsRouteDecoratorCandidate(decorator, checker));
       const classMatches = classDecorators.map((decorator) => nestJsRouteDecorator(decorator, checker));

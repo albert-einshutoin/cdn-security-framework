@@ -73,7 +73,8 @@ function directBaseClass(node, checker) {
     let symbol = checker.getSymbolAtLocation(expression);
     if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
         symbol = checker.getAliasedSymbol(symbol);
-    return symbol?.declarations?.find(typescript_1.default.isClassDeclaration);
+    return symbol?.declarations?.find(typescript_1.default.isClassLike)
+        ?? checker.getTypeAtLocation(expression).getSymbol()?.declarations?.find(typescript_1.default.isClassLike);
 }
 function methodsIncludingDirectBase(node, checker, projectSources, check, maxSteps) {
     const propertyKey = ({ name }) => {
@@ -194,20 +195,14 @@ async function analyze(context) {
         });
     };
     for (const sourceFile of projectSources) {
-        const statements = [...sourceFile.statements].reverse();
-        while (statements.length > 0) {
-            const statement = statements.pop();
+        const nodes = [...sourceFile.statements].reverse();
+        while (nodes.length > 0) {
+            const statement = nodes.pop();
             await checkpoint();
-            if (typescript_1.default.isModuleDeclaration(statement)) {
-                if (statement.body && typescript_1.default.isModuleBlock(statement.body)) {
-                    statements.push(...[...statement.body.statements].reverse());
-                }
-                else if (statement.body && typescript_1.default.isModuleDeclaration(statement.body)) {
-                    statements.push(statement.body);
-                }
-                continue;
-            }
-            if (!typescript_1.default.isClassDeclaration(statement))
+            const children = [];
+            typescript_1.default.forEachChild(statement, (child) => { children.push(child); });
+            nodes.push(...children.reverse());
+            if (!typescript_1.default.isClassLike(statement))
                 continue;
             const classDecorators = decorators(statement);
             const classCandidates = classDecorators.map((decorator) => (0, decorator_symbols_1.nestJsRouteDecoratorCandidate)(decorator, checker));

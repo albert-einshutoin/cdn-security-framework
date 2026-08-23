@@ -302,6 +302,27 @@ describe('NestJS route analyzer', () => {
     });
   });
 
+  test('discovers controllers declared in executable blocks and class expressions', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      function createModule() {
+        @Controller('factory') class FactoryController { @Get() list() {} }
+        return FactoryController;
+      }
+      const ExpressionController = @Controller('expression') class { @Get() list() {} };
+      const BaseController = class { @Get('inherited') list() {} };
+      @Controller('derived') class DerivedController extends BaseController {}
+      void createModule; void ExpressionController; void DerivedController;
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success', result: { contract: { operations: [
+        { routeKey: 'GET /derived/inherited' },
+        { routeKey: 'GET /expression' },
+        { routeKey: 'GET /factory' },
+      ] } },
+    });
+  });
+
   test('reports unsupported Search routes instead of silently dropping them', async () => {
     const root = workspace(`
       import { Controller, Get, Search } from '@nestjs/common';
