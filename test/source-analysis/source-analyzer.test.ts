@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { afterEach, describe, expect, test } from 'vitest';
 
 import {
@@ -165,6 +166,20 @@ describe('Source Analyzer contract', () => {
     expect(await runSourceAnalyzer(absoluteEvidence, context(root, entrypoint)))
       .toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_INVALID_RESULT' }] });
 
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'source-evidence-outside-'));
+    roots.push(outside);
+    fs.writeFileSync(path.join(outside, 'outside.ts'), 'export {};\n');
+    fs.symlinkSync(outside, path.join(root, 'linked'));
+    const escapedEvidence = plugin({
+      async analyze(ctx) {
+        const valid = await fakeSourceAnalyzer.analyze(ctx);
+        valid.contract.operations[0].provenance[0].uri = 'linked/outside.ts';
+        return valid;
+      },
+    });
+    expect(await runSourceAnalyzer(escapedEvidence, context(root, entrypoint)))
+      .toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_INVALID_RESULT' }] });
+
     for (const provenance of [
       { analyzer: 'spoofed@9.9.9' },
       { capability: 'undeclaredCapability' },
@@ -227,5 +242,27 @@ describe('Source Analyzer contract', () => {
     expect(await runSourceAnalyzer(waiting, context(root, entrypoint, {
       ...DEFAULT_SOURCE_ANALYSIS_LIMITS, timeoutMs: 10,
     }))).toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_TIMEOUT' }] });
+  });
+
+  test('keeps the timeout alive when it is the only event-loop handle', () => {
+    const { root } = workspace();
+    const probe = `
+      const api = require('./source-analysis');
+      const capabilities = Object.fromEntries(api.SOURCE_ANALYZER_CAPABILITY_NAMES
+        .map((name) => [name, { status: 'unsupported', reason: 'Probe capability.' }]));
+      const plugin = {
+        id: 'timeout-probe', version: '1.0.0', languages: ['typescript'], frameworks: ['probe'],
+        capabilities, analyze: () => new Promise(() => {}),
+      };
+      api.runSourceAnalyzer(plugin, {
+        workspaceRoot: process.argv[1], entrypoints: ['src/app.ts'],
+        limits: { ...api.DEFAULT_SOURCE_ANALYSIS_LIMITS, timeoutMs: 10 }, logger: { log() {} },
+      }).then((result) => console.log(result.diagnostics[0].code));
+    `;
+    const result = spawnSync(process.execPath, ['-e', probe, root], {
+      cwd: process.cwd(), encoding: 'utf8', timeout: 2_000,
+    });
+    expect(result.status, result.stderr).toBe(0);
+    expect(result.stdout.trim()).toBe('SOURCE_ANALYZER_TIMEOUT');
   });
 });

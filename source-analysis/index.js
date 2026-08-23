@@ -269,7 +269,8 @@ function validateResult(input, workspaceRoot, plugin) {
     const analyzerIdentity = `${plugin.id}@${plugin.version}`;
     if (contract.operations.some(({ provenance }) => provenance.some((evidence) => (evidence.source !== 'source-ast'
         || evidence.analyzer !== analyzerIdentity
-        || !exports.SOURCE_ANALYZER_CAPABILITY_NAMES.includes(evidence.capability))))) {
+        || !exports.SOURCE_ANALYZER_CAPABILITY_NAMES.includes(evidence.capability)
+        || relativeSourceUri(evidence.uri, workspaceRoot) !== evidence.uri)))) {
         throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
     }
     const diagnostics = candidate.diagnostics.map((value) => {
@@ -363,7 +364,6 @@ async function runSourceAnalyzer(input, context) {
     const onCancel = () => interrupt('SOURCE_ANALYZER_CANCELLED');
     context.cancellationSignal?.addEventListener('abort', onCancel, { once: true });
     const timeout = setTimeout(() => interrupt('SOURCE_ANALYZER_TIMEOUT'), limits.timeoutMs);
-    timeout.unref();
     const safeLogger = {
         log(code) {
             if (exports.SOURCE_ANALYZER_LOG_CODES.includes(code))

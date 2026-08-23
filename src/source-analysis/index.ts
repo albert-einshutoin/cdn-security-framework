@@ -359,6 +359,7 @@ function validateResult(
     evidence.source !== 'source-ast'
     || evidence.analyzer !== analyzerIdentity
     || !SOURCE_ANALYZER_CAPABILITY_NAMES.includes(evidence.capability as SourceAnalyzerCapabilityName)
+    || relativeSourceUri(evidence.uri, workspaceRoot) !== evidence.uri
   )))) {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
   }
@@ -446,7 +447,6 @@ export async function runSourceAnalyzer(
   const onCancel = () => interrupt('SOURCE_ANALYZER_CANCELLED');
   context.cancellationSignal?.addEventListener('abort', onCancel, { once: true });
   const timeout = setTimeout(() => interrupt('SOURCE_ANALYZER_TIMEOUT'), limits.timeoutMs);
-  timeout.unref();
   const safeLogger: SafeAnalyzerLogger = {
     log(code) {
       if (SOURCE_ANALYZER_LOG_CODES.includes(code)) log(context.logger, code);
