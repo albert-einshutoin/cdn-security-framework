@@ -50,12 +50,13 @@ function sameFile(left: fs.Stats, right: { device: number; inode: number }): boo
 function outputTarget(
   options: ContractDiffCliOptions,
   sourceFiles: readonly { device: number; inode: number }[],
+  workspace: { root: string; device: number; inode: number },
 ): OutputTarget {
-  let root: string;
+  const root = workspace.root;
   try {
-    root = fs.realpathSync(options.workspaceRoot);
+    if (!sameFile(fs.statSync(root), workspace)) throw new Error('workspace changed');
   } catch {
-    throw new ContractDiffCliError('CONTRACT_DIFF_OUTPUT_INVALID', 'Workspace root was not found.');
+    throw new ContractDiffCliError('CONTRACT_DIFF_OUTPUT_INVALID', 'Workspace root changed after analysis.');
   }
   const lexical = path.resolve(root, options.out as string);
   let parent: string;
@@ -161,7 +162,7 @@ function run(options: ContractDiffCliOptions): void {
     : formatContractDiffText(execution.report, {
       color: !options.out && Boolean(process.stdout.isTTY) && !('NO_COLOR' in process.env),
     });
-  if (options.out) writeOutput(outputTarget(options, execution.sourceIdentities), output);
+  if (options.out) writeOutput(outputTarget(options, execution.sourceIdentities, execution.workspace), output);
   else process.stdout.write(output);
   process.exitCode = contractDiffExitCode(execution.report, options.failOn as ContractDiffFailOn);
 }

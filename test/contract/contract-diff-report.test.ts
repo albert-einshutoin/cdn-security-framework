@@ -265,6 +265,39 @@ exceptions:
     expect(success.status, success.stderr).toBe(0);
     expect(JSON.parse(success.stdout).schemaVersion).toBe(1);
 
+    const workspaceAlias = path.join(os.tmpdir(), `contract-diff-alias-${path.basename(ok.root)}`);
+    const outsideWorkspace = fs.mkdtempSync(path.join(os.tmpdir(), 'contract-diff-retarget-'));
+    fs.symlinkSync(ok.root, workspaceAlias);
+    const rootRetargetPreload = path.join(ok.root, 'retarget-workspace.cjs');
+    fs.writeFileSync(rootRetargetPreload, `const fs = require('node:fs');
+const Module = require('node:module');
+const load = Module._load;
+Module._load = function (request, parent, isMain) {
+  const value = load.call(this, request, parent, isMain);
+  if (request.includes('contract/contract-diff')) {
+    return { ...value, diffSecurityContractsForCli(options) {
+      const execution = value.diffSecurityContractsForCli(options);
+      fs.unlinkSync(process.env.WORKSPACE_ALIAS);
+      fs.symlinkSync(process.env.WORKSPACE_RETARGET, process.env.WORKSPACE_ALIAS);
+      return execution;
+    } };
+  }
+  return value;
+};
+`);
+    const rootRetargetOutput = 'root-retarget-report.json';
+    const rootRetarget = run([
+      '--openapi', ok.openapiPath, '--policy', ok.policyPath, '--target', 'aws',
+      '--workspace-root', workspaceAlias, '--format', 'json', '--out', rootRetargetOutput,
+    ], {
+      NODE_OPTIONS: `--require=${rootRetargetPreload}`,
+      WORKSPACE_ALIAS: workspaceAlias,
+      WORKSPACE_RETARGET: outsideWorkspace,
+    });
+    expect(rootRetarget.status, rootRetarget.stderr).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(ok.root, rootRetargetOutput), 'utf8')).schemaVersion).toBe(1);
+    expect(fs.existsSync(path.join(outsideWorkspace, rootRetargetOutput))).toBe(false);
+
     const mismatch = workspace('POST');
     const finding = run([
       '--openapi', mismatch.openapiPath, '--policy', mismatch.policyPath, '--target', 'aws',

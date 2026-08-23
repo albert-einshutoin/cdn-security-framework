@@ -83,6 +83,7 @@ export class ContractDiffInputError extends Error {
 interface ContractDiffExecution {
   report: ContractDiffReportV1;
   sourceIdentities: SourceIdentity[];
+  workspace: { root: string; device: number; inode: number };
 }
 
 interface SourceIdentity {
@@ -351,6 +352,7 @@ function execute(options: DiffSecurityContractsOptions): ContractDiffExecution {
     throw new ContractDiffInputError('CONTRACT_DIFF_TARGET_INVALID', 'Target must be aws or cloudflare.');
   }
   const root = workspaceRoot(options.workspaceRoot);
+  const rootStat = fs.statSync(root);
   const openapiPath = inputFile(root, options.openapiPath, 'CONTRACT_DIFF_OPENAPI_INVALID', 'OpenAPI input');
   const policyPath = inputFile(root, options.policyPath, 'CONTRACT_DIFF_POLICY_INVALID', 'Policy input');
   const { inspectOpenApiForCli } = require(path.join(
@@ -445,6 +447,7 @@ function execute(options: DiffSecurityContractsOptions): ContractDiffExecution {
         device === identity.device && inode === identity.inode
       )) === index)
       .sort((left, right) => compareText(left.sourcePath, right.sourcePath)),
+    workspace: { root, device: rootStat.dev, inode: rootStat.ino },
   };
 }
 

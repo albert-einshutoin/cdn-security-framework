@@ -50,6 +50,11 @@ export declare class ContractDiffInputError extends Error {
 interface ContractDiffExecution {
     report: ContractDiffReportV1;
     sourceIdentities: SourceIdentity[];
+    workspace: {
+        root: string;
+        device: number;
+        inode: number;
+    };
 }
 interface SourceIdentity {
     sourcePath: string;

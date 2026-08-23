@@ -295,6 +295,7 @@ function execute(options) {
         throw new ContractDiffInputError('CONTRACT_DIFF_TARGET_INVALID', 'Target must be aws or cloudflare.');
     }
     const root = workspaceRoot(options.workspaceRoot);
+    const rootStat = node_fs_1.default.statSync(root);
     const openapiPath = inputFile(root, options.openapiPath, 'CONTRACT_DIFF_OPENAPI_INVALID', 'OpenAPI input');
     const policyPath = inputFile(root, options.policyPath, 'CONTRACT_DIFF_POLICY_INVALID', 'Policy input');
     const { inspectOpenApiForCli } = require(node_path_1.default.join(packageRoot(), 'openapi', 'inspect'));
@@ -382,6 +383,7 @@ function execute(options) {
         sourceIdentities: sourceIdentities
             .filter((identity, index, values) => values.findIndex(({ device, inode }) => (device === identity.device && inode === identity.inode)) === index)
             .sort((left, right) => compareText(left.sourcePath, right.sourcePath)),
+        workspace: { root, device: rootStat.dev, inode: rootStat.ino },
     };
 }
 function diffSecurityContracts(options) {
