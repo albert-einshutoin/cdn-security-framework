@@ -190,19 +190,27 @@ function originatesFromNestJsCommon(symbol: ts.Symbol | undefined): boolean {
   return result;
 }
 
-function matchesConsumerNestJsCommon(node: ts.Expression, symbol: ts.Symbol | undefined): boolean {
+function matchesConsumerModule(
+  node: ts.Node,
+  symbol: ts.Symbol | undefined,
+  moduleName: string,
+): boolean {
   let resolvedRoot: string | undefined;
   try {
     resolvedRoot = packageRoot(
-      createRequire(node.getSourceFile().fileName).resolve('@nestjs/common'),
-      '@nestjs/common',
+      createRequire(node.getSourceFile().fileName).resolve(moduleName),
+      moduleName,
     );
   } catch { return false; }
   if (!resolvedRoot) return false;
   return Boolean(symbol?.declarations?.some((declaration) => {
-    const targetRoot = packageRoot(declaration.getSourceFile().fileName, '@nestjs/common');
+    const targetRoot = packageRoot(declaration.getSourceFile().fileName, moduleName);
     return targetRoot !== undefined && fs.realpathSync(targetRoot) === fs.realpathSync(resolvedRoot);
   }));
+}
+
+function matchesConsumerNestJsCommon(node: ts.Expression, symbol: ts.Symbol | undefined): boolean {
+  return matchesConsumerModule(node, symbol, '@nestjs/common');
 }
 
 function match(
@@ -278,6 +286,16 @@ export function resolveDecoratorSymbol(
   const call = ts.isCallExpression(decorator.expression) ? decorator.expression : undefined;
   if (!call) return undefined;
   return resolveDecoratorCallSymbol(call, checker, check);
+}
+
+export function resolveBareDecoratorName(
+  decorator: ts.Decorator,
+  checker: ts.TypeChecker,
+  check: () => void,
+): string | undefined {
+  if (ts.isCallExpression(decorator.expression)) return undefined;
+  const symbol = targetSymbol(decorator.expression, checker, check);
+  return !symbol || symbol === UNKNOWN_NESTJS_ROUTE ? undefined : symbol.getName();
 }
 
 export function resolveDecoratorCallSymbol(
@@ -362,4 +380,17 @@ export function isStaticShorthandSymbolFrom(
   return Boolean(declaration?.initializer && isStaticSymbolFrom(
     declaration.initializer, checker, check, moduleName, importedName,
   ));
+}
+
+export function isNestJsUseGlobalGuardsCall(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+): boolean {
+  if (!ts.isPropertyAccessExpression(call.expression)
+    || call.expression.name.text !== 'useGlobalGuards') {
+    return false;
+  }
+  const symbol = checker.getSymbolAtLocation(call.expression.name);
+  return matchesConsumerModule(call.expression, symbol, '@nestjs/common')
+    || matchesConsumerModule(call.expression, symbol, '@nestjs/core');
 }

@@ -264,6 +264,28 @@ describe('NestJS auth metadata analyzer', () => {
     });
   });
 
+  test('recognizes a configured public decorator used without a call', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard, Public } from './auth';
+      @Controller('bare') @UseGuards(JwtAuthGuard)
+      class BareController { @Get() @Public read() {} }
+    `, {
+      'src/auth.ts': `
+        export class JwtAuthGuard {}
+        export const Public: MethodDecorator = () => {};
+      `,
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0]).toMatchObject({
+      exposure: 'public',
+      auth: { mode: 'none', analysis: { explicitPublic: true } },
+    });
+  });
+
   test('accumulates inherited class guards and treats empty method UseGuards as a no-op', async () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
@@ -436,10 +458,31 @@ describe('NestJS auth metadata analyzer', () => {
   test('fails closed on bootstrap global guards and external controller inheritance', async () => {
     const globalRoot = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { NestFactory } from '@nestjs/core';
       import { JwtAuthGuard } from './auth';
-      declare const app: { useGlobalGuards(...guards: unknown[]): void };
+      declare class AppModule {}
+      const app = NestFactory.create(AppModule);
       app.useGlobalGuards(new JwtAuthGuard());
       @Controller('bootstrap') class BootstrapController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+        export declare const NestFactory: { create(module: unknown): INestApplication };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const unrelatedRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare const helper: { useGlobalGuards(...guards: unknown[]): void };
+      helper.useGlobalGuards('not a Nest application');
+      @Controller('helper') class HelperController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }
     `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
@@ -458,12 +501,18 @@ describe('NestJS auth metadata analyzer', () => {
     });
 
     const global = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(globalRoot));
+    const unrelated = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(unrelatedRoot));
     const external = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(externalRoot));
     expect(global.status).toBe('success');
+    expect(unrelated.status).toBe('success');
     expect(external.status).toBe('success');
-    if (global.status !== 'success' || external.status !== 'success') return;
+    if (global.status !== 'success' || unrelated.status !== 'success' || external.status !== 'success') return;
     expect(global.result.contract.operations[0].auth.mode).toBe('unknown');
     expect(global.result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+    expect(unrelated.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(unrelated.result.diagnostics).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
     expect(external.result.contract.operations[0]).toMatchObject({

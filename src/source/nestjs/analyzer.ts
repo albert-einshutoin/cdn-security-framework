@@ -29,8 +29,10 @@ import {
 } from '../typescript/project-loader';
 import {
   classifyNestJsRouteDecorator,
+  isNestJsUseGlobalGuardsCall,
   isStaticShorthandSymbolFrom,
   isStaticSymbolFrom,
+  resolveBareDecoratorName,
   resolveDecoratorCallSymbol,
   resolveDecoratorSymbol,
   resolveStaticSymbolName,
@@ -269,7 +271,17 @@ function ownAuthMetadata(
   };
   for (const decorator of [...decorators(node)].reverse()) {
     const resolved = resolveDecoratorSymbol(decorator, checker, check);
-    if (resolved) applyResolved(resolved, decorator, 0);
+    if (resolved) {
+      applyResolved(resolved, decorator, 0);
+      continue;
+    }
+    const bareName = resolveBareDecoratorName(decorator, checker, check);
+    if (bareName && config.public_decorators.includes(bareName)) {
+      result.publicPresent = true;
+      result.explicitPublic = true;
+      result.publicDynamic = false;
+      result.publicEvidence = [decorator];
+    }
   }
   result.dynamic = result.guardDynamic || result.publicDynamic || result.rolesDynamic;
   return result;
@@ -716,8 +728,7 @@ async function analyze(
     while (nodes.length > 0) {
       const node = nodes.pop()!;
       await checkpoint();
-      if (ts.isCallExpression(node) && ts.isPropertyAccessExpression(node.expression)
-        && node.expression.name.text === 'useGlobalGuards') {
+      if (ts.isCallExpression(node) && isNestJsUseGlobalGuardsCall(node, checker)) {
         if (!globalGuardFound) addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.expression);
         globalGuardFound = true;
       }

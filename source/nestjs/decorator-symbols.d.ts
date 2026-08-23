@@ -20,6 +20,7 @@ export declare function resolveDecoratorSymbol(decorator: ts.Decorator, checker:
     nestJsCommon: boolean;
     trustedNestJsCommon: boolean;
 } | undefined;
+export declare function resolveBareDecoratorName(decorator: ts.Decorator, checker: ts.TypeChecker, check: () => void): string | undefined;
 export declare function resolveDecoratorCallSymbol(call: ts.CallExpression, checker: ts.TypeChecker, check: () => void): {
     name: string;
     call: ts.CallExpression;
@@ -29,3 +30,4 @@ export declare function resolveDecoratorCallSymbol(call: ts.CallExpression, chec
 export declare function resolveStaticSymbolName(expression: ts.Expression, checker: ts.TypeChecker, check: () => void): string | undefined;
 export declare function isStaticSymbolFrom(expression: ts.Expression, checker: ts.TypeChecker, check: () => void, moduleName: string, importedName: string): boolean;
 export declare function isStaticShorthandSymbolFrom(shorthand: ts.ShorthandPropertyAssignment, checker: ts.TypeChecker, check: () => void, moduleName: string, importedName: string): boolean;
+export declare function isNestJsUseGlobalGuardsCall(call: ts.CallExpression, checker: ts.TypeChecker): boolean;

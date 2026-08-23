@@ -207,8 +207,17 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps)
     };
     for (const decorator of [...decorators(node)].reverse()) {
         const resolved = (0, decorator_symbols_1.resolveDecoratorSymbol)(decorator, checker, check);
-        if (resolved)
+        if (resolved) {
             applyResolved(resolved, decorator, 0);
+            continue;
+        }
+        const bareName = (0, decorator_symbols_1.resolveBareDecoratorName)(decorator, checker, check);
+        if (bareName && config.public_decorators.includes(bareName)) {
+            result.publicPresent = true;
+            result.explicitPublic = true;
+            result.publicDynamic = false;
+            result.publicEvidence = [decorator];
+        }
     }
     result.dynamic = result.guardDynamic || result.publicDynamic || result.rolesDynamic;
     return result;
@@ -639,8 +648,7 @@ async function analyze(context, authConfig) {
         while (nodes.length > 0) {
             const node = nodes.pop();
             await checkpoint();
-            if (typescript_1.default.isCallExpression(node) && typescript_1.default.isPropertyAccessExpression(node.expression)
-                && node.expression.name.text === 'useGlobalGuards') {
+            if (typescript_1.default.isCallExpression(node) && (0, decorator_symbols_1.isNestJsUseGlobalGuardsCall)(node, checker)) {
                 if (!globalGuardFound)
                     addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.expression);
                 globalGuardFound = true;
