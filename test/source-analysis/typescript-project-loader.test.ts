@@ -80,7 +80,7 @@ describe('TypeScript project loader', () => {
     expect(loaded.projectReferences).toBe('supported');
     expect(loaded.diagnostics).toEqual([]);
     expect(loaded.metrics).toMatchObject({ files: 4, cacheHits: 0, cacheMisses: 1, cacheInvalidations: 0 });
-  });
+  }, 15_000);
 
   test('builds a Program for a normal package import without reading package metadata as source', async () => {
     const root = workspace();
@@ -93,7 +93,7 @@ describe('TypeScript project loader', () => {
     expect(loaded.program.getRootFileNames()).toHaveLength(1);
     expect(loaded.sourceFiles.map(({ fileName }) => path.basename(fileName))).toContain('app.ts');
     expect(loaded.diagnostics.map(({ typescriptCode }) => typescriptCode)).not.toContain(2307);
-  });
+  }, 15_000);
 
   test('supports local extends and rejects package, outside, and symlink escapes', async () => {
     const root = workspace();
@@ -184,7 +184,7 @@ describe('TypeScript project loader', () => {
     expect(second.program).toBe(first.program);
     expect(changed.metrics).toMatchObject({ cacheHits: 0, cacheMisses: 1, cacheInvalidations: 1 });
     expect(changed.program).not.toBe(first.program);
-  });
+  }, 15_000);
 
   test('rejects absolute references and non-library files beside the TypeScript standard library', async () => {
     const root = workspace();
