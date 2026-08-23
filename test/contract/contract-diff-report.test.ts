@@ -149,6 +149,7 @@ exceptions:
     const text = formatContractDiffText(report);
     expect(text.indexOf('\nERROR ')).toBeLessThan(text.indexOf('\nWARNING '));
     expect(text.indexOf('\nWARNING ')).toBeLessThan(text.indexOf('\nINFO '));
+    expect(text).toContain('\n  policy.request.header_limits:partial\n');
   });
 
   test('parses the verified policy snapshot and wraps native read failures', () => {

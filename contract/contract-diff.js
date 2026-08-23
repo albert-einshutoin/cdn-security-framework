@@ -436,6 +436,7 @@ function formatContractDiffText(report, options = {}) {
         `OpenAPI digest: ${report.inputDigests.openapi}`,
         `Policy digest: ${report.inputDigests.policy}`,
         `Omitted/unknown comparisons: ${report.omittedComparisons.length || 'none'}`,
+        ...report.omittedComparisons.map((comparison) => `  ${terminalText(comparison)}`),
         'Findings:',
         ...(active.length > 0 ? active.flatMap((finding) => findingLines(finding, Boolean(options.color))) : ['(none)']),
         ...(report.suppressedFindings.length > 0 ? [
