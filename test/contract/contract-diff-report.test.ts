@@ -70,6 +70,7 @@ describe('Contract Diff Report v1', () => {
     });
     expect(first.inputDigests.openapi).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(first.inputDigests.policy).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(first.omittedComparisons).toContain('policy.request.header_limits:partial');
     expect(contractDiffExitCode(first, 'error')).toBe(0);
     const ajv = new Ajv({ strict: false });
     ajv.addSchema(JSON.parse(fs.readFileSync(path.join(process.cwd(), 'schemas/finding-v1.schema.json'), 'utf8')));
@@ -172,6 +173,19 @@ exceptions:
     } finally {
       parser.parsePolicyFile = originalParse;
     }
+
+    const inherited = workspace();
+    const parentPolicy = path.join(inherited.root, 'parent.yml');
+    const parentAlias = path.join(inherited.root, 'parent-alias.yml');
+    fs.renameSync(inherited.policyPath, parentPolicy);
+    fs.symlinkSync(path.basename(parentPolicy), parentAlias);
+    fs.writeFileSync(inherited.policyPath, 'extends: parent-alias.yml\nversion: 1\n');
+    expect(diffSecurityContracts({
+      openapiPath: inherited.openapiPath,
+      policyPath: inherited.policyPath,
+      target: 'aws',
+      workspaceRoot: inherited.root,
+    }).summary.total).toBe(0);
 
     const nativeFs = require('node:fs') as typeof fs;
     const originalOpen = nativeFs.openSync;

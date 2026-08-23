@@ -227,7 +227,14 @@ function loadPolicy(root, policyPath) {
     const parsed = parsePolicyFile({
         policyPath,
         readPolicyFile: (absolutePath) => {
-            const content = snapshots.get(node_path_1.default.resolve(absolutePath));
+            let resolvedPath;
+            try {
+                resolvedPath = node_fs_1.default.realpathSync(node_path_1.default.resolve(absolutePath));
+            }
+            catch {
+                throw new Error('policy source is outside the verified snapshot');
+            }
+            const content = snapshots.get(resolvedPath);
             if (content === undefined)
                 throw new Error('policy source is outside the verified snapshot');
             return content;
@@ -279,7 +286,7 @@ function omittedComparisons(capabilities, policyCapabilities) {
             .filter(([, status]) => status !== 'complete')
             .map(([name, status]) => `openapi.${name}:${status}`),
         ...policyCapabilities
-            .filter(({ status }) => status === 'unsupported' || status === 'warning-only')
+            .filter(({ status }) => status !== 'supported')
             .map(({ id, status }) => `policy.${id}:${status}`),
     ].sort(compareText);
 }
