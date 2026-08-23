@@ -101,7 +101,8 @@ describe('TypeScript project loader', () => {
   test('supports local extends and rejects package, outside, and symlink escapes', async () => {
     const root = workspace();
     write(root, 'config/base.json', '{ "compilerOptions": { "strict": true }, "include": ["../src/**/*.ts"] }');
-    write(root, 'tsconfig.json', '{ "extends": "./config/base.json" }');
+    fs.mkdirSync(path.join(root, 'config/base'));
+    write(root, 'tsconfig.json', '{ "extends": "./config/base" }');
     write(root, 'src/app.ts', 'export const value = 1;\n');
     expect((await loadTypeScriptProject(options(root))).program.getRootFileNames()).toHaveLength(1);
 

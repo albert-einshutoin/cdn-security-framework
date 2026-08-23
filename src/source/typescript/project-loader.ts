@@ -414,7 +414,11 @@ function resolveExtendsCandidate(
   }
   const base = path.resolve(configDirectory, specifier);
   for (const candidate of [base, `${base}.json`, path.join(base, 'tsconfig.json')]) {
-    if (fileSystem.exists(candidate)) return candidate;
+    try {
+      if (fileSystem.stat(candidate).isFile()) return candidate;
+    } catch (error) {
+      if (!isMissingPathError(error)) throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+    }
   }
   throw new TypeScriptProjectLoadError('TS_PROJECT_CONFIG_MISSING');
 }
@@ -545,7 +549,10 @@ function createParseHost(
   };
   return {
     useCaseSensitiveFileNames: ts.sys.useCaseSensitiveFileNames,
-    fileExists: (candidate) => safeRealPath(candidate) !== undefined,
+    fileExists: (candidate) => {
+      const safe = safeRealPath(candidate);
+      return safe !== undefined && validatedConfigs.has(safe);
+    },
     readFile: (candidate) => {
       const safe = safeRealPath(candidate);
       return safe ? validatedConfigs.get(safe) : undefined;
