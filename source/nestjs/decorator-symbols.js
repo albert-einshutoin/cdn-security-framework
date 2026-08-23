@@ -4,9 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.NESTJS_ROUTE_DECORATORS = void 0;
-exports.nestJsRouteDecoratorCandidate = nestJsRouteDecoratorCandidate;
-exports.nestJsRouteDecorator = nestJsRouteDecorator;
-exports.isUnsupportedNestJsDecorator = isUnsupportedNestJsDecorator;
+exports.classifyNestJsRouteDecorator = classifyNestJsRouteDecorator;
 const node_module_1 = require("node:module");
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
@@ -15,7 +13,9 @@ exports.NESTJS_ROUTE_DECORATORS = [
     'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'RequestMapping', 'Search', 'Sse', 'Version',
 ];
 const UNKNOWN_NESTJS_ROUTE = Symbol('unknown-nestjs-route');
-function targetSymbol(node, checker) {
+const MAX_COMPOSED_DECORATORS = 256;
+const NESTJS_ORIGIN_CACHE = new WeakMap();
+function targetSymbol(node, checker, check) {
     const unwrap = (expression) => {
         let current = expression;
         while (typescript_1.default.isParenthesizedExpression(current) || typescript_1.default.isAsExpression(current)
@@ -28,6 +28,7 @@ function targetSymbol(node, checker) {
     let current = unwrap(node);
     let selected;
     while (true) {
+        check();
         const location = typescript_1.default.isPropertyAccessExpression(current) ? current.name : current;
         const symbol = selected ?? checker.getSymbolAtLocation(location);
         selected = undefined;
@@ -70,6 +71,23 @@ function targetSymbol(node, checker) {
         current = initializer;
     }
 }
+function composesNestJsRoute(call, checker, check, budget) {
+    return call.arguments.some((argument) => {
+        check();
+        budget.remaining -= 1;
+        if (budget.remaining < 0)
+            return true;
+        if (!typescript_1.default.isCallExpression(argument))
+            return false;
+        const symbol = targetSymbol(argument.expression, checker, check);
+        if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE || !originatesFromNestJsCommon(symbol))
+            return false;
+        const name = symbol.getName();
+        if (exports.NESTJS_ROUTE_DECORATORS.includes(name))
+            return true;
+        return name === 'applyDecorators' && composesNestJsRoute(argument, checker, check, budget);
+    });
+}
 function importDeclaration(declaration) {
     let current = declaration;
     while (current && !typescript_1.default.isImportDeclaration(current))
@@ -108,7 +126,12 @@ function packageRoot(fileName) {
     }
 }
 function originatesFromNestJsCommon(symbol) {
-    return Boolean(symbol?.declarations?.some((declaration) => {
+    if (!symbol)
+        return false;
+    const cached = NESTJS_ORIGIN_CACHE.get(symbol);
+    if (cached !== undefined)
+        return cached;
+    const result = Boolean(symbol.declarations?.some((declaration) => {
         const targetRoot = packageRoot(declaration.getSourceFile().fileName);
         if (!targetRoot)
             return false;
@@ -120,6 +143,8 @@ function originatesFromNestJsCommon(symbol) {
             return false;
         }
     }));
+    NESTJS_ORIGIN_CACHE.set(symbol, result);
+    return result;
 }
 function matchesConsumerNestJsCommon(node, symbol) {
     let resolvedRoot;
@@ -136,39 +161,39 @@ function matchesConsumerNestJsCommon(node, symbol) {
         return targetRoot !== undefined && node_fs_1.default.realpathSync(targetRoot) === node_fs_1.default.realpathSync(resolvedRoot);
     }));
 }
-function match(decorator, checker) {
+function match(decorator, checker, check) {
     if (!typescript_1.default.isCallExpression(decorator.expression))
         return undefined;
-    const symbol = targetSymbol(decorator.expression.expression, checker);
+    const symbol = targetSymbol(decorator.expression.expression, checker, check);
     if (symbol === UNKNOWN_NESTJS_ROUTE) {
         return { name: 'Unknown', call: decorator.expression, trusted: false, nestJsOrigin: true };
     }
     const name = symbol?.getName();
+    if (name === 'applyDecorators' && originatesFromNestJsCommon(symbol)
+        && composesNestJsRoute(decorator.expression, checker, check, { remaining: MAX_COMPOSED_DECORATORS })) {
+        return { name: 'Unknown', call: decorator.expression, trusted: false, nestJsOrigin: true };
+    }
     if (!name || !exports.NESTJS_ROUTE_DECORATORS.includes(name))
         return undefined;
     const nestJsOrigin = originatesFromNestJsCommon(symbol);
     return {
-        name,
+        name: name,
         call: decorator.expression,
         trusted: directNestJsImport(decorator.expression.expression, checker)
             && matchesConsumerNestJsCommon(decorator.expression.expression, symbol),
         nestJsOrigin,
     };
 }
-function nestJsRouteDecoratorCandidate(decorator, checker) {
-    const result = match(decorator, checker);
-    return result?.nestJsOrigin
-        ? { name: result.name, call: result.call, trusted: result.trusted }
-        : undefined;
-}
-function nestJsRouteDecorator(decorator, checker) {
-    const result = match(decorator, checker);
-    return result?.trusted && result.name !== 'Unknown'
-        ? { name: result.name, call: result.call }
-        : undefined;
-}
-function isUnsupportedNestJsDecorator(decorator, checker) {
-    const result = match(decorator, checker);
-    return Boolean(result && (!result.trusted
-        || result.name === 'RequestMapping' || result.name === 'Search' || result.name === 'Version'));
+function classifyNestJsRouteDecorator(decorator, checker, check) {
+    const result = match(decorator, checker, check);
+    return {
+        ...(result?.nestJsOrigin ? {
+            candidate: { name: result.name, call: result.call, trusted: result.trusted },
+        } : {}),
+        ...(result?.trusted && result.name !== 'Unknown' ? {
+            route: { name: result.name, call: result.call },
+        } : {}),
+        unsupported: Boolean(result && (!result.trusted
+            || result.name === 'RequestMapping' || result.name === 'Search' || result.name === 'Version')),
+    };
 }

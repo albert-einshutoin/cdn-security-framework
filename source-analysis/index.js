@@ -279,15 +279,19 @@ function validateResult(input, workspaceRoot, analyzerIdentity, capabilityStatus
             || new Set(item.methods).size !== item.methods.length
             || item.path !== null
             || !['SOURCE_ANALYZER_DYNAMIC_ROUTE', 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'].includes(item.reason ?? '')
+            || !safeText(item.sourceUri)
             || !Number.isInteger(item.line) || (item.line ?? 0) < 1
             || !Number.isInteger(item.column) || (item.column ?? 0) < 1) {
             throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
         }
+        const sourceUri = relativeSourceUri(item.sourceUri, workspaceRoot);
+        if (!sourceUri)
+            throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
         return {
             methods: [...item.methods].sort((left, right) => (methodOrder.get(left) - methodOrder.get(right))),
             path: null,
             reason: item.reason,
-            sourceUri: relativeSourceUri(item.sourceUri, workspaceRoot),
+            sourceUri,
             line: item.line,
             column: item.column,
         };

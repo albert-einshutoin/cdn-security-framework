@@ -39,6 +39,7 @@ function installNestJsCommon(root: string, packageRoot = 'node_modules/@nestjs/c
     export declare function Version(value: string): MethodDecorator & ClassDecorator;
     export declare function RequestMapping(options?: object): MethodDecorator;
     export declare function Search(path?: string): MethodDecorator;
+    export declare function applyDecorators(...decorators: Array<ClassDecorator | MethodDecorator | PropertyDecorator>): MethodDecorator & ClassDecorator;
     export declare enum RequestMethod { GET }
     export declare const fake: { Get: typeof Get };
   `);
@@ -351,6 +352,31 @@ describe('NestJS route analyzer', () => {
     });
   });
 
+  test('reports routes composed with applyDecorators as unresolved', async () => {
+    const root = workspace(`
+      import { applyDecorators, Controller, Get } from '@nestjs/common';
+      function noop(): MethodDecorator { return () => {}; }
+      @Controller('system') class SystemController {
+        @applyDecorators(Get('health')) health() {}
+        @applyDecorators(${Array.from({ length: 256 }, () => 'noop()').join(', ')}, Get('late')) late() {}
+      }
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success',
+      result: {
+        contract: { operations: [] },
+        diagnostics: [
+          { code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
+          { code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
+        ],
+        unresolvedOperations: [
+          { methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
+          { methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' },
+        ],
+      },
+    });
+  });
+
   test('ignores static and abstract methods and rejects URL suffixes', async () => {
     const root = workspace(`
       import { Controller, Get } from '@nestjs/common';
@@ -364,11 +390,13 @@ describe('NestJS route analyzer', () => {
         @Get('inherited') inherited() {}
         @Get('quoted') quoted() {}
         @Get('computed') computed() {}
+        @Get('accessor') accessor() {}
         @Get('abstract-shadow') abstractShadow() {}
       }
       @Controller('items') abstract class ItemsController extends BaseController {
         [QUOTED]() {}
         [COMPUTED]() {}
+        get accessor() { return () => {}; }
         abstract abstractShadow(): void;
         @Get('query?secret=value') query() {}
         @Get('hash#part') hash() {}

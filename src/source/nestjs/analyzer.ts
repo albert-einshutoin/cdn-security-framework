@@ -23,9 +23,7 @@ import {
   type LoadedTypeScriptProject,
 } from '../typescript/project-loader';
 import {
-  isUnsupportedNestJsDecorator,
-  nestJsRouteDecorator,
-  nestJsRouteDecoratorCandidate,
+  classifyNestJsRouteDecorator,
   type NestJsRouteDecoratorCandidate,
   type NestJsRouteDecorator,
 } from './decorator-symbols';
@@ -101,7 +99,8 @@ function methodsIncludingDirectBase(
   check: () => void,
   maxSteps: number,
 ): ts.MethodDeclaration[] {
-  const propertyKey = ({ name }: ts.MethodDeclaration): string | undefined => {
+  const propertyKey = ({ name }: ts.NamedDeclaration): string | undefined => {
+    if (!name) return undefined;
     if (ts.isComputedPropertyName(name)) {
       const values = resolveStaticStrings(name.expression, checker, projectSources, { check, maxSteps });
       return values?.length === 1 ? values[0] : undefined;
@@ -115,7 +114,18 @@ function methodsIncludingDirectBase(
       kind === ts.SyntaxKind.StaticKeyword || kind === ts.SyntaxKind.AbstractKeyword
     ));
   const own = allOwn.filter(concrete);
-  const ownNames = new Set(own.map(propertyKey).filter((name): name is string => name !== undefined));
+  const runtimeMember = (member: ts.ClassElement) => {
+    const modifiers = ts.canHaveModifiers(member) ? ts.getModifiers(member) : undefined;
+    return !modifiers?.some(({ kind }) => (
+      kind === ts.SyntaxKind.StaticKeyword || kind === ts.SyntaxKind.AbstractKeyword
+      || kind === ts.SyntaxKind.DeclareKeyword
+    )) && (ts.isPropertyDeclaration(member) || (
+      (ts.isMethodDeclaration(member) || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member))
+      && Boolean(member.body)
+    ));
+  };
+  const ownNames = new Set(node.members.filter(runtimeMember).map(propertyKey)
+    .filter((name): name is string => name !== undefined));
   const base = directBaseClass(node, checker);
   const inherited = base && projectSources.has(base.getSourceFile())
     ? base.members.filter(ts.isMethodDeclaration).filter(concrete)
@@ -230,11 +240,14 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
       nodes.push(...children.reverse());
       if (!ts.isClassLike(statement)) continue;
       const classDecorators = decorators(statement);
-      const classCandidates = classDecorators.map((decorator) => nestJsRouteDecoratorCandidate(decorator, checker));
-      const classMatches = classDecorators.map((decorator) => nestJsRouteDecorator(decorator, checker));
+      const classClassifications = classDecorators.map((decorator) => (
+        classifyNestJsRouteDecorator(decorator, checker, check)
+      ));
+      const classCandidates = classClassifications.map(({ candidate }) => candidate);
+      const classMatches = classClassifications.map(({ route }) => route);
       const classVersioned = classCandidates.some((match) => match?.name === 'Version');
-      for (const decorator of classDecorators) {
-        if (isUnsupportedNestJsDecorator(decorator, checker)) {
+      for (const [index, decorator] of classDecorators.entries()) {
+        if (classClassifications[index]?.unsupported) {
           addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', decorator);
         }
       }
@@ -252,15 +265,18 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
       )) {
         await checkpoint();
         const methodDecorators = decorators(method);
-        const candidates = methodDecorators.map((decorator) => nestJsRouteDecoratorCandidate(decorator, checker));
-        const matches = methodDecorators.map((decorator) => nestJsRouteDecorator(decorator, checker));
+        const classifications = methodDecorators.map((decorator) => (
+          classifyNestJsRouteDecorator(decorator, checker, check)
+        ));
+        const candidates = classifications.map(({ candidate }) => candidate);
+        const matches = classifications.map(({ route }) => route);
         const versioned = classVersioned || candidates.some((match) => match?.name === 'Version');
         const effectiveRoute = candidates.findIndex((match) => Boolean(match && (
           routeMethods(match.name) || match.name === 'Search'
         )));
         if (effectiveRoute === -1) continue;
-        for (const methodDecorator of methodDecorators) {
-          if (isUnsupportedNestJsDecorator(methodDecorator, checker)) {
+        for (const [index, methodDecorator] of methodDecorators.entries()) {
+          if (classifications[index]?.unsupported) {
             addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
           }
         }

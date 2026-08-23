@@ -11,10 +11,13 @@ export const NESTJS_ROUTE_DECORATORS = [
 export type NestJsRouteDecorator = typeof NESTJS_ROUTE_DECORATORS[number];
 export type NestJsRouteDecoratorCandidate = NestJsRouteDecorator | 'Unknown';
 const UNKNOWN_NESTJS_ROUTE = Symbol('unknown-nestjs-route');
+const MAX_COMPOSED_DECORATORS = 256;
+const NESTJS_ORIGIN_CACHE = new WeakMap<ts.Symbol, boolean>();
 
 function targetSymbol(
   node: ts.Expression,
   checker: ts.TypeChecker,
+  check: () => void,
 ): ts.Symbol | typeof UNKNOWN_NESTJS_ROUTE | undefined {
   const unwrap = (expression: ts.Expression): ts.Expression => {
     let current = expression;
@@ -27,6 +30,7 @@ function targetSymbol(
   let current = unwrap(node);
   let selected: ts.Symbol | undefined;
   while (true) {
+    check();
     const location = ts.isPropertyAccessExpression(current) ? current.name : current;
     const symbol = selected ?? checker.getSymbolAtLocation(location);
     selected = undefined;
@@ -70,6 +74,25 @@ function targetSymbol(
   }
 }
 
+function composesNestJsRoute(
+  call: ts.CallExpression,
+  checker: ts.TypeChecker,
+  check: () => void,
+  budget: { remaining: number },
+): boolean {
+  return call.arguments.some((argument) => {
+    check();
+    budget.remaining -= 1;
+    if (budget.remaining < 0) return true;
+    if (!ts.isCallExpression(argument)) return false;
+    const symbol = targetSymbol(argument.expression, checker, check);
+    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE || !originatesFromNestJsCommon(symbol)) return false;
+    const name = symbol.getName();
+    if (NESTJS_ROUTE_DECORATORS.includes(name as NestJsRouteDecorator)) return true;
+    return name === 'applyDecorators' && composesNestJsRoute(argument, checker, check, budget);
+  });
+}
+
 function importDeclaration(declaration: ts.Declaration): ts.ImportDeclaration | undefined {
   let current: ts.Node | undefined = declaration;
   while (current && !ts.isImportDeclaration(current)) current = current.parent;
@@ -107,7 +130,10 @@ function packageRoot(fileName: string): string | undefined {
 }
 
 function originatesFromNestJsCommon(symbol: ts.Symbol | undefined): boolean {
-  return Boolean(symbol?.declarations?.some((declaration) => {
+  if (!symbol) return false;
+  const cached = NESTJS_ORIGIN_CACHE.get(symbol);
+  if (cached !== undefined) return cached;
+  const result = Boolean(symbol.declarations?.some((declaration) => {
     const targetRoot = packageRoot(declaration.getSourceFile().fileName);
     if (!targetRoot) return false;
     try {
@@ -115,6 +141,8 @@ function originatesFromNestJsCommon(symbol: ts.Symbol | undefined): boolean {
       return resolvedRoot !== undefined && fs.realpathSync(targetRoot) === fs.realpathSync(resolvedRoot);
     } catch { return false; }
   }));
+  NESTJS_ORIGIN_CACHE.set(symbol, result);
+  return result;
 }
 
 function matchesConsumerNestJsCommon(node: ts.Expression, symbol: ts.Symbol | undefined): boolean {
@@ -132,17 +160,24 @@ function matchesConsumerNestJsCommon(node: ts.Expression, symbol: ts.Symbol | un
 function match(
   decorator: ts.Decorator,
   checker: ts.TypeChecker,
+  check: () => void,
 ): { name: NestJsRouteDecoratorCandidate; call: ts.CallExpression; trusted: boolean; nestJsOrigin: boolean } | undefined {
   if (!ts.isCallExpression(decorator.expression)) return undefined;
-  const symbol = targetSymbol(decorator.expression.expression, checker);
+  const symbol = targetSymbol(decorator.expression.expression, checker, check);
   if (symbol === UNKNOWN_NESTJS_ROUTE) {
     return { name: 'Unknown', call: decorator.expression, trusted: false, nestJsOrigin: true };
   }
-  const name = symbol?.getName() as NestJsRouteDecorator | undefined;
-  if (!name || !NESTJS_ROUTE_DECORATORS.includes(name)) return undefined;
+  const name = symbol?.getName();
+  if (name === 'applyDecorators' && originatesFromNestJsCommon(symbol)
+    && composesNestJsRoute(
+      decorator.expression, checker, check, { remaining: MAX_COMPOSED_DECORATORS },
+    )) {
+    return { name: 'Unknown', call: decorator.expression, trusted: false, nestJsOrigin: true };
+  }
+  if (!name || !NESTJS_ROUTE_DECORATORS.includes(name as NestJsRouteDecorator)) return undefined;
   const nestJsOrigin = originatesFromNestJsCommon(symbol);
   return {
-    name,
+    name: name as NestJsRouteDecorator,
     call: decorator.expression,
     trusted: directNestJsImport(decorator.expression.expression, checker)
       && matchesConsumerNestJsCommon(decorator.expression.expression, symbol),
@@ -150,31 +185,24 @@ function match(
   };
 }
 
-export function nestJsRouteDecoratorCandidate(
+export function classifyNestJsRouteDecorator(
   decorator: ts.Decorator,
   checker: ts.TypeChecker,
-): { name: NestJsRouteDecoratorCandidate; call: ts.CallExpression; trusted: boolean } | undefined {
-  const result = match(decorator, checker);
-  return result?.nestJsOrigin
-    ? { name: result.name, call: result.call, trusted: result.trusted }
-    : undefined;
-}
-
-export function nestJsRouteDecorator(
-  decorator: ts.Decorator,
-  checker: ts.TypeChecker,
-): { name: NestJsRouteDecorator; call: ts.CallExpression } | undefined {
-  const result = match(decorator, checker);
-  return result?.trusted && result.name !== 'Unknown'
-    ? { name: result.name, call: result.call }
-    : undefined;
-}
-
-export function isUnsupportedNestJsDecorator(
-  decorator: ts.Decorator,
-  checker: ts.TypeChecker,
-): boolean {
-  const result = match(decorator, checker);
-  return Boolean(result && (!result.trusted
-    || result.name === 'RequestMapping' || result.name === 'Search' || result.name === 'Version'));
+  check: () => void,
+): {
+    candidate?: { name: NestJsRouteDecoratorCandidate; call: ts.CallExpression; trusted: boolean };
+    route?: { name: NestJsRouteDecorator; call: ts.CallExpression };
+    unsupported: boolean;
+  } {
+  const result = match(decorator, checker, check);
+  return {
+    ...(result?.nestJsOrigin ? {
+      candidate: { name: result.name, call: result.call, trusted: result.trusted },
+    } : {}),
+    ...(result?.trusted && result.name !== 'Unknown' ? {
+      route: { name: result.name, call: result.call },
+    } : {}),
+    unsupported: Boolean(result && (!result.trusted
+      || result.name === 'RequestMapping' || result.name === 'Search' || result.name === 'Version')),
+  };
 }

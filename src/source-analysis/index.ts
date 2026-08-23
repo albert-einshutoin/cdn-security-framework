@@ -378,17 +378,20 @@ function validateResult(
       || new Set(item.methods).size !== item.methods.length
       || item.path !== null
       || !['SOURCE_ANALYZER_DYNAMIC_ROUTE', 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'].includes(item.reason ?? '')
+      || !safeText(item.sourceUri)
       || !Number.isInteger(item.line) || (item.line ?? 0) < 1
       || !Number.isInteger(item.column) || (item.column ?? 0) < 1) {
       throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
     }
+    const sourceUri = relativeSourceUri(item.sourceUri, workspaceRoot);
+    if (!sourceUri) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
     return {
       methods: [...item.methods].sort((left, right) => (
         methodOrder.get(left as HttpMethod)! - methodOrder.get(right as HttpMethod)!
       )) as HttpMethod[],
       path: null,
       reason: item.reason as UnresolvedSourceOperationCandidate['reason'],
-      sourceUri: relativeSourceUri(item.sourceUri, workspaceRoot) as string,
+      sourceUri,
       line: item.line as number,
       column: item.column as number,
     };

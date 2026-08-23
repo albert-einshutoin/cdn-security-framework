@@ -78,6 +78,8 @@ function directBaseClass(node, checker) {
 }
 function methodsIncludingDirectBase(node, checker, projectSources, check, maxSteps) {
     const propertyKey = ({ name }) => {
+        if (!name)
+            return undefined;
         if (typescript_1.default.isComputedPropertyName(name)) {
             const values = (0, static_string_resolver_1.resolveStaticStrings)(name.expression, checker, projectSources, { check, maxSteps });
             return values?.length === 1 ? values[0] : undefined;
@@ -89,7 +91,14 @@ function methodsIncludingDirectBase(node, checker, projectSources, check, maxSte
     const concrete = (method) => Boolean(method.body)
         && !method.modifiers?.some(({ kind }) => (kind === typescript_1.default.SyntaxKind.StaticKeyword || kind === typescript_1.default.SyntaxKind.AbstractKeyword));
     const own = allOwn.filter(concrete);
-    const ownNames = new Set(own.map(propertyKey).filter((name) => name !== undefined));
+    const runtimeMember = (member) => {
+        const modifiers = typescript_1.default.canHaveModifiers(member) ? typescript_1.default.getModifiers(member) : undefined;
+        return !modifiers?.some(({ kind }) => (kind === typescript_1.default.SyntaxKind.StaticKeyword || kind === typescript_1.default.SyntaxKind.AbstractKeyword
+            || kind === typescript_1.default.SyntaxKind.DeclareKeyword)) && (typescript_1.default.isPropertyDeclaration(member) || ((typescript_1.default.isMethodDeclaration(member) || typescript_1.default.isGetAccessorDeclaration(member) || typescript_1.default.isSetAccessorDeclaration(member))
+            && Boolean(member.body)));
+    };
+    const ownNames = new Set(node.members.filter(runtimeMember).map(propertyKey)
+        .filter((name) => name !== undefined));
     const base = directBaseClass(node, checker);
     const inherited = base && projectSources.has(base.getSourceFile())
         ? base.members.filter(typescript_1.default.isMethodDeclaration).filter(concrete)
@@ -205,11 +214,12 @@ async function analyze(context) {
             if (!typescript_1.default.isClassLike(statement))
                 continue;
             const classDecorators = decorators(statement);
-            const classCandidates = classDecorators.map((decorator) => (0, decorator_symbols_1.nestJsRouteDecoratorCandidate)(decorator, checker));
-            const classMatches = classDecorators.map((decorator) => (0, decorator_symbols_1.nestJsRouteDecorator)(decorator, checker));
+            const classClassifications = classDecorators.map((decorator) => ((0, decorator_symbols_1.classifyNestJsRouteDecorator)(decorator, checker, check)));
+            const classCandidates = classClassifications.map(({ candidate }) => candidate);
+            const classMatches = classClassifications.map(({ route }) => route);
             const classVersioned = classCandidates.some((match) => match?.name === 'Version');
-            for (const decorator of classDecorators) {
-                if ((0, decorator_symbols_1.isUnsupportedNestJsDecorator)(decorator, checker)) {
+            for (const [index, decorator] of classDecorators.entries()) {
+                if (classClassifications[index]?.unsupported) {
                     addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', decorator);
                 }
             }
@@ -224,14 +234,15 @@ async function analyze(context) {
             for (const method of methodsIncludingDirectBase(statement, checker, projectSources, check, context.limits.maxAstNodes)) {
                 await checkpoint();
                 const methodDecorators = decorators(method);
-                const candidates = methodDecorators.map((decorator) => (0, decorator_symbols_1.nestJsRouteDecoratorCandidate)(decorator, checker));
-                const matches = methodDecorators.map((decorator) => (0, decorator_symbols_1.nestJsRouteDecorator)(decorator, checker));
+                const classifications = methodDecorators.map((decorator) => ((0, decorator_symbols_1.classifyNestJsRouteDecorator)(decorator, checker, check)));
+                const candidates = classifications.map(({ candidate }) => candidate);
+                const matches = classifications.map(({ route }) => route);
                 const versioned = classVersioned || candidates.some((match) => match?.name === 'Version');
                 const effectiveRoute = candidates.findIndex((match) => Boolean(match && (routeMethods(match.name) || match.name === 'Search')));
                 if (effectiveRoute === -1)
                     continue;
-                for (const methodDecorator of methodDecorators) {
-                    if ((0, decorator_symbols_1.isUnsupportedNestJsDecorator)(methodDecorator, checker)) {
+                for (const [index, methodDecorator] of methodDecorators.entries()) {
+                    if (classifications[index]?.unsupported) {
                         addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
                     }
                 }

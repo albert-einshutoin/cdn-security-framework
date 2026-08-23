@@ -186,6 +186,22 @@ describe('Source Analyzer contract', () => {
     expect(await runSourceAnalyzer(absoluteEvidence, context(root, entrypoint)))
       .toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_INVALID_RESULT' }] });
 
+    const missingUnresolvedSource = plugin({
+      async analyze(ctx) {
+        const valid = await fakeSourceAnalyzer.analyze(ctx);
+        return {
+          ...valid,
+          unresolvedOperations: [{
+            methods: ['GET'], path: null, reason: 'SOURCE_ANALYZER_DYNAMIC_ROUTE',
+            sourceUri: undefined, line: 1, column: 1,
+          }],
+          metrics: { ...valid.metrics, operations: 2 },
+        } as never;
+      },
+    });
+    expect(await runSourceAnalyzer(missingUnresolvedSource, context(root, entrypoint)))
+      .toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_INVALID_RESULT' }] });
+
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'source-evidence-outside-'));
     roots.push(outside);
     fs.writeFileSync(path.join(outside, 'outside.ts'), 'export {};\n');
