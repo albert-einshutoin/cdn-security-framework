@@ -614,6 +614,7 @@ async function loadTypeScriptProjectInternal(options) {
     const defaultHost = typescript_1.default.createCompilerHost(compilerOptions, true);
     const defaultLibraryRoot = fileSystem.realpath(node_path_1.default.dirname(typescript_1.default.getDefaultLibFilePath(compilerOptions)));
     const isStandardLibrary = (absolute) => (node_path_1.default.dirname(absolute) === defaultLibraryRoot && /^lib(?:\.[a-z0-9_-]+)*\.d\.ts$/iu.test(node_path_1.default.basename(absolute)));
+    const isStandardLibraryDirectory = (absolute) => (absolute === defaultLibraryRoot || relativeWithin(absolute, defaultLibraryRoot) !== undefined);
     let boundaryViolation = false;
     const workspaceContents = new Map(rootContents);
     const libraryContents = new Map();
@@ -690,6 +691,16 @@ async function loadTypeScriptProjectInternal(options) {
         }
     };
     const resolvedProgramPaths = new Set(rootNames.map((candidate) => node_path_1.default.resolve(candidate)));
+    const isHoistedNodeModulesPath = (candidate) => {
+        let current = node_path_1.default.resolve(candidate);
+        while (node_path_1.default.dirname(current) !== current && node_path_1.default.basename(current) !== 'node_modules') {
+            current = node_path_1.default.dirname(current);
+        }
+        if (node_path_1.default.basename(current) !== 'node_modules')
+            return false;
+        const packageRoot = node_path_1.default.dirname(current);
+        return packageRoot === workspaceRoot || relativeWithin(packageRoot, workspaceRoot) !== undefined;
+    };
     const resolveProgramPath = (candidate) => {
         const lexical = node_path_1.default.resolve(candidate);
         const safe = safeExistingPath(candidate);
@@ -831,8 +842,10 @@ async function loadTypeScriptProjectInternal(options) {
             try {
                 const lexical = node_path_1.default.resolve(candidate);
                 const absolute = fileSystem.realpath(candidate);
-                if ((lexical === workspaceRoot || relativeWithin(workspaceRoot, lexical) !== undefined)
-                    && absolute !== workspaceRoot && relativeWithin(workspaceRoot, absolute) === undefined) {
+                if (((lexical === workspaceRoot || relativeWithin(workspaceRoot, lexical) !== undefined)
+                    && absolute !== workspaceRoot && relativeWithin(workspaceRoot, absolute) === undefined)
+                    || (absolute !== workspaceRoot && relativeWithin(workspaceRoot, absolute) === undefined
+                        && !isStandardLibraryDirectory(absolute) && isHoistedNodeModulesPath(lexical))) {
                     boundaryViolation = true;
                     return false;
                 }

@@ -102,6 +102,23 @@ describe('TypeScript project loader', () => {
     await expect(loadTypeScriptProject(options(root))).resolves.toBeDefined();
   }, 15_000);
 
+  test('rejects hoisted packages outside the workspace', async () => {
+    const standardLibraryRoot = fs.mkdtempSync(path.join(process.cwd(), '.typescript-project-loader-'));
+    roots.push(standardLibraryRoot);
+    write(standardLibraryRoot, 'tsconfig.json', '{ "compilerOptions": { "types": [] }, "files": ["src/app.ts"] }');
+    write(standardLibraryRoot, 'src/app.ts', 'export const value: Promise<number> = Promise.resolve(1);\n');
+    await expect(loadTypeScriptProject(options(standardLibraryRoot))).resolves.toBeDefined();
+
+    const monorepo = workspace();
+    const root = path.join(monorepo, 'packages/app');
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "moduleResolution": "node", "noLib": true }, "files": ["src/app.ts"] }');
+    write(root, 'src/app.ts', 'import { value } from "example";\nexport { value };\n');
+    write(monorepo, 'node_modules/example/package.json', '{ "types": "index.d.ts" }');
+    write(monorepo, 'node_modules/example/index.d.ts', 'export declare const value: number;\n');
+
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+  });
+
   test('supports local extends and rejects package, outside, and symlink escapes', async () => {
     const root = workspace();
     write(root, 'config/base.json', '{ "compilerOptions": { "strict": true }, "include": ["../src/**/*.ts"] }');
