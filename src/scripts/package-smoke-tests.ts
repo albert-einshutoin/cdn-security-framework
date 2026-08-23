@@ -89,6 +89,7 @@ function assertContractDiffWorkflow(filePath: string) {
   assert.strictEqual(workflow.concurrency['cancel-in-progress'], true);
   assert.ok(!content.includes('pull_request_target'));
   assert.ok(!content.includes('${{ secrets.'));
+  assert.ok(!content.includes('npx '));
   assert.ok(content.includes("3) echo 'Unexpected contract diff tool failure.' >&2; exit 3 ;;"));
   const actionRefs = [...content.matchAll(/uses:\s+[^\s@]+@([^\s]+)/g)].map((match) => match[1]);
   assert.ok(actionRefs.length > 0 && actionRefs.every((ref) => /^[a-f0-9]{40}$/.test(ref)));

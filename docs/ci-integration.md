@@ -1,6 +1,6 @@
 # GitHub Actions contract diff
 
-Copy [`examples/github-actions/contract-diff.yml`](../examples/github-actions/contract-diff.yml) to `.github/workflows/contract-diff.yml`, then replace the example `--openapi` and `--policy` paths with repository-owned files. Keep `cdn-security-framework` in `package.json` and use `npm ci`; the example uses `npx --no-install` so CI never downloads an unreviewed package version.
+Copy [`examples/github-actions/contract-diff.yml`](../examples/github-actions/contract-diff.yml) to `.github/workflows/contract-diff.yml`, then replace the example `--openapi` and `--policy` paths with repository-owned files. Keep `cdn-security-framework` in `package.json` and use `npm ci`; the example invokes `./node_modules/.bin/cdn-security` directly so a missing dependency fails instead of downloading an unreviewed package version.
 
 The workflow is safe for fork pull requests: it uses `pull_request`, reads no secrets, has only `contents: read`, does not post comments, cancels obsolete runs, and pins actions to commits. It writes a bounded summary to `$GITHUB_STEP_SUMMARY` and uploads `contract-diff.json`, `cdn-security.sarif`, and `github-summary.md`. The summary excludes messages, evidence, query strings, and request bodies.
 

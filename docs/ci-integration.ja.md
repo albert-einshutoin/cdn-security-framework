@@ -1,6 +1,6 @@
 # GitHub ActionsでのContract Diff
 
-[`examples/github-actions/contract-diff.yml`](../examples/github-actions/contract-diff.yml)を`.github/workflows/contract-diff.yml`へコピーし、例の`--openapi`と`--policy`をリポジトリ内のファイルへ変更します。`cdn-security-framework`は`package.json`で固定し、`npm ci`を使ってください。例は`npx --no-install`を使うため、CI中に未レビューのpackage versionを取得しません。
+[`examples/github-actions/contract-diff.yml`](../examples/github-actions/contract-diff.yml)を`.github/workflows/contract-diff.yml`へコピーし、例の`--openapi`と`--policy`をリポジトリ内のファイルへ変更します。`cdn-security-framework`は`package.json`で固定し、`npm ci`を使ってください。例は`./node_modules/.bin/cdn-security`を直接実行するため、依存が欠落しても未レビューのpackage versionを取得せず失敗します。
 
 workflowはfork PRでも安全です。`pull_request`を使い、secretを読まず、権限は`contents: read`だけで、コメントを投稿せず、古いrunをcancelし、actionをcommit SHAで固定します。`$GITHUB_STEP_SUMMARY`には件数と上位findingだけを出し、`contract-diff.json`、`cdn-security.sarif`、`github-summary.md`をartifactにします。summaryへmessage、evidence、query string、request bodyは出しません。
 

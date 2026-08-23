@@ -35,14 +35,14 @@ jobs:
         run: |
           mkdir -p reports
           set +e
-          npx --no-install cdn-security contract diff \
+          ./node_modules/.bin/cdn-security contract diff \
             --openapi examples/github-actions/fixtures/openapi.yaml \
             --policy examples/github-actions/fixtures/policy.yml \
             --target aws --workspace-root . --format json --fail-on never \
             --out reports/contract-diff.json
           status=$?
           if [ "$status" -eq 0 ]; then
-            npx --no-install cdn-security contract diff \
+            ./node_modules/.bin/cdn-security contract diff \
               --openapi examples/github-actions/fixtures/openapi.yaml \
               --policy examples/github-actions/fixtures/policy.yml \
               --target aws --workspace-root . --format sarif --fail-on never \
@@ -50,7 +50,7 @@ jobs:
             status=$?
           fi
           if [ "$status" -eq 0 ]; then
-            npx --no-install cdn-security contract diff \
+            ./node_modules/.bin/cdn-security contract diff \
               --openapi examples/github-actions/fixtures/openapi.yaml \
               --policy examples/github-actions/fixtures/policy.yml \
               --target aws --workspace-root . --format github-summary --fail-on error \
