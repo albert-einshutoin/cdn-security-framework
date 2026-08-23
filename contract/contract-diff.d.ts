@@ -11,6 +11,7 @@ export interface DiffSecurityContractsOptions {
     workspaceRoot: string;
     exceptionsPath?: string;
     currentDate?: string;
+    environment?: string;
     includeSuppressed?: boolean;
 }
 export interface ContractDiffSummaryV1 {

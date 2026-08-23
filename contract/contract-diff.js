@@ -297,6 +297,10 @@ function execute(options) {
     if (!options || !['aws', 'cloudflare'].includes(options.target)) {
         throw new ContractDiffInputError('CONTRACT_DIFF_TARGET_INVALID', 'Target must be aws or cloudflare.');
     }
+    if (options.environment !== undefined
+        && (!options.environment.trim() || options.environment.length > 128)) {
+        throw new ContractDiffInputError('CONTRACT_DIFF_ENVIRONMENT_INVALID', 'Environment must be 1 to 128 characters.');
+    }
     const root = workspaceRoot(options.workspaceRoot);
     const rootStat = node_fs_1.default.statSync(root);
     const openapiPath = inputFile(root, options.openapiPath, 'CONTRACT_DIFF_OPENAPI_INVALID', 'OpenAPI input');
@@ -346,6 +350,7 @@ function execute(options) {
             const applied = (0, finding_exceptions_1.applyFindingExceptions)(findings, exceptions, {
                 currentDate,
                 target: options.target,
+                environment: options.environment,
                 sourceUri: sourceUri(root, exceptionsPath),
             });
             findings = applied.findings.filter(({ category }) => category !== 'governance');

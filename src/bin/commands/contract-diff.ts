@@ -20,6 +20,7 @@ interface ContractDiffCliOptions {
   target?: string;
   exceptions?: string;
   currentDate?: string;
+  environment?: string;
   format: string;
   out?: string;
   failOn: string;
@@ -167,6 +168,7 @@ function run(options: ContractDiffCliOptions): void {
     target: options.target as 'aws' | 'cloudflare',
     exceptionsPath: options.exceptions,
     currentDate: options.currentDate,
+    environment: options.environment,
     includeSuppressed: options.includeSuppressed,
     workspaceRoot: options.workspaceRoot,
   });
@@ -193,6 +195,7 @@ export function registerContractDiffCommand(program: Command): void {
     .option('--target <target>', 'Target platform: aws | cloudflare')
     .option('--exceptions <path>', 'Finding exceptions YAML file')
     .option('--current-date <date>', 'Exception evaluation date in YYYY-MM-DD')
+    .option('--environment <name>', 'Deployment environment for scoped finding exceptions')
     .option('--format <format>', 'Output format: text | json', 'text')
     .option('--out <path>', 'Write the report inside the workspace')
     .option('--fail-on <severity>', 'Failure threshold: error | warning | never', 'error')

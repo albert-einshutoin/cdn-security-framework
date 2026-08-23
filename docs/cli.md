@@ -42,7 +42,7 @@ npx cdn-security contract diff \
 
 - `--openapi`, `--policy`, and `--target aws|cloudflare` are required. All inputs and local references must stay inside `--workspace-root`.
 - `--format text|json` defaults to text. JSON follows [`contract-diff-report-v1.schema.json`](../schemas/contract-diff-report-v1.schema.json) and excludes timestamps, absolute paths, raw specifications, and secrets.
-- `--exceptions` applies the existing Finding Exception contract. Suppressed findings are counted but omitted unless `--include-suppressed` is set. Use `--current-date YYYY-MM-DD` to pin expiry evaluation for reproducible CI reports.
+- `--exceptions` applies the existing Finding Exception contract. Pass `--environment <name>` when exceptions use `selector.environment`. Suppressed findings are counted but omitted unless `--include-suppressed` is set. Use `--current-date YYYY-MM-DD` to pin expiry evaluation for reproducible CI reports.
 - `--fail-on error|warning|never` defaults to `error`. Exit codes are `0` below threshold, `1` at or above threshold, `2` for input/configuration/safety errors, and `3` for unexpected internal errors.
 - `--out` writes only to an existing directory inside the workspace. Existing regular files require `--force`; policy, build output, and analyzed source files are protected.
 - Text starts with the summary and contains rule, route, expected/actual evidence, and remediation. Color is used only on a TTY and is disabled by `NO_COLOR`.

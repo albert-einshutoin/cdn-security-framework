@@ -42,7 +42,7 @@ npx cdn-security contract diff \
 
 - `--openapi`、`--policy`、`--target aws|cloudflare`は必須です。全inputとlocal refは`--workspace-root`内に限定されます。
 - `--format text|json`の既定はtextです。JSONは[`contract-diff-report-v1.schema.json`](../schemas/contract-diff-report-v1.schema.json)に従い、timestamp、absolute path、raw specification、secretを含みません。
-- `--exceptions`は既存のFinding Exception契約を適用します。抑制件数は常に集計し、`--include-suppressed`指定時だけ抑制Finding本体を含めます。再現可能なCI reportでは`--current-date YYYY-MM-DD`で有効期限の評価日を固定します。
+- `--exceptions`は既存のFinding Exception契約を適用します。`selector.environment`を使う場合は`--environment <name>`を指定します。抑制件数は常に集計し、`--include-suppressed`指定時だけ抑制Finding本体を含めます。再現可能なCI reportでは`--current-date YYYY-MM-DD`で有効期限の評価日を固定します。
 - `--fail-on error|warning|never`の既定は`error`です。終了コードはthreshold未満が`0`、到達時が`1`、input/config/safety errorが`2`、予期しない内部errorが`3`です。
 - `--out`はworkspace内の存在するdirectoryにだけ出力します。既存regular fileの上書きには`--force`が必要で、Policy、build出力、解析したsource fileは保護されます。
 - Textはsummaryから始まり、rule、route、expected/actual、evidence、remediationを表示します。色はTTYでのみ有効で、`NO_COLOR`で無効化できます。

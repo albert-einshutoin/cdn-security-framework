@@ -116,13 +116,16 @@ describe('Contract Diff Report v1', () => {
 exceptions:
   - id: EXC-2026-291
     rule_id: ${finding?.ruleId}
-    selector: { instance_id: ${finding?.instanceId}, target: aws }
+    selector: { instance_id: ${finding?.instanceId}, target: aws, environment: production }
     reason: A temporary compatibility window is approved for this exact finding.
     owner: security-team
     expires_at: 2026-12-01
 `);
-    const hidden = diffSecurityContracts({ ...options, exceptionsPath });
-    const included = diffSecurityContracts({ ...options, exceptionsPath, includeSuppressed: true });
+    expect(diffSecurityContracts({ ...options, exceptionsPath }).summary.suppressed).toBe(0);
+    const hidden = diffSecurityContracts({ ...options, exceptionsPath, environment: 'production' });
+    const included = diffSecurityContracts({
+      ...options, exceptionsPath, environment: 'production', includeSuppressed: true,
+    });
     expect(hidden.summary.suppressed).toBe(1);
     expect(hidden.suppressedFindings).toEqual([]);
     expect(included.suppressedFindings).toHaveLength(1);
@@ -130,7 +133,7 @@ exceptions:
 
     fs.writeFileSync(exceptionsPath, fs.readFileSync(exceptionsPath, 'utf8')
       .replace('2026-12-01', '2026-01-01'));
-    const expired = diffSecurityContracts({ ...options, exceptionsPath });
+    const expired = diffSecurityContracts({ ...options, exceptionsPath, environment: 'production' });
     expect(expired.summary.suppressed).toBe(0);
     expect(expired.exceptionDiagnostics.some(({ ruleId }) => ruleId === 'SC-GOV-001')).toBe(true);
   });
@@ -403,6 +406,7 @@ fs.openSync = function (filePath, flags, ...rest) {
     expect(invalid.stderr).toContain('CONTRACT_DIFF_TARGET_INVALID');
     expect(run(['--openapi']).status).toBe(2);
     expect(run([...common, '--unknown-option']).status).toBe(2);
+    expect(run([...common, '--environment', '']).status).toBe(2);
     expect(run(['--help']).status).toBe(0);
 
     const invalidOpenApi = path.join(ok.root, 'invalid-openapi.yaml');
