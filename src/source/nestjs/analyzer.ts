@@ -92,6 +92,30 @@ function directBaseClass(node: ts.ClassLikeDeclaration, checker: ts.TypeChecker)
     ?? checker.getTypeAtLocation(expression).getSymbol()?.declarations?.find(ts.isClassLike);
 }
 
+function hasInheritedClassVersion(
+  node: ts.ClassLikeDeclaration,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+  maxSteps: number,
+): boolean {
+  const seen = new Set<ts.ClassLikeDeclaration>();
+  let current = directBaseClass(node, checker);
+  let steps = 0;
+  while (current && projectSources.has(current.getSourceFile()) && !seen.has(current)) {
+    check();
+    steps += 1;
+    if (steps > maxSteps) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+    seen.add(current);
+    if (decorators(current).some((decorator) => {
+      const name = classifyNestJsRouteDecorator(decorator, checker, check).candidate?.name;
+      return name === 'Version' || name === 'Unknown';
+    })) return true;
+    current = directBaseClass(current, checker);
+  }
+  return false;
+}
+
 function methodsIncludingDirectBase(
   node: ts.ClassLikeDeclaration,
   checker: ts.TypeChecker,
@@ -250,7 +274,12 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
       ));
       const classCandidates = classClassifications.map(({ candidate }) => candidate);
       const classMatches = classClassifications.map(({ route }) => route);
-      const classVersioned = classCandidates.some((match) => match?.name === 'Version');
+      const classVersioned = classCandidates.some((match) => (
+        match?.name === 'Version' || match?.name === 'Unknown'
+      ))
+        || hasInheritedClassVersion(
+          statement, checker, projectSources, check, context.limits.maxAstNodes,
+        );
       for (const [index, decorator] of classDecorators.entries()) {
         if (classClassifications[index]?.unsupported) {
           addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', decorator);
@@ -275,7 +304,9 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
         ));
         const candidates = classifications.map(({ candidate }) => candidate);
         const matches = classifications.map(({ route }) => route);
-        const versioned = classVersioned || candidates.some((match) => match?.name === 'Version');
+        const versioned = classVersioned || candidates.some((match) => (
+          match?.name === 'Version' || match?.name === 'Unknown'
+        ));
         const effectiveRoute = candidates.findIndex((match) => Boolean(match && (
           routeMethods(match.name) || match.name === 'Search'
         )));

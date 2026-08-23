@@ -269,12 +269,26 @@ describe('NestJS route analyzer', () => {
 
   test('fails closed for class versions and RequestMapping routes', async () => {
     const root = workspace(`
-      import { Controller, Get, RequestMapping, RequestMethod, Version } from '@nestjs/common';
+      import { applyDecorators, Controller, Get, RequestMapping, RequestMethod, Version } from '@nestjs/common';
       @Version('1') @Controller('users')
       class UsersController { @Get('list') list() {} }
       @Controller('system')
       class SystemController {
         @RequestMapping({ path: 'health', method: RequestMethod.GET }) health() {}
+      }
+      @Version('2')
+      class VersionedBase { @Get('inherited') inherited() {} }
+      @Controller('derived')
+      class DerivedController extends VersionedBase {}
+      @applyDecorators(Version('3'))
+      class ComposedVersionBase { @Get('inherited') inherited() {} }
+      @Controller('composed')
+      class ComposedDerivedController extends ComposedVersionBase {}
+      @Controller('own-composed') @applyDecorators(Version('4'))
+      class OwnComposedController { @Get('list') list() {} }
+      @Controller('method-composed')
+      class MethodComposedController {
+        @Get('list') @applyDecorators(Version('5')) list() {}
       }
     `);
 

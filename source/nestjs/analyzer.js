@@ -76,6 +76,25 @@ function directBaseClass(node, checker) {
     return symbol?.declarations?.find(typescript_1.default.isClassLike)
         ?? checker.getTypeAtLocation(expression).getSymbol()?.declarations?.find(typescript_1.default.isClassLike);
 }
+function hasInheritedClassVersion(node, checker, projectSources, check, maxSteps) {
+    const seen = new Set();
+    let current = directBaseClass(node, checker);
+    let steps = 0;
+    while (current && projectSources.has(current.getSourceFile()) && !seen.has(current)) {
+        check();
+        steps += 1;
+        if (steps > maxSteps)
+            throw new source_analysis_1.SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+        seen.add(current);
+        if (decorators(current).some((decorator) => {
+            const name = (0, decorator_symbols_1.classifyNestJsRouteDecorator)(decorator, checker, check).candidate?.name;
+            return name === 'Version' || name === 'Unknown';
+        }))
+            return true;
+        current = directBaseClass(current, checker);
+    }
+    return false;
+}
 function methodsIncludingDirectBase(node, checker, projectSources, useDefineForClassFields, check, maxSteps) {
     const propertyKey = ({ name }) => {
         if (!name)
@@ -221,7 +240,8 @@ async function analyze(context) {
             const classClassifications = classDecorators.map((decorator) => ((0, decorator_symbols_1.classifyNestJsRouteDecorator)(decorator, checker, check)));
             const classCandidates = classClassifications.map(({ candidate }) => candidate);
             const classMatches = classClassifications.map(({ route }) => route);
-            const classVersioned = classCandidates.some((match) => match?.name === 'Version');
+            const classVersioned = classCandidates.some((match) => (match?.name === 'Version' || match?.name === 'Unknown'))
+                || hasInheritedClassVersion(statement, checker, projectSources, check, context.limits.maxAstNodes);
             for (const [index, decorator] of classDecorators.entries()) {
                 if (classClassifications[index]?.unsupported) {
                     addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', decorator);
@@ -241,7 +261,7 @@ async function analyze(context) {
                 const classifications = methodDecorators.map((decorator) => ((0, decorator_symbols_1.classifyNestJsRouteDecorator)(decorator, checker, check)));
                 const candidates = classifications.map(({ candidate }) => candidate);
                 const matches = classifications.map(({ route }) => route);
-                const versioned = classVersioned || candidates.some((match) => match?.name === 'Version');
+                const versioned = classVersioned || candidates.some((match) => (match?.name === 'Version' || match?.name === 'Unknown'));
                 const effectiveRoute = candidates.findIndex((match) => Boolean(match && (routeMethods(match.name) || match.name === 'Search')));
                 if (effectiveRoute === -1)
                     continue;
