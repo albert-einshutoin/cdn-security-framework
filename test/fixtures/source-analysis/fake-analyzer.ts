@@ -29,7 +29,7 @@ export const fakeSourceAnalyzer: SourceAnalyzerPlugin = {
       contract: createSecurityContract({
         source: 'source-ast',
         capabilities: {
-          routes: 'complete', parameters: 'unsupported', requestBodies: 'unsupported', authentication: 'partial',
+          routes: 'partial', parameters: 'unsupported', requestBodies: 'unsupported', authentication: 'partial',
         },
         operations: [{
           method: 'GET', path: '/health', exposure: 'unknown',

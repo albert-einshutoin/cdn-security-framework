@@ -68,8 +68,13 @@ host; dynamic plugin loading and that host are outside this issue.
 A successful result contains only a `SecurityContractV1`, analyzer diagnostics,
 and bounded metrics. The wrapper rebuilds the contract with
 `createSecurityContract()`, requires `source: source-ast`, and verifies metric
-counts. This removes unknown framework AST fields and rejects invalid routes,
+counts. A `complete` routes or authentication claim requires every corresponding
+analyzer capability to be `supported`; source parameter and request-body shape
+extraction cannot be `complete` in this contract version. This removes unknown framework AST fields and rejects invalid routes,
 absolute or escaping provenance URIs, query fragments, and secret-like values.
+
+Lifecycle events (`STARTED`, `COMPLETED`, and `FAILED`) are wrapper-owned. Calls
+made through the logger supplied to an analyzer cannot emit them early or twice.
 
 Analyzer diagnostics are separate from security Findings. They contain a
 stable code, a framework-owned safe message, an optional workspace-relative

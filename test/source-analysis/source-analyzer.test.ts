@@ -229,6 +229,67 @@ describe('Source Analyzer contract', () => {
     expect(execution.status).toBe('success');
   });
 
+  test('rejects each overclaimed contract capability independently', async () => {
+    const { root, entrypoint } = workspace();
+    for (const capability of ['routes', 'parameters', 'requestBodies', 'authentication'] as const) {
+      const overclaiming = plugin({
+        async analyze(ctx) {
+          const valid = await fakeSourceAnalyzer.analyze(ctx);
+          return {
+            ...valid,
+            contract: {
+              ...valid.contract,
+              capabilities: { ...valid.contract.capabilities, [capability]: 'complete' },
+              operations: [],
+            },
+            metrics: { ...valid.metrics, operations: 0 },
+          };
+        },
+      });
+      expect(await runSourceAnalyzer(overclaiming, context(root, entrypoint)), capability)
+        .toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_INVALID_RESULT' }] });
+    }
+
+    const supported = Object.fromEntries(Object.entries(fakeSourceAnalyzer.capabilities).map(([name, value]) => (
+      [name, { ...value, status: 'supported' }]
+    ))) as SourceAnalyzerPlugin['capabilities'];
+    for (const capability of ['routes', 'authentication'] as const) {
+      const complete = plugin({
+        capabilities: supported,
+        async analyze(ctx) {
+          const valid = await fakeSourceAnalyzer.analyze(ctx);
+          return {
+            ...valid,
+            contract: {
+              ...valid.contract,
+              capabilities: { ...valid.contract.capabilities, [capability]: 'complete' },
+              operations: [],
+            },
+            metrics: { ...valid.metrics, operations: 0 },
+          };
+        },
+      });
+      expect((await runSourceAnalyzer(complete, context(root, entrypoint))).status, capability).toBe('success');
+    }
+  });
+
+  test('reserves all lifecycle events for the wrapper', async () => {
+    const { root, entrypoint } = workspace();
+    const events: string[] = [];
+    const emitting = plugin({
+      async analyze(ctx) {
+        ctx.logger.log('SOURCE_ANALYZER_STARTED');
+        ctx.logger.log('SOURCE_ANALYZER_COMPLETED');
+        ctx.logger.log('SOURCE_ANALYZER_FAILED');
+        return fakeSourceAnalyzer.analyze(ctx);
+      },
+    });
+    expect((await runSourceAnalyzer(emitting, {
+      ...context(root, entrypoint), logger: { log: (event) => events.push(event) },
+    })).status).toBe('success');
+    expect(events).toEqual(['SOURCE_ANALYZER_STARTED', 'SOURCE_ANALYZER_COMPLETED']);
+  });
+
   test('handles cancellation before and during analysis without treating it as an empty contract', async () => {
     const { root, entrypoint } = workspace();
     const before = new AbortController();

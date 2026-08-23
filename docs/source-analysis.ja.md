@@ -58,9 +58,14 @@ event loopへ制御を返し、cancellation signalを監視する必要があり
 
 成功Resultに含められるのは、`SecurityContractV1`、Analyzer Diagnostic、制限済み
 Metricsだけです。Wrapperは`createSecurityContract()`でContractを再構築し、
-`source: source-ast`とmetric countを検証します。これにより未知のFramework AST fieldを
+`source: source-ast`とmetric countを検証します。RouteまたはAuthenticationを`complete`と
+するには対応するAnalyzer Capabilityがすべて`supported`である必要があります。このVersionでは
+source parameterとrequest-body shapeの抽出を`complete`にできません。これにより未知のFramework AST fieldを
 除去し、不正Route、absolute/escape provenance URI、query fragment、secret-like valueを
 拒否します。
+
+Lifecycle event（`STARTED`、`COMPLETED`、`FAILED`）はWrapperだけが発行します。Analyzerへ
+渡すLoggerから早期発行または重複発行することはできません。
 
 Analyzer DiagnosticはSecurity Findingと分離します。安定code、Framework固定の
 safe message、任意のworkspace-relative source URI、正のline/columnだけを保持します。
