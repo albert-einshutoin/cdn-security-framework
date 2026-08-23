@@ -13,6 +13,7 @@ import {
   type ContractDiffFailOn,
 } from '../../contract/contract-diff';
 import { isPathWithinWorkspace, OpenApiAnalysisError } from '../../openapi';
+import { renderContractDiffGitHubSummary } from '../../reporters/github-summary';
 import { renderFindingsAsSarif } from '../../reporters/sarif';
 
 interface ContractDiffCliOptions {
@@ -148,8 +149,11 @@ function required(value: string | undefined, name: string): string {
 }
 
 function run(options: ContractDiffCliOptions): void {
-  if (!['text', 'json', 'sarif'].includes(options.format)) {
-    throw new ContractDiffCliError('CONTRACT_DIFF_FORMAT_INVALID', '--format must be text, json, or sarif.');
+  if (!['text', 'json', 'sarif', 'github-summary'].includes(options.format)) {
+    throw new ContractDiffCliError(
+      'CONTRACT_DIFF_FORMAT_INVALID',
+      '--format must be text, json, sarif, or github-summary.',
+    );
   }
   if (!CONTRACT_DIFF_FAIL_ON.includes(options.failOn as ContractDiffFailOn)) {
     throw new ContractDiffCliError('CONTRACT_DIFF_FAIL_ON_INVALID', '--fail-on must be error, warning, or never.');
@@ -175,9 +179,13 @@ function run(options: ContractDiffCliOptions): void {
   });
   const output = options.format === 'sarif'
     ? `${JSON.stringify(renderFindingsAsSarif(execution.report), null, 2)}\n`
-    : options.format === 'json' ? formatContractDiffJson(execution.report) : formatContractDiffText(execution.report, {
-      color: !options.out && Boolean(process.stdout.isTTY) && !('NO_COLOR' in process.env),
-    });
+    : options.format === 'github-summary'
+      ? renderContractDiffGitHubSummary(execution.report, {
+        failOn: options.failOn as ContractDiffFailOn,
+      })
+      : options.format === 'json' ? formatContractDiffJson(execution.report) : formatContractDiffText(execution.report, {
+        color: !options.out && Boolean(process.stdout.isTTY) && !('NO_COLOR' in process.env),
+      });
   if (options.out) writeOutput(outputTarget(options, execution.sourceIdentities, execution.workspace), output);
   else process.stdout.write(output);
   process.exitCode = contractDiffExitCode(execution.report, options.failOn as ContractDiffFailOn);
@@ -197,7 +205,7 @@ export function registerContractDiffCommand(program: Command): void {
     .option('--exceptions <path>', 'Finding exceptions YAML file')
     .option('--current-date <date>', 'Exception evaluation date in YYYY-MM-DD')
     .option('--environment <name>', 'Deployment environment for scoped finding exceptions')
-    .option('--format <format>', 'Output format: text | json | sarif', 'text')
+    .option('--format <format>', 'Output format: text | json | sarif | github-summary', 'text')
     .option('--out <path>', 'Write the report inside the workspace')
     .option('--fail-on <severity>', 'Failure threshold: error | warning | never', 'error')
     .option('--include-suppressed', 'Include suppressed findings in the report')
