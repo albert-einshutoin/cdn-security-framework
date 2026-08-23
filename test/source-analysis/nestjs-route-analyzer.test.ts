@@ -295,6 +295,20 @@ describe('NestJS route analyzer', () => {
         diagnostics: [{ code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }],
       },
     });
+
+    const reExportRoot = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      import { Search } from './wrapper';
+      @Controller('items') class ItemsController { @Search('actual') @Get('reported') search() {} }
+    `);
+    write(reExportRoot, 'src/wrapper.ts', "export { Search } from '@nestjs/common';\n");
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(reExportRoot))).resolves.toMatchObject({
+      status: 'success',
+      result: {
+        contract: { operations: [] },
+        diagnostics: [{ code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }],
+      },
+    });
   });
 
   test('ignores static and abstract methods and rejects URL suffixes', async () => {
@@ -391,16 +405,39 @@ describe('NestJS route analyzer', () => {
     });
 
     const reExportRoot = workspace(`
-      import { Controller, Get } from './wrapper';
+      import { Get } from '@nestjs/common';
+      import { Controller } from './wrapper';
       @Controller('items') class ItemsController { @Get() one() {} }
     `);
-    write(reExportRoot, 'src/wrapper.ts', "export { Controller, Get } from '@nestjs/common';\n");
+    write(reExportRoot, 'src/wrapper.ts', "export { Controller } from '@nestjs/common';\n");
     const reExported = await runSourceAnalyzer(nestJsSourceAnalyzer, context(reExportRoot));
     expect(reExported).toMatchObject({
       status: 'success',
       result: {
         contract: { operations: [] },
         diagnostics: [{ code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }],
+        unresolvedOperations: [{ methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }],
+      },
+    });
+
+    const mixedReExportRoot = workspace(`
+      import { Controller, Post } from '@nestjs/common';
+      import { Get, RequestMapping } from './wrapper';
+      @Controller('items') class ItemsController {
+        @Get('actual') @Post('reported') one() {}
+        @RequestMapping({ path: 'mapped' }) two() {}
+      }
+    `);
+    write(mixedReExportRoot, 'src/wrapper.ts', "export { Get, RequestMapping } from '@nestjs/common';\n");
+    const mixedReExported = await runSourceAnalyzer(nestJsSourceAnalyzer, context(mixedReExportRoot));
+    expect(mixedReExported).toMatchObject({
+      status: 'success',
+      result: {
+        contract: { operations: [] },
+        unresolvedOperations: expect.arrayContaining([
+          expect.objectContaining({ methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+          expect.objectContaining({ methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+        ]),
       },
     });
 

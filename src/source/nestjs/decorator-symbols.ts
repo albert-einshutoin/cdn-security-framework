@@ -74,17 +74,28 @@ function originatesFromNestJsCommon(
 function match(
   decorator: ts.Decorator,
   checker: ts.TypeChecker,
-): { name: NestJsRouteDecorator; call: ts.CallExpression; trusted: boolean } | undefined {
+): { name: NestJsRouteDecorator; call: ts.CallExpression; trusted: boolean; nestJsOrigin: boolean } | undefined {
   if (!ts.isCallExpression(decorator.expression)) return undefined;
   const symbol = targetSymbol(decorator.expression.expression, checker);
   const name = symbol?.getName() as NestJsRouteDecorator | undefined;
   if (!name || !NESTJS_ROUTE_DECORATORS.includes(name)) return undefined;
+  const nestJsOrigin = originatesFromNestJsCommon(decorator.expression.expression, symbol, checker);
   return {
     name,
     call: decorator.expression,
-    trusted: directNestJsImport(decorator.expression.expression, checker)
-      && originatesFromNestJsCommon(decorator.expression.expression, symbol, checker),
+    trusted: directNestJsImport(decorator.expression.expression, checker) && nestJsOrigin,
+    nestJsOrigin,
   };
+}
+
+export function nestJsRouteDecoratorCandidate(
+  decorator: ts.Decorator,
+  checker: ts.TypeChecker,
+): { name: NestJsRouteDecorator; call: ts.CallExpression; trusted: boolean } | undefined {
+  const result = match(decorator, checker);
+  return result?.nestJsOrigin
+    ? { name: result.name, call: result.call, trusted: result.trusted }
+    : undefined;
 }
 
 export function nestJsRouteDecorator(

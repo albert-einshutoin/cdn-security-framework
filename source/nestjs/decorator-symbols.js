@@ -4,6 +4,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 };
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.NESTJS_ROUTE_DECORATORS = void 0;
+exports.nestJsRouteDecoratorCandidate = nestJsRouteDecoratorCandidate;
 exports.nestJsRouteDecorator = nestJsRouteDecorator;
 exports.isUnsupportedNestJsDecorator = isUnsupportedNestJsDecorator;
 const node_module_1 = require("node:module");
@@ -83,12 +84,19 @@ function match(decorator, checker) {
     const name = symbol?.getName();
     if (!name || !exports.NESTJS_ROUTE_DECORATORS.includes(name))
         return undefined;
+    const nestJsOrigin = originatesFromNestJsCommon(decorator.expression.expression, symbol, checker);
     return {
         name,
         call: decorator.expression,
-        trusted: directNestJsImport(decorator.expression.expression, checker)
-            && originatesFromNestJsCommon(decorator.expression.expression, symbol, checker),
+        trusted: directNestJsImport(decorator.expression.expression, checker) && nestJsOrigin,
+        nestJsOrigin,
     };
+}
+function nestJsRouteDecoratorCandidate(decorator, checker) {
+    const result = match(decorator, checker);
+    return result?.nestJsOrigin
+        ? { name: result.name, call: result.call, trusted: result.trusted }
+        : undefined;
 }
 function nestJsRouteDecorator(decorator, checker) {
     const result = match(decorator, checker);
