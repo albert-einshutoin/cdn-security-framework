@@ -6,6 +6,7 @@ import {
   type SecurityContractInputV1,
   type SecurityContractV1,
 } from '../contract/security-ir';
+import { HTTP_METHODS, type HttpMethod } from '../contract/canonical-route';
 
 export const SOURCE_ANALYZER_CAPABILITY_NAMES = [
   'routePaths',
@@ -113,7 +114,17 @@ export interface SourceAnalysisContext {
 export interface SourceAnalysisResult {
   contract: SecurityContractV1;
   diagnostics: AnalyzerDiagnostic[];
+  unresolvedOperations: UnresolvedSourceOperationCandidate[];
   metrics: SourceAnalysisMetrics;
+}
+
+export interface UnresolvedSourceOperationCandidate {
+  methods: HttpMethod[];
+  path: null;
+  reason: 'SOURCE_ANALYZER_DYNAMIC_ROUTE' | 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR';
+  sourceUri: string;
+  line: number;
+  column: number;
 }
 
 export interface SourceAnalyzerPlugin {
@@ -345,7 +356,7 @@ function validateResult(
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
   }
   const candidate = input as Partial<SourceAnalysisResult>;
-  if (!Array.isArray(candidate.diagnostics)) {
+  if (!Array.isArray(candidate.diagnostics) || !Array.isArray(candidate.unresolvedOperations)) {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
   }
   const metrics = validateMetrics(candidate.metrics);
@@ -355,7 +366,40 @@ function validateResult(
   } catch {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
   }
-  if (contract.source !== 'source-ast' || metrics.operations !== contract.operations.length
+  const methodOrder = new Map(HTTP_METHODS.map((method, index) => [method, index]));
+  const unresolvedOperations = candidate.unresolvedOperations.map((value) => {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
+    }
+    const item = value as Partial<UnresolvedSourceOperationCandidate>;
+    if (Object.keys(item).sort().join(',') !== 'column,line,methods,path,reason,sourceUri'
+      || !Array.isArray(item.methods) || item.methods.length === 0
+      || item.methods.some((method) => !HTTP_METHODS.includes(method as HttpMethod))
+      || new Set(item.methods).size !== item.methods.length
+      || item.path !== null
+      || !['SOURCE_ANALYZER_DYNAMIC_ROUTE', 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'].includes(item.reason ?? '')
+      || !Number.isInteger(item.line) || (item.line ?? 0) < 1
+      || !Number.isInteger(item.column) || (item.column ?? 0) < 1) {
+      throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
+    }
+    return {
+      methods: [...item.methods].sort((left, right) => (
+        methodOrder.get(left as HttpMethod)! - methodOrder.get(right as HttpMethod)!
+      )) as HttpMethod[],
+      path: null,
+      reason: item.reason as UnresolvedSourceOperationCandidate['reason'],
+      sourceUri: relativeSourceUri(item.sourceUri, workspaceRoot) as string,
+      line: item.line as number,
+      column: item.column as number,
+    };
+  }).sort((left, right) => {
+    const leftKey = `${left.sourceUri}\0${left.line.toString().padStart(10, '0')}\0${left.column.toString().padStart(10, '0')}\0${left.reason}\0${left.methods.join(',')}`;
+    const rightKey = `${right.sourceUri}\0${right.line.toString().padStart(10, '0')}\0${right.column.toString().padStart(10, '0')}\0${right.reason}\0${right.methods.join(',')}`;
+    return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+  });
+  const unresolvedMethodCount = unresolvedOperations.reduce((total, item) => total + item.methods.length, 0);
+  if (contract.source !== 'source-ast'
+    || metrics.operations !== contract.operations.length + unresolvedMethodCount
     || metrics.diagnostics !== candidate.diagnostics.length) {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
   }
@@ -395,7 +439,7 @@ function validateResult(
       column: item.column,
     });
   });
-  return { contract, diagnostics, metrics };
+  return { contract, diagnostics, unresolvedOperations, metrics };
 }
 
 function orderedLog(logger: SafeAnalyzerLogger): (code: SourceAnalyzerLogCode) => void {

@@ -182,4 +182,13 @@ describe('SARIF 2.1.0 reporter', () => {
       item.locations?.[0].physicalLocation.artifactLocation.uri
     ))).toEqual(['policy/already%20encoded.yml', 'specs/open%20api%25.yaml']);
   });
+
+  test('maps source line and column evidence to a SARIF region', () => {
+    const input = report();
+    input.findings[1].evidence = input.findings[1].evidence.map((evidence) => ({
+      ...evidence, pointer: 'line:7:column:11',
+    }));
+    expect(renderFindingsAsSarif(input).runs[0].results[0].locations?.[0].physicalLocation.region)
+      .toEqual({ startLine: 7, startColumn: 11 });
+  });
 });

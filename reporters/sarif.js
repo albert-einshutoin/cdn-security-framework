@@ -32,11 +32,18 @@ function evidenceKey(evidence) {
 }
 function location(evidence, id) {
     const pointer = evidence.pointer?.trim();
+    const sourcePosition = /^line:([1-9]\d*):column:([1-9]\d*)$/u.exec(pointer ?? '');
     return {
         ...(id === undefined ? {} : { id }),
         ...(id === undefined ? {} : { message: { text: `${evidence.source} evidence` } }),
         physicalLocation: {
             artifactLocation: { uri: safeUri(evidence.uri), uriBaseId: '%SRCROOT%' },
+            ...(sourcePosition ? {
+                region: {
+                    startLine: Number(sourcePosition[1]),
+                    startColumn: Number(sourcePosition[2]),
+                },
+            } : {}),
             properties: {
                 source: evidence.source,
                 digest: evidence.digest,
@@ -45,7 +52,7 @@ function location(evidence, id) {
                 complete: evidence.complete,
             },
         },
-        ...(pointer ? {
+        ...(pointer && !sourcePosition ? {
             logicalLocations: [{ name: pointer, fullyQualifiedName: pointer, kind: 'jsonPointer' }],
         } : {}),
     };
