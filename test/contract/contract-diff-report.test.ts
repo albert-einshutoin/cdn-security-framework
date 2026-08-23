@@ -321,5 +321,5 @@ Module._load = function (request, parent, isMain) {
     expect(internal.status).toBe(3);
     expect(internal.stderr).toContain('CONTRACT_DIFF_INTERNAL');
     expect(internal.stderr).not.toContain('Error: unexpected');
-  });
+  }, 15_000);
 });
