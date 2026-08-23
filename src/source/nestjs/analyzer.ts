@@ -237,12 +237,15 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
         const methodDecorators = decorators(method);
         const matches = methodDecorators.map((decorator) => nestJsRouteDecorator(decorator, checker));
         const versioned = classVersioned || matches.some((match) => match?.name === 'Version');
-        const effectiveRoute = matches.findIndex((match) => Boolean(match && METHOD_DECORATORS[match.name]));
+        const effectiveRoute = matches.findIndex((match) => Boolean(match && (
+          METHOD_DECORATORS[match.name] || match.name === 'RequestMapping' || match.name === 'Search'
+        )));
         for (const [index, methodDecorator] of methodDecorators.entries()) {
           await checkpoint();
           const match = matches[index];
           const methods = match && METHOD_DECORATORS[match.name];
           if (!match || !methods) {
+            if ((match?.name === 'RequestMapping' || match?.name === 'Search') && index !== effectiveRoute) continue;
             if (isUnsupportedNestJsDecorator(methodDecorator, checker)) {
               addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
             }

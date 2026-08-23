@@ -285,8 +285,8 @@ describe('NestJS route analyzer', () => {
 
   test('reports unsupported Search routes instead of silently dropping them', async () => {
     const root = workspace(`
-      import { Controller, Search } from '@nestjs/common';
-      @Controller('items') class ItemsController { @Search() search() {} }
+      import { Controller, Get, Search } from '@nestjs/common';
+      @Controller('items') class ItemsController { @Search('actual') @Get('reported') search() {} }
     `);
     await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
       status: 'success',
