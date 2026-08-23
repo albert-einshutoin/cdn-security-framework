@@ -8,6 +8,7 @@ exports.classifyNestJsRouteDecorator = classifyNestJsRouteDecorator;
 exports.resolveDecoratorSymbol = resolveDecoratorSymbol;
 exports.resolveStaticSymbolName = resolveStaticSymbolName;
 exports.isStaticSymbolFrom = isStaticSymbolFrom;
+exports.isStaticShorthandSymbolFrom = isStaticShorthandSymbolFrom;
 const node_module_1 = require("node:module");
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
@@ -264,13 +265,12 @@ function resolveStaticSymbolName(expression, checker, check) {
     return !symbol || symbol === UNKNOWN_NESTJS_ROUTE
         || !symbol.declarations?.some(typescript_1.default.isClassLike) ? undefined : symbol.getName();
 }
-function isStaticSymbolFrom(expression, checker, check, moduleName, importedName) {
-    const symbol = targetSymbol(expression, checker, check);
-    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE || symbol.getName() !== importedName)
+function isResolvedSymbolFrom(symbol, source, moduleName, importedName) {
+    if (symbol.getName() !== importedName)
         return false;
     let resolvedRoot;
     try {
-        resolvedRoot = packageRoot((0, node_module_1.createRequire)(expression.getSourceFile().fileName).resolve(moduleName), moduleName);
+        resolvedRoot = packageRoot((0, node_module_1.createRequire)(source.getSourceFile().fileName).resolve(moduleName), moduleName);
     }
     catch {
         return false;
@@ -279,4 +279,21 @@ function isStaticSymbolFrom(expression, checker, check, moduleName, importedName
         const targetRoot = packageRoot(declaration.getSourceFile().fileName, moduleName);
         return targetRoot !== undefined && node_fs_1.default.realpathSync(targetRoot) === node_fs_1.default.realpathSync(resolvedRoot);
     }));
+}
+function isStaticSymbolFrom(expression, checker, check, moduleName, importedName) {
+    const symbol = targetSymbol(expression, checker, check);
+    return Boolean(symbol && symbol !== UNKNOWN_NESTJS_ROUTE
+        && isResolvedSymbolFrom(symbol, expression, moduleName, importedName));
+}
+function isStaticShorthandSymbolFrom(shorthand, checker, check, moduleName, importedName) {
+    const symbol = checker.getShorthandAssignmentValueSymbol(shorthand);
+    if (!symbol)
+        return false;
+    const target = symbol.flags & typescript_1.default.SymbolFlags.Alias ? checker.getAliasedSymbol(symbol) : symbol;
+    if (isResolvedSymbolFrom(target, shorthand, moduleName, importedName))
+        return true;
+    const declaration = symbol.declarations?.find((candidate) => (typescript_1.default.isVariableDeclaration(candidate) && candidate.initializer !== undefined
+        && typescript_1.default.isVariableDeclarationList(candidate.parent)
+        && Boolean(candidate.parent.flags & typescript_1.default.NodeFlags.Const)));
+    return Boolean(declaration?.initializer && isStaticSymbolFrom(declaration.initializer, checker, check, moduleName, importedName));
 }

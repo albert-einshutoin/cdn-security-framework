@@ -29,6 +29,7 @@ import {
 } from '../typescript/project-loader';
 import {
   classifyNestJsRouteDecorator,
+  isStaticShorthandSymbolFrom,
   isStaticSymbolFrom,
   resolveDecoratorSymbol,
   resolveStaticSymbolName,
@@ -209,7 +210,7 @@ function ownAuthMetadata(
     if (resolved.name === 'UseGuards' && resolved.trustedNestJsCommon) {
       result.guardsPresent = true;
       result.guardEvidence.push(decorator);
-      if (resolved.call.arguments.length === 0 || resolved.call.arguments.some(ts.isSpreadElement)) {
+      if (resolved.call.arguments.some(ts.isSpreadElement)) {
         result.guardDynamic = true;
         continue;
       }
@@ -268,12 +269,12 @@ function effectiveClassAuthMetadata(
     if (steps > maxSteps) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
     seen.add(current);
     const own = ownAuthMetadata(current, checker, projectSources, config, check, maxSteps);
-    if (!result.guardsPresent && own.guardsPresent) {
+    if (own.guardsPresent) {
       result.guardsPresent = true;
-      result.guards = own.guards;
-      result.guardDynamic = own.guardDynamic;
+      result.guards = [...own.guards, ...result.guards];
+      result.guardDynamic ||= own.guardDynamic;
       result.dynamic ||= own.guardDynamic;
-      result.guardEvidence.push(...own.guardEvidence);
+      result.guardEvidence = [...own.guardEvidence, ...result.guardEvidence];
     }
     if (!result.publicPresent && own.publicPresent) {
       result.publicPresent = true;
@@ -289,7 +290,6 @@ function effectiveClassAuthMetadata(
       result.dynamic ||= own.rolesDynamic;
       result.authorizationEvidence.push(...own.authorizationEvidence);
     }
-    if (result.guardsPresent && result.publicPresent && result.rolesPresent) break;
     current = directBaseClass(current, checker);
   }
   return result;
@@ -686,11 +686,15 @@ async function analyze(
     while (nodes.length > 0) {
       const node = nodes.pop()!;
       await checkpoint();
-      if (ts.isPropertyAssignment(node)
+      const globalGuardProvider = ts.isPropertyAssignment(node)
         && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))
         && node.name.text === 'provide'
-        && isStaticSymbolFrom(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD')) {
-        if (!globalGuardFound) addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.initializer);
+        ? isStaticSymbolFrom(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD')
+        : ts.isShorthandPropertyAssignment(node) && node.name.text === 'provide'
+          ? isStaticShorthandSymbolFrom(node, checker, check, '@nestjs/core', 'APP_GUARD')
+          : false;
+      if (globalGuardProvider) {
+        if (!globalGuardFound) addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node);
         globalGuardFound = true;
       }
       ts.forEachChild(node, (child) => { nodes.push(child); });

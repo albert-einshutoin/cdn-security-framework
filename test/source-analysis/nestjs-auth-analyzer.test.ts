@@ -263,13 +263,45 @@ describe('NestJS auth metadata analyzer', () => {
     });
   });
 
+  test('accumulates inherited class guards and treats empty method UseGuards as a no-op', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard, JwtAuthGuard } from './auth';
+      @UseGuards(JwtAuthGuard) class BaseController {}
+      @Controller('inherited') @UseGuards(ApiKeyGuard)
+      class InheritedController extends BaseController {
+        @Get() @UseGuards() read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0]).toMatchObject({
+      exposure: 'authenticated',
+      auth: {
+        mode: 'alternatives',
+        analysis: {
+          guards: [
+            { symbol: 'JwtAuthGuard', authKind: 'bearer' },
+            { symbol: 'ApiKeyGuard', authKind: 'api-key' },
+          ],
+          enforcementConfidence: 'high',
+        },
+      },
+    });
+  });
+
   test('reports APP_GUARD as a partial global capability without executing module code', async () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
       import { JwtAuthGuard } from './auth';
       import { GLOBAL_GUARD } from './global-guard';
       const GUARD_TOKEN = GLOBAL_GUARD;
-      export const providers = [{ provide: GUARD_TOKEN, useClass: JwtAuthGuard }];
+      const provide = GUARD_TOKEN;
+      export const providers = [{ provide, useClass: JwtAuthGuard }];
       @Controller('global') class GlobalController { @Get() @UseGuards(JwtAuthGuard) read() {} }
       throw new Error('must not execute');
     `, {
@@ -298,6 +330,47 @@ describe('NestJS auth metadata analyzer', () => {
         },
       },
     });
+  });
+
+  test('detects direct-import shorthand APP_GUARD without trusting mutable bindings', async () => {
+    const nestCoreFiles = {
+      'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+    };
+    const directRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD as provide } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      export const providers = [{ provide, useClass: JwtAuthGuard }];
+      @Controller('direct') class DirectController { @Get() @UseGuards(JwtAuthGuard) read() {} }
+    `, nestCoreFiles);
+    const mutableRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      let provide: unknown = APP_GUARD;
+      provide = {};
+      export const providers = [{ provide, useClass: JwtAuthGuard }];
+      @Controller('mutable') class MutableController { @Get() @UseGuards(JwtAuthGuard) read() {} }
+    `, nestCoreFiles);
+
+    const direct = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(directRoot));
+    const mutable = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(mutableRoot));
+    expect(direct.status).toBe('success');
+    expect(mutable.status).toBe('success');
+    if (direct.status !== 'success' || mutable.status !== 'success') return;
+    expect(direct.result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+    expect(direct.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(mutable.result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+    expect(mutable.result.contract.operations[0].auth.mode).toBe('alternatives');
   });
 
   test('fails closed when duplicate routes have conflicting auth metadata', async () => {
