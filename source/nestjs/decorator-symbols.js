@@ -80,7 +80,7 @@ function composesNestJsRoute(call, checker, check, budget) {
         if (typescript_1.default.isSpreadElement(argument))
             return true;
         if (!typescript_1.default.isCallExpression(argument))
-            return false;
+            return true;
         const symbol = targetSymbol(argument.expression, checker, check);
         if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE || !originatesFromNestJsCommon(symbol))
             return false;

@@ -395,6 +395,32 @@ describe('NestJS route analyzer', () => {
     });
   });
 
+  test('fails closed for stored decorators passed to applyDecorators', async () => {
+    const root = workspace(`
+      import { applyDecorators, Controller, Get, Version } from '@nestjs/common';
+      const storedVersion = Version('1');
+      const storedRoute = Get('health');
+      @Controller('versioned') @applyDecorators(storedVersion)
+      class VersionedController { @Get() list() {} }
+      @Controller('system') class SystemController {
+        @applyDecorators(storedRoute) health() {}
+      }
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success',
+      result: {
+        contract: { operations: [] },
+        diagnostics: expect.arrayContaining([
+          expect.objectContaining({ code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+        ]),
+        unresolvedOperations: expect.arrayContaining([
+          expect.objectContaining({ methods: HTTP_METHODS, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+          expect.objectContaining({ methods: ['GET'], reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+        ]),
+      },
+    });
+  });
+
   test('ignores static and abstract methods and rejects URL suffixes', async () => {
     const root = workspace(`
       import { Controller, Get } from '@nestjs/common';
