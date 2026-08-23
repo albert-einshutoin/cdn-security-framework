@@ -333,6 +333,131 @@ describe('TypeScript project loader', () => {
     expect(retargeted).toBe(true);
   });
 
+  test('fails closed on source retargets and unexpected resolution errors', async () => {
+    const outside = workspace();
+    write(outside, 'outside.ts', 'export const value = 2;\n');
+
+    const root = workspace();
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    write(root, 'src/app.ts', 'export const value = 1;\n');
+    await expectFailure(loadTypeScriptProject(options(root, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        readFileBounded(filePath, maxBytes) {
+          if (filePath.endsWith('src/app.ts')) {
+            fs.renameSync(filePath, `${filePath}.safe`);
+            fs.symlinkSync(path.join(outside, 'outside.ts'), filePath);
+          }
+          return nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
+        },
+      },
+    })), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+
+    const dependencyRoot = workspace();
+    write(dependencyRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    write(dependencyRoot, 'src/app.ts', 'import { value } from "./dep";\nexport { value };\n');
+    write(dependencyRoot, 'src/dep.ts', 'export const value = 1;\n');
+    let dependencyRetargeted = false;
+    await expectFailure(loadTypeScriptProject(options(dependencyRoot, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        readFileBounded(filePath, maxBytes) {
+          if (!dependencyRetargeted && filePath.endsWith('src/dep.ts')) {
+            dependencyRetargeted = true;
+            fs.renameSync(filePath, `${filePath}.safe`);
+            fs.symlinkSync(path.join(outside, 'outside.ts'), filePath);
+          }
+          return nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
+        },
+      },
+    })), 'TS_PROJECT_PATH_OUTSIDE_ROOT', dependencyRoot);
+    expect(dependencyRetargeted).toBe(true);
+
+    const resolutionRoot = workspace();
+    write(resolutionRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    write(resolutionRoot, 'src/app.ts', 'import { value } from "./dep";\nexport { value };\n');
+    write(resolutionRoot, 'src/dep.ts', 'export const value = 1;\n');
+    await expectFailure(loadTypeScriptProject(options(resolutionRoot, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        realpath(filePath) {
+          if (filePath.endsWith('src/dep.ts')) {
+            throw Object.assign(new Error('denied'), { code: 'EACCES' });
+          }
+          return nodeTypeScriptProjectFileSystem.realpath(filePath);
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', resolutionRoot);
+
+    const directoryRoot = workspace();
+    write(directoryRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true, "moduleResolution": "node" }, "files": ["src/app.ts"] }');
+    write(directoryRoot, 'src/app.ts', 'import value from "missing";\nexport { value };\n');
+    await expectFailure(loadTypeScriptProject(options(directoryRoot, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        realpath(filePath) {
+          if (filePath.endsWith('src/node_modules')) {
+            throw Object.assign(new Error('denied'), { code: 'EACCES' });
+          }
+          return nodeTypeScriptProjectFileSystem.realpath(filePath);
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', directoryRoot);
+
+    const enumerationRoot = workspace();
+    write(enumerationRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true, "types": ["*"], "typeRoots": ["types"] }, "files": ["src/app.ts"] }');
+    write(enumerationRoot, 'src/app.ts', 'export const value = 1;\n');
+    fs.mkdirSync(path.join(enumerationRoot, 'types/example'), { recursive: true });
+    let typeRootResolutions = 0;
+    await expectFailure(loadTypeScriptProject(options(enumerationRoot, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        realpath(filePath) {
+          if (filePath.endsWith('/types') && ++typeRootResolutions === 3) {
+            throw Object.assign(new Error('denied'), { code: 'EACCES' });
+          }
+          return nodeTypeScriptProjectFileSystem.realpath(filePath);
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', enumerationRoot);
+
+    const reusedRoot = workspace();
+    write(reusedRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    write(reusedRoot, 'src/app.ts', 'export const value = 1;\n');
+    let sourceResolutions = 0;
+    await expectFailure(loadTypeScriptProject(options(reusedRoot, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        realpath(filePath) {
+          if (filePath.endsWith('src/app.ts') && ++sourceResolutions === 5) {
+            throw Object.assign(new Error('denied'), { code: 'EACCES' });
+          }
+          return nodeTypeScriptProjectFileSystem.realpath(filePath);
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', reusedRoot);
+  }, 15_000);
+
+  test('enforces AST limits before loading remaining dependencies', async () => {
+    const root = workspace();
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    write(root, 'src/app.ts', 'import { value } from "./dep";\nexport { value };\n');
+    write(root, 'src/dep.ts', 'export const value = 1;\n');
+    let dependencyRead = false;
+
+    await expectFailure(loadTypeScriptProject(options(root, {
+      limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxAstNodes: 1 },
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        readFileBounded(filePath, maxBytes) {
+          if (filePath.endsWith('src/dep.ts')) dependencyRead = true;
+          return nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
+        },
+      },
+    })), 'TS_PROJECT_AST_NODE_LIMIT', root);
+    expect(dependencyRead).toBe(false);
+  });
+
   test('returns partial project-reference diagnostics without loading referenced projects', async () => {
     const root = workspace();
     write(root, 'tsconfig.json', '{ "files": ["src/app.ts"], "references": [{ "path": "./other" }] }');
@@ -488,8 +613,8 @@ describe('TypeScript project loader', () => {
       cancellationSignal: duringRead.signal,
       fileSystem: {
         ...nodeTypeScriptProjectFileSystem,
-        readFile(filePath) {
-          const text = nodeTypeScriptProjectFileSystem.readFile(filePath);
+        readFileBounded(filePath, maxBytes) {
+          const text = nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
           if (filePath.endsWith('src/app.ts')) duringRead.abort();
           return text;
         },
@@ -501,8 +626,8 @@ describe('TypeScript project loader', () => {
       cancellationSignal: scheduled.signal,
       fileSystem: {
         ...nodeTypeScriptProjectFileSystem,
-        readFile(filePath) {
-          const text = nodeTypeScriptProjectFileSystem.readFile(filePath);
+        readFileBounded(filePath, maxBytes) {
+          const text = nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
           if (filePath.endsWith('src/app.ts')) setTimeout(() => scheduled.abort(), 0);
           return text;
         },
@@ -512,9 +637,9 @@ describe('TypeScript project loader', () => {
     await expectFailure(loadTypeScriptProject(options(root, {
       fileSystem: {
         ...nodeTypeScriptProjectFileSystem,
-        readFile(filePath) {
+        readFileBounded(filePath, maxBytes) {
           if (filePath.endsWith('src/app.ts')) throw new Error(`${root}/secret source failure`);
-          return nodeTypeScriptProjectFileSystem.readFile(filePath);
+          return nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
         },
       },
     })), 'TS_PROJECT_INTERNAL', root);

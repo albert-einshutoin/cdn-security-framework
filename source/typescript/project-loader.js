@@ -190,6 +190,9 @@ const SAFE_MESSAGES = Object.freeze({
 });
 const SOURCE_EXTENSIONS = Object.freeze(['.ts', '.tsx', '.mts', '.cts']);
 const GLOB_MARKER = /[*?]/u;
+function isMissingPathError(error) {
+    return ['ENOENT', 'ENOTDIR'].includes(error.code ?? '');
+}
 function diagnostic(code, options = {}) {
     return { code, safeMessage: SAFE_MESSAGES[code], ...options };
 }
@@ -573,7 +576,7 @@ async function loadTypeScriptProjectInternal(options) {
         if (totalSourceBytes + resolved.stat.size > limits.maxTotalSourceBytes) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_TOTAL_BYTES_LIMIT');
         }
-        const text = fileSystem.readFile(resolved.absolute);
+        const text = fileSystem.readFileBounded(resolved.absolute, limits.maxFileBytes);
         const size = Buffer.byteLength(text);
         if (size > limits.maxFileBytes) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', { sourceUri: resolved.relative });
@@ -651,8 +654,12 @@ async function loadTypeScriptProjectInternal(options) {
             }
             return undefined;
         }
-        catch {
-            return undefined;
+        catch (error) {
+            if (error instanceof TypeScriptProjectLoadError)
+                throw error;
+            if (isMissingPathError(error))
+                return undefined;
+            throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
         }
     };
     const readProgramFile = (candidate) => {
@@ -720,7 +727,7 @@ async function loadTypeScriptProjectInternal(options) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_EXTENSION_UNSUPPORTED');
         }
         preflightProgramRead(safe.absolute, relative);
-        const text = fileSystem.readFile(safe.absolute);
+        const text = fileSystem.readFileBounded(safe.absolute, limits.maxFileBytes);
         const size = Buffer.byteLength(text);
         if (size > limits.maxFileBytes) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', { sourceUri: relative });
@@ -738,6 +745,29 @@ async function loadTypeScriptProjectInternal(options) {
         validateReferences(text, relative);
         return text;
     };
+    let astNodes = 0;
+    let maxDepth = 0;
+    const accountedSourceFiles = new WeakSet();
+    const accountSourceFile = (sourceFile) => {
+        if (accountedSourceFiles.has(sourceFile))
+            return;
+        accountedSourceFiles.add(sourceFile);
+        const stack = [[sourceFile, 1]];
+        while (stack.length > 0) {
+            checkInterruption(options.cancellationSignal, deadline);
+            const current = stack.pop();
+            if (!current)
+                break;
+            const [node, depth] = current;
+            astNodes += 1;
+            maxDepth = Math.max(maxDepth, depth);
+            if (astNodes > limits.maxAstNodes)
+                throw new TypeScriptProjectLoadError('TS_PROJECT_AST_NODE_LIMIT');
+            if (depth > limits.maxAnalysisDepth)
+                throw new TypeScriptProjectLoadError('TS_PROJECT_DEPTH_LIMIT');
+            node.forEachChild((child) => { stack.push([child, depth + 1]); });
+        }
+    };
     const host = {
         ...defaultHost,
         fileExists: (candidate) => safeExistingPath(candidate) !== undefined,
@@ -749,7 +779,12 @@ async function loadTypeScriptProjectInternal(options) {
                 throw new TypeScriptProjectLoadError('TS_PROJECT_EXTENSION_UNSUPPORTED');
             }
             const text = readProgramFile(candidate);
-            return text === undefined ? undefined : typescript_1.default.createSourceFile(candidate, text, languageVersion, true);
+            if (text === undefined)
+                return undefined;
+            const sourceFile = typescript_1.default.createSourceFile(candidate, text, languageVersion, true);
+            if (kind === 'workspace')
+                accountSourceFile(sourceFile);
+            return sourceFile;
         },
         realpath: (candidate) => safeExistingPath(candidate)?.absolute ?? candidate,
         directoryExists: (candidate) => {
@@ -764,8 +799,10 @@ async function loadTypeScriptProjectInternal(options) {
                 return absolute === workspaceRoot || relativeWithin(workspaceRoot, absolute) !== undefined
                     || absolute === defaultLibraryRoot;
             }
-            catch {
-                return false;
+            catch (error) {
+                if (isMissingPathError(error))
+                    return false;
+                throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
             }
         },
         getDirectories: (candidate) => {
@@ -793,7 +830,9 @@ async function loadTypeScriptProjectInternal(options) {
             catch (error) {
                 if (error instanceof TypeScriptProjectLoadError)
                     throw error;
-                return [];
+                if (isMissingPathError(error))
+                    return [];
+                throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
             }
         },
     };
@@ -814,36 +853,13 @@ async function loadTypeScriptProjectInternal(options) {
     if (boundaryViolation)
         throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
     await yieldAndCheckInterruption(options.cancellationSignal, deadline);
-    const sourceFiles = program.getSourceFiles().filter(({ fileName }) => {
-        try {
-            return relativeWithin(workspaceRoot, fileSystem.realpath(fileName)) !== undefined;
-        }
-        catch {
-            return false;
-        }
-    }).sort((left, right) => left.fileName.localeCompare(right.fileName));
-    let astNodes = 0;
-    let maxDepth = 0;
-    for (const sourceFile of sourceFiles) {
-        const stack = [[sourceFile, 1]];
-        while (stack.length > 0) {
-            checkInterruption(options.cancellationSignal, deadline);
-            const current = stack.pop();
-            if (!current)
-                break;
-            const [node, depth] = current;
-            astNodes += 1;
-            maxDepth = Math.max(maxDepth, depth);
-            if (astNodes > limits.maxAstNodes)
-                throw new TypeScriptProjectLoadError('TS_PROJECT_AST_NODE_LIMIT');
-            if (depth > limits.maxAnalysisDepth)
-                throw new TypeScriptProjectLoadError('TS_PROJECT_DEPTH_LIMIT');
-            node.forEachChild((child) => { stack.push([child, depth + 1]); });
-            if (astNodes % 1_024 === 0) {
-                await yieldAndCheckInterruption(options.cancellationSignal, deadline);
-            }
-        }
-    }
+    const sourceFiles = program.getSourceFiles()
+        .filter(({ fileName }) => safeExistingPath(fileName)?.kind === 'workspace')
+        .sort((left, right) => left.fileName.localeCompare(right.fileName));
+    if (boundaryViolation)
+        throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
+    for (const sourceFile of sourceFiles)
+        accountSourceFile(sourceFile);
     const diagnostics = [];
     if ((parsed.projectReferences?.length ?? 0) > 0)
         diagnostics.push(diagnostic('TS_PROJECT_REFERENCES_PARTIAL'));
