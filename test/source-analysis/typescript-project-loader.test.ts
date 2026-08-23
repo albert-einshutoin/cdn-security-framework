@@ -84,7 +84,7 @@ describe('TypeScript project loader', () => {
 
   test('builds a Program for a normal package import without reading package metadata as source', async () => {
     const root = workspace();
-    write(root, 'tsconfig.json', '{ "compilerOptions": { "moduleResolution": "node" }, "files": ["src/app.ts"] }');
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "moduleResolution": "node", "noLib": true }, "files": ["src/app.ts"] }');
     write(root, 'node_modules/example/package.json', '{ "types": "dist/types.d.ts" }');
     write(root, 'node_modules/example/dist/types.d.ts', 'export declare const value: number;\n');
     write(root, 'src/app.ts', 'import { value } from "example";\nexport const result = value;\n');
@@ -241,14 +241,36 @@ describe('TypeScript project loader', () => {
     const root = workspace();
     write(root, 'tsconfig.json', '{ "include": ["src/**/*.ts"] }');
     write(root, 'src/app.ts', 'export const value = 1;\n');
+    write(root, 'scan/one.txt', 'one');
+    write(root, 'scan/two.txt', 'two');
+    write(root, 'scan/three.txt', 'three');
+    fs.mkdirSync(path.join(root, 'scan-special'));
+    for (const name of ['one', 'two', 'three']) {
+      fs.symlinkSync('/dev/null', path.join(root, 'scan-special', name));
+    }
 
+    expect(() => nodeTypeScriptProjectFileSystem.readDirectory(
+      path.join(root, 'scan'), ['.ts'], undefined, ['**/*'], undefined, 2,
+    )).toThrow('TypeScript project file limit was exceeded.');
+    expect(() => nodeTypeScriptProjectFileSystem.readDirectory(
+      path.join(root, 'scan-special'), ['.ts'], undefined, ['**/*'], undefined, 2,
+    )).toThrow('TypeScript project file limit was exceeded.');
+    expect(() => nodeTypeScriptProjectFileSystem.readDirectory(
+      path.join(root, 'missing'), ['.ts'], undefined, ['**/*'], undefined, 2,
+    )).toThrow('TypeScript project loading failed unexpectedly.');
+
+    let enumerationLimit: number | undefined;
     await expectFailure(loadTypeScriptProject(options(root, {
       limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxFiles: 1 },
       fileSystem: {
         ...nodeTypeScriptProjectFileSystem,
-        readDirectory() { return ['one.ts', 'two.ts']; },
+        readDirectory(_rootDir, _extensions, _excludes, _includes, _depth, maxEntries) {
+          enumerationLimit = maxEntries;
+          return ['one.ts', 'two.ts'];
+        },
       },
     })), 'TS_PROJECT_FILE_LIMIT', root);
+    expect(enumerationLimit).toBe(1);
 
     await expectFailure(loadTypeScriptProject(options(root, {
       limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, timeoutMs: 1 },
@@ -261,6 +283,25 @@ describe('TypeScript project loader', () => {
         },
       },
     })), 'TS_PROJECT_TIMEOUT', root);
+  });
+
+  test('accounts for standard libraries and config size in project-wide limits', async () => {
+    const root = workspace();
+    const config = `{ "compilerOptions": { "strict": true }, "files": ["src/app.ts"] }${' '.repeat(64)}`;
+    const source = 'export const value = 1;\n';
+    write(root, 'tsconfig.json', config);
+    write(root, 'src/app.ts', source);
+
+    await expectFailure(loadTypeScriptProject(options(root, {
+      limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxFiles: 2 },
+    })), 'TS_PROJECT_FILE_LIMIT', root);
+    await expectFailure(loadTypeScriptProject(options(root, {
+      limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxFileBytes: Buffer.byteLength(config) + 1 },
+    })), 'TS_PROJECT_FILE_BYTES_LIMIT', root);
+
+    write(root, 'tsconfig.json', `{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }${' '.repeat(64)}`);
+    const loaded = await loadTypeScriptProject(options(root));
+    expect(loaded.metrics.largestFileBytes).toBe(fs.statSync(path.join(root, 'tsconfig.json')).size);
   });
 
   test('honors cancellation and redacts malformed-config diagnostics', async () => {

@@ -37,7 +37,7 @@ export interface TypeScriptProjectFileSystem {
     readFile(filePath: string): string;
     stat(filePath: string): fs.Stats;
     exists(filePath: string): boolean;
-    readDirectory(rootDir: string, extensions: readonly string[], excludes: readonly string[] | undefined, includes: readonly string[], depth?: number): string[];
+    readDirectory(rootDir: string, extensions: readonly string[], excludes: readonly string[] | undefined, includes: readonly string[], depth?: number, maxEntries?: number, checkInterruption?: () => void): string[];
 }
 export declare const nodeTypeScriptProjectFileSystem: TypeScriptProjectFileSystem;
 export interface LoadTypeScriptProjectOptions {
