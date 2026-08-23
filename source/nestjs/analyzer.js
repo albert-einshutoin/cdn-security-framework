@@ -236,7 +236,16 @@ function composeAuth(classMetadata, methodMetadata, config, globalGuardFound) {
         ? methodMetadata.explicitPublic
         : classMetadata.explicitPublic;
     const roles = methodMetadata.rolesPresent ? methodMetadata.roles : classMetadata.roles;
-    const dynamic = classMetadata.dynamic || methodMetadata.dynamic;
+    const effectivePublicDynamic = methodMetadata.publicPresent
+        ? methodMetadata.publicDynamic
+        : classMetadata.publicDynamic;
+    const effectiveRolesDynamic = methodMetadata.rolesPresent
+        ? methodMetadata.rolesDynamic
+        : classMetadata.rolesDynamic;
+    const authenticationDynamic = classMetadata.guardDynamic || methodMetadata.guardDynamic
+        || effectivePublicDynamic;
+    const authorizationDynamic = effectiveRolesDynamic;
+    const dynamic = authenticationDynamic || authorizationDynamic;
     const analyzedGuards = guards.map((symbol) => {
         const mapping = config.guard_mappings[symbol];
         return {
@@ -248,8 +257,10 @@ function composeAuth(classMetadata, methodMetadata, config, globalGuardFound) {
     const capabilityReasons = [];
     if (globalGuardFound)
         capabilityReasons.push('Global NestJS guards are not analyzed.');
-    if (dynamic)
+    if (authenticationDynamic)
         capabilityReasons.push('Dynamic authentication metadata was not inferred.');
+    if (authorizationDynamic)
+        capabilityReasons.push('Dynamic role metadata was not inferred.');
     if (unknownGuard)
         capabilityReasons.push('Unmapped NestJS guards remain unknown.');
     if (!explicitPublic && guards.length === 0) {
@@ -269,11 +280,11 @@ function composeAuth(classMetadata, methodMetadata, config, globalGuardFound) {
     };
     let auth;
     let exposure;
-    if (explicitPublic && !dynamic) {
+    if (explicitPublic && !authenticationDynamic && !globalGuardFound) {
         auth = { mode: 'none', alternatives: [], analysis };
         exposure = 'public';
     }
-    else if (guards.length > 0 && !unknownGuard && !dynamic) {
+    else if (guards.length > 0 && !unknownGuard && !authenticationDynamic && !globalGuardFound) {
         auth = {
             mode: 'alternatives',
             alternatives: [{

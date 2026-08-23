@@ -201,7 +201,12 @@ describe('NestJS auth metadata analyzer', () => {
       auth: { analysis: { guards: [{ symbol: 'JwtAuthGuard', authKind: 'bearer' }] } },
     });
     expect(operations['GET /items/dynamic-role']).toMatchObject({
-      auth: { analysis: { roles: [], enforcementConfidence: 'unknown' } },
+      exposure: 'authenticated',
+      auth: {
+        mode: 'alternatives',
+        alternatives: [{ schemes: [{ name: 'JwtAuthGuard', kind: 'bearer' }] }],
+        analysis: { roles: [], enforcementConfidence: 'unknown' },
+      },
     });
     expect(operations['GET /items/dynamic-guard']).toMatchObject({
       exposure: 'unknown', auth: { mode: 'unknown' },
@@ -217,13 +222,54 @@ describe('NestJS auth metadata analyzer', () => {
     ))).toHaveLength(2);
   });
 
+  test('method auth metadata overrides dynamic class Public and Roles metadata', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard, Public, Roles } from './auth';
+      declare const dynamicValue: string;
+
+      @Controller('roles') @UseGuards(JwtAuthGuard) @Roles(dynamicValue)
+      class RolesController { @Get() @Roles('admin') read() {} }
+
+      @Controller('public') @Public(dynamicValue)
+      class PublicController { @Get() @Public() read() {} }
+    `, {
+      'src/auth.ts': `
+        export class JwtAuthGuard {}
+        export const Public = (..._args: unknown[]): MethodDecorator & ClassDecorator => () => {};
+        export const Roles = (..._roles: unknown[]): MethodDecorator & ClassDecorator => () => {};
+      `,
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    const operations = Object.fromEntries(execution.result.contract.operations.map((operation) => (
+      [operation.routeKey, operation]
+    )));
+    expect(operations['GET /roles']).toMatchObject({
+      exposure: 'authenticated',
+      auth: {
+        mode: 'alternatives',
+        analysis: { roles: ['admin'], enforcementConfidence: 'high' },
+      },
+    });
+    expect(operations['GET /public']).toMatchObject({
+      exposure: 'public',
+      auth: {
+        mode: 'none',
+        analysis: { explicitPublic: true, enforcementConfidence: 'high' },
+      },
+    });
+  });
+
   test('reports APP_GUARD as a partial global capability without executing module code', async () => {
     const root = workspace(`
-      import { Controller, Get } from '@nestjs/common';
+      import { Controller, Get, UseGuards } from '@nestjs/common';
       import { APP_GUARD } from '@nestjs/core';
       import { JwtAuthGuard } from './auth';
       export const providers = [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
-      @Controller('global') class GlobalController { @Get() read() {} }
+      @Controller('global') class GlobalController { @Get() @UseGuards(JwtAuthGuard) read() {} }
       throw new Error('must not execute');
     `, {
       'src/auth.ts': 'export class JwtAuthGuard {}\n',
