@@ -440,6 +440,54 @@ describe('TypeScript project loader', () => {
     expect(retargeted).toBe(true);
   });
 
+  test('reuses each validated config snapshot after an in-workspace retarget', async () => {
+    const root = workspace();
+    write(root, 'base.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/other.ts"] }');
+    write(root, 'tsconfig.json', '{ "extends": "./base.json", "files": ["src/app.ts"] }');
+    write(root, 'src/app.ts', 'export const value = 1;\n');
+    write(root, 'src/other.ts', 'export const other = 2;\n');
+    let retargeted = false;
+
+    const loaded = await loadTypeScriptProject(options(root, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        readFileBounded(filePath, maxBytes) {
+          const text = nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
+          if (!retargeted && filePath.endsWith('base.json')) {
+            retargeted = true;
+            fs.unlinkSync(path.join(root, 'tsconfig.json'));
+            fs.symlinkSync(path.join(root, 'base.json'), path.join(root, 'tsconfig.json'));
+          }
+          return text;
+        },
+      },
+    }));
+
+    expect(retargeted).toBe(true);
+    expect(loaded.sourceFiles.map(({ fileName }) => path.basename(fileName))).toEqual(['app.ts']);
+  });
+
+  test('rejects a validated config lexical path retargeted on revisit', async () => {
+    const root = workspace();
+    write(root, 'tsconfig.json', '{ "extends": ["./shared.json", "./alternate.json", "./shared.json"], "files": ["src/app.ts"] }');
+    write(root, 'shared.json', '{ "compilerOptions": { "noLib": true } }');
+    write(root, 'alternate.json', '{ "compilerOptions": { "noLib": true, "strict": true } }');
+    write(root, 'src/app.ts', 'export const value = 1;\n');
+    let sharedResolutions = 0;
+
+    await expectFailure(loadTypeScriptProject(options(root, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        realpath(filePath) {
+          if (filePath.endsWith('shared.json') && ++sharedResolutions > 1) {
+            return nodeTypeScriptProjectFileSystem.realpath(path.join(root, 'alternate.json'));
+          }
+          return nodeTypeScriptProjectFileSystem.realpath(filePath);
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', root);
+  });
+
   test('fails closed on source retargets and unexpected resolution errors', async () => {
     const outside = workspace();
     write(outside, 'outside.ts', 'export const value = 2;\n');
@@ -493,6 +541,24 @@ describe('TypeScript project loader', () => {
       },
     })), 'TS_PROJECT_PATH_OUTSIDE_ROOT', dependencyRoot);
     expect(dependencyRetargeted).toBe(true);
+
+    const inWorkspaceRetargetRoot = workspace();
+    write(inWorkspaceRetargetRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    write(inWorkspaceRetargetRoot, 'src/app.ts', 'import { value } from "./dep";\nexport { value };\n');
+    write(inWorkspaceRetargetRoot, 'src/dep.ts', 'export const value = 1;\n');
+    write(inWorkspaceRetargetRoot, 'src/other.ts', 'export const value = 2;\n');
+    let dependencyResolutions = 0;
+    await expectFailure(loadTypeScriptProject(options(inWorkspaceRetargetRoot, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        realpath(filePath) {
+          if (filePath.endsWith('src/dep.ts') && ++dependencyResolutions > 1) {
+            return nodeTypeScriptProjectFileSystem.realpath(path.join(inWorkspaceRetargetRoot, 'src/other.ts'));
+          }
+          return nodeTypeScriptProjectFileSystem.realpath(filePath);
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', inWorkspaceRetargetRoot);
 
     const deletedDependencyRoot = workspace();
     write(deletedDependencyRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');

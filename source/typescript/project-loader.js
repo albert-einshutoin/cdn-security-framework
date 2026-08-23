@@ -300,6 +300,14 @@ function safeConfigPath(fileSystem, workspaceRoot, configDirectory, configuredPa
         }
     }
 }
+function bindConfigSnapshot(state, lexicalPath, absolute, text) {
+    const previous = state.snapshotTargets.get(lexicalPath);
+    if (previous !== undefined && previous !== absolute) {
+        throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+    }
+    state.snapshotTargets.set(lexicalPath, absolute);
+    state.snapshots.set(lexicalPath, text);
+}
 function resolveExtendsCandidate(fileSystem, configDirectory, specifier) {
     if (node_path_1.default.isAbsolute(specifier))
         throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
@@ -326,8 +334,13 @@ function validateConfigTree(fileSystem, workspaceRoot, configPath, limits, signa
     const resolved = realFileWithin(fileSystem, workspaceRoot, configPath, 'TS_PROJECT_CONFIG_MISSING');
     if (visiting.has(resolved.absolute))
         throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
-    if (state.digests.has(resolved.relative))
+    const lexicalPath = node_path_1.default.resolve(configPath);
+    if (state.digests.has(resolved.relative)) {
+        const contents = state.contents.get(resolved.absolute);
+        if (contents !== undefined)
+            bindConfigSnapshot(state, lexicalPath, resolved.absolute, contents);
         return;
+    }
     if (resolved.stat.size > limits.maxFileBytes) {
         throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', { sourceUri: resolved.relative });
     }
@@ -351,6 +364,8 @@ function validateConfigTree(fileSystem, workspaceRoot, configPath, limits, signa
     }
     state.digests.set(resolved.relative, node_crypto_1.default.createHash('sha256').update(text).digest('hex'));
     state.contents.set(resolved.absolute, text);
+    bindConfigSnapshot(state, lexicalPath, resolved.absolute, text);
+    bindConfigSnapshot(state, resolved.absolute, resolved.absolute, text);
     state.totalBytes += bytes;
     state.largestFileBytes = Math.max(state.largestFileBytes, bytes);
     if (state.digests.size > limits.maxFiles)
@@ -456,14 +471,8 @@ function createParseHost(fileSystem, workspaceRoot, limits, signal, deadline, ma
     };
     return {
         useCaseSensitiveFileNames: typescript_1.default.sys.useCaseSensitiveFileNames,
-        fileExists: (candidate) => {
-            const safe = safeRealPath(candidate);
-            return safe !== undefined && validatedConfigs.has(safe);
-        },
-        readFile: (candidate) => {
-            const safe = safeRealPath(candidate);
-            return safe ? validatedConfigs.get(safe) : undefined;
-        },
+        fileExists: (candidate) => validatedConfigs.has(node_path_1.default.resolve(candidate)),
+        readFile: (candidate) => validatedConfigs.get(node_path_1.default.resolve(candidate)),
         readDirectory: (rootDir, extensions, excludes, includes, depth) => {
             checkInterruption(signal, deadline);
             if (!relativeWithin(workspaceRoot, node_path_1.default.resolve(rootDir)) && node_path_1.default.resolve(rootDir) !== workspaceRoot)
@@ -537,24 +546,18 @@ async function loadTypeScriptProjectInternal(options) {
     const configPath = node_path_1.default.resolve(workspaceRoot, options.tsconfigPath);
     const resolvedConfig = realFileWithin(fileSystem, workspaceRoot, configPath, 'TS_PROJECT_CONFIG_MISSING');
     const configState = {
-        digests: new Map(), contents: new Map(), totalBytes: 0, largestFileBytes: 0,
+        digests: new Map(), contents: new Map(), snapshots: new Map(), snapshotTargets: new Map(),
+        totalBytes: 0, largestFileBytes: 0,
     };
     validateConfigTree(fileSystem, workspaceRoot, resolvedConfig.absolute, limits, options.cancellationSignal, deadline, configState, new Set());
-    const read = typescript_1.default.readConfigFile(resolvedConfig.absolute, (candidate) => {
-        try {
-            return configState.contents.get(fileSystem.realpath(candidate));
-        }
-        catch {
-            return undefined;
-        }
-    });
+    const read = typescript_1.default.readConfigFile(resolvedConfig.absolute, (candidate) => configState.snapshots.get(node_path_1.default.resolve(candidate)));
     if (read.error) {
         throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG', {
             sourceUri: resolvedConfig.relative,
             typescriptCode: read.error.code,
         });
     }
-    const parsed = typescript_1.default.parseJsonConfigFileContent(read.config, createParseHost(fileSystem, workspaceRoot, limits, options.cancellationSignal, deadline, limits.maxFiles, configState.contents), node_path_1.default.dirname(resolvedConfig.absolute), { noEmit: true, plugins: [] }, resolvedConfig.absolute);
+    const parsed = typescript_1.default.parseJsonConfigFileContent(read.config, createParseHost(fileSystem, workspaceRoot, limits, options.cancellationSignal, deadline, limits.maxFiles, configState.snapshots), node_path_1.default.dirname(resolvedConfig.absolute), { noEmit: true, plugins: [] }, resolvedConfig.absolute);
     if (parsed.errors.length > 0) {
         throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG', {
             sourceUri: resolvedConfig.relative,
@@ -714,7 +717,10 @@ async function loadTypeScriptProjectInternal(options) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
         }
     };
-    const resolvedProgramPaths = new Set(rootNames.map((candidate) => node_path_1.default.resolve(candidate)));
+    const resolvedProgramPaths = new Map(rootNames.map((candidate) => {
+        const absolute = node_path_1.default.resolve(candidate);
+        return [absolute, absolute];
+    }));
     const isHoistedNodeModulesPath = (candidate) => {
         let current = node_path_1.default.resolve(candidate);
         while (node_path_1.default.dirname(current) !== current && node_path_1.default.basename(current) !== 'node_modules') {
@@ -729,8 +735,14 @@ async function loadTypeScriptProjectInternal(options) {
         const lexical = node_path_1.default.resolve(candidate);
         const safe = safeExistingPath(candidate);
         if (safe) {
-            resolvedProgramPaths.add(lexical);
-            resolvedProgramPaths.add(node_path_1.default.resolve(safe.absolute));
+            const canonical = node_path_1.default.resolve(safe.absolute);
+            const previous = resolvedProgramPaths.get(lexical);
+            if (previous !== undefined && previous !== canonical) {
+                throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+            }
+            resolvedProgramPaths.set(lexical, canonical);
+            if (!resolvedProgramPaths.has(canonical))
+                resolvedProgramPaths.set(canonical, canonical);
             return safe;
         }
         if (resolvedProgramPaths.has(lexical))
