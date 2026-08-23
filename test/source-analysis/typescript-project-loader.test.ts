@@ -161,6 +161,23 @@ describe('TypeScript project loader', () => {
     await expectFailure(loadTypeScriptProject(options(root, {
       limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxFileBytes: 1 },
     })), 'TS_PROJECT_FILE_BYTES_LIMIT', root);
+    let oversizedSourceRead = false;
+    await expectFailure(loadTypeScriptProject(options(root, {
+      limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxFileBytes: 128 },
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        stat(filePath) {
+          const stat = nodeTypeScriptProjectFileSystem.stat(filePath);
+          if (filePath.endsWith('src/one.ts')) Object.defineProperty(stat, 'size', { value: 129 });
+          return stat;
+        },
+        readFile(filePath) {
+          if (filePath.endsWith('src/one.ts')) oversizedSourceRead = true;
+          return nodeTypeScriptProjectFileSystem.readFile(filePath);
+        },
+      },
+    })), 'TS_PROJECT_FILE_BYTES_LIMIT', root);
+    expect(oversizedSourceRead).toBe(false);
     await expectFailure(loadTypeScriptProject(options(root, {
       limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxAstNodes: 1 },
     })), 'TS_PROJECT_AST_NODE_LIMIT', root);
@@ -205,6 +222,10 @@ describe('TypeScript project loader', () => {
     expect(loaded.projectReferences).toBe('partial');
     expect(loaded.diagnostics).toEqual([expect.objectContaining({ code: 'TS_PROJECT_REFERENCES_PARTIAL' })]);
     expect(loaded.sourceFiles.map(({ fileName }) => fileName)).not.toContain(path.join(root, 'other/secret.ts'));
+
+    write(root, 'configs/app.json', '{ "files": ["../src/app.ts"], "references": [{ "path": ".." }] }');
+    const rootReference = await loadTypeScriptProject(options(root, { tsconfigPath: 'configs/app.json' }));
+    expect(rootReference.projectReferences).toBe('partial');
   });
 
   test('uses content-based cache and invalidates it after a source change', async () => {

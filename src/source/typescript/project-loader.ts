@@ -261,7 +261,7 @@ function realFileWithin(
   workspaceRoot: string,
   candidate: string,
   missingCode: TypeScriptProjectDiagnosticCode,
-): { absolute: string; relative: string } {
+): { absolute: string; relative: string; stat: fs.Stats } {
   let absolute: string;
   try {
     absolute = fileSystem.realpath(candidate);
@@ -273,7 +273,7 @@ function realFileWithin(
   let stat: fs.Stats;
   try { stat = fileSystem.stat(absolute); } catch { throw new TypeScriptProjectLoadError(missingCode); }
   if (!stat.isFile()) throw new TypeScriptProjectLoadError(missingCode);
-  return { absolute, relative };
+  return { absolute, relative, stat };
 }
 
 function safeConfigPath(
@@ -339,6 +339,15 @@ function validateConfigTree(
   if (depth > limits.maxAnalysisDepth) throw new TypeScriptProjectLoadError('TS_PROJECT_DEPTH_LIMIT');
   const resolved = realFileWithin(fileSystem, workspaceRoot, configPath, 'TS_PROJECT_CONFIG_MISSING');
   if (visiting.has(resolved.absolute)) throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
+  if (resolved.stat.size > limits.maxFileBytes) {
+    throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', { sourceUri: resolved.relative });
+  }
+  if (!state.digests.has(resolved.relative) && state.digests.size + 1 > limits.maxFiles) {
+    throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_LIMIT');
+  }
+  if (state.totalBytes + resolved.stat.size > limits.maxTotalSourceBytes) {
+    throw new TypeScriptProjectLoadError('TS_PROJECT_TOTAL_BYTES_LIMIT');
+  }
   const text = fileSystem.readFile(resolved.absolute);
   const bytes = Buffer.byteLength(text);
   if (bytes > limits.maxFileBytes) {
@@ -580,7 +589,7 @@ async function loadTypeScriptProjectInternal(
   }
   for (const reference of parsed.projectReferences ?? []) {
     const absolute = path.resolve(reference.path);
-    if (!relativeWithin(workspaceRoot, absolute)) {
+    if (absolute !== workspaceRoot && !relativeWithin(workspaceRoot, absolute)) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
     }
     if (fileSystem.exists(absolute)) {
@@ -588,7 +597,7 @@ async function loadTypeScriptProjectInternal(
       try { realPath = fileSystem.realpath(absolute); } catch {
         throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
       }
-      if (!relativeWithin(workspaceRoot, realPath)) {
+      if (realPath !== workspaceRoot && !relativeWithin(workspaceRoot, realPath)) {
         throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
       }
     }
@@ -606,6 +615,15 @@ async function loadTypeScriptProjectInternal(
       throw new TypeScriptProjectLoadError('TS_PROJECT_EXTENSION_UNSUPPORTED', { sourceUri: resolved.relative });
     }
     if (rootContents.has(resolved.absolute)) continue;
+    if (resolved.stat.size > limits.maxFileBytes) {
+      throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', { sourceUri: resolved.relative });
+    }
+    if (configState.digests.size + rootNames.length + 1 > limits.maxFiles) {
+      throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_LIMIT');
+    }
+    if (totalSourceBytes + resolved.stat.size > limits.maxTotalSourceBytes) {
+      throw new TypeScriptProjectLoadError('TS_PROJECT_TOTAL_BYTES_LIMIT');
+    }
     const text = fileSystem.readFile(resolved.absolute);
     const size = Buffer.byteLength(text);
     if (size > limits.maxFileBytes) {
@@ -638,6 +656,20 @@ async function loadTypeScriptProjectInternal(
   const workspaceContents = new Map(rootContents);
   const libraryContents = new Map<string, string>();
   const metadataContents = new Map<string, { relative: string; text: string }>();
+  const preflightProgramRead = (absolute: string, sourceUri?: string): void => {
+    let size: number;
+    try { size = fileSystem.stat(absolute).size; } catch {
+      throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+    }
+    if (size > limits.maxFileBytes) {
+      throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', sourceUri ? { sourceUri } : {});
+    }
+    if (configState.digests.size + workspaceContents.size + metadataContents.size + libraryContents.size + 1
+      > limits.maxFiles) throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_LIMIT');
+    if (totalSourceBytes + size > limits.maxTotalSourceBytes) {
+      throw new TypeScriptProjectLoadError('TS_PROJECT_TOTAL_BYTES_LIMIT');
+    }
+  };
   const validateReferences = (text: string, relative: string): void => {
     const references = ts.preProcessFile(text).referencedFiles;
     if (references.some(({ fileName }) => path.isAbsolute(fileName) || /^[a-z][a-z0-9+.-]*:/iu.test(fileName))) {
@@ -670,6 +702,7 @@ async function loadTypeScriptProjectInternal(
     if (safe.kind === 'library') {
       const existingLibrary = libraryContents.get(safe.absolute);
       if (existingLibrary !== undefined) return existingLibrary;
+      preflightProgramRead(safe.absolute);
       const text = defaultHost.readFile(safe.absolute);
       if (text !== undefined) {
         const size = Buffer.byteLength(text);
@@ -691,6 +724,7 @@ async function loadTypeScriptProjectInternal(
       if (existingMetadata) return existingMetadata.text;
       const relative = relativeWithin(workspaceRoot, safe.absolute);
       if (!relative) throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
+      preflightProgramRead(safe.absolute, relative);
       const text = fileSystem.readFile(safe.absolute);
       const size = Buffer.byteLength(text);
       if (size > limits.maxFileBytes) {
@@ -718,6 +752,7 @@ async function loadTypeScriptProjectInternal(
     if (!relative || !SOURCE_EXTENSIONS.some((extension) => relative.endsWith(extension))) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_EXTENSION_UNSUPPORTED');
     }
+    preflightProgramRead(safe.absolute, relative);
     const text = fileSystem.readFile(safe.absolute);
     const size = Buffer.byteLength(text);
     if (size > limits.maxFileBytes) {
