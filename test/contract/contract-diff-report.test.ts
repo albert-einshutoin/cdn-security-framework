@@ -263,6 +263,9 @@ exceptions:
     const invalid = run(['--openapi', ok.openapiPath, '--policy', ok.policyPath]);
     expect(invalid.status).toBe(2);
     expect(invalid.stderr).toContain('CONTRACT_DIFF_TARGET_INVALID');
+    expect(run(['--openapi']).status).toBe(2);
+    expect(run([...common, '--unknown-option']).status).toBe(2);
+    expect(run(['--help']).status).toBe(0);
 
     const invalidOpenApi = path.join(ok.root, 'invalid-openapi.yaml');
     fs.writeFileSync(invalidOpenApi, 'openapi: 3.1.0\npaths: []\n');
@@ -304,6 +307,30 @@ exceptions:
     const hardlinkOutput = path.join(ok.root, 'hardlink-report.json');
     fs.linkSync(ok.openapiPath, hardlinkOutput);
     expect(run([...common, '--out', hardlinkOutput, '--force']).status).toBe(2);
+    const fifoOutput = path.join(ok.root, 'fifo-race-report.json');
+    fs.writeFileSync(fifoOutput, 'existing\n');
+    const fifoPreload = path.join(ok.root, 'fifo-race.cjs');
+    fs.writeFileSync(fifoPreload, `const fs = require('node:fs');
+const childProcess = require('node:child_process');
+const target = process.env.FIFO_SWAP_TARGET ? fs.realpathSync(process.env.FIFO_SWAP_TARGET) : undefined;
+const open = fs.openSync;
+let swapped = false;
+fs.openSync = function (filePath, flags, ...rest) {
+  if (!swapped && target && require('node:path').resolve(String(filePath)) === target) {
+    swapped = true;
+    fs.unlinkSync(target);
+    childProcess.execFileSync('mkfifo', [target]);
+  }
+  return open.call(this, filePath, flags, ...rest);
+};
+`);
+    const fifoRace = spawnSync(process.execPath, [cli, 'contract', 'diff', ...common,
+      '--out', fifoOutput, '--force'], {
+      cwd: process.cwd(), encoding: 'utf8', timeout: 5_000,
+      env: { ...process.env, NODE_OPTIONS: `--require=${fifoPreload}`, FIFO_SWAP_TARGET: fifoOutput },
+    });
+    expect(fifoRace.error).toBeUndefined();
+    expect(fifoRace.status).toBe(2);
     expect(fs.readFileSync(ok.openapiPath, 'utf8')).toBe(inputBefore);
 
     const preload = path.join(ok.root, 'unexpected.cjs');

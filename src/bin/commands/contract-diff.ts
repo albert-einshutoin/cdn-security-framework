@@ -110,7 +110,8 @@ function writeOutput(target: OutputTarget, content: string): void {
       target.basename,
       fs.constants.O_WRONLY | fs.constants.O_CREAT
         | (target.expected ? 0 : fs.constants.O_EXCL)
-        | (fs.constants.O_NOFOLLOW ?? 0),
+        | (fs.constants.O_NOFOLLOW ?? 0)
+        | (fs.constants.O_NONBLOCK ?? 0),
       0o666,
     );
     const opened = fs.fstatSync(descriptor);
@@ -170,11 +171,13 @@ function run(options: ContractDiffCliOptions): void {
 }
 
 export function registerContractDiffCommand(program: Command): void {
-  program
+  const contract = program
     .command('contract')
-    .description('Compare an OpenAPI contract with the effective CDN security policy')
+    .description('Compare an OpenAPI contract with the effective CDN security policy');
+  contract
     .command('diff')
     .description('Emit deterministic security contract drift findings')
+    .exitOverride()
     .option('--openapi <path>', 'OpenAPI YAML or JSON file')
     .option('--policy <path>', 'CDN security policy YAML file')
     .option('--target <target>', 'Target platform: aws | cloudflare')

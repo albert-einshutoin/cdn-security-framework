@@ -4014,7 +4014,19 @@ program
     }
   });
 
-program.parse();
+try {
+  program.parse();
+} catch (error: unknown) {
+  const commanderError = error as { code?: string; exitCode?: number };
+  if (process.argv[2] === 'contract' && process.argv[3] === 'diff'
+    && commanderError.code?.startsWith('commander.')) {
+    if (commanderError.exitCode === 0) process.exitCode = 0;
+    else {
+      console.error('[ERROR] CONTRACT_DIFF_ARGUMENT_INVALID: Invalid contract diff arguments.');
+      process.exitCode = 2;
+    }
+  } else throw error;
+}
 
 }
 
