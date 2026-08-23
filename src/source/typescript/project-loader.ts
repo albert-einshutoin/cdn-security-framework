@@ -788,12 +788,17 @@ async function loadTypeScriptProjectInternal(
     const preprocessed = ts.preProcessFile(text, true, true);
     const references = [...preprocessed.referencedFiles, ...preprocessed.importedFiles];
     const sourceDirectory = path.dirname(path.resolve(workspaceRoot, relative));
-    if (references.some(({ fileName }) => path.isAbsolute(fileName) || /^[a-z][a-z0-9+.-]*:/iu.test(fileName))) {
+    if (preprocessed.referencedFiles.some(({ fileName }) => (
+      path.isAbsolute(fileName.replaceAll('\\', '/')) || /^[a-z][a-z0-9+.-]*:/iu.test(fileName)
+    )) || preprocessed.importedFiles.some(({ fileName }) => (
+      path.isAbsolute(fileName.replaceAll('\\', '/')) || /^[a-z]:[\\/]/iu.test(fileName)
+    ))) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT', { sourceUri: relative });
     }
     if (references.some(({ fileName }) => {
-      if (!fileName.startsWith('.')) return false;
-      const candidate = path.resolve(sourceDirectory, fileName);
+      const normalized = fileName.replaceAll('\\', '/');
+      if (!normalized.startsWith('.')) return false;
+      const candidate = path.resolve(sourceDirectory, normalized);
       return candidate !== workspaceRoot && relativeWithin(workspaceRoot, candidate) === undefined;
     })) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT', { sourceUri: relative });
@@ -829,8 +834,20 @@ async function loadTypeScriptProjectInternal(
       throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
     }
   };
-  const readProgramFile = (candidate: string): string | undefined => {
+  const resolvedProgramPaths = new Set(rootNames.map((candidate) => path.resolve(candidate)));
+  const resolveProgramPath = (candidate: string): ReturnType<typeof safeExistingPath> => {
+    const lexical = path.resolve(candidate);
     const safe = safeExistingPath(candidate);
+    if (safe) {
+      resolvedProgramPaths.add(lexical);
+      resolvedProgramPaths.add(path.resolve(safe.absolute));
+      return safe;
+    }
+    if (resolvedProgramPaths.has(lexical)) throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+    return undefined;
+  };
+  const readProgramFile = (candidate: string): string | undefined => {
+    const safe = resolveProgramPath(candidate);
     if (!safe) return undefined;
     if (safe.kind === 'unsupported') return undefined;
     if (safe.kind === 'library') {
@@ -926,11 +943,11 @@ async function loadTypeScriptProjectInternal(
   };
   const host: ts.CompilerHost = {
     ...defaultHost,
-    fileExists: (candidate) => safeExistingPath(candidate) !== undefined,
+    fileExists: (candidate) => resolveProgramPath(candidate) !== undefined,
     readFile: readProgramFile,
     getSourceFile: (candidate, languageVersion) => {
       checkInterruption(options.cancellationSignal, deadline);
-      const kind = safeExistingPath(candidate)?.kind;
+      const kind = resolveProgramPath(candidate)?.kind;
       if (kind === 'unsupported' || kind === 'package-metadata') {
         throw new TypeScriptProjectLoadError('TS_PROJECT_EXTENSION_UNSUPPORTED');
       }
@@ -940,7 +957,7 @@ async function loadTypeScriptProjectInternal(
       if (kind === 'workspace' || kind === 'library') accountSourceFile(sourceFile);
       return sourceFile;
     },
-    realpath: (candidate) => safeExistingPath(candidate)?.absolute ?? candidate,
+    realpath: (candidate) => resolveProgramPath(candidate)?.absolute ?? candidate,
     directoryExists: (candidate) => {
       try {
         const lexical = path.resolve(candidate);
@@ -1005,7 +1022,7 @@ async function loadTypeScriptProjectInternal(
   await yieldAndCheckInterruption(options.cancellationSignal, deadline);
 
   const sourceFiles = program.getSourceFiles()
-    .filter(({ fileName }) => safeExistingPath(fileName)?.kind === 'workspace')
+    .filter(({ fileName }) => resolveProgramPath(fileName)?.kind === 'workspace')
     .sort((left, right) => left.fileName.localeCompare(right.fileName));
   if (boundaryViolation) throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
   for (const sourceFile of sourceFiles) accountSourceFile(sourceFile);

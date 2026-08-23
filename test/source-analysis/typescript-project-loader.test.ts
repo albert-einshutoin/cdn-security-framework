@@ -96,6 +96,10 @@ describe('TypeScript project loader', () => {
     await expectFailure(loadTypeScriptProject(options(root, {
       limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxFiles: 3 },
     })), 'TS_PROJECT_FILE_LIMIT', root);
+
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "module": "NodeNext", "moduleResolution": "NodeNext", "noLib": true }, "files": ["src/app.ts"] }');
+    write(root, 'src/app.ts', 'import fs from "node:fs";\nexport const value = fs;\n');
+    await expect(loadTypeScriptProject(options(root))).resolves.toBeDefined();
   }, 15_000);
 
   test('supports local extends and rejects package, outside, and symlink escapes', async () => {
@@ -278,6 +282,13 @@ describe('TypeScript project loader', () => {
 
     write(root, 'src/app.ts', `const value = require(${JSON.stringify(outsideSpecifier)});\nexport { value };\n`);
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+
+    const windowsOutsideSpecifier = outsideSpecifier.replaceAll('/', '\\');
+    write(root, 'src/app.ts', `import { value } from ${JSON.stringify(windowsOutsideSpecifier)};\nexport { value };\n`);
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+
+    write(root, 'src/app.ts', 'import value from "\\\\server\\share";\nexport { value };\n');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
   }, 15_000);
 
   test('rejects non-regular dependency inputs before bounded reads', async () => {
@@ -388,6 +399,20 @@ describe('TypeScript project loader', () => {
       },
     })), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
 
+    const deletedRoot = workspace();
+    write(deletedRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    write(deletedRoot, 'src/app.ts', 'export const value = 1;\n');
+    await expectFailure(loadTypeScriptProject(options(deletedRoot, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        readFileBounded(filePath, maxBytes) {
+          const text = nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
+          if (filePath.endsWith('src/app.ts')) fs.unlinkSync(filePath);
+          return text;
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', deletedRoot);
+
     const dependencyRoot = workspace();
     write(dependencyRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
     write(dependencyRoot, 'src/app.ts', 'import { value } from "./dep";\nexport { value };\n');
@@ -407,6 +432,21 @@ describe('TypeScript project loader', () => {
       },
     })), 'TS_PROJECT_PATH_OUTSIDE_ROOT', dependencyRoot);
     expect(dependencyRetargeted).toBe(true);
+
+    const deletedDependencyRoot = workspace();
+    write(deletedDependencyRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    write(deletedDependencyRoot, 'src/app.ts', 'import { value } from "./dep";\nexport { value };\n');
+    write(deletedDependencyRoot, 'src/dep.ts', 'export const value = 1;\n');
+    await expectFailure(loadTypeScriptProject(options(deletedDependencyRoot, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        readFileBounded(filePath, maxBytes) {
+          const text = nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
+          if (filePath.endsWith('src/dep.ts')) fs.unlinkSync(filePath);
+          return text;
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', deletedDependencyRoot);
 
     const resolutionRoot = workspace();
     write(resolutionRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');

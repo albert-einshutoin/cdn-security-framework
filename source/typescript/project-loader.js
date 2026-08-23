@@ -644,13 +644,14 @@ async function loadTypeScriptProjectInternal(options) {
         const preprocessed = typescript_1.default.preProcessFile(text, true, true);
         const references = [...preprocessed.referencedFiles, ...preprocessed.importedFiles];
         const sourceDirectory = node_path_1.default.dirname(node_path_1.default.resolve(workspaceRoot, relative));
-        if (references.some(({ fileName }) => node_path_1.default.isAbsolute(fileName) || /^[a-z][a-z0-9+.-]*:/iu.test(fileName))) {
+        if (preprocessed.referencedFiles.some(({ fileName }) => (node_path_1.default.isAbsolute(fileName.replaceAll('\\', '/')) || /^[a-z][a-z0-9+.-]*:/iu.test(fileName))) || preprocessed.importedFiles.some(({ fileName }) => (node_path_1.default.isAbsolute(fileName.replaceAll('\\', '/')) || /^[a-z]:[\\/]/iu.test(fileName)))) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT', { sourceUri: relative });
         }
         if (references.some(({ fileName }) => {
-            if (!fileName.startsWith('.'))
+            const normalized = fileName.replaceAll('\\', '/');
+            if (!normalized.startsWith('.'))
                 return false;
-            const candidate = node_path_1.default.resolve(sourceDirectory, fileName);
+            const candidate = node_path_1.default.resolve(sourceDirectory, normalized);
             return candidate !== workspaceRoot && relativeWithin(workspaceRoot, candidate) === undefined;
         })) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT', { sourceUri: relative });
@@ -688,8 +689,21 @@ async function loadTypeScriptProjectInternal(options) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
         }
     };
-    const readProgramFile = (candidate) => {
+    const resolvedProgramPaths = new Set(rootNames.map((candidate) => node_path_1.default.resolve(candidate)));
+    const resolveProgramPath = (candidate) => {
+        const lexical = node_path_1.default.resolve(candidate);
         const safe = safeExistingPath(candidate);
+        if (safe) {
+            resolvedProgramPaths.add(lexical);
+            resolvedProgramPaths.add(node_path_1.default.resolve(safe.absolute));
+            return safe;
+        }
+        if (resolvedProgramPaths.has(lexical))
+            throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+        return undefined;
+    };
+    const readProgramFile = (candidate) => {
+        const safe = resolveProgramPath(candidate);
         if (!safe)
             return undefined;
         if (safe.kind === 'unsupported')
@@ -796,11 +810,11 @@ async function loadTypeScriptProjectInternal(options) {
     };
     const host = {
         ...defaultHost,
-        fileExists: (candidate) => safeExistingPath(candidate) !== undefined,
+        fileExists: (candidate) => resolveProgramPath(candidate) !== undefined,
         readFile: readProgramFile,
         getSourceFile: (candidate, languageVersion) => {
             checkInterruption(options.cancellationSignal, deadline);
-            const kind = safeExistingPath(candidate)?.kind;
+            const kind = resolveProgramPath(candidate)?.kind;
             if (kind === 'unsupported' || kind === 'package-metadata') {
                 throw new TypeScriptProjectLoadError('TS_PROJECT_EXTENSION_UNSUPPORTED');
             }
@@ -812,7 +826,7 @@ async function loadTypeScriptProjectInternal(options) {
                 accountSourceFile(sourceFile);
             return sourceFile;
         },
-        realpath: (candidate) => safeExistingPath(candidate)?.absolute ?? candidate,
+        realpath: (candidate) => resolveProgramPath(candidate)?.absolute ?? candidate,
         directoryExists: (candidate) => {
             try {
                 const lexical = node_path_1.default.resolve(candidate);
@@ -880,7 +894,7 @@ async function loadTypeScriptProjectInternal(options) {
         throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
     await yieldAndCheckInterruption(options.cancellationSignal, deadline);
     const sourceFiles = program.getSourceFiles()
-        .filter(({ fileName }) => safeExistingPath(fileName)?.kind === 'workspace')
+        .filter(({ fileName }) => resolveProgramPath(fileName)?.kind === 'workspace')
         .sort((left, right) => left.fileName.localeCompare(right.fileName));
     if (boundaryViolation)
         throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
