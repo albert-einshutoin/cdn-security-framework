@@ -6,10 +6,12 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.NESTJS_ROUTE_DECORATORS = void 0;
 exports.nestJsRouteDecorator = nestJsRouteDecorator;
 exports.isUnsupportedNestJsDecorator = isUnsupportedNestJsDecorator;
+const node_module_1 = require("node:module");
+const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
 const typescript_1 = __importDefault(require("typescript"));
 exports.NESTJS_ROUTE_DECORATORS = [
-    'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'Version',
+    'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'Sse', 'Version',
 ];
 function targetSymbol(node, checker) {
     const location = typescript_1.default.isPropertyAccessExpression(node) ? node.name : node;
@@ -47,18 +49,31 @@ function originatesFromNestJsCommon(node, symbol, checker) {
     const sourceFile = importSymbol?.declarations?.[0]?.getSourceFile();
     if (!sourceFile)
         return false;
-    return Boolean(symbol?.declarations?.some((declaration) => {
-        const target = node_path_1.default.resolve(declaration.getSourceFile().fileName);
-        let directory = node_path_1.default.dirname(node_path_1.default.resolve(sourceFile.fileName));
+    const packageRoot = (fileName) => {
+        let directory = node_path_1.default.dirname(node_path_1.default.resolve(fileName));
         while (true) {
-            const packageRoot = node_path_1.default.join(directory, 'node_modules', '@nestjs', 'common');
-            if (target === packageRoot || target.startsWith(`${packageRoot}${node_path_1.default.sep}`))
-                return true;
+            if (node_path_1.default.basename(directory) === 'common'
+                && node_path_1.default.basename(node_path_1.default.dirname(directory)) === '@nestjs'
+                && node_path_1.default.basename(node_path_1.default.dirname(node_path_1.default.dirname(directory))) === 'node_modules')
+                return directory;
             const parent = node_path_1.default.dirname(directory);
             if (parent === directory)
-                return false;
+                return undefined;
             directory = parent;
         }
+    };
+    let resolvedRoot;
+    try {
+        resolvedRoot = packageRoot((0, node_module_1.createRequire)(sourceFile.fileName).resolve('@nestjs/common'));
+    }
+    catch {
+        return false;
+    }
+    if (!resolvedRoot)
+        return false;
+    return Boolean(symbol?.declarations?.some((declaration) => {
+        const targetRoot = packageRoot(declaration.getSourceFile().fileName);
+        return targetRoot !== undefined && node_fs_1.default.realpathSync(targetRoot) === node_fs_1.default.realpathSync(resolvedRoot);
     }));
 }
 function match(decorator, checker) {

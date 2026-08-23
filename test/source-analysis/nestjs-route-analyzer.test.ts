@@ -20,11 +20,12 @@ function write(root: string, relative: string, contents: string): void {
   fs.writeFileSync(target, contents);
 }
 
-function installNestJsCommon(root: string): void {
-  write(root, 'node_modules/@nestjs/common/package.json', JSON.stringify({
-    name: '@nestjs/common', version: '1.0.0', types: 'index.d.ts',
+function installNestJsCommon(root: string, packageRoot = 'node_modules/@nestjs/common'): void {
+  write(root, `${packageRoot}/package.json`, JSON.stringify({
+    name: '@nestjs/common', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
   }));
-  write(root, 'node_modules/@nestjs/common/index.d.ts', `
+  write(root, `${packageRoot}/index.js`, 'module.exports = {};\n');
+  write(root, `${packageRoot}/index.d.ts`, `
     export declare function Controller(path?: string | readonly string[]): ClassDecorator;
     export declare function Get(path?: string | readonly string[]): MethodDecorator;
     export declare function Post(path?: string | readonly string[]): MethodDecorator;
@@ -34,6 +35,7 @@ function installNestJsCommon(root: string): void {
     export declare function Options(path?: string | readonly string[]): MethodDecorator;
     export declare function Head(path?: string | readonly string[]): MethodDecorator;
     export declare function All(path?: string | readonly string[]): MethodDecorator;
+    export declare function Sse(path?: string | readonly string[]): MethodDecorator;
     export declare function Version(value: string): MethodDecorator;
     export declare const fake: { Get: typeof Get };
   `);
@@ -111,6 +113,7 @@ describe('NestJS route analyzer', () => {
         @All('*') all() {}
         @Nest.Delete(process.env.ROUTE) dynamic() {}
         @Version('1') @Nest.Options('versioned') versioned() {}
+        @Nest.Sse('events') events() {}
         @Get('fake') fake() {}
         @Nest.Get(':id(\\\\d+)') regex() {}
       }
@@ -129,11 +132,12 @@ describe('NestJS route analyzer', () => {
       'GET /users/{id}',
       'GET /users/details/view',
       'HEAD /users/inherited',
-      'OPTIONS /users/versioned',
+      'GET /users/events',
       'POST /users',
       'PUT /users/save',
       ...HTTP_METHODS.map((method) => `${method} /users/*`),
     ]));
+    expect(routeKeys).not.toContain('OPTIONS /users/versioned');
     expect(routeKeys.some((routeKey) => routeKey.endsWith('/fake'))).toBe(false);
     expect(routeKeys.some((routeKey) => routeKey.endsWith('/ignored'))).toBe(false);
     expect(contract.capabilities.routes).toBe('partial');
@@ -157,6 +161,12 @@ describe('NestJS route analyzer', () => {
       }),
       expect.objectContaining({
         methods: ['GET'],
+        path: null,
+        reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR',
+        sourceUri: 'src/controller.ts',
+      }),
+      expect.objectContaining({
+        methods: ['OPTIONS'],
         path: null,
         reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR',
         sourceUri: 'src/controller.ts',
@@ -220,6 +230,29 @@ describe('NestJS route analyzer', () => {
         contract: { operations: [] },
         diagnostics: [{ code: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }],
       },
+    });
+  });
+
+  test('accepts a genuine pnpm-style NestJS package location', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      @Controller('items') class ItemsController { @Get() list() {} }
+    `);
+    const packageLink = path.join(root, 'node_modules/@nestjs/common');
+    const storeRelative = 'node_modules/.pnpm/@nestjs+common@1.0.0/node_modules/@nestjs/common';
+    const store = path.join(root, storeRelative);
+    fs.rmSync(packageLink, { recursive: true });
+    installNestJsCommon(root, storeRelative);
+    fs.symlinkSync(path.relative(path.dirname(packageLink), store), packageLink, 'dir');
+    write(root, 'tsconfig.json', JSON.stringify({
+      compilerOptions: {
+        experimentalDecorators: true, moduleResolution: 'node', noLib: true, preserveSymlinks: true, types: [],
+      },
+      files: ['src/controller.ts'],
+    }));
+
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success', result: { contract: { operations: [{ routeKey: 'GET /items' }] } },
     });
   });
 

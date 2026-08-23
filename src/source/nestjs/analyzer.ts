@@ -41,6 +41,7 @@ const METHOD_DECORATORS: Readonly<Partial<Record<NestJsRouteDecorator, readonly 
   Patch: ['PATCH'],
   Post: ['POST'],
   Put: ['PUT'],
+  Sse: ['GET'],
 });
 const EMPTY_REQUEST = Object.freeze({
   contentTypes: [], requiredHeaders: [], queryParameters: [], pathParameters: [],
@@ -219,7 +220,11 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
       if (controllers.length === 0) continue;
       for (const method of methodsIncludingDirectBase(statement, checker, projectSources)) {
         await checkpoint();
-        for (const methodDecorator of decorators(method)) {
+        const methodDecorators = decorators(method);
+        const versioned = methodDecorators.some((decorator) => (
+          nestJsRouteDecorator(decorator, checker)?.name === 'Version'
+        ));
+        for (const methodDecorator of methodDecorators) {
           await checkpoint();
           const match = nestJsRouteDecorator(methodDecorator, checker);
           const methods = match && METHOD_DECORATORS[match.name];
@@ -227,7 +232,11 @@ async function analyze(context: Parameters<SourceAnalyzerPlugin['analyze']>[0]) 
             if (isUnsupportedNestJsDecorator(methodDecorator, checker)) {
               addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
             }
-            if (match?.name === 'Version') addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
+            continue;
+          }
+          if (versioned) {
+            addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
+            addUnresolved(methods, methodDecorator, 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');
             continue;
           }
           const methodPaths = match.call.arguments.length <= 1

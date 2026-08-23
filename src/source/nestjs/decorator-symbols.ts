@@ -1,9 +1,11 @@
+import { createRequire } from 'node:module';
+import fs from 'node:fs';
 import path from 'node:path';
 
 import ts from 'typescript';
 
 export const NESTJS_ROUTE_DECORATORS = [
-  'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'Version',
+  'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'Sse', 'Version',
 ] as const;
 
 export type NestJsRouteDecorator = typeof NESTJS_ROUTE_DECORATORS[number];
@@ -47,16 +49,25 @@ function originatesFromNestJsCommon(
   const importSymbol = checker.getSymbolAtLocation(ts.isPropertyAccessExpression(node) ? node.expression : node);
   const sourceFile = importSymbol?.declarations?.[0]?.getSourceFile();
   if (!sourceFile) return false;
-  return Boolean(symbol?.declarations?.some((declaration) => {
-    const target = path.resolve(declaration.getSourceFile().fileName);
-    let directory = path.dirname(path.resolve(sourceFile.fileName));
+  const packageRoot = (fileName: string): string | undefined => {
+    let directory = path.dirname(path.resolve(fileName));
     while (true) {
-      const packageRoot = path.join(directory, 'node_modules', '@nestjs', 'common');
-      if (target === packageRoot || target.startsWith(`${packageRoot}${path.sep}`)) return true;
+      if (path.basename(directory) === 'common'
+        && path.basename(path.dirname(directory)) === '@nestjs'
+        && path.basename(path.dirname(path.dirname(directory))) === 'node_modules') return directory;
       const parent = path.dirname(directory);
-      if (parent === directory) return false;
+      if (parent === directory) return undefined;
       directory = parent;
     }
+  };
+  let resolvedRoot: string | undefined;
+  try {
+    resolvedRoot = packageRoot(createRequire(sourceFile.fileName).resolve('@nestjs/common'));
+  } catch { return false; }
+  if (!resolvedRoot) return false;
+  return Boolean(symbol?.declarations?.some((declaration) => {
+    const targetRoot = packageRoot(declaration.getSourceFile().fileName);
+    return targetRoot !== undefined && fs.realpathSync(targetRoot) === fs.realpathSync(resolvedRoot);
   }));
 }
 
