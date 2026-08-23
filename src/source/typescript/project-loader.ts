@@ -541,7 +541,10 @@ function createParseHost(
     let absolute: string;
     try {
       absolute = fileSystem.realpath(candidate);
-    } catch { return undefined; }
+    } catch (error) {
+      if (isMissingPathError(error)) return undefined;
+      throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
+    }
     if (!relativeWithin(workspaceRoot, absolute)) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
     }
@@ -934,7 +937,7 @@ async function loadTypeScriptProjectInternal(
       const text = readProgramFile(candidate);
       if (text === undefined) return undefined;
       const sourceFile = ts.createSourceFile(candidate, text, languageVersion, true);
-      if (kind === 'workspace') accountSourceFile(sourceFile);
+      if (kind === 'workspace' || kind === 'library') accountSourceFile(sourceFile);
       return sourceFile;
     },
     realpath: (candidate) => safeExistingPath(candidate)?.absolute ?? candidate,

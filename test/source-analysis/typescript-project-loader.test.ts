@@ -424,6 +424,21 @@ describe('TypeScript project loader', () => {
       },
     })), 'TS_PROJECT_INTERNAL', resolutionRoot);
 
+    const includeRoot = workspace();
+    write(includeRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "include": ["src/**/*.ts"] }');
+    write(includeRoot, 'src/app.ts', 'export const value = 1;\n');
+    await expectFailure(loadTypeScriptProject(options(includeRoot, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        realpath(filePath) {
+          if (filePath.endsWith('src/app.ts')) {
+            throw Object.assign(new Error('denied'), { code: 'EACCES' });
+          }
+          return nodeTypeScriptProjectFileSystem.realpath(filePath);
+        },
+      },
+    })), 'TS_PROJECT_INTERNAL', includeRoot);
+
     const directoryRoot = workspace();
     write(directoryRoot, 'tsconfig.json', '{ "compilerOptions": { "noLib": true, "moduleResolution": "node" }, "files": ["src/app.ts"] }');
     write(directoryRoot, 'src/app.ts', 'import value from "missing";\nexport { value };\n');
@@ -631,6 +646,13 @@ describe('TypeScript project loader', () => {
     write(root, 'tsconfig.json', `{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }${' '.repeat(64)}`);
     const loaded = await loadTypeScriptProject(options(root));
     expect(loaded.metrics.largestFileBytes).toBe(fs.statSync(path.join(root, 'tsconfig.json')).size);
+
+    write(root, 'tsconfig.json', config);
+    const withLibrary = await loadTypeScriptProject(options(root));
+    expect(withLibrary.metrics.astNodes).toBeGreaterThan(loaded.metrics.astNodes);
+    await expectFailure(loadTypeScriptProject(options(root, {
+      limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxAstNodes: loaded.metrics.astNodes },
+    })), 'TS_PROJECT_AST_NODE_LIMIT', root);
   });
 
   test('honors cancellation and redacts malformed-config diagnostics', async () => {
