@@ -128,6 +128,9 @@ export const nodeTypeScriptProjectFileSystem: TypeScriptProjectFileSystem = Obje
       return Buffer.concat(chunks, total).toString('utf8');
     } catch (error) {
       if (error instanceof TypeScriptProjectLoadError) throw error;
+      if ((error as NodeJS.ErrnoException).code === 'ELOOP') {
+        throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
+      }
       throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
     } finally {
       if (descriptor !== undefined) fs.closeSync(descriptor);
@@ -366,6 +369,10 @@ function safeConfigPath(
   }
   const marker = configuredPath.search(GLOB_MARKER);
   const staticPart = marker < 0 ? configuredPath : configuredPath.slice(0, marker);
+  const resolvedPattern = path.resolve(configDirectory, configuredPath);
+  if (!relativeWithin(workspaceRoot, resolvedPattern) && resolvedPattern !== workspaceRoot) {
+    throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
+  }
   const candidate = path.resolve(configDirectory, staticPart || '.');
   if (!relativeWithin(workspaceRoot, candidate) && candidate !== workspaceRoot) {
     throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
@@ -383,6 +390,7 @@ function safeConfigPath(
 
 interface ConfigState {
   readonly digests: Map<string, string>;
+  readonly contents: Map<string, string>;
   totalBytes: number;
   largestFileBytes: number;
 }
@@ -428,7 +436,7 @@ function validateConfigTree(
   if (state.totalBytes + resolved.stat.size > limits.maxTotalSourceBytes) {
     throw new TypeScriptProjectLoadError('TS_PROJECT_TOTAL_BYTES_LIMIT');
   }
-  const text = fileSystem.readFile(resolved.absolute);
+  const text = fileSystem.readFileBounded(resolved.absolute, limits.maxFileBytes);
   const bytes = Buffer.byteLength(text);
   if (bytes > limits.maxFileBytes) {
     throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_BYTES_LIMIT', { sourceUri: resolved.relative });
@@ -441,6 +449,7 @@ function validateConfigTree(
     });
   }
   state.digests.set(resolved.relative, crypto.createHash('sha256').update(text).digest('hex'));
+  state.contents.set(resolved.absolute, text);
   state.totalBytes += bytes;
   state.largestFileBytes = Math.max(state.largestFileBytes, bytes);
   if (state.digests.size > limits.maxFiles) throw new TypeScriptProjectLoadError('TS_PROJECT_FILE_LIMIT');
@@ -514,6 +523,7 @@ function createParseHost(
   signal: AbortSignal | undefined,
   deadline: number,
   maxEnumerationEntries: number,
+  validatedConfigs: ReadonlyMap<string, string>,
 ): ts.ParseConfigHost {
   const safeRealPath = (candidate: string): string | undefined => {
     let absolute: string;
@@ -530,7 +540,7 @@ function createParseHost(
     fileExists: (candidate) => safeRealPath(candidate) !== undefined,
     readFile: (candidate) => {
       const safe = safeRealPath(candidate);
-      return safe ? fileSystem.readFile(safe) : undefined;
+      return safe ? validatedConfigs.get(safe) : undefined;
     },
     readDirectory: (rootDir, extensions, excludes, includes, depth) => {
       checkInterruption(signal, deadline);
@@ -619,7 +629,9 @@ async function loadTypeScriptProjectInternal(
   }
   const configPath = path.resolve(workspaceRoot, options.tsconfigPath);
   const resolvedConfig = realFileWithin(fileSystem, workspaceRoot, configPath, 'TS_PROJECT_CONFIG_MISSING');
-  const configState: ConfigState = { digests: new Map(), totalBytes: 0, largestFileBytes: 0 };
+  const configState: ConfigState = {
+    digests: new Map(), contents: new Map(), totalBytes: 0, largestFileBytes: 0,
+  };
   validateConfigTree(
     fileSystem,
     workspaceRoot,
@@ -632,7 +644,7 @@ async function loadTypeScriptProjectInternal(
   );
 
   const read = ts.readConfigFile(resolvedConfig.absolute, (candidate) => {
-    try { return fileSystem.readFile(candidate); } catch { return undefined; }
+    try { return configState.contents.get(fileSystem.realpath(candidate)); } catch { return undefined; }
   });
   if (read.error) {
     throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG', {
@@ -649,6 +661,7 @@ async function loadTypeScriptProjectInternal(
       options.cancellationSignal,
       deadline,
       limits.maxFiles,
+      configState.contents,
     ),
     path.dirname(resolvedConfig.absolute),
     { noEmit: true, plugins: [] },

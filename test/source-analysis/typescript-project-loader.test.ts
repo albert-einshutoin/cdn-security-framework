@@ -209,6 +209,9 @@ describe('TypeScript project loader', () => {
     write(root, 'tsconfig.json', '{ "compilerOptions": { "paths": { "@outside/*": ["../outside/*"] } }, "files": ["src/one.ts"] }');
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
 
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "paths": { "@outside/*": ["safe/*/../../../outside"] } }, "files": ["src/one.ts"] }');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+
     const outside = workspace();
     write(outside, 'escaped.ts', 'export const escaped = true;\n');
     fs.symlinkSync(path.join(outside, 'escaped.ts'), path.join(root, 'src/linked.ts'));
@@ -298,6 +301,30 @@ describe('TypeScript project loader', () => {
             retargeted = true;
             fs.renameSync(path.join(root, 'src'), path.join(root, 'src-safe'));
             fs.symlinkSync(outside, path.join(root, 'src'));
+          }
+          return nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
+        },
+      },
+    })), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+    expect(retargeted).toBe(true);
+  });
+
+  test('rejects a config retargeted outside before its bounded read', async () => {
+    const root = workspace();
+    const outside = workspace();
+    write(root, 'tsconfig.json', '{ "files": ["src/app.ts"] }');
+    write(root, 'src/app.ts', 'export const value = 1;\n');
+    write(outside, 'outside.json', '{ "files": ["outside.ts"] }');
+    let retargeted = false;
+
+    await expectFailure(loadTypeScriptProject(options(root, {
+      fileSystem: {
+        ...nodeTypeScriptProjectFileSystem,
+        readFileBounded(filePath, maxBytes) {
+          if (!retargeted && filePath.endsWith('tsconfig.json')) {
+            retargeted = true;
+            fs.unlinkSync(filePath);
+            fs.symlinkSync(path.join(outside, 'outside.json'), filePath);
           }
           return nodeTypeScriptProjectFileSystem.readFileBounded(filePath, maxBytes);
         },
