@@ -3,7 +3,8 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.nestJsSourceAnalyzer = void 0;
+exports.nestJsSourceAnalyzer = exports.validateNestJsAuthConfig = void 0;
+exports.createNestJsSourceAnalyzer = createNestJsSourceAnalyzer;
 const node_crypto_1 = require("node:crypto");
 const node_path_1 = __importDefault(require("node:path"));
 const typescript_1 = __importDefault(require("typescript"));
@@ -12,9 +13,12 @@ const security_ir_1 = require("../../contract/security-ir");
 const source_analysis_1 = require("../../source-analysis");
 const project_loader_1 = require("../typescript/project-loader");
 const decorator_symbols_1 = require("./decorator-symbols");
+const auth_config_1 = require("./auth-config");
 const static_string_resolver_1 = require("./static-string-resolver");
+var auth_config_2 = require("./auth-config");
+Object.defineProperty(exports, "validateNestJsAuthConfig", { enumerable: true, get: function () { return auth_config_2.validateNestJsAuthConfig; } });
 const ANALYZER_ID = 'nestjs-typescript';
-const ANALYZER_VERSION = '1.0.0';
+const ANALYZER_VERSION = '1.1.0';
 const ANALYZER_IDENTITY = `${ANALYZER_ID}@${ANALYZER_VERSION}`;
 const METHOD_DECORATORS = Object.freeze({
     All: canonical_route_1.HTTP_METHODS,
@@ -114,6 +118,197 @@ function effectiveControllerInChain(node, checker, projectSources, check, maxSte
         current = directBaseClass(current, checker);
     }
     return undefined;
+}
+function emptyAuthMetadata() {
+    return {
+        guardsPresent: false,
+        guards: [],
+        publicPresent: false,
+        explicitPublic: false,
+        rolesPresent: false,
+        roles: [],
+        dynamic: false,
+        guardDynamic: false,
+        publicDynamic: false,
+        rolesDynamic: false,
+        guardEvidence: [],
+        publicEvidence: [],
+        authorizationEvidence: [],
+    };
+}
+function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps) {
+    const result = emptyAuthMetadata();
+    for (const decorator of [...decorators(node)].reverse()) {
+        const resolved = (0, decorator_symbols_1.resolveDecoratorSymbol)(decorator, checker, check);
+        if (!resolved)
+            continue;
+        if (resolved.name === 'UseGuards' && resolved.trustedNestJsCommon) {
+            result.guardsPresent = true;
+            result.guardEvidence.push(decorator);
+            if (resolved.call.arguments.length === 0 || resolved.call.arguments.some(typescript_1.default.isSpreadElement)) {
+                result.guardDynamic = true;
+                continue;
+            }
+            for (const argument of resolved.call.arguments) {
+                const symbol = (0, decorator_symbols_1.resolveStaticSymbolName)(argument, checker, check);
+                if (symbol)
+                    result.guards.push(symbol);
+                else {
+                    result.guardDynamic = true;
+                }
+            }
+            continue;
+        }
+        if (config.public_decorators.includes(resolved.name)) {
+            result.publicPresent = true;
+            result.explicitPublic = false;
+            result.publicDynamic = false;
+            result.publicEvidence = [decorator];
+            if (resolved.call.arguments.length === 0)
+                result.explicitPublic = true;
+            else
+                result.publicDynamic = true;
+            continue;
+        }
+        if (!config.roles_decorators.includes(resolved.name))
+            continue;
+        result.rolesPresent = true;
+        result.roles = [];
+        result.rolesDynamic = false;
+        result.authorizationEvidence = [decorator];
+        for (const argument of resolved.call.arguments) {
+            if (typescript_1.default.isSpreadElement(argument)) {
+                result.rolesDynamic = true;
+                continue;
+            }
+            const values = (0, static_string_resolver_1.resolveStaticStrings)(argument, checker, projectSources, { check, maxSteps });
+            if (values)
+                result.roles.push(...values);
+            else
+                result.rolesDynamic = true;
+        }
+    }
+    result.dynamic = result.guardDynamic || result.publicDynamic || result.rolesDynamic;
+    return result;
+}
+function effectiveClassAuthMetadata(node, checker, projectSources, config, check, maxSteps) {
+    const result = emptyAuthMetadata();
+    const seen = new Set();
+    let current = node;
+    let steps = 0;
+    while (current && projectSources.has(current.getSourceFile()) && !seen.has(current)) {
+        check();
+        steps += 1;
+        if (steps > maxSteps)
+            throw new source_analysis_1.SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+        seen.add(current);
+        const own = ownAuthMetadata(current, checker, projectSources, config, check, maxSteps);
+        if (!result.guardsPresent && own.guardsPresent) {
+            result.guardsPresent = true;
+            result.guards = own.guards;
+            result.guardDynamic = own.guardDynamic;
+            result.dynamic ||= own.guardDynamic;
+            result.guardEvidence.push(...own.guardEvidence);
+        }
+        if (!result.publicPresent && own.publicPresent) {
+            result.publicPresent = true;
+            result.explicitPublic = own.explicitPublic;
+            result.publicDynamic = own.publicDynamic;
+            result.dynamic ||= own.publicDynamic;
+            result.publicEvidence.push(...own.publicEvidence);
+        }
+        if (!result.rolesPresent && own.rolesPresent) {
+            result.rolesPresent = true;
+            result.roles = own.roles;
+            result.rolesDynamic = own.rolesDynamic;
+            result.dynamic ||= own.rolesDynamic;
+            result.authorizationEvidence.push(...own.authorizationEvidence);
+        }
+        if (result.guardsPresent && result.publicPresent && result.rolesPresent)
+            break;
+        current = directBaseClass(current, checker);
+    }
+    return result;
+}
+function composeAuth(classMetadata, methodMetadata, config, globalGuardFound) {
+    const guards = [...classMetadata.guards, ...methodMetadata.guards];
+    const explicitPublic = methodMetadata.publicPresent
+        ? methodMetadata.explicitPublic
+        : classMetadata.explicitPublic;
+    const roles = methodMetadata.rolesPresent ? methodMetadata.roles : classMetadata.roles;
+    const dynamic = classMetadata.dynamic || methodMetadata.dynamic;
+    const analyzedGuards = guards.map((symbol) => {
+        const mapping = config.guard_mappings[symbol];
+        return {
+            symbol,
+            ...(mapping ? { authKind: (0, auth_config_1.authKindToIr)(mapping.auth_kind) } : {}),
+        };
+    });
+    const unknownGuard = analyzedGuards.some(({ authKind }) => authKind === undefined);
+    const capabilityReasons = [];
+    if (globalGuardFound)
+        capabilityReasons.push('Global NestJS guards are not analyzed.');
+    if (dynamic)
+        capabilityReasons.push('Dynamic authentication metadata was not inferred.');
+    if (unknownGuard)
+        capabilityReasons.push('Unmapped NestJS guards remain unknown.');
+    if (!explicitPublic && guards.length === 0) {
+        capabilityReasons.push('Local guard absence does not prove a public route.');
+    }
+    if (classMetadata.rolesPresent || methodMetadata.rolesPresent) {
+        capabilityReasons.push('Role metadata does not prove authorization enforcement.');
+    }
+    const enforcementConfidence = !globalGuardFound && !dynamic
+        && (explicitPublic || (guards.length > 0 && !unknownGuard)) ? 'high' : 'unknown';
+    const analysis = {
+        guards: analyzedGuards,
+        explicitPublic,
+        roles,
+        enforcementConfidence,
+        capabilityReasons,
+    };
+    let auth;
+    let exposure;
+    if (explicitPublic && !dynamic) {
+        auth = { mode: 'none', alternatives: [], analysis };
+        exposure = 'public';
+    }
+    else if (guards.length > 0 && !unknownGuard && !dynamic) {
+        auth = {
+            mode: 'alternatives',
+            alternatives: [{
+                    anonymous: false,
+                    schemes: analyzedGuards.map(({ symbol, authKind }) => ({
+                        name: symbol,
+                        kind: authKind,
+                        scopes: [],
+                        capability: 'supported',
+                    })),
+                }],
+            analysis,
+        };
+        exposure = 'authenticated';
+    }
+    else {
+        auth = { mode: 'unknown', alternatives: [], analysis };
+        exposure = 'unknown';
+    }
+    return {
+        auth,
+        exposure,
+        evidence: [
+            ...[
+                ...classMetadata.guardEvidence,
+                ...classMetadata.publicEvidence,
+                ...methodMetadata.guardEvidence,
+                ...methodMetadata.publicEvidence,
+            ].map((decorator) => ({ decorator, capability: 'authentication' })),
+            ...[
+                ...classMetadata.authorizationEvidence,
+                ...methodMetadata.authorizationEvidence,
+            ].map((decorator) => ({ decorator, capability: 'authorization' })),
+        ],
+    };
 }
 function methodsIncludingBaseChain(node, checker, projectSources, useDefineForClassFields, check, maxSteps) {
     const symbolKey = Symbol('symbol-method-key');
@@ -330,7 +525,7 @@ async function loadProject(workspaceRoot, tsconfigPath, context) {
         throw new source_analysis_1.SourceAnalyzerContractError('SOURCE_ANALYZER_INTERNAL');
     }
 }
-async function analyze(context) {
+async function analyze(context, authConfig) {
     if (context.entrypoints.length !== 1) {
         throw new source_analysis_1.SourceAnalyzerContractError('SOURCE_ANALYZER_INPUT_INVALID');
     }
@@ -353,6 +548,7 @@ async function analyze(context) {
     const unresolvedOperations = [];
     let unresolvedMethodCount = 0;
     let inspectedNodes = 0;
+    let globalGuardFound = false;
     const checkpoint = async () => {
         inspectedNodes += 1;
         if (inspectedNodes % 256 === 0)
@@ -373,7 +569,11 @@ async function analyze(context) {
             code,
             safeMessage: code === 'SOURCE_ANALYZER_DYNAMIC_ROUTE'
                 ? 'A dynamic route expression could not be resolved statically.'
-                : 'A source decorator is not supported by this analyzer.',
+                : code === 'SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA'
+                    ? 'Dynamic authentication metadata could not be resolved statically.'
+                    : code === 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED'
+                        ? 'Global NestJS guards are not analyzed.'
+                        : 'A source decorator is not supported by this analyzer.',
             ...sourceLocation(node, context.workspaceRoot),
         });
     };
@@ -384,6 +584,22 @@ async function analyze(context) {
             methods: [...methods], path: null, reason, ...sourceLocation(node, context.workspaceRoot),
         });
     };
+    for (const sourceFile of projectSources) {
+        const nodes = [sourceFile];
+        while (nodes.length > 0) {
+            const node = nodes.pop();
+            await checkpoint();
+            if (typescript_1.default.isPropertyAssignment(node)
+                && (typescript_1.default.isIdentifier(node.name) || typescript_1.default.isStringLiteral(node.name))
+                && node.name.text === 'provide'
+                && (0, decorator_symbols_1.isDirectImportFrom)(node.initializer, checker, '@nestjs/core', 'APP_GUARD')) {
+                if (!globalGuardFound)
+                    addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.initializer);
+                globalGuardFound = true;
+            }
+            typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+        }
+    }
     for (const sourceFile of projectSources) {
         const nodes = [...sourceFile.statements].reverse();
         while (nodes.length > 0) {
@@ -407,6 +623,10 @@ async function analyze(context) {
             const effectiveController = effectiveControllerInChain(statement, checker, projectSources, check, context.limits.maxAstNodes);
             if (!effectiveController)
                 continue;
+            const classAuthMetadata = effectiveClassAuthMetadata(statement, checker, projectSources, authConfig, check, context.limits.maxAstNodes);
+            if (classAuthMetadata.dynamic) {
+                addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', statement);
+            }
             const controllers = effectiveController.classification.route?.name === 'Controller'
                 ? [{ decorator: effectiveController.decorator, match: effectiveController.classification.route }]
                 : [];
@@ -420,6 +640,11 @@ async function analyze(context) {
                 const effectiveRoute = candidates.findIndex((match) => Boolean(match && (routeMethods(match.name) || match.name === 'Search')));
                 if (effectiveRoute === -1)
                     continue;
+                const methodAuthMetadata = ownAuthMetadata(method, checker, projectSources, authConfig, check, context.limits.maxAstNodes);
+                if (methodAuthMetadata.dynamic) {
+                    addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', method);
+                }
+                const operationAuth = composeAuth(classAuthMetadata, methodAuthMetadata, authConfig, globalGuardFound);
                 for (const [index, methodDecorator] of methodDecorators.entries()) {
                     if (classifications[index]?.unsupported) {
                         addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
@@ -505,18 +730,51 @@ async function analyze(context) {
                                             capability: 'httpMethods',
                                             complete: route.complete,
                                         },
+                                        ...operationAuth.evidence.map(({ decorator: authDecorator, capability }) => {
+                                            const location = sourceLocation(authDecorator, context.workspaceRoot);
+                                            return {
+                                                source: 'source-ast',
+                                                uri: location.sourceUri,
+                                                pointer: `line:${location.line}:column:${location.column}`,
+                                                digest: digest(authDecorator.getSourceFile()),
+                                                analyzer: ANALYZER_IDENTITY,
+                                                capability,
+                                                complete: operationAuth.auth.analysis?.enforcementConfidence === 'high',
+                                            };
+                                        }),
                                     ];
                                     const previous = operations.get(key);
                                     if (previous) {
                                         previous.provenance.push(...provenance);
+                                        if (JSON.stringify([previous.exposure, previous.auth])
+                                            !== JSON.stringify([operationAuth.exposure, operationAuth.auth])) {
+                                            const left = previous.auth.analysis;
+                                            const right = operationAuth.auth.analysis;
+                                            previous.exposure = 'unknown';
+                                            previous.auth = {
+                                                mode: 'unknown',
+                                                alternatives: [],
+                                                analysis: {
+                                                    guards: [...left.guards, ...right.guards],
+                                                    explicitPublic: left.explicitPublic || right.explicitPublic,
+                                                    roles: [...left.roles, ...right.roles],
+                                                    enforcementConfidence: 'unknown',
+                                                    capabilityReasons: [
+                                                        ...left.capabilityReasons,
+                                                        ...right.capabilityReasons,
+                                                        'Conflicting NestJS auth metadata was found for the same route.',
+                                                    ],
+                                                },
+                                            };
+                                        }
                                         continue;
                                     }
                                     consume();
                                     operations.set(key, {
                                         method: httpMethod,
                                         path: route.path,
-                                        exposure: 'unknown',
-                                        auth: { mode: 'unknown', alternatives: [] },
+                                        exposure: operationAuth.exposure,
+                                        auth: operationAuth.auth,
                                         request: { ...EMPTY_REQUEST },
                                         provenance,
                                     });
@@ -530,7 +788,7 @@ async function analyze(context) {
     const contract = (0, security_ir_1.createSecurityContract)({
         source: 'source-ast',
         capabilities: {
-            routes: 'partial', parameters: 'unsupported', requestBodies: 'unsupported', authentication: 'unsupported',
+            routes: 'partial', parameters: 'unsupported', requestBodies: 'unsupported', authentication: 'partial',
         },
         operations: [...operations.values()],
     });
@@ -558,23 +816,28 @@ async function analyze(context) {
         },
     };
 }
-exports.nestJsSourceAnalyzer = Object.freeze({
-    id: ANALYZER_ID,
-    version: ANALYZER_VERSION,
-    languages: Object.freeze(['typescript']),
-    frameworks: Object.freeze(['nestjs']),
-    capabilities: Object.freeze({
-        routePaths: Object.freeze({ status: 'partial', reason: 'Static NestJS route paths are supported.' }),
-        httpMethods: Object.freeze({ status: 'supported', reason: 'NestJS HTTP method decorators are supported.' }),
-        routerPrefixes: Object.freeze({ status: 'supported', reason: 'Static controller prefixes are supported.' }),
-        globalPrefixes: Object.freeze({ status: 'unsupported', reason: 'Runtime global prefixes are not inspected.' }),
-        authentication: Object.freeze({ status: 'unsupported', reason: 'Authentication metadata is handled separately.' }),
-        authorization: Object.freeze({ status: 'unsupported', reason: 'Authorization metadata is handled separately.' }),
-        requestContentTypes: Object.freeze({ status: 'unsupported', reason: 'Request content types are not inspected.' }),
-        requestLimits: Object.freeze({ status: 'unsupported', reason: 'Request limits are not inspected.' }),
-        sourceLocations: Object.freeze({ status: 'supported', reason: 'Decorator locations are reported.' }),
-        inheritedMetadata: Object.freeze({ status: 'partial', reason: 'Direct class inheritance is supported.' }),
-        dynamicExpressions: Object.freeze({ status: 'partial', reason: 'Only literal and const string expressions are resolved.' }),
-    }),
-    analyze,
+const CAPABILITIES = Object.freeze({
+    routePaths: Object.freeze({ status: 'partial', reason: 'Static NestJS route paths are supported.' }),
+    httpMethods: Object.freeze({ status: 'supported', reason: 'NestJS HTTP method decorators are supported.' }),
+    routerPrefixes: Object.freeze({ status: 'supported', reason: 'Static controller prefixes are supported.' }),
+    globalPrefixes: Object.freeze({ status: 'unsupported', reason: 'Runtime global prefixes are not inspected.' }),
+    authentication: Object.freeze({ status: 'partial', reason: 'Configured local Guard and Public metadata are inspected.' }),
+    authorization: Object.freeze({ status: 'partial', reason: 'Configured static role labels are inspected.' }),
+    requestContentTypes: Object.freeze({ status: 'unsupported', reason: 'Request content types are not inspected.' }),
+    requestLimits: Object.freeze({ status: 'unsupported', reason: 'Request limits are not inspected.' }),
+    sourceLocations: Object.freeze({ status: 'supported', reason: 'Decorator locations are reported.' }),
+    inheritedMetadata: Object.freeze({ status: 'partial', reason: 'Project-local class inheritance is supported.' }),
+    dynamicExpressions: Object.freeze({ status: 'partial', reason: 'Only statically provable metadata is resolved.' }),
 });
+function createNestJsSourceAnalyzer(config) {
+    const authConfig = config === undefined ? auth_config_1.EMPTY_NESTJS_AUTH_CONFIG : (0, auth_config_1.validateNestJsAuthConfig)(config);
+    return Object.freeze({
+        id: ANALYZER_ID,
+        version: ANALYZER_VERSION,
+        languages: Object.freeze(['typescript']),
+        frameworks: Object.freeze(['nestjs']),
+        capabilities: CAPABILITIES,
+        analyze: (context) => analyze(context, authConfig),
+    });
+}
+exports.nestJsSourceAnalyzer = createNestJsSourceAnalyzer();

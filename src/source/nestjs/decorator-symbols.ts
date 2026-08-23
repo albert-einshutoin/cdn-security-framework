@@ -253,3 +253,63 @@ export function classifyNestJsRouteDecorator(
       || result.name === 'RequestMapping' || result.name === 'Search' || result.name === 'Version')),
   };
 }
+
+export function resolveDecoratorSymbol(
+  decorator: ts.Decorator,
+  checker: ts.TypeChecker,
+  check: () => void,
+): {
+  name: string;
+  call: ts.CallExpression;
+  nestJsCommon: boolean;
+  trustedNestJsCommon: boolean;
+} | undefined {
+  const call = ts.isCallExpression(decorator.expression) ? decorator.expression : undefined;
+  if (!call) return undefined;
+  const symbol = targetSymbol(call.expression, checker, check);
+  if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) return undefined;
+  const nestJsCommon = originatesFromNestJsCommon(symbol);
+  return {
+    name: symbol.getName(),
+    call,
+    nestJsCommon,
+    trustedNestJsCommon: nestJsCommon && directNestJsImport(call.expression, checker)
+      && matchesConsumerNestJsCommon(call.expression, symbol),
+  };
+}
+
+export function resolveStaticSymbolName(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  check: () => void,
+): string | undefined {
+  const symbol = targetSymbol(expression, checker, check);
+  return !symbol || symbol === UNKNOWN_NESTJS_ROUTE
+    || !symbol.declarations?.some(ts.isClassLike) ? undefined : symbol.getName();
+}
+
+export function isDirectImportFrom(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  moduleName: string,
+  importedName: string,
+): boolean {
+  const node = unwrapExpression(expression);
+  if (ts.isIdentifier(node)) {
+    return Boolean(checker.getSymbolAtLocation(node)?.declarations?.some((declaration) => {
+      const imported = importDeclaration(declaration);
+      return ts.isImportSpecifier(declaration) && Boolean(imported)
+        && (declaration.propertyName ?? declaration.name).text === importedName
+        && ts.isStringLiteral(imported!.moduleSpecifier)
+        && imported!.moduleSpecifier.text === moduleName;
+    }));
+  }
+  if (!ts.isPropertyAccessExpression(node) || node.name.text !== importedName
+    || !ts.isIdentifier(node.expression)) return false;
+  return Boolean(checker.getSymbolAtLocation(node.expression)?.declarations?.some((declaration) => {
+    const imported = importDeclaration(declaration);
+    return ts.isNamespaceImport(declaration) && Boolean(imported)
+      && ts.isStringLiteral(imported!.moduleSpecifier)
+      && imported!.moduleSpecifier.text === moduleName;
+  }));
+}

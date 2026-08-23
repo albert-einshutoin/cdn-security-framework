@@ -175,6 +175,38 @@ describe('Security IR v1', () => {
       .operations[0].auth.alternatives).toHaveLength(2);
   });
 
+  test('preserves Guard execution order and validates source auth analysis', () => {
+    const input = structuredClone(baseInput);
+    input.operations[0].auth.analysis = {
+      guards: [
+        { symbol: 'JwtAuthGuard', authKind: 'bearer' },
+        { symbol: 'ApiKeyGuard', authKind: 'api-key' },
+      ],
+      explicitPublic: true,
+      roles: ['ops', 'admin', 'ops'],
+      enforcementConfidence: 'high',
+      capabilityReasons: [],
+    };
+    const contract = createSecurityContract(input);
+    expect(contract.operations.find(({ routeKey }) => routeKey === 'POST /users')?.auth.analysis).toEqual({
+      guards: [
+        { symbol: 'JwtAuthGuard', authKind: 'bearer' },
+        { symbol: 'ApiKeyGuard', authKind: 'api-key' },
+      ],
+      explicitPublic: true,
+      roles: ['admin', 'ops'],
+      enforcementConfidence: 'high',
+      capabilityReasons: [],
+    });
+
+    const invalidKind = structuredClone(input) as any;
+    invalidKind.operations[0].auth.analysis.guards[0].authKind = 'jwt';
+    expect(() => createSecurityContract(invalidKind)).toThrow('invalid authentication guard analysis');
+    const secretRole = structuredClone(input);
+    secretRole.operations[0].auth.analysis!.roles = ['secret=do-not-emit'];
+    expect(() => createSecurityContract(secretRole)).toThrow('secret-like value is not allowed');
+  });
+
   test('serializes equivalent inputs identically regardless of set and provenance order', () => {
     const first = createSecurityContract(baseInput);
     const reversed: SecurityContractInputV1 = {

@@ -80,9 +80,23 @@ export interface ApiAuthAlternativeV1 {
   schemes: ApiAuthSchemeV1[];
 }
 
+export interface ApiAuthGuardAnalysisV1 {
+  symbol: string;
+  authKind?: AuthSchemeKindV1;
+}
+
+export interface ApiAuthAnalysisV1 {
+  guards: ApiAuthGuardAnalysisV1[];
+  explicitPublic: boolean;
+  roles: string[];
+  enforcementConfidence: 'high' | 'unknown';
+  capabilityReasons: string[];
+}
+
 export interface ApiAuthenticationContractV1 {
   mode: 'none' | 'unknown' | 'alternatives';
   alternatives: ApiAuthAlternativeV1[];
+  analysis?: ApiAuthAnalysisV1;
 }
 
 export interface ApiOperationContractV1 {
@@ -388,7 +402,37 @@ function normalizeAuth(input: ApiAuthenticationContractV1, state: NormalizationS
   const canonicalAlternatives = [...new Map(alternatives.map((alternative) => (
     [stableSerialize(alternative), alternative]
   ))).entries()].sort(([left], [right]) => compareText(left, right)).map(([, alternative]) => alternative);
-  return { mode: input.mode, alternatives: canonicalAlternatives };
+  let analysis: ApiAuthAnalysisV1 | undefined;
+  if (input.analysis !== undefined) {
+    if (!input.analysis || typeof input.analysis !== 'object'
+      || !Array.isArray(input.analysis.guards)
+      || !['high', 'unknown'].includes(input.analysis.enforcementConfidence)) {
+      throw new Error('invalid authentication analysis');
+    }
+    consume(state, input.analysis.guards.length);
+    const guards = input.analysis.guards.map((guard) => {
+      if (!guard || typeof guard !== 'object'
+        || (guard.authKind !== undefined && !AUTH_SCHEME_KINDS.includes(guard.authKind))) {
+        throw new Error('invalid authentication guard analysis');
+      }
+      return {
+        symbol: nonEmpty(guard.symbol, 'authentication guard symbol'),
+        ...(guard.authKind === undefined ? {} : { authKind: guard.authKind }),
+      };
+    });
+    analysis = {
+      guards,
+      explicitPublic: booleanValue(input.analysis.explicitPublic, 'explicit public override'),
+      roles: sortedSet(input.analysis.roles, 'authorization role', state),
+      enforcementConfidence: input.analysis.enforcementConfidence,
+      capabilityReasons: sortedSet(input.analysis.capabilityReasons, 'authentication capability reason', state),
+    };
+  }
+  return {
+    mode: input.mode,
+    alternatives: canonicalAlternatives,
+    ...(analysis === undefined ? {} : { analysis }),
+  };
 }
 
 function normalizeOperation(input: ApiOperationInputV1, state: NormalizationState): ApiOperationContractV1 {

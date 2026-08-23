@@ -68,9 +68,21 @@ export interface ApiAuthAlternativeV1 {
     anonymous: boolean;
     schemes: ApiAuthSchemeV1[];
 }
+export interface ApiAuthGuardAnalysisV1 {
+    symbol: string;
+    authKind?: AuthSchemeKindV1;
+}
+export interface ApiAuthAnalysisV1 {
+    guards: ApiAuthGuardAnalysisV1[];
+    explicitPublic: boolean;
+    roles: string[];
+    enforcementConfidence: 'high' | 'unknown';
+    capabilityReasons: string[];
+}
 export interface ApiAuthenticationContractV1 {
     mode: 'none' | 'unknown' | 'alternatives';
     alternatives: ApiAuthAlternativeV1[];
+    analysis?: ApiAuthAnalysisV1;
 }
 export interface ApiOperationContractV1 {
     routeKey: string;

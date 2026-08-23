@@ -14,3 +14,11 @@ export declare function classifyNestJsRouteDecorator(decorator: ts.Decorator, ch
     };
     unsupported: boolean;
 };
+export declare function resolveDecoratorSymbol(decorator: ts.Decorator, checker: ts.TypeChecker, check: () => void): {
+    name: string;
+    call: ts.CallExpression;
+    nestJsCommon: boolean;
+    trustedNestJsCommon: boolean;
+} | undefined;
+export declare function resolveStaticSymbolName(expression: ts.Expression, checker: ts.TypeChecker, check: () => void): string | undefined;
+export declare function isDirectImportFrom(expression: ts.Expression, checker: ts.TypeChecker, moduleName: string, importedName: string): boolean;

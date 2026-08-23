@@ -170,7 +170,8 @@
       "required": ["mode", "alternatives"],
       "properties": {
         "mode": { "enum": ["none", "unknown", "alternatives"] },
-        "alternatives": { "type": "array", "maxItems": 100000, "items": { "$ref": "#/definitions/authAlternative" } }
+        "alternatives": { "type": "array", "maxItems": 100000, "items": { "$ref": "#/definitions/authAlternative" } },
+        "analysis": { "$ref": "#/definitions/authAnalysis" }
       },
       "allOf": [
         {
@@ -179,6 +180,27 @@
           "else": { "properties": { "alternatives": { "type": "array", "maxItems": 0 } } }
         }
       ]
+    },
+    "authGuardAnalysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["symbol"],
+      "properties": {
+        "symbol": { "type": "string", "minLength": 1, "maxLength": 16384 },
+        "authKind": { "enum": ["basic", "bearer", "api-key", "oauth2", "openid-connect", "mutual-tls", "unknown"] }
+      }
+    },
+    "authAnalysis": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["guards", "explicitPublic", "roles", "enforcementConfidence", "capabilityReasons"],
+      "properties": {
+        "guards": { "type": "array", "maxItems": 100000, "items": { "$ref": "#/definitions/authGuardAnalysis" } },
+        "explicitPublic": { "type": "boolean" },
+        "roles": { "$ref": "#/definitions/stringSet" },
+        "enforcementConfidence": { "enum": ["high", "unknown"] },
+        "capabilityReasons": { "$ref": "#/definitions/stringSet" }
+      }
     },
     "evidence": {
       "type": "object",

@@ -5,6 +5,9 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.NESTJS_ROUTE_DECORATORS = void 0;
 exports.classifyNestJsRouteDecorator = classifyNestJsRouteDecorator;
+exports.resolveDecoratorSymbol = resolveDecoratorSymbol;
+exports.resolveStaticSymbolName = resolveStaticSymbolName;
+exports.isDirectImportFrom = isDirectImportFrom;
 const node_module_1 = require("node:module");
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
@@ -233,4 +236,46 @@ function classifyNestJsRouteDecorator(decorator, checker, check) {
         unsupported: Boolean(result && (!result.trusted
             || result.name === 'RequestMapping' || result.name === 'Search' || result.name === 'Version')),
     };
+}
+function resolveDecoratorSymbol(decorator, checker, check) {
+    const call = typescript_1.default.isCallExpression(decorator.expression) ? decorator.expression : undefined;
+    if (!call)
+        return undefined;
+    const symbol = targetSymbol(call.expression, checker, check);
+    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE)
+        return undefined;
+    const nestJsCommon = originatesFromNestJsCommon(symbol);
+    return {
+        name: symbol.getName(),
+        call,
+        nestJsCommon,
+        trustedNestJsCommon: nestJsCommon && directNestJsImport(call.expression, checker)
+            && matchesConsumerNestJsCommon(call.expression, symbol),
+    };
+}
+function resolveStaticSymbolName(expression, checker, check) {
+    const symbol = targetSymbol(expression, checker, check);
+    return !symbol || symbol === UNKNOWN_NESTJS_ROUTE
+        || !symbol.declarations?.some(typescript_1.default.isClassLike) ? undefined : symbol.getName();
+}
+function isDirectImportFrom(expression, checker, moduleName, importedName) {
+    const node = unwrapExpression(expression);
+    if (typescript_1.default.isIdentifier(node)) {
+        return Boolean(checker.getSymbolAtLocation(node)?.declarations?.some((declaration) => {
+            const imported = importDeclaration(declaration);
+            return typescript_1.default.isImportSpecifier(declaration) && Boolean(imported)
+                && (declaration.propertyName ?? declaration.name).text === importedName
+                && typescript_1.default.isStringLiteral(imported.moduleSpecifier)
+                && imported.moduleSpecifier.text === moduleName;
+        }));
+    }
+    if (!typescript_1.default.isPropertyAccessExpression(node) || node.name.text !== importedName
+        || !typescript_1.default.isIdentifier(node.expression))
+        return false;
+    return Boolean(checker.getSymbolAtLocation(node.expression)?.declarations?.some((declaration) => {
+        const imported = importDeclaration(declaration);
+        return typescript_1.default.isNamespaceImport(declaration) && Boolean(imported)
+            && typescript_1.default.isStringLiteral(imported.moduleSpecifier)
+            && imported.moduleSpecifier.text === moduleName;
+    }));
 }
