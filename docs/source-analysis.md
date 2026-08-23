@@ -51,10 +51,17 @@ diagnostic. They must not be guessed.
 ## Limits and cancellation
 
 `SourceAnalysisLimits` bounds files, total source bytes, bytes per file, AST
-nodes, diagnostics, operations, analysis depth, and wall-clock timeout. The
-analyzer reports corresponding integer metrics. Cancellation before or during
-analysis and an ignored timeout return a failed execution without a contract.
-Partial contracts are not supported by this version.
+nodes, diagnostics, operations, analysis depth, and a cooperative wall-clock
+timeout. The analyzer reports corresponding integer metrics. Cancellation
+before or during analysis and an ignored timeout return a failed execution
+without a contract. The wrapper also rejects a result returned after the
+deadline, even when synchronous analyzer work delayed the timer. Partial
+contracts are not supported by this version.
+
+The internal object contract does not provide hard process isolation: a trusted
+analyzer must yield to the event loop and observe the cancellation signal.
+Untrusted or potentially non-yielding analyzers require a future worker/process
+host; dynamic plugin loading and that host are outside this issue.
 
 ## Result validation and data minimization
 

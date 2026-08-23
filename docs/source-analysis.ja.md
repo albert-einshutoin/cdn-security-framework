@@ -44,9 +44,15 @@ Capability外のInherited metadataを推測せず、`unknown`、partial/unsuppor
 ## LimitとCancellation
 
 `SourceAnalysisLimits`はFile数、合計source bytes、File単位bytes、AST node数、
-Diagnostic数、Operation数、解析depth、wall-clock timeoutを制限します。Analyzerは
+Diagnostic数、Operation数、解析depth、協調的wall-clock timeoutを制限します。Analyzerは
 対応する整数metricsを返します。解析前/中のcancelとtimeout無視は、Contractを持たない
-failed executionになります。このVersionはpartial contractを成功扱いしません。
+failed executionになります。同期的なAnalyzer処理がtimerを遅延させても、deadline後に
+返った結果はwrapperが拒否します。このVersionはpartial contractを成功扱いしません。
+
+このinternal object contractはhard process isolationを提供しません。信頼済みAnalyzerは
+event loopへ制御を返し、cancellation signalを監視する必要があります。信頼できない、または
+制御を返さない可能性があるAnalyzerには将来worker/process hostが必要です。動的plugin loadと
+そのhostはこのIssueの非目標です。
 
 ## Result validationとData minimization
 

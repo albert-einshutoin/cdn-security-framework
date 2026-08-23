@@ -225,21 +225,40 @@ describe('Source Analyzer contract', () => {
     ['maxDepth', 'maxAnalysisDepth', 'SOURCE_ANALYZER_DEPTH_LIMIT'],
   ] as const)('fails closed when %s exceeds %s', async (metric, limit, code) => {
     const { root, entrypoint } = workspace();
-    const limited = { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, [limit]: 1 };
+    const events: string[] = [];
+    const threshold = metric === 'totalSourceBytes' || metric === 'largestFileBytes' ? 100 : 1;
+    const limited = { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, [limit]: threshold };
     const excessive = plugin({
       async analyze(ctx) {
         const valid = await fakeSourceAnalyzer.analyze(ctx);
-        return { ...valid, metrics: { ...valid.metrics, [metric]: 2 } as SourceAnalysisMetrics };
+        return { ...valid, metrics: { ...valid.metrics, [metric]: threshold + 1 } as SourceAnalysisMetrics };
       },
     });
-    expect(await runSourceAnalyzer(excessive, context(root, entrypoint, limited)))
+    expect(await runSourceAnalyzer(excessive, {
+      ...context(root, entrypoint, limited), logger: { log: (event) => events.push(event) },
+    }))
       .toMatchObject({ status: 'failed', diagnostics: [{ code }] });
+    expect(events).toEqual(['SOURCE_ANALYZER_STARTED', 'SOURCE_ANALYZER_FAILED']);
   });
 
   test('returns a timeout code when an analyzer ignores cancellation', async () => {
     const { root, entrypoint } = workspace();
     const waiting = plugin({ analyze: () => new Promise(() => {}) });
     expect(await runSourceAnalyzer(waiting, context(root, entrypoint, {
+      ...DEFAULT_SOURCE_ANALYSIS_LIMITS, timeoutMs: 10,
+    }))).toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_TIMEOUT' }] });
+  });
+
+  test('rejects a CPU-bound result that outlives the timeout', async () => {
+    const { root, entrypoint } = workspace();
+    const blocking = plugin({
+      async analyze(ctx) {
+        const deadline = performance.now() + 50;
+        while (performance.now() < deadline) { /* Simulate synchronous parser work. */ }
+        return fakeSourceAnalyzer.analyze(ctx);
+      },
+    });
+    expect(await runSourceAnalyzer(blocking, context(root, entrypoint, {
       ...DEFAULT_SOURCE_ANALYSIS_LIMITS, timeoutMs: 10,
     }))).toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_TIMEOUT' }] });
   });

@@ -453,6 +453,7 @@ export async function runSourceAnalyzer(
     },
   };
   log(context.logger, 'SOURCE_ANALYZER_STARTED');
+  const startedAt = performance.now();
   try {
     const aborted = new Promise<never>((_, reject) => {
       controller.signal.addEventListener('abort', () => reject(new Error('analysis interrupted')), { once: true });
@@ -467,8 +468,16 @@ export async function runSourceAnalyzer(
       })),
       aborted,
     ]);
+    if (context.cancellationSignal?.aborted) {
+      interrupted = 'SOURCE_ANALYZER_CANCELLED';
+      throw new SourceAnalyzerContractError(interrupted);
+    }
+    if (performance.now() - startedAt >= limits.timeoutMs) {
+      interrupted = 'SOURCE_ANALYZER_TIMEOUT';
+      throw new SourceAnalyzerContractError(interrupted);
+    }
     const limitCode = exceededMetric((result as Partial<SourceAnalysisResult>).metrics, limits);
-    if (limitCode) return failed(limitCode);
+    if (limitCode) throw new SourceAnalyzerContractError(limitCode);
     const validated = validateResult(result, prepared.workspaceRoot, plugin);
     log(context.logger, 'SOURCE_ANALYZER_COMPLETED');
     return { status: 'success', result: validated };
