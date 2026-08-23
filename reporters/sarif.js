@@ -15,7 +15,17 @@ function safeUri(uri) {
         || normalized.split('/').includes('..')) {
         throw new Error('SARIF evidence URI must be workspace-relative');
     }
-    return normalized;
+    try {
+        return normalized.split('/').map((segment) => {
+            if (segment.replace(/%2e/gi, '.') === '..' || /%(?:2f|5c)/i.test(segment)) {
+                throw new Error('unsafe encoded path segment');
+            }
+            return segment.replace(/%[0-9A-Fa-f]{2}|./gu, (value) => (/^%[0-9A-Fa-f]{2}$/.test(value) ? value.toUpperCase() : encodeURIComponent(value)));
+        }).join('/');
+    }
+    catch {
+        throw new Error('SARIF evidence URI must be workspace-relative');
+    }
 }
 function evidenceKey(evidence) {
     return [evidence.uri, evidence.pointer ?? '', evidence.source, evidence.digest].join('\u0000');
@@ -88,6 +98,7 @@ function renderFindingsAsSarif(report) {
     for (const finding of findings)
         if (!rules.has(finding.ruleId))
             rules.set(finding.ruleId, finding);
+    const analyzers = [...new Set(findings.flatMap((finding) => (finding.evidence.map(({ analyzer }) => analyzer))))].sort(compareText);
     return {
         version: '2.1.0',
         $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
@@ -95,11 +106,9 @@ function renderFindingsAsSarif(report) {
                 tool: {
                     driver: {
                         name: 'cdn-security-framework',
-                        version: '1',
-                        semanticVersion: '1.0.0',
                         informationUri: FINDING_REFERENCE,
                         rules: [...rules.values()].sort((left, right) => compareText(left.ruleId, right.ruleId)).map(rule),
-                        properties: { findingSchemaVersion: 1, reportSchemaVersion: report.schemaVersion },
+                        properties: { analyzers, findingSchemaVersion: 1, reportSchemaVersion: report.schemaVersion },
                     },
                 },
                 results: findings.map((finding) => result(finding, suppressedIds.has(finding.instanceId))),

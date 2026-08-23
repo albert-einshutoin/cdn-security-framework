@@ -8,11 +8,10 @@ interface SarifRun {
     tool: {
         driver: {
             name: string;
-            version: string;
-            semanticVersion: string;
             informationUri: string;
             rules: SarifRule[];
             properties: {
+                analyzers: string[];
                 findingSchemaVersion: number;
                 reportSchemaVersion: number;
             };

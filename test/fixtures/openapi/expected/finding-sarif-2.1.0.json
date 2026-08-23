@@ -129,6 +129,10 @@
           "informationUri": "https://github.com/albert-einshutoin/cdn-security-framework/blob/main/docs/finding-reference.md",
           "name": "cdn-security-framework",
           "properties": {
+            "analyzers": [
+              "openapi@1",
+              "policy@1"
+            ],
             "findingSchemaVersion": 1,
             "reportSchemaVersion": 1
           },
@@ -202,9 +206,7 @@
                 "text": "Authentication contract mismatch"
               }
             }
-          ],
-          "semanticVersion": "1.0.0",
-          "version": "1"
+          ]
         }
       }
     }

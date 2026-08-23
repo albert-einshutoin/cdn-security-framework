@@ -97,6 +97,9 @@ describe('SARIF 2.1.0 reporter', () => {
     expect(first.runs[0].tool.driver.rules.map(({ id }) => id)).toEqual([
       'SC-AUTHN-001', 'SC-EXPOSURE-001', 'SC-GOV-001',
     ]);
+    expect(first.runs[0].tool.driver.properties).toMatchObject({
+      analyzers: ['openapi@1', 'policy@1'], findingSchemaVersion: 1, reportSchemaVersion: 1,
+    });
     expect(first.runs[0].results.map(({ ruleId }) => ruleId)).toEqual([
       'SC-AUTHN-001', 'SC-GOV-001', 'SC-EXPOSURE-001',
     ]);
@@ -116,7 +119,7 @@ describe('SARIF 2.1.0 reporter', () => {
                 type: 'object', required: ['driver'],
                 properties: {
                   driver: {
-                    type: 'object', required: ['name', 'version', 'rules'],
+                    type: 'object', required: ['name', 'rules'],
                     properties: { rules: { type: 'array' } },
                   },
                 },
@@ -138,7 +141,10 @@ describe('SARIF 2.1.0 reporter', () => {
     assertGolden('finding-sarif-2.1.0', first);
   });
 
-  test.each(['/Users/alice/policy.yml', 'policy.yml?token=raw-secret', '../policy.yml'])(
+  test.each([
+    '/Users/alice/policy.yml', 'policy.yml?token=raw-secret', '../policy.yml',
+    '%2e%2e/policy.yml', 'policy%2Fsecret.yml',
+  ])(
     'rejects unsafe evidence URI %s',
     (uri) => {
       const input = report();
@@ -152,4 +158,28 @@ describe('SARIF 2.1.0 reporter', () => {
       expect(() => renderFindingsAsSarif(input)).toThrow(/workspace-relative/);
     },
   );
+
+  test('encodes URI path segments without double-encoding existing escapes', () => {
+    const input = report();
+    input.findings = [
+      {
+        ...input.findings[0],
+        evidence: [{
+          source: 'openapi', uri: 'specs/open api%.yaml', digest: 'sha256:raw',
+          analyzer: 'openapi@1', capability: 'openapi-v1', complete: true,
+        }],
+      },
+      {
+        ...input.findings[1],
+        evidence: [{
+          source: 'policy', uri: 'policy/already%20encoded.yml', digest: 'sha256:encoded',
+          analyzer: 'policy@1', capability: 'policy-v1', complete: true,
+        }],
+      },
+    ];
+    input.suppressedFindings = [];
+    expect(renderFindingsAsSarif(input).runs[0].results.map((item) => (
+      item.locations?.[0].physicalLocation.artifactLocation.uri
+    ))).toEqual(['policy/already%20encoded.yml', 'specs/open%20api%25.yaml']);
+  });
 });
