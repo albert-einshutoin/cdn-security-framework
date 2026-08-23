@@ -5,6 +5,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.serializeResolvedOpenApiGraph = void 0;
 exports.isResolvedOpenApiGraph = isResolvedOpenApiGraph;
+exports.resolvedOpenApiSourceIdentities = resolvedOpenApiSourceIdentities;
 exports.resolveJsonPointer = resolveJsonPointer;
 exports.resolveJsonPointerValue = resolveJsonPointerValue;
 exports.resolveOpenApiReferences = resolveOpenApiReferences;
@@ -15,6 +16,7 @@ const analysis_limits_1 = require("./analysis-limits");
 const load_document_1 = require("./load-document");
 const ref_boundary_1 = require("./ref-boundary");
 const RESOLVED_OPENAPI_GRAPHS = new WeakSet();
+const RESOLVED_OPENAPI_SOURCE_IDENTITIES = new WeakMap();
 const LITERAL_VALUE_KEYS = new Set(['const', 'default', 'enum', 'example', 'value']);
 const NAMED_OBJECT_MAP_KEYS = new Set([
     '$defs', 'callbacks', 'content', 'definitions', 'dependentSchemas', 'encoding', 'examples',
@@ -36,6 +38,12 @@ function isResolvedOpenApiGraph(value) {
     return typeof value === 'object' && value !== null
         && RESOLVED_OPENAPI_GRAPHS.has(value)
         && Object.isFrozen(value);
+}
+function resolvedOpenApiSourceIdentities(graph) {
+    const identities = RESOLVED_OPENAPI_SOURCE_IDENTITIES.get(graph);
+    if (!identities)
+        throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_INVALID_ROOT');
+    return identities;
 }
 function pointerError(code, sourceUri, pointer) {
     throw new analysis_error_1.OpenApiAnalysisError(code, { sourceUri, pointer });
@@ -257,6 +265,10 @@ function resolveOpenApiReferences(options) {
         }
     };
     walk(options.root.document, options.root, '', 0, new Set());
+    const sourceIdentities = Object.freeze([...documents.values()].map((document) => {
+        const { sourcePath, device, inode } = (0, load_document_1.loadedOpenApiDocumentMetadata)(document);
+        return Object.freeze({ sourcePath, device, inode });
+    }).sort((left, right) => compareText(left.sourcePath, right.sourcePath)));
     const resolvedDocuments = [...documents.values()]
         .map(({ sourceUri, contentDigest, byteSize, document }) => ({
         sourceUri,
@@ -282,5 +294,6 @@ function resolveOpenApiReferences(options) {
         totalByteSize,
     });
     RESOLVED_OPENAPI_GRAPHS.add(graph);
+    RESOLVED_OPENAPI_SOURCE_IDENTITIES.set(graph, sourceIdentities);
     return graph;
 }

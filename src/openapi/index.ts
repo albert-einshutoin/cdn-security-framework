@@ -8,7 +8,20 @@ export {
 } from './load-document';
 export * from './document-graph';
 export * from './operation-normalizer';
-export * from './ref-resolver';
+export {
+  isResolvedOpenApiGraph,
+  resolveJsonPointer,
+  resolveJsonPointerValue,
+  resolveOpenApiReferences,
+  serializeResolvedOpenApiGraph,
+  type OpenApiNodeLocation,
+  type OpenApiReferenceEdge,
+  type ResolvedOpenApiDocument,
+  type ResolvedOpenApiGraph,
+  type ResolvedJsonPointer,
+  type ResolvedJsonPointerValue,
+  type ResolveOpenApiReferencesOptions,
+} from './ref-resolver';
 export * from './ref-boundary';
 export {
   formatOpenApiInspectionJson,

@@ -99,6 +99,8 @@ function assertPackageContents(pack: PackResult) {
     'bin/cli.d.ts',
     'bin/commands/openapi-inspect.js',
     'bin/commands/openapi-inspect.d.ts',
+    'bin/commands/contract-diff.js',
+    'bin/commands/contract-diff.d.ts',
     'lib/index.js',
     'lib/index.d.ts',
     'lib/compile.js',
@@ -109,6 +111,8 @@ function assertPackageContents(pack: PackResult) {
     'contract/index.d.ts',
     'contract/finding-exceptions.js',
     'contract/finding-exceptions.d.ts',
+    'contract/contract-diff.js',
+    'contract/contract-diff.d.ts',
     'contract/allowed-surface.js',
     'contract/allowed-surface.d.ts',
     'contract/drift/index.js',
@@ -128,6 +132,8 @@ function assertPackageContents(pack: PackResult) {
     'schemas/security-ir-v1.schema.json',
     'schemas/openapi-inspection-v1.schema.json',
     'schemas/finding-exceptions-v1.schema.json',
+    'schemas/finding-v1.schema.json',
+    'schemas/contract-diff-report-v1.schema.json',
     'openapi/index.js',
     'openapi/index.d.ts',
     'openapi/load-document.js',
@@ -204,6 +210,8 @@ function smokeInstalledPackage(tarballPath: string) {
       const schema = require(${JSON.stringify(`${packageName}/schemas/security-ir-v1.schema.json`)});
       const inspectionSchema = require(${JSON.stringify(`${packageName}/schemas/openapi-inspection-v1.schema.json`)});
       const exceptionSchema = require(${JSON.stringify(`${packageName}/schemas/finding-exceptions-v1.schema.json`)});
+      const findingSchema = require(${JSON.stringify(`${packageName}/schemas/finding-v1.schema.json`)});
+      const contractDiffSchema = require(${JSON.stringify(`${packageName}/schemas/contract-diff-report-v1.schema.json`)});
       const openapi = require(${JSON.stringify(`${packageName}/openapi`)});
       const recommendation = require(${JSON.stringify(`${packageName}/recommendation`)});
       assert.strictEqual(typeof pkg.compile, 'function');
@@ -214,8 +222,11 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(schema.properties.schemaVersion.const, 1);
       assert.strictEqual(inspectionSchema.properties.schemaVersion.const, 1);
       assert.strictEqual(exceptionSchema.properties.version.const, 1);
+      assert.strictEqual(findingSchema.properties.schemaVersion.const, 1);
+      assert.strictEqual(contractDiffSchema.properties.schemaVersion.const, 1);
       assert.strictEqual(typeof contract.loadFindingExceptions, 'function');
       assert.strictEqual(typeof contract.applyFindingExceptions, 'function');
+      assert.strictEqual(typeof contract.diffSecurityContracts, 'function');
       assert.strictEqual(typeof openapi.loadOpenApiDocument, 'function');
       assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
       assert.strictEqual(typeof openapi.normalizeOpenApiOperations, 'function');
@@ -247,6 +258,15 @@ function smokeInstalledPackage(tarballPath: string) {
     assert.strictEqual(inspection.schemaVersion, 1);
     assert.strictEqual(inspection.summary.operationCount, 5);
     assert.ok(fs.existsSync(path.join(installDir, 'reports', 'openapi-contract.json')));
+    run(cliPath, [
+      'contract', 'diff', '--openapi', openApiPath, '--policy', installedBasePolicy,
+      '--target', 'aws', '--workspace-root', installDir, '--format', 'json',
+      '--fail-on', 'never', '--out', 'reports/contract-diff.json',
+    ], { cwd: installDir });
+    const contractDiff = JSON.parse(fs.readFileSync(
+      path.join(installDir, 'reports', 'contract-diff.json'), 'utf8',
+    ));
+    assert.strictEqual(contractDiff.schemaVersion, 1);
     run(cliPath, [
       'openapi', 'generate-policy', '--input', openApiPath, '--workspace-root', installDir,
       '--profile', 'balanced', '--out', 'openapi.candidate.yml',

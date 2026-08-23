@@ -1,0 +1,142 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cdn-security-framework.dev/schemas/contract-diff-report-v1.schema.json",
+  "title": "Contract Diff Report v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion", "inputDigests", "target", "summary", "findings",
+    "suppressedFindings", "exceptionDiagnostics", "appliedExceptionIds",
+    "analyzerCapabilities", "analyzerDiagnostics", "omittedComparisons"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "inputDigests": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["openapi", "policy", "exceptions"],
+      "properties": {
+        "openapi": { "$ref": "#/definitions/digest" },
+        "policy": { "$ref": "#/definitions/digest" },
+        "exceptions": { "oneOf": [{ "$ref": "#/definitions/digest" }, { "type": "null" }] }
+      }
+    },
+    "target": { "enum": ["aws", "cloudflare"] },
+    "summary": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["total", "error", "warning", "info", "suppressed", "bySeverity", "byConfidence", "byCategory"],
+      "properties": {
+        "total": { "$ref": "#/definitions/count" },
+        "error": { "$ref": "#/definitions/count" },
+        "warning": { "$ref": "#/definitions/count" },
+        "info": { "$ref": "#/definitions/count" },
+        "suppressed": { "$ref": "#/definitions/count" },
+        "bySeverity": { "$ref": "#/definitions/severityCounts" },
+        "byConfidence": { "$ref": "#/definitions/confidenceCounts" },
+        "byCategory": { "$ref": "#/definitions/categoryCounts" }
+      }
+    },
+    "findings": { "$ref": "#/definitions/findings" },
+    "suppressedFindings": { "$ref": "#/definitions/findings" },
+    "exceptionDiagnostics": { "$ref": "#/definitions/findings" },
+    "appliedExceptionIds": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    },
+    "analyzerCapabilities": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["openapi", "policy"],
+      "properties": {
+        "openapi": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["routes", "parameters", "requestBodies", "authentication"],
+          "properties": {
+            "routes": { "$ref": "#/definitions/openapiCapability" },
+            "parameters": { "$ref": "#/definitions/openapiCapability" },
+            "requestBodies": { "$ref": "#/definitions/openapiCapability" },
+            "authentication": { "$ref": "#/definitions/openapiCapability" }
+          }
+        },
+        "policy": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["id", "status"],
+            "properties": {
+              "id": { "type": "string", "minLength": 1 },
+              "status": { "enum": ["supported", "partial", "unsupported", "warning-only"] }
+            }
+          }
+        }
+      }
+    },
+    "analyzerDiagnostics": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["code", "level", "message"],
+        "properties": {
+          "code": { "enum": ["OPENAPI_CAPABILITY_PARTIAL", "OPENAPI_CAPABILITY_UNSUPPORTED", "OPENAPI_LIMIT_NEAR"] },
+          "level": { "const": "warning" },
+          "message": { "type": "string", "minLength": 1, "maxLength": 256 },
+          "capability": { "enum": ["routes", "parameters", "requestBodies", "authentication"] },
+          "metric": { "enum": ["documentBytes", "graphBytes", "resolvedDocuments", "operations"] },
+          "used": { "$ref": "#/definitions/count" },
+          "limit": { "type": "integer", "minimum": 1 }
+        }
+      }
+    },
+    "omittedComparisons": {
+      "type": "array",
+      "items": { "type": "string", "minLength": 1 },
+      "uniqueItems": true
+    }
+  },
+  "definitions": {
+    "count": { "type": "integer", "minimum": 0 },
+    "digest": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "findings": {
+      "type": "array",
+      "items": { "$ref": "https://cdn-security-framework.dev/schemas/finding-v1.schema.json" }
+    },
+    "openapiCapability": { "enum": ["complete", "partial", "unsupported"] },
+    "severityCounts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["error", "warning", "info"],
+      "properties": {
+        "error": { "$ref": "#/definitions/count" },
+        "warning": { "$ref": "#/definitions/count" },
+        "info": { "$ref": "#/definitions/count" }
+      }
+    },
+    "confidenceCounts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["deterministic", "high-confidence", "heuristic"],
+      "properties": {
+        "deterministic": { "$ref": "#/definitions/count" },
+        "high-confidence": { "$ref": "#/definitions/count" },
+        "heuristic": { "$ref": "#/definitions/count" }
+      }
+    },
+    "categoryCounts": {
+      "type": "object", "additionalProperties": false,
+      "required": ["inventory", "exposure", "authentication", "authorization", "resource-limit", "misconfiguration", "governance", "runtime-evidence"],
+      "properties": {
+        "inventory": { "$ref": "#/definitions/count" },
+        "exposure": { "$ref": "#/definitions/count" },
+        "authentication": { "$ref": "#/definitions/count" },
+        "authorization": { "$ref": "#/definitions/count" },
+        "resource-limit": { "$ref": "#/definitions/count" },
+        "misconfiguration": { "$ref": "#/definitions/count" },
+        "governance": { "$ref": "#/definitions/count" },
+        "runtime-evidence": { "$ref": "#/definitions/count" }
+      }
+    }
+  }
+}

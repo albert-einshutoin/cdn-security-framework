@@ -219,9 +219,11 @@ function loadOpenApiSourceDocument(options) {
     }
     let descriptor;
     let bytes;
+    let identity;
     try {
         descriptor = node_fs_1.default.openSync(resolvedPath, node_fs_1.default.constants.O_RDONLY | (node_fs_1.default.constants.O_NOFOLLOW ?? 0));
         const opened = node_fs_1.default.fstatSync(descriptor);
+        identity = { device: opened.dev, inode: opened.ino };
         if (!opened.isFile() || opened.dev !== beforeRead.dev || opened.ino !== beforeRead.ino) {
             throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_INPUT_NOT_FOUND', { sourceUri });
         }
@@ -269,13 +271,15 @@ function loadOpenApiSourceDocument(options) {
         nodes: 0,
     }, new Set());
     freezeValue(parsed);
+    if (!identity)
+        throw new analysis_error_1.OpenApiAnalysisError('OPENAPI_INPUT_NOT_FOUND', { sourceUri });
     return markLoaded({
         document: parsed,
         sourceUri,
         contentDigest: `sha256:${(0, node_crypto_1.createHash)('sha256').update(bytes).digest('hex')}`,
         byteSize: bytes.length,
         refStatus: 'unresolved',
-    }, 'source', { workspaceRoot: rootRealPath, sourcePath: resolvedPath });
+    }, 'source', { workspaceRoot: rootRealPath, sourcePath: resolvedPath, ...identity });
 }
 function loadOpenApiDocument(options) {
     const loaded = loadOpenApiSourceDocument(options);

@@ -11,7 +11,11 @@ import {
 } from './analysis-limits';
 import { loadOpenApiDocument } from './load-document';
 import { normalizeOpenApiOperations } from './operation-normalizer';
-import { resolveOpenApiReferences } from './ref-resolver';
+import {
+  resolveOpenApiReferences,
+  resolvedOpenApiSourceIdentities,
+  type OpenApiSourceIdentity,
+} from './ref-resolver';
 
 export interface InspectOpenApiOptions {
   inputPath: string;
@@ -52,6 +56,7 @@ export interface OpenApiInspectionV1 {
 export interface OpenApiInspectionForCli {
   report: OpenApiInspectionV1;
   sourcePaths: readonly string[];
+  sourceIdentities: readonly OpenApiSourceIdentity[];
 }
 
 const CAPABILITY_MESSAGES: Record<CapabilityLevelV1, string | undefined> = {
@@ -145,6 +150,7 @@ export function inspectOpenApiForCli(options: InspectOpenApiOptions): OpenApiIns
     sourcePaths: graph.documents.map(({ sourceUri }) => (
       path.resolve(workspaceRoot, ...sourceUri.split('/').map(decodeURIComponent))
     )),
+    sourceIdentities: resolvedOpenApiSourceIdentities(graph),
   };
 }
 

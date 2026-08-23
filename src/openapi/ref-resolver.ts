@@ -21,6 +21,12 @@ import {
 import { resolveOpenApiRefPath } from './ref-boundary';
 
 const RESOLVED_OPENAPI_GRAPHS = new WeakSet<object>();
+export interface OpenApiSourceIdentity {
+  sourcePath: string;
+  device: number;
+  inode: number;
+}
+const RESOLVED_OPENAPI_SOURCE_IDENTITIES = new WeakMap<object, readonly OpenApiSourceIdentity[]>();
 const LITERAL_VALUE_KEYS = new Set(['const', 'default', 'enum', 'example', 'value']);
 const NAMED_OBJECT_MAP_KEYS = new Set([
   '$defs', 'callbacks', 'content', 'definitions', 'dependentSchemas', 'encoding', 'examples',
@@ -65,6 +71,14 @@ export function isResolvedOpenApiGraph(value: unknown): value is ResolvedOpenApi
   return typeof value === 'object' && value !== null
     && RESOLVED_OPENAPI_GRAPHS.has(value)
     && Object.isFrozen(value);
+}
+
+export function resolvedOpenApiSourceIdentities(
+  graph: ResolvedOpenApiGraph,
+): readonly OpenApiSourceIdentity[] {
+  const identities = RESOLVED_OPENAPI_SOURCE_IDENTITIES.get(graph);
+  if (!identities) throw new OpenApiAnalysisError('OPENAPI_INVALID_ROOT');
+  return identities;
 }
 
 function pointerError(
@@ -336,6 +350,10 @@ export function resolveOpenApiReferences(
   };
 
   walk(options.root.document, options.root, '', 0, new Set());
+  const sourceIdentities = Object.freeze([...documents.values()].map((document) => {
+    const { sourcePath, device, inode } = loadedOpenApiDocumentMetadata(document);
+    return Object.freeze({ sourcePath, device, inode });
+  }).sort((left, right) => compareText(left.sourcePath, right.sourcePath)));
   const resolvedDocuments: ResolvedOpenApiDocument[] = [...documents.values()]
     .map(({ sourceUri, contentDigest, byteSize, document }) => ({
       sourceUri,
@@ -365,5 +383,6 @@ export function resolveOpenApiReferences(
     totalByteSize,
   });
   RESOLVED_OPENAPI_GRAPHS.add(graph);
+  RESOLVED_OPENAPI_SOURCE_IDENTITIES.set(graph, sourceIdentities);
   return graph;
 }

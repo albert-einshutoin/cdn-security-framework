@@ -25,6 +25,29 @@ npx cdn-security <subcommand> [options]
 | `migrate` | Migrate a policy file between schema versions (stub — v1 is the only shipped version today). |
 | `openapi inspect` | Inspect local OpenAPI security contracts as deterministic text or JSON without changing policy or build output. |
 | `openapi generate-policy` | Generate a non-destructive, review-only policy candidate and metadata sidecar. |
+| `contract diff` | Compare OpenAPI declarations with the effective policy and emit security findings. |
+
+---
+
+## `contract diff`
+
+```bash
+npx cdn-security contract diff \
+  --openapi openapi.yaml --policy policy/security.yml --target aws
+npx cdn-security contract diff \
+  --openapi openapi.yaml --policy policy/security.yml --target cloudflare \
+  --exceptions policy/finding-exceptions.yml --format json \
+  --out reports/contract-diff.json --fail-on warning
+```
+
+- `--openapi`, `--policy`, and `--target aws|cloudflare` are required. All inputs and local references must stay inside `--workspace-root`.
+- `--format text|json` defaults to text. JSON follows [`contract-diff-report-v1.schema.json`](../schemas/contract-diff-report-v1.schema.json) and excludes timestamps, absolute paths, raw specifications, and secrets.
+- `--exceptions` applies the existing Finding Exception contract. Pass `--environment <name>` when exceptions use `selector.environment`. Suppressed findings are counted but omitted unless `--include-suppressed` is set. Use `--current-date YYYY-MM-DD` to pin expiry evaluation for reproducible CI reports.
+- `--fail-on error|warning|never` defaults to `error`. Exit codes are `0` below threshold, `1` at or above threshold, `2` for input/configuration/safety errors, and `3` for unexpected internal errors.
+- `--out` writes only to an existing directory inside the workspace. Existing regular files require `--force`; policy, build output, and analyzed source files are protected. Run the command with exclusive control of the writable workspace: a same-user process with rename permission can relocate an already-open directory inode after validation.
+- Text starts with the summary and contains rule, route, expected/actual evidence, and remediation. Color is used only on a TTY and is disabled by `NO_COLOR`.
+
+The command is read-only except for an explicit report output. Unsupported and partial analyzer capabilities are reported as omitted comparisons rather than guessed.
 
 ---
 
