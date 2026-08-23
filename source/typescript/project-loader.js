@@ -240,6 +240,11 @@ async function yieldAndCheckInterruption(signal, deadline) {
 function normalizeRelative(value) {
     return value.replaceAll('\\', '/');
 }
+function isPathLikeSpecifier(value) {
+    const normalized = normalizeRelative(value);
+    return node_path_1.default.isAbsolute(normalized) || /^[a-z]:\//iu.test(normalized)
+        || normalized.split('/').some((segment) => segment === '.' || segment === '..');
+}
 function relativeWithin(workspaceRoot, absolutePath) {
     const relative = normalizeRelative(node_path_1.default.relative(workspaceRoot, absolutePath));
     if (!relative || relative === '..' || relative.startsWith('../') || node_path_1.default.isAbsolute(relative))
@@ -388,6 +393,16 @@ function validateConfigTree(fileSystem, workspaceRoot, configPath, limits, signa
             }
             for (const value of values)
                 safeConfigPath(fileSystem, workspaceRoot, configDirectory, value);
+        }
+        if (compiler.types !== undefined) {
+            if (!Array.isArray(compiler.types) || compiler.types.some((value) => typeof value !== 'string')) {
+                throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
+            }
+            for (const value of compiler.types) {
+                if (isPathLikeSpecifier(value)) {
+                    safeConfigPath(fileSystem, workspaceRoot, configDirectory, normalizeRelative(value));
+                }
+            }
         }
         if (compiler.paths !== undefined) {
             if (!compiler.paths || typeof compiler.paths !== 'object' || Array.isArray(compiler.paths)) {
@@ -643,14 +658,18 @@ async function loadTypeScriptProjectInternal(options) {
     };
     const validateReferences = (text, relative) => {
         const preprocessed = typescript_1.default.preProcessFile(text, true, true);
-        const references = [...preprocessed.referencedFiles, ...preprocessed.importedFiles];
+        const references = [
+            ...preprocessed.referencedFiles,
+            ...preprocessed.importedFiles,
+            ...preprocessed.typeReferenceDirectives,
+        ];
         const sourceDirectory = node_path_1.default.dirname(node_path_1.default.resolve(workspaceRoot, relative));
-        if (preprocessed.referencedFiles.some(({ fileName }) => (node_path_1.default.isAbsolute(fileName.replaceAll('\\', '/')) || /^[a-z][a-z0-9+.-]*:/iu.test(fileName))) || preprocessed.importedFiles.some(({ fileName }) => (node_path_1.default.isAbsolute(fileName.replaceAll('\\', '/')) || /^[a-z]:[\\/]/iu.test(fileName)))) {
+        if (preprocessed.referencedFiles.some(({ fileName }) => (node_path_1.default.isAbsolute(fileName.replaceAll('\\', '/')) || /^[a-z][a-z0-9+.-]*:/iu.test(fileName))) || preprocessed.importedFiles.some(({ fileName }) => (node_path_1.default.isAbsolute(fileName.replaceAll('\\', '/')) || /^[a-z]:[\\/]/iu.test(fileName))) || preprocessed.typeReferenceDirectives.some(({ fileName }) => (node_path_1.default.isAbsolute(fileName.replaceAll('\\', '/')) || /^[a-z]:[\\/]/iu.test(fileName)))) {
             throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT', { sourceUri: relative });
         }
         if (references.some(({ fileName }) => {
-            const normalized = fileName.replaceAll('\\', '/');
-            if (!normalized.startsWith('.'))
+            const normalized = normalizeRelative(fileName);
+            if (!isPathLikeSpecifier(normalized))
                 return false;
             const candidate = node_path_1.default.resolve(sourceDirectory, normalized);
             return candidate !== workspaceRoot && relativeWithin(workspaceRoot, candidate) === undefined;

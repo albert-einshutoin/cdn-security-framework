@@ -234,6 +234,13 @@ describe('TypeScript project loader', () => {
     write(root, 'tsconfig.json', '{ "compilerOptions": { "paths": { "@outside/*": ["safe/*/../../../outside"] } }, "files": ["src/one.ts"] }');
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
 
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "types": ["../outside"] }, "files": ["src/one.ts"] }');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "types": ["pkg/../../../outside"] }, "files": ["src/one.ts"] }');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "types": ["\\\\\\\\server\\\\share"] }, "files": ["src/one.ts"] }');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+
     const outside = workspace();
     write(outside, 'escaped.ts', 'export const escaped = true;\n');
     fs.symlinkSync(path.join(outside, 'escaped.ts'), path.join(root, 'src/linked.ts'));
@@ -305,6 +312,13 @@ describe('TypeScript project loader', () => {
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
 
     write(root, 'src/app.ts', 'import value from "\\\\server\\share";\nexport { value };\n');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+
+    write(root, 'src/app.ts', '/// <reference types="../../outside" />\nexport const value = 1;\n');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+    write(root, 'src/app.ts', '/// <reference types="pkg/../../../outside" />\nexport const value = 1;\n');
+    await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+    write(root, 'src/app.ts', '/// <reference types="\\\\server\\share" />\nexport const value = 1;\n');
     await expectFailure(loadTypeScriptProject(options(root)), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
   }, 15_000);
 

@@ -340,6 +340,12 @@ function normalizeRelative(value: string): string {
   return value.replaceAll('\\', '/');
 }
 
+function isPathLikeSpecifier(value: string): boolean {
+  const normalized = normalizeRelative(value);
+  return path.isAbsolute(normalized) || /^[a-z]:\//iu.test(normalized)
+    || normalized.split('/').some((segment) => segment === '.' || segment === '..');
+}
+
 function relativeWithin(workspaceRoot: string, absolutePath: string): string | undefined {
   const relative = normalizeRelative(path.relative(workspaceRoot, absolutePath));
   if (!relative || relative === '..' || relative.startsWith('../') || path.isAbsolute(relative)) return undefined;
@@ -498,6 +504,16 @@ function validateConfigTree(
         throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
       }
       for (const value of values as string[]) safeConfigPath(fileSystem, workspaceRoot, configDirectory, value);
+    }
+    if (compiler.types !== undefined) {
+      if (!Array.isArray(compiler.types) || compiler.types.some((value) => typeof value !== 'string')) {
+        throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
+      }
+      for (const value of compiler.types as string[]) {
+        if (isPathLikeSpecifier(value)) {
+          safeConfigPath(fileSystem, workspaceRoot, configDirectory, normalizeRelative(value));
+        }
+      }
     }
     if (compiler.paths !== undefined) {
       if (!compiler.paths || typeof compiler.paths !== 'object' || Array.isArray(compiler.paths)) {
@@ -789,18 +805,24 @@ async function loadTypeScriptProjectInternal(
   };
   const validateReferences = (text: string, relative: string): void => {
     const preprocessed = ts.preProcessFile(text, true, true);
-    const references = [...preprocessed.referencedFiles, ...preprocessed.importedFiles];
+    const references = [
+      ...preprocessed.referencedFiles,
+      ...preprocessed.importedFiles,
+      ...preprocessed.typeReferenceDirectives,
+    ];
     const sourceDirectory = path.dirname(path.resolve(workspaceRoot, relative));
     if (preprocessed.referencedFiles.some(({ fileName }) => (
       path.isAbsolute(fileName.replaceAll('\\', '/')) || /^[a-z][a-z0-9+.-]*:/iu.test(fileName)
     )) || preprocessed.importedFiles.some(({ fileName }) => (
       path.isAbsolute(fileName.replaceAll('\\', '/')) || /^[a-z]:[\\/]/iu.test(fileName)
+    )) || preprocessed.typeReferenceDirectives.some(({ fileName }) => (
+      path.isAbsolute(fileName.replaceAll('\\', '/')) || /^[a-z]:[\\/]/iu.test(fileName)
     ))) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT', { sourceUri: relative });
     }
     if (references.some(({ fileName }) => {
-      const normalized = fileName.replaceAll('\\', '/');
-      if (!normalized.startsWith('.')) return false;
+      const normalized = normalizeRelative(fileName);
+      if (!isPathLikeSpecifier(normalized)) return false;
       const candidate = path.resolve(sourceDirectory, normalized);
       return candidate !== workspaceRoot && relativeWithin(workspaceRoot, candidate) === undefined;
     })) {
