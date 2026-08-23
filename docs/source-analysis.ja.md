@@ -17,7 +17,7 @@ Process exit statusの決定に使うことも禁止します。
 
 - workspace rootと全entrypointのreal pathを解決する。
 - 未存在入力、Directory、Traversal、root外absolute path、symlink escapeを拒否する。
-- entrypointのFile数、File単位bytes、合計bytesを制限する。
+- entrypointを解決済みreal pathで重複排除してから、File数、File単位bytes、合計bytesを制限する。
 - timeout/cancellation signalと、固定event codeだけを受け取るLoggerを渡す。
 
 Analyzerがentrypointから追加発見するFileにも、同じrootとlimitの検査が必要です。
@@ -60,12 +60,13 @@ event loopへ制御を返し、cancellation signalを監視する必要があり
 Metricsだけです。Wrapperは`createSecurityContract()`でContractを再構築し、
 `source: source-ast`とmetric countを検証します。RouteまたはAuthenticationを`complete`と
 するには対応するAnalyzer Capabilityがすべて`supported`である必要があります。このVersionでは
-source parameterとrequest-body shapeの抽出を`complete`にできません。これにより未知のFramework AST fieldを
+source parameterとrequest-body shapeの抽出を`complete`にできません。また、Operationを返すには
+Route pathとHTTP methodの抽出Capabilityが`unsupported`でない必要があります。これにより未知のFramework AST fieldを
 除去し、不正Route、absolute/escape provenance URI、query fragment、secret-like valueを
 拒否します。
 
 Lifecycle event（`STARTED`、`COMPLETED`、`FAILED`）はWrapperだけが発行します。Analyzerへ
-渡すLoggerから早期発行または重複発行することはできません。
+渡すLoggerから早期発行または重複発行することはできず、Wrapperからasync Loggerへの書き込みは直列化されます。
 
 Analyzer DiagnosticはSecurity Findingと分離します。安定code、Framework固定の
 safe message、任意のworkspace-relative source URI、正のline/columnだけを保持します。

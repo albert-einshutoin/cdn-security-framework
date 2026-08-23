@@ -100,6 +100,26 @@ describe('Source Analyzer contract', () => {
     });
   });
 
+  test('applies file and byte limits after resolving duplicate entrypoints', async () => {
+    const { root, entrypoint } = workspace();
+    const sourceBytes = fs.statSync(path.join(root, entrypoint)).size;
+    fs.symlinkSync(path.join(root, entrypoint), path.join(root, 'app-alias.ts'));
+    const execution = await runSourceAnalyzer(fakeSourceAnalyzer, {
+      ...context(root, entrypoint, {
+        ...DEFAULT_SOURCE_ANALYSIS_LIMITS,
+        maxFiles: 1,
+        maxTotalSourceBytes: sourceBytes,
+      }),
+      entrypoints: [entrypoint, 'src/../src/app.ts', 'app-alias.ts'],
+    });
+    expect(execution.status).toBe('success');
+
+    expect(await runSourceAnalyzer(fakeSourceAnalyzer, {
+      ...context(root, entrypoint),
+      entrypoints: Array.from({ length: 100_001 }, () => entrypoint),
+    })).toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_FILE_LIMIT' }] });
+  });
+
   test('converts throws, invalid IR, absolute evidence, and secret diagnostics to safe failure', async () => {
     const { root, entrypoint } = workspace();
     const throwing = plugin({
@@ -204,6 +224,30 @@ describe('Source Analyzer contract', () => {
     expect(await runSourceAnalyzer(unsupportedEvidence, context(root, entrypoint)))
       .toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_INVALID_RESULT' }] });
 
+    for (const capability of ['routePaths', 'httpMethods'] as const) {
+      const unsupportedRouteClaim = plugin({
+        capabilities: {
+          ...fakeSourceAnalyzer.capabilities,
+          [capability]: { status: 'unsupported', reason: `${capability} extraction is not supported.` },
+        },
+        async analyze(ctx) {
+          const valid = await fakeSourceAnalyzer.analyze(ctx);
+          valid.contract.operations[0].provenance[0].capability = 'sourceLocations';
+          return valid;
+        },
+      });
+      expect(await runSourceAnalyzer(unsupportedRouteClaim, context(root, entrypoint)), capability)
+        .toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_INVALID_RESULT' }] });
+    }
+    const partialRouteClaims = plugin({
+      capabilities: {
+        ...fakeSourceAnalyzer.capabilities,
+        routePaths: { status: 'partial', reason: 'Some route paths are supported.' },
+        httpMethods: { status: 'partial', reason: 'Some HTTP methods are supported.' },
+      },
+    });
+    expect((await runSourceAnalyzer(partialRouteClaims, context(root, entrypoint))).status).toBe('success');
+
     const mutableCapabilities = {
       ...fakeSourceAnalyzer.capabilities,
       routePaths: { status: 'unsupported', reason: 'Route extraction is not supported.' },
@@ -219,14 +263,37 @@ describe('Source Analyzer contract', () => {
       .toMatchObject({ status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_INVALID_RESULT' }] });
   });
 
-  test('ignores asynchronously rejected logger writes', async () => {
+  test('ignores synchronously and asynchronously rejected logger writes', async () => {
     const { root, entrypoint } = workspace();
+    for (const rejectedLogger of [
+      { log() { throw new Error('token=sync-logger-secret'); } },
+      { async log() { throw new Error('token=async-logger-secret'); } },
+    ]) {
+      const execution = await runSourceAnalyzer(fakeSourceAnalyzer, {
+        ...context(root, entrypoint), logger: rejectedLogger,
+      });
+      expect(execution.status).toBe('success');
+    }
+    await new Promise((resolve) => setImmediate(resolve));
+  });
+
+  test('serializes asynchronous lifecycle logger writes', async () => {
+    const { root, entrypoint } = workspace();
+    const events: string[] = [];
     const execution = await runSourceAnalyzer(fakeSourceAnalyzer, {
       ...context(root, entrypoint),
-      logger: { async log() { throw new Error('token=logger-secret'); } },
+      logger: {
+        async log(event) {
+          if (event === 'SOURCE_ANALYZER_STARTED') {
+            await new Promise((resolve) => setTimeout(resolve, 20));
+          }
+          events.push(event);
+        },
+      },
     });
-    await new Promise((resolve) => setImmediate(resolve));
+    await new Promise((resolve) => setTimeout(resolve, 30));
     expect(execution.status).toBe('success');
+    expect(events).toEqual(['SOURCE_ANALYZER_STARTED', 'SOURCE_ANALYZER_COMPLETED']);
   });
 
   test('rejects each overclaimed contract capability independently', async () => {

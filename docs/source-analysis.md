@@ -20,7 +20,8 @@ Before invoking an analyzer, `runSourceAnalyzer()`:
 - resolves the real workspace root and every entrypoint;
 - rejects missing inputs, directories, traversal, absolute paths outside the
   root, and symlink escapes;
-- enforces entrypoint file count, per-file bytes, and total entrypoint bytes;
+- deduplicates entrypoints by resolved real path, then enforces file count,
+  per-file bytes, and total entrypoint bytes;
 - supplies a bounded cancellation signal and a logger that accepts only fixed
   event codes.
 
@@ -70,11 +71,13 @@ and bounded metrics. The wrapper rebuilds the contract with
 `createSecurityContract()`, requires `source: source-ast`, and verifies metric
 counts. A `complete` routes or authentication claim requires every corresponding
 analyzer capability to be `supported`; source parameter and request-body shape
-extraction cannot be `complete` in this contract version. This removes unknown framework AST fields and rejects invalid routes,
+extraction cannot be `complete` in this contract version. Every returned operation
+also requires non-unsupported route-path and HTTP-method extraction. This removes unknown framework AST fields and rejects invalid routes,
 absolute or escaping provenance URIs, query fragments, and secret-like values.
 
 Lifecycle events (`STARTED`, `COMPLETED`, and `FAILED`) are wrapper-owned. Calls
-made through the logger supplied to an analyzer cannot emit them early or twice.
+made through the logger supplied to an analyzer cannot emit them early or twice;
+wrapper writes to asynchronous loggers are serialized.
 
 Analyzer diagnostics are separate from security Findings. They contain a
 stable code, a framework-owned safe message, an optional workspace-relative

@@ -366,6 +366,10 @@ function validateResult(
     ))) {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
   }
+  if (contract.operations.length > 0
+    && (capabilityStatuses.routePaths === 'unsupported' || capabilityStatuses.httpMethods === 'unsupported')) {
+    throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
+  }
   if (contract.operations.some(({ provenance }) => provenance.some((evidence) => (
     evidence.source !== 'source-ast'
     || evidence.analyzer !== analyzerIdentity
@@ -394,10 +398,14 @@ function validateResult(
   return { contract, diagnostics, metrics };
 }
 
-function log(logger: SafeAnalyzerLogger, code: SourceAnalyzerLogCode): void {
-  try {
-    Promise.resolve(logger.log(code)).catch(() => {});
-  } catch { /* Logging must not change analysis results. */ }
+function orderedLog(logger: SafeAnalyzerLogger): (code: SourceAnalyzerLogCode) => void {
+  let pending = Promise.resolve();
+  return (code) => {
+    pending = pending.then(() => logger.log(code)).then(
+      () => undefined,
+      () => undefined,
+    );
+  };
 }
 
 function preflight(context: SourceAnalysisContext, limits: SourceAnalysisLimits):
@@ -405,11 +413,12 @@ function preflight(context: SourceAnalysisContext, limits: SourceAnalysisLimits)
   if (!Array.isArray(context.entrypoints) || context.entrypoints.length === 0) {
     return failed('SOURCE_ANALYZER_INPUT_INVALID');
   }
-  if (context.entrypoints.length > limits.maxFiles) return failed('SOURCE_ANALYZER_FILE_LIMIT');
+  if (context.entrypoints.length > LIMIT_RANGES.maxFiles.max) return failed('SOURCE_ANALYZER_FILE_LIMIT');
   let workspaceRoot: string;
   try { workspaceRoot = fs.realpathSync(context.workspaceRoot); } catch { return failed('SOURCE_ANALYZER_INPUT_INVALID'); }
   let totalBytes = 0;
   const entrypoints: string[] = [];
+  const seenEntrypoints = new Set<string>();
   for (const entrypoint of context.entrypoints) {
     if (!safeText(entrypoint) || /[?#]/.test(entrypoint)) return failed('SOURCE_ANALYZER_INPUT_INVALID');
     const candidate = path.resolve(workspaceRoot, entrypoint);
@@ -426,12 +435,15 @@ function preflight(context: SourceAnalysisContext, limits: SourceAnalysisLimits)
       return failed('SOURCE_ANALYZER_INPUT_OUTSIDE_ROOT');
     }
     if (!stat.isFile()) return failed('SOURCE_ANALYZER_INPUT_INVALID');
+    if (seenEntrypoints.has(relative)) continue;
+    seenEntrypoints.add(relative);
     if (stat.size > limits.maxFileBytes) return failed('SOURCE_ANALYZER_FILE_BYTES_LIMIT', { sourceUri: relative });
     totalBytes += stat.size;
     if (totalBytes > limits.maxTotalSourceBytes) return failed('SOURCE_ANALYZER_TOTAL_BYTES_LIMIT');
     entrypoints.push(relative);
+    if (entrypoints.length > limits.maxFiles) return failed('SOURCE_ANALYZER_FILE_LIMIT');
   }
-  return { workspaceRoot, entrypoints: [...new Set(entrypoints)].sort() };
+  return { workspaceRoot, entrypoints: entrypoints.sort() };
 }
 
 export async function runSourceAnalyzer(
@@ -468,7 +480,8 @@ export async function runSourceAnalyzer(
   const safeLogger: SafeAnalyzerLogger = {
     log() { /* Lifecycle events are emitted only by the wrapper. */ },
   };
-  log(context.logger, 'SOURCE_ANALYZER_STARTED');
+  const log = orderedLog(context.logger);
+  log('SOURCE_ANALYZER_STARTED');
   const startedAt = performance.now();
   try {
     const aborted = new Promise<never>((_, reject) => {
@@ -495,10 +508,10 @@ export async function runSourceAnalyzer(
     const limitCode = exceededMetric((result as Partial<SourceAnalysisResult>).metrics, limits);
     if (limitCode) throw new SourceAnalyzerContractError(limitCode);
     const validated = validateResult(result, prepared.workspaceRoot, analyzerIdentity, capabilityStatuses);
-    log(context.logger, 'SOURCE_ANALYZER_COMPLETED');
+    log('SOURCE_ANALYZER_COMPLETED');
     return { status: 'success', result: validated };
   } catch (error) {
-    log(context.logger, 'SOURCE_ANALYZER_FAILED');
+    log('SOURCE_ANALYZER_FAILED');
     return failed(interrupted
       ?? (error instanceof SourceAnalyzerContractError ? error.code : 'SOURCE_ANALYZER_INTERNAL'));
   } finally {
