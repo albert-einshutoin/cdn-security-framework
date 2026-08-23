@@ -7,7 +7,7 @@ exports.NESTJS_ROUTE_DECORATORS = void 0;
 exports.classifyNestJsRouteDecorator = classifyNestJsRouteDecorator;
 exports.resolveDecoratorSymbol = resolveDecoratorSymbol;
 exports.resolveStaticSymbolName = resolveStaticSymbolName;
-exports.isDirectImportFrom = isDirectImportFrom;
+exports.isStaticSymbolFrom = isStaticSymbolFrom;
 const node_module_1 = require("node:module");
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
@@ -145,12 +145,18 @@ function directNestJsImport(node, checker) {
             && imported.moduleSpecifier.text === '@nestjs/common';
     }));
 }
-function packageRoot(fileName) {
+function packageRoot(fileName, moduleName) {
+    const segments = moduleName.split('/');
     let directory = node_path_1.default.dirname(node_path_1.default.resolve(fileName));
     while (true) {
-        if (node_path_1.default.basename(directory) === 'common'
-            && node_path_1.default.basename(node_path_1.default.dirname(directory)) === '@nestjs'
-            && node_path_1.default.basename(node_path_1.default.dirname(node_path_1.default.dirname(directory))) === 'node_modules')
+        let candidate = directory;
+        let matches = true;
+        for (let index = segments.length - 1; index >= 0; index -= 1) {
+            if (node_path_1.default.basename(candidate) !== segments[index])
+                matches = false;
+            candidate = node_path_1.default.dirname(candidate);
+        }
+        if (matches && node_path_1.default.basename(candidate) === 'node_modules')
             return directory;
         const parent = node_path_1.default.dirname(directory);
         if (parent === directory)
@@ -165,11 +171,11 @@ function originatesFromNestJsCommon(symbol) {
     if (cached !== undefined)
         return cached;
     const result = Boolean(symbol.declarations?.some((declaration) => {
-        const targetRoot = packageRoot(declaration.getSourceFile().fileName);
+        const targetRoot = packageRoot(declaration.getSourceFile().fileName, '@nestjs/common');
         if (!targetRoot)
             return false;
         try {
-            const resolvedRoot = packageRoot((0, node_module_1.createRequire)(declaration.getSourceFile().fileName).resolve('@nestjs/common'));
+            const resolvedRoot = packageRoot((0, node_module_1.createRequire)(declaration.getSourceFile().fileName).resolve('@nestjs/common'), '@nestjs/common');
             return resolvedRoot !== undefined && node_fs_1.default.realpathSync(targetRoot) === node_fs_1.default.realpathSync(resolvedRoot);
         }
         catch {
@@ -182,7 +188,7 @@ function originatesFromNestJsCommon(symbol) {
 function matchesConsumerNestJsCommon(node, symbol) {
     let resolvedRoot;
     try {
-        resolvedRoot = packageRoot((0, node_module_1.createRequire)(node.getSourceFile().fileName).resolve('@nestjs/common'));
+        resolvedRoot = packageRoot((0, node_module_1.createRequire)(node.getSourceFile().fileName).resolve('@nestjs/common'), '@nestjs/common');
     }
     catch {
         return false;
@@ -190,7 +196,7 @@ function matchesConsumerNestJsCommon(node, symbol) {
     if (!resolvedRoot)
         return false;
     return Boolean(symbol?.declarations?.some((declaration) => {
-        const targetRoot = packageRoot(declaration.getSourceFile().fileName);
+        const targetRoot = packageRoot(declaration.getSourceFile().fileName, '@nestjs/common');
         return targetRoot !== undefined && node_fs_1.default.realpathSync(targetRoot) === node_fs_1.default.realpathSync(resolvedRoot);
     }));
 }
@@ -258,24 +264,19 @@ function resolveStaticSymbolName(expression, checker, check) {
     return !symbol || symbol === UNKNOWN_NESTJS_ROUTE
         || !symbol.declarations?.some(typescript_1.default.isClassLike) ? undefined : symbol.getName();
 }
-function isDirectImportFrom(expression, checker, moduleName, importedName) {
-    const node = unwrapExpression(expression);
-    if (typescript_1.default.isIdentifier(node)) {
-        return Boolean(checker.getSymbolAtLocation(node)?.declarations?.some((declaration) => {
-            const imported = importDeclaration(declaration);
-            return typescript_1.default.isImportSpecifier(declaration) && Boolean(imported)
-                && (declaration.propertyName ?? declaration.name).text === importedName
-                && typescript_1.default.isStringLiteral(imported.moduleSpecifier)
-                && imported.moduleSpecifier.text === moduleName;
-        }));
-    }
-    if (!typescript_1.default.isPropertyAccessExpression(node) || node.name.text !== importedName
-        || !typescript_1.default.isIdentifier(node.expression))
+function isStaticSymbolFrom(expression, checker, check, moduleName, importedName) {
+    const symbol = targetSymbol(expression, checker, check);
+    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE || symbol.getName() !== importedName)
         return false;
-    return Boolean(checker.getSymbolAtLocation(node.expression)?.declarations?.some((declaration) => {
-        const imported = importDeclaration(declaration);
-        return typescript_1.default.isNamespaceImport(declaration) && Boolean(imported)
-            && typescript_1.default.isStringLiteral(imported.moduleSpecifier)
-            && imported.moduleSpecifier.text === moduleName;
+    let resolvedRoot;
+    try {
+        resolvedRoot = packageRoot((0, node_module_1.createRequire)(expression.getSourceFile().fileName).resolve(moduleName), moduleName);
+    }
+    catch {
+        return false;
+    }
+    return Boolean(resolvedRoot && symbol.declarations?.some((declaration) => {
+        const targetRoot = packageRoot(declaration.getSourceFile().fileName, moduleName);
+        return targetRoot !== undefined && node_fs_1.default.realpathSync(targetRoot) === node_fs_1.default.realpathSync(resolvedRoot);
     }));
 }

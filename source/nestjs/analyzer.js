@@ -321,6 +321,19 @@ function composeAuth(classMetadata, methodMetadata, config, globalGuardFound) {
         ],
     };
 }
+function comparableAuth(exposure, auth) {
+    const sortedSet = (values) => [...new Set(values)].sort((left, right) => (left < right ? -1 : left > right ? 1 : 0));
+    return JSON.stringify([exposure, {
+            ...auth,
+            ...(auth.analysis ? {
+                analysis: {
+                    ...auth.analysis,
+                    roles: sortedSet(auth.analysis.roles),
+                    capabilityReasons: sortedSet(auth.analysis.capabilityReasons),
+                },
+            } : {}),
+        }]);
+}
 function methodsIncludingBaseChain(node, checker, projectSources, useDefineForClassFields, check, maxSteps) {
     const symbolKey = Symbol('symbol-method-key');
     const unwrapPropertyExpression = (expression) => {
@@ -603,7 +616,7 @@ async function analyze(context, authConfig) {
             if (typescript_1.default.isPropertyAssignment(node)
                 && (typescript_1.default.isIdentifier(node.name) || typescript_1.default.isStringLiteral(node.name))
                 && node.name.text === 'provide'
-                && (0, decorator_symbols_1.isDirectImportFrom)(node.initializer, checker, '@nestjs/core', 'APP_GUARD')) {
+                && (0, decorator_symbols_1.isStaticSymbolFrom)(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD')) {
                 if (!globalGuardFound)
                     addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.initializer);
                 globalGuardFound = true;
@@ -757,8 +770,8 @@ async function analyze(context, authConfig) {
                                     const previous = operations.get(key);
                                     if (previous) {
                                         previous.provenance.push(...provenance);
-                                        if (JSON.stringify([previous.exposure, previous.auth])
-                                            !== JSON.stringify([operationAuth.exposure, operationAuth.auth])) {
+                                        if (comparableAuth(previous.exposure, previous.auth)
+                                            !== comparableAuth(operationAuth.exposure, operationAuth.auth)) {
                                             const left = previous.auth.analysis;
                                             const right = operationAuth.auth.analysis;
                                             previous.exposure = 'unknown';

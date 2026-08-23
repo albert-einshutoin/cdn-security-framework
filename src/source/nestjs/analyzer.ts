@@ -29,7 +29,7 @@ import {
 } from '../typescript/project-loader';
 import {
   classifyNestJsRouteDecorator,
-  isDirectImportFrom,
+  isStaticSymbolFrom,
   resolveDecoratorSymbol,
   resolveStaticSymbolName,
   type NestJsRouteDecoratorCandidate,
@@ -390,6 +390,25 @@ function composeAuth(
   };
 }
 
+function comparableAuth(
+  exposure: ApiOperationInputV1['exposure'],
+  auth: ApiAuthenticationContractV1,
+): string {
+  const sortedSet = (values: readonly string[]) => [...new Set(values)].sort((left, right) => (
+    left < right ? -1 : left > right ? 1 : 0
+  ));
+  return JSON.stringify([exposure, {
+    ...auth,
+    ...(auth.analysis ? {
+      analysis: {
+        ...auth.analysis,
+        roles: sortedSet(auth.analysis.roles),
+        capabilityReasons: sortedSet(auth.analysis.capabilityReasons),
+      },
+    } : {}),
+  }]);
+}
+
 function methodsIncludingBaseChain(
   node: ts.ClassLikeDeclaration,
   checker: ts.TypeChecker,
@@ -670,7 +689,7 @@ async function analyze(
       if (ts.isPropertyAssignment(node)
         && (ts.isIdentifier(node.name) || ts.isStringLiteral(node.name))
         && node.name.text === 'provide'
-        && isDirectImportFrom(node.initializer, checker, '@nestjs/core', 'APP_GUARD')) {
+        && isStaticSymbolFrom(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD')) {
         if (!globalGuardFound) addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.initializer);
         globalGuardFound = true;
       }
@@ -840,8 +859,8 @@ async function analyze(
                 const previous = operations.get(key);
                 if (previous) {
                   previous.provenance.push(...provenance);
-                  if (JSON.stringify([previous.exposure, previous.auth])
-                    !== JSON.stringify([operationAuth.exposure, operationAuth.auth])) {
+                  if (comparableAuth(previous.exposure, previous.auth)
+                    !== comparableAuth(operationAuth.exposure, operationAuth.auth)) {
                     const left = previous.auth.analysis!;
                     const right = operationAuth.auth.analysis!;
                     previous.exposure = 'unknown';

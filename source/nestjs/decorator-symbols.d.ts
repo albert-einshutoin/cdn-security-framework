@@ -21,4 +21,4 @@ export declare function resolveDecoratorSymbol(decorator: ts.Decorator, checker:
     trustedNestJsCommon: boolean;
 } | undefined;
 export declare function resolveStaticSymbolName(expression: ts.Expression, checker: ts.TypeChecker, check: () => void): string | undefined;
-export declare function isDirectImportFrom(expression: ts.Expression, checker: ts.TypeChecker, moduleName: string, importedName: string): boolean;
+export declare function isStaticSymbolFrom(expression: ts.Expression, checker: ts.TypeChecker, check: () => void, moduleName: string, importedName: string): boolean;

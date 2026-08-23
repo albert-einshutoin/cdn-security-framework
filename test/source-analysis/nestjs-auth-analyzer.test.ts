@@ -266,13 +266,15 @@ describe('NestJS auth metadata analyzer', () => {
   test('reports APP_GUARD as a partial global capability without executing module code', async () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
-      import { APP_GUARD } from '@nestjs/core';
       import { JwtAuthGuard } from './auth';
-      export const providers = [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
+      import { GLOBAL_GUARD } from './global-guard';
+      const GUARD_TOKEN = GLOBAL_GUARD;
+      export const providers = [{ provide: GUARD_TOKEN, useClass: JwtAuthGuard }];
       @Controller('global') class GlobalController { @Get() @UseGuards(JwtAuthGuard) read() {} }
       throw new Error('must not execute');
     `, {
       'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'src/global-guard.ts': "export { APP_GUARD as GLOBAL_GUARD } from '@nestjs/core';\n",
       'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
       'node_modules/@nestjs/core/package.json': JSON.stringify({
         name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
@@ -327,6 +329,42 @@ describe('NestJS auth metadata analyzer', () => {
         },
       },
     });
+  });
+
+  test('does not conflict on duplicate routes with reordered set-valued auth metadata', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard, Roles } from './auth';
+      @Controller('same') class FirstController {
+        @Get() @UseGuards(JwtAuthGuard) @Roles('admin', 'ops') read() {}
+      }
+      @Controller('same') class SecondController {
+        @Get() @UseGuards(JwtAuthGuard) @Roles('ops', 'admin') read() {}
+      }
+    `, {
+      'src/auth.ts': `
+        export class JwtAuthGuard {}
+        export const Roles = (..._roles: unknown[]): MethodDecorator => () => {};
+      `,
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations).toHaveLength(1);
+    expect(execution.result.contract.operations[0]).toMatchObject({
+      exposure: 'authenticated',
+      auth: {
+        mode: 'alternatives',
+        analysis: {
+          roles: ['admin', 'ops'],
+          enforcementConfidence: 'high',
+        },
+      },
+    });
+    expect(execution.result.contract.operations[0].auth.analysis?.capabilityReasons).not.toContain(
+      'Conflicting NestJS auth metadata was found for the same route.',
+    );
   });
 
   test('rejects invalid or executable-shaped programmatic config', () => {
