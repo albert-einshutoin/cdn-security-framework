@@ -41,6 +41,24 @@ Capability map、1つのasync `analyze`関数を持ちます。次のCapability�
 Capability外のInherited metadataを推測せず、`unknown`、partial/unsupported Capability、
 または安全なAnalyzer Diagnosticとして返します。
 
+## TypeScript Project Loader
+
+`loadTypeScriptProject()`はJSON/JSONCからAnalyzer内部用TypeScript `Program`を構築します。
+Source、`ts-node`、Compiler plugin、Transformer、Nest CLI、webpack、build scriptは実行しません。
+workspace内local `extends`、`files`/`include`/`exclude`、path alias、`.ts`、`.tsx`、`.mts`、
+`.cts`を扱います。Package/Remote/Absolute pathとsymlink escapeを含む設定はfail closedです。
+
+Loaderはsourceをreal pathで解決し、workspace内File、TypeScriptの`lib*.d.ts`標準Library、
+型解決に必要な制限済み`node_modules/**/package.json` metadataだけを許可します。
+File数、bytes、AST node、Diagnostic、depth、協調的deadline、cancellationのLimitを戻り値生成前に強制します。
+Project referenceは検出しますがv1ではloadせず、固定のpartial-capability Diagnosticを返します。
+TypeScript messageとsource snippetは破棄し、固定safe message、数値code、任意のworkspace-relative
+位置だけを保持します。
+
+`TypeScriptAnalysisCache`はprocess-localかつcontent-basedです。Canonical config chain、Compiler
+option、source/標準Library content、TypeScript version、Loader versionをdigestへ含め、invalid/cancelled/limit超過Resultはcacheしません。
+内部で以前のProgramを再利用できますが、cacheなしでも同じ正しさを維持します。
+
 ## LimitとCancellation
 
 `SourceAnalysisLimits`はFile数、合計source bytes、File単位bytes、AST node数、
@@ -53,6 +71,8 @@ failed executionになります。同期的なAnalyzer処理がtimerを遅延さ
 event loopへ制御を返し、cancellation signalを監視する必要があります。信頼できない、または
 制御を返さない可能性があるAnalyzerには将来worker/process hostが必要です。動的plugin loadと
 そのhostはこのIssueの非目標です。
+Project Loader自身はAPI Operationを抽出しないためOperation metricは0です。Programを利用する
+Framework Analyzerが`maxOperations`を強制します。
 
 ## Result validationとData minimization
 

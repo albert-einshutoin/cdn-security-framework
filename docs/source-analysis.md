@@ -49,6 +49,29 @@ unrecognized guards, and inherited metadata outside analyzer capability must
 produce an `unknown` value, a partial/unsupported capability, or a safe analyzer
 diagnostic. They must not be guessed.
 
+## TypeScript project loader
+
+`loadTypeScriptProject()` builds an analyzer-internal TypeScript `Program` from
+JSON/JSONC without executing source, `ts-node`, compiler plugins, transformers,
+Nest CLI, webpack, or build scripts. It supports local workspace `extends`,
+`files`/`include`/`exclude`, path aliases, and `.ts`, `.tsx`, `.mts`, and `.cts`.
+Package, remote, absolute, and symlink-escaping configuration paths fail closed.
+
+The loader resolves source files by real path, permits only workspace files and
+TypeScript's `lib*.d.ts` standard-library files, plus bounded `node_modules/**/package.json`
+metadata needed for type resolution, and applies file, byte, AST-node,
+diagnostic, depth, cooperative deadline, and cancellation limits before returning. Project references are detected
+but not loaded in v1, so the result carries a fixed partial-capability diagnostic.
+TypeScript messages and source snippets are discarded; diagnostics retain only
+a fixed safe message, numeric TypeScript code, and optional workspace-relative
+position.
+
+`TypeScriptAnalysisCache` is process-local and content-based. Its digest covers
+the canonical config chain, compiler options, source and standard-library contents,
+TypeScript version, and loader
+version; invalid, cancelled, and limit-exceeded loads are never cached. A prior
+Program may be reused internally, but cache-free execution remains correct.
+
 ## Limits and cancellation
 
 `SourceAnalysisLimits` bounds files, total source bytes, bytes per file, AST
@@ -63,6 +86,8 @@ The internal object contract does not provide hard process isolation: a trusted
 analyzer must yield to the event loop and observe the cancellation signal.
 Untrusted or potentially non-yielding analyzers require a future worker/process
 host; dynamic plugin loading and that host are outside this issue.
+The project loader itself extracts no API operations, so its operation metric is
+zero; the framework analyzer that consumes the Program enforces `maxOperations`.
 
 ## Result validation and data minimization
 
