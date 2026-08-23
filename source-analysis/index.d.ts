@@ -1,4 +1,5 @@
 import { type SecurityContractV1 } from '../contract/security-ir';
+import { type HttpMethod } from '../contract/canonical-route';
 export declare const SOURCE_ANALYZER_CAPABILITY_NAMES: readonly ["routePaths", "httpMethods", "routerPrefixes", "globalPrefixes", "authentication", "authorization", "requestContentTypes", "requestLimits", "sourceLocations", "inheritedMetadata", "dynamicExpressions"];
 export declare const SOURCE_ANALYZER_CAPABILITY_STATUSES: readonly ["supported", "partial", "unsupported"];
 export declare const SOURCE_ANALYZER_DIAGNOSTIC_CODES: readonly ["SOURCE_ANALYZER_INVALID_PLUGIN", "SOURCE_ANALYZER_DUPLICATE", "SOURCE_ANALYZER_UNKNOWN", "SOURCE_ANALYZER_INVALID_LIMITS", "SOURCE_ANALYZER_INPUT_INVALID", "SOURCE_ANALYZER_INPUT_OUTSIDE_ROOT", "SOURCE_ANALYZER_FILE_LIMIT", "SOURCE_ANALYZER_TOTAL_BYTES_LIMIT", "SOURCE_ANALYZER_FILE_BYTES_LIMIT", "SOURCE_ANALYZER_AST_NODE_LIMIT", "SOURCE_ANALYZER_DIAGNOSTIC_LIMIT", "SOURCE_ANALYZER_OPERATION_LIMIT", "SOURCE_ANALYZER_DEPTH_LIMIT", "SOURCE_ANALYZER_DYNAMIC_ROUTE", "SOURCE_ANALYZER_UNSUPPORTED_DECORATOR", "SOURCE_ANALYZER_CANCELLED", "SOURCE_ANALYZER_TIMEOUT", "SOURCE_ANALYZER_INVALID_RESULT", "SOURCE_ANALYZER_INTERNAL"];
@@ -51,7 +52,16 @@ export interface SourceAnalysisContext {
 export interface SourceAnalysisResult {
     contract: SecurityContractV1;
     diagnostics: AnalyzerDiagnostic[];
+    unresolvedOperations: UnresolvedSourceOperationCandidate[];
     metrics: SourceAnalysisMetrics;
+}
+export interface UnresolvedSourceOperationCandidate {
+    methods: HttpMethod[];
+    path: null;
+    reason: 'SOURCE_ANALYZER_DYNAMIC_ROUTE' | 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR';
+    sourceUri: string;
+    line: number;
+    column: number;
 }
 export interface SourceAnalyzerPlugin {
     readonly id: string;

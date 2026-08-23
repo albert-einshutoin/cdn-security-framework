@@ -1,0 +1,9 @@
+{
+  "compilerOptions": {
+    "experimentalDecorators": true,
+    "moduleResolution": "node",
+    "noLib": true,
+    "types": []
+  },
+  "files": ["src/controller.ts"]
+}

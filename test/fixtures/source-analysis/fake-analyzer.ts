@@ -45,6 +45,7 @@ export const fakeSourceAnalyzer: SourceAnalyzerPlugin = {
         }],
       }),
       diagnostics: [],
+      unresolvedOperations: [],
       metrics: {
         files: 1, totalSourceBytes: sourceBytes, largestFileBytes: sourceBytes,
         astNodes: 5, diagnostics: 0, operations: 1, maxDepth: 1,

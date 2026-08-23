@@ -10,6 +10,7 @@ exports.runSourceAnalyzer = runSourceAnalyzer;
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
 const security_ir_1 = require("../contract/security-ir");
+const canonical_route_1 = require("../contract/canonical-route");
 exports.SOURCE_ANALYZER_CAPABILITY_NAMES = [
     'routePaths',
     'httpMethods',
@@ -255,7 +256,7 @@ function validateResult(input, workspaceRoot, analyzerIdentity, capabilityStatus
         throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
     }
     const candidate = input;
-    if (!Array.isArray(candidate.diagnostics)) {
+    if (!Array.isArray(candidate.diagnostics) || !Array.isArray(candidate.unresolvedOperations)) {
         throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
     }
     const metrics = validateMetrics(candidate.metrics);
@@ -266,7 +267,42 @@ function validateResult(input, workspaceRoot, analyzerIdentity, capabilityStatus
     catch {
         throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
     }
-    if (contract.source !== 'source-ast' || metrics.operations !== contract.operations.length
+    const methodOrder = new Map(canonical_route_1.HTTP_METHODS.map((method, index) => [method, index]));
+    const unresolvedOperations = candidate.unresolvedOperations.map((value) => {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) {
+            throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
+        }
+        const item = value;
+        if (Object.keys(item).sort().join(',') !== 'column,line,methods,path,reason,sourceUri'
+            || !Array.isArray(item.methods) || item.methods.length === 0
+            || item.methods.some((method) => !canonical_route_1.HTTP_METHODS.includes(method))
+            || new Set(item.methods).size !== item.methods.length
+            || item.path !== null
+            || !['SOURCE_ANALYZER_DYNAMIC_ROUTE', 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'].includes(item.reason ?? '')
+            || !safeText(item.sourceUri)
+            || !Number.isInteger(item.line) || (item.line ?? 0) < 1
+            || !Number.isInteger(item.column) || (item.column ?? 0) < 1) {
+            throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
+        }
+        const sourceUri = relativeSourceUri(item.sourceUri, workspaceRoot);
+        if (!sourceUri)
+            throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
+        return {
+            methods: [...item.methods].sort((left, right) => (methodOrder.get(left) - methodOrder.get(right))),
+            path: null,
+            reason: item.reason,
+            sourceUri,
+            line: item.line,
+            column: item.column,
+        };
+    }).sort((left, right) => {
+        const leftKey = `${left.sourceUri}\0${left.line.toString().padStart(10, '0')}\0${left.column.toString().padStart(10, '0')}\0${left.reason}\0${left.methods.join(',')}`;
+        const rightKey = `${right.sourceUri}\0${right.line.toString().padStart(10, '0')}\0${right.column.toString().padStart(10, '0')}\0${right.reason}\0${right.methods.join(',')}`;
+        return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
+    });
+    const unresolvedMethodCount = unresolvedOperations.reduce((total, item) => total + item.methods.length, 0);
+    if (contract.source !== 'source-ast'
+        || metrics.operations !== contract.operations.length + unresolvedMethodCount
         || metrics.diagnostics !== candidate.diagnostics.length) {
         throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INVALID_RESULT');
     }
@@ -300,7 +336,7 @@ function validateResult(input, workspaceRoot, analyzerIdentity, capabilityStatus
             column: item.column,
         });
     });
-    return { contract, diagnostics, metrics };
+    return { contract, diagnostics, unresolvedOperations, metrics };
 }
 function orderedLog(logger) {
     let pending = Promise.resolve();

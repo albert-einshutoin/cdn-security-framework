@@ -73,6 +73,10 @@ interface SarifLocation {
             uri: string;
             uriBaseId: '%SRCROOT%';
         };
+        region?: {
+            startLine: number;
+            startColumn?: number;
+        };
         properties: {
             source: string;
             digest: string;
