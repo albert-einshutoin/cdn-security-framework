@@ -353,6 +353,19 @@ describe('NestJS route analyzer', () => {
     });
   });
 
+  test('excludes symbol-named methods from route discovery', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      declare const handler: unique symbol;
+      @Controller('symbols') class SymbolController {
+        @Get('items') [handler]() {}
+      }
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success', result: { contract: { operations: [] } },
+    });
+  });
+
   test('reports unsupported Search routes instead of silently dropping them', async () => {
     const root = workspace(`
       import { Controller, Get, Search } from '@nestjs/common';

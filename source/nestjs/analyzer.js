@@ -96,12 +96,17 @@ function hasInheritedClassVersion(node, checker, projectSources, check, maxSteps
     return false;
 }
 function methodsIncludingBaseChain(node, checker, projectSources, useDefineForClassFields, check, maxSteps) {
+    const symbolKey = Symbol('symbol-method-key');
     const propertyKey = ({ name }) => {
         if (!name)
             return undefined;
         if (typescript_1.default.isComputedPropertyName(name)) {
             const values = (0, static_string_resolver_1.resolveStaticStrings)(name.expression, checker, projectSources, { check, maxSteps });
-            return values?.length === 1 ? values[0] : undefined;
+            if (values?.length === 1)
+                return values[0];
+            return checker.getTypeAtLocation(name.expression).flags & typescript_1.default.TypeFlags.ESSymbolLike
+                ? symbolKey
+                : undefined;
         }
         return typescript_1.default.isIdentifier(name) || typescript_1.default.isStringLiteral(name) || typescript_1.default.isNumericLiteral(name)
             || typescript_1.default.isNoSubstitutionTemplateLiteral(name) ? name.text : undefined;
@@ -129,11 +134,11 @@ function methodsIncludingBaseChain(node, checker, projectSources, useDefineForCl
         methods.push(...current.members.filter(typescript_1.default.isMethodDeclaration).filter(concrete)
             .filter((method) => {
             const key = propertyKey(method);
-            return key === undefined || !shadowed.has(key);
+            return key !== symbolKey && (key === undefined || !shadowed.has(key));
         }));
         for (const member of current.members.filter(runtimeMember)) {
             const key = propertyKey(member);
-            if (key !== undefined)
+            if (typeof key === 'string')
                 shadowed.add(key);
         }
         current = directBaseClass(current, checker);

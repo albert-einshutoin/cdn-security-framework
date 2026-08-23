@@ -124,11 +124,15 @@ function methodsIncludingBaseChain(
   check: () => void,
   maxSteps: number,
 ): ts.MethodDeclaration[] {
-  const propertyKey = ({ name }: ts.NamedDeclaration): string | undefined => {
+  const symbolKey = Symbol('symbol-method-key');
+  const propertyKey = ({ name }: ts.NamedDeclaration): string | typeof symbolKey | undefined => {
     if (!name) return undefined;
     if (ts.isComputedPropertyName(name)) {
       const values = resolveStaticStrings(name.expression, checker, projectSources, { check, maxSteps });
-      return values?.length === 1 ? values[0] : undefined;
+      if (values?.length === 1) return values[0];
+      return checker.getTypeAtLocation(name.expression).flags & ts.TypeFlags.ESSymbolLike
+        ? symbolKey
+        : undefined;
     }
     return ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name)
       || ts.isNoSubstitutionTemplateLiteral(name) ? name.text : undefined;
@@ -161,11 +165,11 @@ function methodsIncludingBaseChain(
     methods.push(...current.members.filter(ts.isMethodDeclaration).filter(concrete)
       .filter((method) => {
         const key = propertyKey(method);
-        return key === undefined || !shadowed.has(key);
+        return key !== symbolKey && (key === undefined || !shadowed.has(key));
       }));
     for (const member of current.members.filter(runtimeMember)) {
       const key = propertyKey(member);
-      if (key !== undefined) shadowed.add(key);
+      if (typeof key === 'string') shadowed.add(key);
     }
     current = directBaseClass(current, checker);
   }
