@@ -38,16 +38,35 @@ npx cdn-security contract diff \
   --openapi openapi.yaml --policy policy/security.yml --target cloudflare \
   --exceptions policy/finding-exceptions.yml --format json \
   --out reports/contract-diff.json --fail-on warning
+npx cdn-security contract diff \
+  --openapi openapi.yaml --policy policy/security.yml --target aws \
+  --format sarif --out reports/cdn-security.sarif --fail-on never
 ```
 
 - `--openapi`、`--policy`、`--target aws|cloudflare`は必須です。全inputとlocal refは`--workspace-root`内に限定されます。
-- `--format text|json`の既定はtextです。JSONは[`contract-diff-report-v1.schema.json`](../schemas/contract-diff-report-v1.schema.json)に従い、timestamp、absolute path、raw specification、secretを含みません。
-- `--exceptions`は既存のFinding Exception契約を適用します。`selector.environment`を使う場合は`--environment <name>`を指定します。抑制件数は常に集計し、`--include-suppressed`指定時だけ抑制Finding本体を含めます。再現可能なCI reportでは`--current-date YYYY-MM-DD`で有効期限の評価日を固定します。
+- `--format text|json|sarif`の既定はtextです。JSONは[`contract-diff-report-v1.schema.json`](../schemas/contract-diff-report-v1.schema.json)に従います。SARIFはCI向けに決定的なSARIF 2.1.0を出力します。どちらのmachine formatにもtimestamp、absolute path、raw specification、secretを含めません。
+- `--exceptions`は既存のFinding Exception契約を適用します。`selector.environment`を使う場合は`--environment <name>`を指定します。抑制件数は常に集計し、`--include-suppressed`指定時だけ抑制Finding本体を含めます。SARIFではaccepted external suppressionとして表現します。再現可能なCI reportでは`--current-date YYYY-MM-DD`で有効期限の評価日を固定します。
 - `--fail-on error|warning|never`の既定は`error`です。終了コードはthreshold未満が`0`、到達時が`1`、input/config/safety errorが`2`、予期しない内部errorが`3`です。
 - `--out`はworkspace内の存在するdirectoryにだけ出力します。既存regular fileの上書きには`--force`が必要で、Policy、build出力、解析したsource fileは保護されます。実行中は書込み可能なworkspaceを排他的に扱ってください。同一ユーザー権限でrename可能な別processは、検証済みでopen済みのdirectory inodeを検証後に移動できます。
 - Textはsummaryから始まり、rule、route、expected/actual、evidence、remediationを表示します。色はTTYでのみ有効で、`NO_COLOR`で無効化できます。
 
 明示的なreport出力以外は読み取り専用です。未対応・部分対応の解析項目は推測せず、omitted comparisonとして報告します。
+
+Code Scanningのupload権限を付与せず、GitHub Actions artifactとしてSARIFを保存する例:
+
+```yaml
+- run: >-
+    npx cdn-security contract diff --openapi openapi.yaml
+    --policy policy/security.yml --target aws --format sarif
+    --out reports/cdn-security.sarif --fail-on never
+- name: Upload CDN security SARIF artifact
+  uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+  with:
+    name: cdn-security-sarif
+    path: reports/cdn-security.sarif
+```
+
+これはartifact保存だけを行います。Code Scanningへの自動uploadはこのcommandの対象外です。
 
 ---
 

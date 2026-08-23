@@ -38,16 +38,35 @@ npx cdn-security contract diff \
   --openapi openapi.yaml --policy policy/security.yml --target cloudflare \
   --exceptions policy/finding-exceptions.yml --format json \
   --out reports/contract-diff.json --fail-on warning
+npx cdn-security contract diff \
+  --openapi openapi.yaml --policy policy/security.yml --target aws \
+  --format sarif --out reports/cdn-security.sarif --fail-on never
 ```
 
 - `--openapi`, `--policy`, and `--target aws|cloudflare` are required. All inputs and local references must stay inside `--workspace-root`.
-- `--format text|json` defaults to text. JSON follows [`contract-diff-report-v1.schema.json`](../schemas/contract-diff-report-v1.schema.json) and excludes timestamps, absolute paths, raw specifications, and secrets.
-- `--exceptions` applies the existing Finding Exception contract. Pass `--environment <name>` when exceptions use `selector.environment`. Suppressed findings are counted but omitted unless `--include-suppressed` is set. Use `--current-date YYYY-MM-DD` to pin expiry evaluation for reproducible CI reports.
+- `--format text|json|sarif` defaults to text. JSON follows [`contract-diff-report-v1.schema.json`](../schemas/contract-diff-report-v1.schema.json). SARIF emits deterministic SARIF 2.1.0 for CI consumers. Both machine formats exclude timestamps, absolute paths, raw specifications, and secrets.
+- `--exceptions` applies the existing Finding Exception contract. Pass `--environment <name>` when exceptions use `selector.environment`. Suppressed findings are counted but omitted unless `--include-suppressed` is set; in SARIF they are encoded as accepted external suppressions. Use `--current-date YYYY-MM-DD` to pin expiry evaluation for reproducible CI reports.
 - `--fail-on error|warning|never` defaults to `error`. Exit codes are `0` below threshold, `1` at or above threshold, `2` for input/configuration/safety errors, and `3` for unexpected internal errors.
 - `--out` writes only to an existing directory inside the workspace. Existing regular files require `--force`; policy, build output, and analyzed source files are protected. Run the command with exclusive control of the writable workspace: a same-user process with rename permission can relocate an already-open directory inode after validation.
 - Text starts with the summary and contains rule, route, expected/actual evidence, and remediation. Color is used only on a TTY and is disabled by `NO_COLOR`.
 
 The command is read-only except for an explicit report output. Unsupported and partial analyzer capabilities are reported as omitted comparisons rather than guessed.
+
+To retain SARIF as a GitHub Actions artifact without granting Code Scanning upload permissions:
+
+```yaml
+- run: >-
+    npx cdn-security contract diff --openapi openapi.yaml
+    --policy policy/security.yml --target aws --format sarif
+    --out reports/cdn-security.sarif --fail-on never
+- name: Upload CDN security SARIF artifact
+  uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+  with:
+    name: cdn-security-sarif
+    path: reports/cdn-security.sarif
+```
+
+This only stores the artifact; automatic Code Scanning upload is outside this command.
 
 ---
 

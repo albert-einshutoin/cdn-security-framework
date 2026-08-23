@@ -1,0 +1,215 @@
+{
+  "$schema": "https://json.schemastore.org/sarif-2.1.0.json",
+  "runs": [
+    {
+      "results": [
+        {
+          "level": "error",
+          "locations": [
+            {
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "/paths/~1admin/get/security",
+                  "kind": "jsonPointer",
+                  "name": "/paths/~1admin/get/security"
+                }
+              ],
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "openapi.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "properties": {
+                  "analyzer": "openapi@1",
+                  "capability": "openapi-security-v1",
+                  "complete": true,
+                  "digest": "sha256:openapi",
+                  "source": "openapi"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "The operation requires authentication but the edge policy does not enforce it."
+          },
+          "partialFingerprints": {
+            "securityContractFinding/v1": "11cb769333aca9ef31dd00305702f0674a05588a35f36581ee1d089c72e254f0"
+          },
+          "properties": {
+            "category": "authentication",
+            "confidence": "deterministic",
+            "tags": []
+          },
+          "relatedLocations": [
+            {
+              "id": 1,
+              "logicalLocations": [
+                {
+                  "fullyQualifiedName": "/routes/0/auth_gate",
+                  "kind": "jsonPointer",
+                  "name": "/routes/0/auth_gate"
+                }
+              ],
+              "message": {
+                "text": "policy evidence"
+              },
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "policy/security.yml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "properties": {
+                  "analyzer": "policy@1",
+                  "capability": "policy-routes-v1",
+                  "complete": true,
+                  "digest": "sha256:policy",
+                  "source": "policy"
+                }
+              }
+            }
+          ],
+          "ruleId": "SC-AUTHN-001"
+        },
+        {
+          "level": "error",
+          "message": {
+            "text": "The operation requires authentication but the edge policy does not enforce it."
+          },
+          "partialFingerprints": {
+            "securityContractFinding/v1": "0000000000000000000000000000000000000000000000000000000000000000"
+          },
+          "properties": {
+            "category": "authentication",
+            "confidence": "deterministic",
+            "tags": []
+          },
+          "ruleId": "SC-GOV-001"
+        },
+        {
+          "level": "warning",
+          "locations": [
+            {
+              "physicalLocation": {
+                "artifactLocation": {
+                  "uri": "openapi.yaml",
+                  "uriBaseId": "%SRCROOT%"
+                },
+                "properties": {
+                  "analyzer": "openapi@1",
+                  "capability": "openapi-security-v1",
+                  "complete": true,
+                  "digest": "sha256:openapi",
+                  "source": "openapi"
+                }
+              }
+            }
+          ],
+          "message": {
+            "text": "The route is public but is not declared as public in OpenAPI."
+          },
+          "partialFingerprints": {
+            "securityContractFinding/v1": "094a7f1859bb01049d8a390b2cc5e54a27d16b3ea1374c54dabe86204a9096a1"
+          },
+          "properties": {
+            "category": "exposure",
+            "confidence": "high-confidence",
+            "tags": []
+          },
+          "ruleId": "SC-EXPOSURE-001",
+          "suppressions": [
+            {
+              "kind": "external",
+              "status": "accepted"
+            }
+          ]
+        }
+      ],
+      "tool": {
+        "driver": {
+          "informationUri": "https://github.com/albert-einshutoin/cdn-security-framework/blob/main/docs/finding-reference.md",
+          "name": "cdn-security-framework",
+          "properties": {
+            "analyzers": [
+              "openapi@1",
+              "policy@1"
+            ],
+            "findingSchemaVersion": 1,
+            "reportSchemaVersion": 1
+          },
+          "rules": [
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "The operation requires authentication but the edge policy does not enforce it."
+              },
+              "help": {
+                "markdown": "Add an enforced auth gate for this route.",
+                "text": "Add an enforced auth gate for this route."
+              },
+              "helpUri": "https://github.com/albert-einshutoin/cdn-security-framework/blob/main/docs/finding-reference.md",
+              "id": "SC-AUTHN-001",
+              "name": "SC_AUTHN_001",
+              "properties": {
+                "category": "authentication",
+                "confidence": "deterministic",
+                "tags": []
+              },
+              "shortDescription": {
+                "text": "Authentication contract mismatch"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "warning"
+              },
+              "fullDescription": {
+                "text": "The route is public but is not declared as public in OpenAPI."
+              },
+              "help": {
+                "markdown": "The route is public but is not declared as public in OpenAPI.",
+                "text": "The route is public but is not declared as public in OpenAPI."
+              },
+              "helpUri": "https://github.com/albert-einshutoin/cdn-security-framework/blob/main/docs/finding-reference.md",
+              "id": "SC-EXPOSURE-001",
+              "name": "SC_EXPOSURE_001",
+              "properties": {
+                "category": "exposure",
+                "confidence": "high-confidence",
+                "tags": []
+              },
+              "shortDescription": {
+                "text": "Undeclared public route"
+              }
+            },
+            {
+              "defaultConfiguration": {
+                "level": "error"
+              },
+              "fullDescription": {
+                "text": "The operation requires authentication but the edge policy does not enforce it."
+              },
+              "help": {
+                "markdown": "Add an enforced auth gate for this route.",
+                "text": "Add an enforced auth gate for this route."
+              },
+              "helpUri": "https://github.com/albert-einshutoin/cdn-security-framework/blob/main/docs/finding-reference.md",
+              "id": "SC-GOV-001",
+              "name": "SC_GOV_001",
+              "properties": {
+                "category": "authentication",
+                "confidence": "deterministic",
+                "tags": []
+              },
+              "shortDescription": {
+                "text": "Authentication contract mismatch"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "version": "2.1.0"
+}

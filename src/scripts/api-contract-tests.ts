@@ -96,6 +96,7 @@ test('phase subpath exports expose public compiler contracts', () => {
   assert.strictEqual(typeof contract.loadFindingExceptions, 'function');
   assert.strictEqual(typeof contract.applyFindingExceptions, 'function');
   assert.strictEqual(typeof contract.diffSecurityContracts, 'function');
+  assert.strictEqual(typeof contract.renderFindingsAsSarif, 'function');
   assert.strictEqual(typeof contract.contractDiffExitCode, 'function');
   assert.strictEqual(typeof openapi.loadOpenApiDocument, 'function');
   assert.strictEqual(typeof openapi.resolveOpenApiReferences, 'function');
@@ -116,6 +117,7 @@ test('phase subpath exports expose public compiler contracts', () => {
   }
   const contractDeclarations = fs.readFileSync(path.join(repoRoot, 'contract/index.d.ts'), 'utf8');
   assert.ok(contractDeclarations.includes('diffSecurityContracts'));
+  assert.ok(contractDeclarations.includes('renderFindingsAsSarif'));
 });
 
 test('root type declarations expose public programmatic api', () => {
