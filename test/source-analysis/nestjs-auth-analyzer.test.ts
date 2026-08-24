@@ -80,9 +80,20 @@ afterEach(() => {
 
 describe('NestJS auth metadata analyzer', () => {
   test('composes class and method guards without treating their order as alternatives', async () => {
+    const deepReflectAlias = Array.from(
+      { length: 65 }, (_, index) => `const invoke${index + 1} = invoke${index};`,
+    ).join(' ');
     const root = workspace(`
       import { Controller, Get, UseGuards as Guards } from '@nestjs/common';
       import { ApiKeyGuard, JwtAuthGuard, Public as Open, Roles as Permissions, SecondGuard, UnknownGuard } from './auth';
+      const invoke = Reflect.apply;
+      let mutableInvoke = Reflect.apply;
+      const invoke0 = Reflect.apply;
+      ${deepReflectAlias}
+      const audit = (..._args: unknown[]): MethodDecorator => () => {};
+      let lateInvoke: any = audit;
+      let earlyInvoke: any = audit;
+      earlyInvoke = Reflect.apply;
 
       @Controller('users')
       @Guards(JwtAuthGuard)
@@ -93,6 +104,15 @@ describe('NestJS auth metadata analyzer', () => {
         @Get('call') @Guards.call(undefined, ApiKeyGuard) callGuard() {}
         @Get('apply') @Guards.apply(undefined, [ApiKeyGuard]) applyGuard() {}
         @Get('reflect-apply') @Reflect.apply(Guards, undefined, [ApiKeyGuard]) reflectApplyGuard() {}
+        @Get('aliased-reflect-apply') @invoke(Guards, undefined, [ApiKeyGuard]) aliasedReflectApplyGuard() {}
+        @Get('mutable-aliased-reflect-apply')
+        @mutableInvoke(Guards, undefined, [ApiKeyGuard]) mutableAliasedReflectApplyGuard() {}
+        @Get('deep-aliased-reflect-apply')
+        @invoke65(Guards, undefined, [ApiKeyGuard]) deepAliasedReflectApplyGuard() {}
+        @Get('late-reflect-write')
+        @lateInvoke(Guards, undefined, [ApiKeyGuard]) lateReflectWriteGuard() {}
+        @Get('early-reflect-write')
+        @earlyInvoke(Guards, undefined, [ApiKeyGuard]) earlyReflectWriteGuard() {}
         @Get('global-reflect-apply')
         @globalThis.Reflect.apply(Guards, undefined, [ApiKeyGuard]) globalReflectApplyGuard() {}
         @Get('reflect-construct') @Reflect.construct(Guards, [ApiKeyGuard]) reflectConstructGuard() {}
@@ -104,6 +124,7 @@ describe('NestJS auth metadata analyzer', () => {
 
       @Controller('health')
       class HealthController { @Get() read() {} }
+      lateInvoke = Reflect.apply;
     `, {
       'src/auth.ts': `
         export class JwtAuthGuard {}
@@ -147,6 +168,10 @@ describe('NestJS auth metadata analyzer', () => {
     });
     for (const route of [
       'GET /users/call', 'GET /users/apply', 'GET /users/reflect-apply',
+      'GET /users/aliased-reflect-apply',
+      'GET /users/mutable-aliased-reflect-apply',
+      'GET /users/deep-aliased-reflect-apply',
+      'GET /users/early-reflect-write',
       'GET /users/global-reflect-apply', 'GET /users/reflect-construct',
       'GET /users/function-prototype',
     ]) {
@@ -155,6 +180,10 @@ describe('NestJS auth metadata analyzer', () => {
         auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
       });
     }
+    expect(operations['GET /users/late-reflect-write']).toMatchObject({
+      exposure: 'authenticated',
+      auth: { mode: 'alternatives', analysis: { enforcementConfidence: 'high' } },
+    });
     expect(operations['GET /users/public']).toMatchObject({
       exposure: 'public',
       auth: {
@@ -4411,8 +4440,10 @@ describe('NestJS auth metadata analyzer', () => {
       import { JwtAuthGuard } from './auth';
       declare const app: INestApplication;
       declare const guard: unknown;
+      const invoke = Reflect.apply;
       Reflect.apply(app.useGlobalGuards, app, [guard]);
       globalThis.Reflect.apply(app.useGlobalGuards, app, [guard]);
+      invoke(app.useGlobalGuards, app, [guard]);
       @Controller('reflect-apply') class ReflectApplyController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }

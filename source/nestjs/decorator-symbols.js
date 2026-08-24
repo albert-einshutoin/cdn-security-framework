@@ -38,6 +38,8 @@ const CALLABLE_WRITE_INDEX_CACHE = new WeakMap();
 const MEMBER_WRITE_INDEX_CACHE = new WeakMap();
 const STABLE_RECEIVER_SYMBOL_CACHE = new WeakMap();
 const STATIC_MEMBER_WRITE_CACHE = new WeakMap();
+const INCOMPLETE_LOCAL_CONST = Symbol('incomplete-local-const');
+const LOCAL_CONST_INITIALIZER_CACHE = new WeakMap();
 function callableWriteIndex(projectSources, checker, check) {
     const cached = CALLABLE_WRITE_INDEX_CACHE.get(projectSources);
     if (cached)
@@ -612,6 +614,51 @@ function resolveConstInitializer(input, checker, check, projectSources) {
     }
     return expression;
 }
+function resolveLocalConstInitializer(input, checker, projectSources, check) {
+    const original = unwrapExpression(input);
+    if (!typescript_1.default.isIdentifier(original))
+        return { expression: original, incomplete: false };
+    let cache = LOCAL_CONST_INITIALIZER_CACHE.get(projectSources);
+    if (!cache) {
+        cache = new WeakMap();
+        LOCAL_CONST_INITIALIZER_CACHE.set(projectSources, cache);
+    }
+    const path = [];
+    const seen = new Set();
+    let current = original;
+    let result = false;
+    while (typescript_1.default.isIdentifier(current) && path.length < 64) {
+        check();
+        const symbol = checker.getSymbolAtLocation(current);
+        if (!symbol || (symbol.flags & typescript_1.default.SymbolFlags.Alias) || seen.has(symbol))
+            break;
+        const cached = cache.get(symbol);
+        if (cached !== undefined) {
+            result = cached;
+            break;
+        }
+        path.push(symbol);
+        seen.add(symbol);
+        const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+            || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+            break;
+        current = unwrapExpression(declaration.initializer);
+        if (!typescript_1.default.isIdentifier(current))
+            result = current;
+    }
+    if (typescript_1.default.isIdentifier(current) && path.length >= 64)
+        result = INCOMPLETE_LOCAL_CONST;
+    if (!result && current !== original && !typescript_1.default.isIdentifier(current))
+        result = current;
+    for (const symbol of path)
+        cache.set(symbol, result);
+    return result === INCOMPLETE_LOCAL_CONST
+        ? { expression: original, incomplete: true }
+        : { expression: result || original, incomplete: false };
+}
 function isDefinitelyNonProvidePropertyKey(expression) {
     const key = unwrapExpression(expression);
     return typescript_1.default.isPrefixUnaryExpression(key)
@@ -901,7 +948,7 @@ function resolveDecoratorSymbol(decorator, checker, check, projectSources) {
     const call = typescript_1.default.isCallExpression(expression) ? expression : undefined;
     if (!call)
         return undefined;
-    return resolveDecoratorCallSymbol(call, checker, check);
+    return resolveDecoratorCallSymbol(call, checker, check, projectSources);
 }
 function resolveBareDecoratorName(decorator, checker, check) {
     const expression = unwrapExpression(decorator.expression);
@@ -1116,9 +1163,72 @@ function standardFunctionPrototypeMethod(input, checker, check) {
         && globalReceiver.text === 'globalThis' && !hasRuntimeBinding(globalReceiver, checker)
         ? method : undefined;
 }
-function resolveDecoratorCallSymbol(call, checker, check) {
-    let expression = call.expression;
-    let indirectInvocation = false;
+function resolveDecoratorCallSymbol(call, checker, check, projectSources) {
+    const standardReflectMethod = (input) => {
+        const member = unwrapExpression(input);
+        const method = typescript_1.default.isPropertyAccessExpression(member) ? member.name.text
+            : typescript_1.default.isElementAccessExpression(member) && member.argumentExpression
+                ? resolveStaticPropertyKey(member.argumentExpression, checker, check) : undefined;
+        const receiver = (typescript_1.default.isPropertyAccessExpression(member) || typescript_1.default.isElementAccessExpression(member))
+            ? member.expression : undefined;
+        return receiver && (method === 'apply' || method === 'construct')
+            && isStandardReflectReceiver(receiver, checker, check) ? method : undefined;
+    };
+    const resolvedCallable = projectSources
+        ? resolveLocalConstInitializer(call.expression, checker, projectSources, check)
+        : { expression: call.expression, incomplete: false };
+    const resolvedReflect = standardReflectMethod(resolvedCallable.expression);
+    let expression = resolvedReflect ? resolvedCallable.expression : call.expression;
+    let indirectInvocation = resolvedCallable.incomplete && Boolean(call.arguments[0]);
+    if (indirectInvocation)
+        expression = call.arguments[0];
+    if (!resolvedReflect && !resolvedCallable.incomplete && projectSources
+        && typescript_1.default.isIdentifier(unwrapExpression(call.expression))) {
+        const identifier = unwrapExpression(call.expression);
+        let symbol = checker.getSymbolAtLocation(identifier);
+        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        const declarations = symbol?.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        const mutable = declaration && typescript_1.default.isVariableDeclarationList(declaration.parent)
+            && !(declaration.parent.flags & typescript_1.default.NodeFlags.Const);
+        const records = symbol ? callableWriteIndex(projectSources, checker, check).get(symbol) ?? [] : [];
+        const reflectEvidence = (candidate) => {
+            const resolved = resolveLocalConstInitializer(candidate, checker, projectSources, check);
+            return resolved.incomplete || Boolean(standardReflectMethod(resolved.expression));
+        };
+        let current = declaration?.initializer;
+        let latestStart = declaration?.getStart() ?? -1;
+        let ambiguousWrite = false;
+        let ambiguousCanonical = false;
+        for (const record of records) {
+            const direct = record.directTopLevel && record.sourceFile === call.getSourceFile();
+            if (direct && record.start < call.getStart()) {
+                if (record.start > latestStart) {
+                    current = record.value;
+                    latestStart = record.start;
+                    if (!record.value) {
+                        ambiguousWrite = true;
+                        ambiguousCanonical = true;
+                    }
+                }
+            }
+            else if (!(direct && record.start > call.getStart())) {
+                ambiguousWrite = true;
+                ambiguousCanonical ||= record.uncertainCanonical || Boolean(record.value
+                    && reflectEvidence(record.value));
+            }
+        }
+        const canonicalCandidate = Boolean(mutable && (ambiguousCanonical
+            || current && reflectEvidence(current)));
+        if (canonicalCandidate && call.arguments[0]) {
+            indirectInvocation = true;
+            expression = call.arguments[0];
+        }
+        else if (mutable && !ambiguousWrite && current) {
+            expression = current;
+        }
+    }
     const outer = unwrapExpression(expression);
     const outerInvocation = typescript_1.default.isPropertyAccessExpression(outer) ? outer.name.text
         : typescript_1.default.isElementAccessExpression(outer) && outer.argumentExpression
@@ -1171,7 +1281,28 @@ function resolveDecoratorCallSymbol(call, checker, check) {
     };
 }
 function resolveStaticDecoratorWrapperCall(call, checker, projectSources, check) {
-    const symbol = targetSymbol(call.expression, checker, check);
+    let effectiveExpression = call.expression;
+    const original = unwrapExpression(call.expression);
+    if (typescript_1.default.isIdentifier(original)) {
+        let binding = checker.getSymbolAtLocation(original);
+        if (binding?.flags && binding.flags & typescript_1.default.SymbolFlags.Alias)
+            binding = checker.getAliasedSymbol(binding);
+        const declarations = binding?.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const bindingDeclaration = declarations.length === 1 ? declarations[0] : undefined;
+        const mutable = bindingDeclaration && typescript_1.default.isVariableDeclarationList(bindingDeclaration.parent)
+            && !(bindingDeclaration.parent.flags & typescript_1.default.NodeFlags.Const);
+        if (binding && mutable) {
+            const ambiguous = (callableWriteIndex(projectSources, checker, check).get(binding) ?? [])
+                .some((record) => {
+                const direct = record.directTopLevel && record.sourceFile === call.getSourceFile();
+                return !(direct && record.start > call.getStart());
+            });
+            if (!ambiguous && bindingDeclaration.initializer) {
+                effectiveExpression = bindingDeclaration.initializer;
+            }
+        }
+    }
+    const symbol = targetSymbol(effectiveExpression, checker, check);
     if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) {
         const callee = unwrapExpression(call.expression);
         const base = typescript_1.default.isElementAccessExpression(callee)
@@ -1193,7 +1324,7 @@ function resolveStaticDecoratorWrapperCall(call, checker, projectSources, check)
     if (!implementation || (!typescript_1.default.isFunctionDeclaration(implementation)
         && !typescript_1.default.isArrowFunction(implementation) && !typescript_1.default.isFunctionExpression(implementation)))
         return undefined;
-    const unwrappedCallee = unwrapExpression(call.expression);
+    const unwrappedCallee = unwrapExpression(effectiveExpression);
     const objectAccess = typescript_1.default.isPropertyAccessExpression(unwrappedCallee)
         || typescript_1.default.isElementAccessExpression(unwrappedCallee);
     const stable = Boolean((!objectAccess || isNamespaceImportAccess(unwrappedCallee, checker))
@@ -3942,7 +4073,7 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
     };
     let effectiveArguments = flattenArguments(call.arguments);
     let expression = resolveStableInitializer(call.expression);
-    const reflectCall = unwrapExpression(call.expression);
+    const reflectCall = unwrapExpression(expression);
     const reflectMethod = typescript_1.default.isPropertyAccessExpression(reflectCall) ? reflectCall.name.text
         : typescript_1.default.isElementAccessExpression(reflectCall) && reflectCall.argumentExpression
             ? staticPropertyName(reflectCall.argumentExpression) : undefined;

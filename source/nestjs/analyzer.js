@@ -4362,7 +4362,7 @@ function isUnresolvedStoredGuardDecorator(decorator, checker, projectSources, ch
                 return true;
             const candidate = unwrap(expressions.pop());
             if (typescript_1.default.isCallExpression(candidate)) {
-                const resolved = (0, decorator_symbols_1.resolveDecoratorCallSymbol)(candidate, checker, check);
+                const resolved = (0, decorator_symbols_1.resolveDecoratorCallSymbol)(candidate, checker, check, projectSources);
                 if (resolved?.nestJsCommon
                     && (resolved.name === 'UseGuards' || resolved.name === 'applyDecorators'))
                     return true;
@@ -4776,7 +4776,7 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps,
                     result.guardDynamic = true;
                     continue;
                 }
-                const nested = (0, decorator_symbols_1.resolveDecoratorCallSymbol)(argument, checker, check);
+                const nested = (0, decorator_symbols_1.resolveDecoratorCallSymbol)(argument, checker, check, projectSources);
                 if (nested) {
                     if (!applyResolved(nested, evidence, depth + 1))
                         result.guardDynamic = true;
@@ -4845,7 +4845,7 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps,
             return true;
         }
         const wrapper = wrapperCall?.call
-            && (0, decorator_symbols_1.resolveDecoratorCallSymbol)(wrapperCall.call, checker, check);
+            && (0, decorator_symbols_1.resolveDecoratorCallSymbol)(wrapperCall.call, checker, check, projectSources);
         if (!wrapper)
             return false;
         if (!wrapperCall.stable || resolvingWrappers.has(wrapperCall.symbol)

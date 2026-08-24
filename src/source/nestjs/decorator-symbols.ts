@@ -57,6 +57,12 @@ type StaticMemberMutation = { escaped: boolean; dynamic: boolean; keys: Readonly
 const STATIC_MEMBER_WRITE_CACHE = new WeakMap<
   ReadonlySet<ts.SourceFile>, WeakMap<ts.Symbol, StaticMemberMutation>
 >();
+const INCOMPLETE_LOCAL_CONST = Symbol('incomplete-local-const');
+const LOCAL_CONST_INITIALIZER_CACHE = new WeakMap<
+  ReadonlySet<ts.SourceFile>, WeakMap<
+    ts.Symbol, ts.Expression | false | typeof INCOMPLETE_LOCAL_CONST
+  >
+>();
 
 function callableWriteIndex(
   projectSources: ReadonlySet<ts.SourceFile>,
@@ -623,6 +629,50 @@ function resolveConstInitializer(
   return expression;
 }
 
+function resolveLocalConstInitializer(
+  input: ts.Expression,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+): { expression: ts.Expression; incomplete: boolean } {
+  const original = unwrapExpression(input);
+  if (!ts.isIdentifier(original)) return { expression: original, incomplete: false };
+  let cache = LOCAL_CONST_INITIALIZER_CACHE.get(projectSources);
+  if (!cache) {
+    cache = new WeakMap();
+    LOCAL_CONST_INITIALIZER_CACHE.set(projectSources, cache);
+  }
+  const path: ts.Symbol[] = [];
+  const seen = new Set<ts.Symbol>();
+  let current: ts.Expression = original;
+  let result: ts.Expression | false | typeof INCOMPLETE_LOCAL_CONST = false;
+  while (ts.isIdentifier(current) && path.length < 64) {
+    check();
+    const symbol = checker.getSymbolAtLocation(current);
+    if (!symbol || (symbol.flags & ts.SymbolFlags.Alias) || seen.has(symbol)) break;
+    const cached = cache.get(symbol);
+    if (cached !== undefined) {
+      result = cached;
+      break;
+    }
+    path.push(symbol);
+    seen.add(symbol);
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+      || !ts.isVariableDeclarationList(declaration.parent)
+      || !(declaration.parent.flags & ts.NodeFlags.Const)) break;
+    current = unwrapExpression(declaration.initializer);
+    if (!ts.isIdentifier(current)) result = current;
+  }
+  if (ts.isIdentifier(current) && path.length >= 64) result = INCOMPLETE_LOCAL_CONST;
+  if (!result && current !== original && !ts.isIdentifier(current)) result = current;
+  for (const symbol of path) cache.set(symbol, result);
+  return result === INCOMPLETE_LOCAL_CONST
+    ? { expression: original, incomplete: true }
+    : { expression: result || original, incomplete: false };
+}
+
 export function isDefinitelyNonProvidePropertyKey(expression: ts.Expression): boolean {
   const key = unwrapExpression(expression);
   return ts.isPrefixUnaryExpression(key)
@@ -954,7 +1004,7 @@ export function resolveDecoratorSymbol(
   );
   const call = ts.isCallExpression(expression) ? expression : undefined;
   if (!call) return undefined;
-  return resolveDecoratorCallSymbol(call, checker, check);
+  return resolveDecoratorCallSymbol(call, checker, check, projectSources);
 }
 
 export function resolveBareDecoratorName(
@@ -1190,6 +1240,7 @@ export function resolveDecoratorCallSymbol(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
   check: () => void,
+  projectSources?: ReadonlySet<ts.SourceFile>,
 ): {
   name: string;
   call: ts.CallExpression;
@@ -1197,8 +1248,67 @@ export function resolveDecoratorCallSymbol(
   trustedNestJsCommon: boolean;
   indirectInvocation: boolean;
 } | undefined {
-  let expression: ts.Expression = call.expression;
-  let indirectInvocation = false;
+  const standardReflectMethod = (input: ts.Expression): 'apply' | 'construct' | undefined => {
+    const member = unwrapExpression(input);
+    const method = ts.isPropertyAccessExpression(member) ? member.name.text
+      : ts.isElementAccessExpression(member) && member.argumentExpression
+        ? resolveStaticPropertyKey(member.argumentExpression, checker, check) : undefined;
+    const receiver = (ts.isPropertyAccessExpression(member) || ts.isElementAccessExpression(member))
+      ? member.expression : undefined;
+    return receiver && (method === 'apply' || method === 'construct')
+      && isStandardReflectReceiver(receiver, checker, check) ? method : undefined;
+  };
+  const resolvedCallable = projectSources
+    ? resolveLocalConstInitializer(call.expression, checker, projectSources, check)
+    : { expression: call.expression, incomplete: false };
+  const resolvedReflect = standardReflectMethod(resolvedCallable.expression);
+  let expression: ts.Expression = resolvedReflect ? resolvedCallable.expression : call.expression;
+  let indirectInvocation = resolvedCallable.incomplete && Boolean(call.arguments[0]);
+  if (indirectInvocation) expression = call.arguments[0];
+  if (!resolvedReflect && !resolvedCallable.incomplete && projectSources
+    && ts.isIdentifier(unwrapExpression(call.expression))) {
+    const identifier = unwrapExpression(call.expression) as ts.Identifier;
+    let symbol = checker.getSymbolAtLocation(identifier);
+    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    const declarations = symbol?.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    const mutable = declaration && ts.isVariableDeclarationList(declaration.parent)
+      && !(declaration.parent.flags & ts.NodeFlags.Const);
+    const records = symbol ? callableWriteIndex(projectSources, checker, check).get(symbol) ?? [] : [];
+    const reflectEvidence = (candidate: ts.Expression): boolean => {
+      const resolved = resolveLocalConstInitializer(candidate, checker, projectSources, check);
+      return resolved.incomplete || Boolean(standardReflectMethod(resolved.expression));
+    };
+    let current = declaration?.initializer;
+    let latestStart = declaration?.getStart() ?? -1;
+    let ambiguousWrite = false;
+    let ambiguousCanonical = false;
+    for (const record of records) {
+      const direct = record.directTopLevel && record.sourceFile === call.getSourceFile();
+      if (direct && record.start < call.getStart()) {
+        if (record.start > latestStart) {
+          current = record.value;
+          latestStart = record.start;
+          if (!record.value) {
+            ambiguousWrite = true;
+            ambiguousCanonical = true;
+          }
+        }
+      } else if (!(direct && record.start > call.getStart())) {
+        ambiguousWrite = true;
+        ambiguousCanonical ||= record.uncertainCanonical || Boolean(record.value
+          && reflectEvidence(record.value));
+      }
+    }
+    const canonicalCandidate = Boolean(mutable && (ambiguousCanonical
+      || current && reflectEvidence(current)));
+    if (canonicalCandidate && call.arguments[0]) {
+      indirectInvocation = true;
+      expression = call.arguments[0];
+    } else if (mutable && !ambiguousWrite && current) {
+      expression = current;
+    }
+  }
   const outer = unwrapExpression(expression);
   const outerInvocation = ts.isPropertyAccessExpression(outer) ? outer.name.text
     : ts.isElementAccessExpression(outer) && outer.argumentExpression
@@ -1254,7 +1364,27 @@ export function resolveStaticDecoratorWrapperCall(
   projectSources: ReadonlySet<ts.SourceFile>,
   check: () => void,
 ): { call?: ts.CallExpression; symbol: ts.Symbol; stable: boolean; dynamic: boolean } | undefined {
-  const symbol = targetSymbol(call.expression, checker, check);
+  let effectiveExpression: ts.Expression = call.expression;
+  const original = unwrapExpression(call.expression);
+  if (ts.isIdentifier(original)) {
+    let binding = checker.getSymbolAtLocation(original);
+    if (binding?.flags && binding.flags & ts.SymbolFlags.Alias) binding = checker.getAliasedSymbol(binding);
+    const declarations = binding?.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const bindingDeclaration = declarations.length === 1 ? declarations[0] : undefined;
+    const mutable = bindingDeclaration && ts.isVariableDeclarationList(bindingDeclaration.parent)
+      && !(bindingDeclaration.parent.flags & ts.NodeFlags.Const);
+    if (binding && mutable) {
+      const ambiguous = (callableWriteIndex(projectSources, checker, check).get(binding) ?? [])
+        .some((record) => {
+          const direct = record.directTopLevel && record.sourceFile === call.getSourceFile();
+          return !(direct && record.start > call.getStart());
+        });
+      if (!ambiguous && bindingDeclaration.initializer) {
+        effectiveExpression = bindingDeclaration.initializer;
+      }
+    }
+  }
+  const symbol = targetSymbol(effectiveExpression, checker, check);
   if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) {
     const callee = unwrapExpression(call.expression);
     const base = ts.isElementAccessExpression(callee)
@@ -1282,7 +1412,7 @@ export function resolveStaticDecoratorWrapperCall(
     : declaration;
   if (!implementation || (!ts.isFunctionDeclaration(implementation)
     && !ts.isArrowFunction(implementation) && !ts.isFunctionExpression(implementation))) return undefined;
-  const unwrappedCallee = unwrapExpression(call.expression);
+  const unwrappedCallee = unwrapExpression(effectiveExpression);
   const objectAccess = ts.isPropertyAccessExpression(unwrappedCallee)
     || ts.isElementAccessExpression(unwrappedCallee);
   const stable = Boolean((!objectAccess || isNamespaceImportAccess(unwrappedCallee, checker))
@@ -3951,7 +4081,7 @@ export function isNestJsUseGlobalGuardsCall(
   };
   let effectiveArguments = flattenArguments(call.arguments);
   let expression = resolveStableInitializer(call.expression);
-  const reflectCall = unwrapExpression(call.expression);
+  const reflectCall = unwrapExpression(expression);
   const reflectMethod = ts.isPropertyAccessExpression(reflectCall) ? reflectCall.name.text
     : ts.isElementAccessExpression(reflectCall) && reflectCall.argumentExpression
       ? staticPropertyName(reflectCall.argumentExpression) : undefined;

@@ -4165,7 +4165,7 @@ function isUnresolvedStoredGuardDecorator(
       if (steps > 64) return true;
       const candidate = unwrap(expressions.pop()!);
       if (ts.isCallExpression(candidate)) {
-        const resolved = resolveDecoratorCallSymbol(candidate, checker, check);
+        const resolved = resolveDecoratorCallSymbol(candidate, checker, check, projectSources);
         if (resolved?.nestJsCommon
           && (resolved.name === 'UseGuards' || resolved.name === 'applyDecorators')) return true;
         expressions.push(...candidate.arguments.map((argument) => (
@@ -4534,7 +4534,7 @@ function ownAuthMetadata(
           result.guardDynamic = true;
           continue;
         }
-        const nested = resolveDecoratorCallSymbol(argument, checker, check);
+        const nested = resolveDecoratorCallSymbol(argument, checker, check, projectSources);
         if (nested) {
           if (!applyResolved(nested, evidence, depth + 1)) result.guardDynamic = true;
         }
@@ -4597,7 +4597,7 @@ function ownAuthMetadata(
       return true;
     }
     const wrapper = wrapperCall?.call
-      && resolveDecoratorCallSymbol(wrapperCall.call, checker, check);
+      && resolveDecoratorCallSymbol(wrapperCall.call, checker, check, projectSources);
     if (!wrapper) return false;
     if (!wrapperCall.stable || resolvingWrappers.has(wrapperCall.symbol)
       || depth >= maxDepth) {
