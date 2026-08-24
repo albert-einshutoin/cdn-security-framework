@@ -197,7 +197,7 @@
       "properties": {
         "guards": { "type": "array", "maxItems": 100000, "items": { "$ref": "#/definitions/authGuardAnalysis" } },
         "explicitPublic": { "type": "boolean" },
-        "roles": { "$ref": "#/definitions/stringSet" },
+        "roles": { "$ref": "#/definitions/rawStringSet" },
         "enforcementConfidence": { "enum": ["high", "unknown"] },
         "capabilityReasons": { "$ref": "#/definitions/stringSet" }
       }
@@ -313,6 +313,12 @@
       "maxItems": 100000,
       "uniqueItems": true,
       "items": { "type": "string", "minLength": 1, "maxLength": 16384 }
+    },
+    "rawStringSet": {
+      "type": "array",
+      "maxItems": 100000,
+      "uniqueItems": true,
+      "items": { "type": "string", "maxLength": 16384 }
     }
   }
 }

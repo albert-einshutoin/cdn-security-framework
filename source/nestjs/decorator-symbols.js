@@ -31,6 +31,61 @@ const MEMBER_REFERENCE_CACHE = new WeakMap();
 const CALLABLE_REFERENCE_CACHE = new WeakMap();
 const WRAPPER_MUTATION_CACHE = new WeakMap();
 const WRAPPED_RECEIVER_CACHE = new WeakMap();
+function callableBindingMayBeWritten(symbol, declarations, checker, projectSources, check) {
+    let projectCache = projectSources && CALLABLE_REFERENCE_CACHE.get(projectSources);
+    if (projectSources && !projectCache) {
+        projectCache = new WeakMap();
+        CALLABLE_REFERENCE_CACHE.set(projectSources, projectCache);
+    }
+    const cached = projectCache?.get(symbol);
+    if (cached !== undefined)
+        return cached;
+    let written = false;
+    const references = projectSources ? [...projectSources] : [];
+    while (references.length > 0 && !written) {
+        const reference = references.pop();
+        check();
+        if (typescript_1.default.isIdentifier(reference)) {
+            let referenceSymbol = checker.getSymbolAtLocation(reference);
+            if (referenceSymbol?.flags && referenceSymbol.flags & typescript_1.default.SymbolFlags.Alias) {
+                referenceSymbol = checker.getAliasedSymbol(referenceSymbol);
+            }
+            if (referenceSymbol === symbol) {
+                const declarationName = declarations.some((declaration) => ('name' in declaration && declaration.name === reference));
+                let usage = reference;
+                while (typescript_1.default.isParenthesizedExpression(usage.parent)
+                    || typescript_1.default.isAsExpression(usage.parent) || typescript_1.default.isTypeAssertionExpression(usage.parent)
+                    || typescript_1.default.isSatisfiesExpression(usage.parent) || typescript_1.default.isNonNullExpression(usage.parent)) {
+                    usage = usage.parent;
+                }
+                let target = usage;
+                while (!declarationName && target.parent && !typescript_1.default.isStatement(target)) {
+                    const parent = target.parent;
+                    if (typescript_1.default.isBinaryExpression(parent) && parent.left === target
+                        && parent.operatorToken.kind >= typescript_1.default.SyntaxKind.FirstAssignment
+                        && parent.operatorToken.kind <= typescript_1.default.SyntaxKind.LastAssignment) {
+                        written = true;
+                        break;
+                    }
+                    if ((typescript_1.default.isPrefixUnaryExpression(parent) || typescript_1.default.isPostfixUnaryExpression(parent))
+                        && parent.operand === target) {
+                        written = true;
+                        break;
+                    }
+                    if ((typescript_1.default.isForOfStatement(parent) || typescript_1.default.isForInStatement(parent))
+                        && parent.initializer === target) {
+                        written = true;
+                        break;
+                    }
+                    target = parent;
+                }
+            }
+        }
+        typescript_1.default.forEachChild(reference, (child) => { references.push(child); });
+    }
+    projectCache?.set(symbol, written);
+    return written;
+}
 function unwrapExpression(expression) {
     let current = expression;
     while (typescript_1.default.isParenthesizedExpression(current) || typescript_1.default.isAsExpression(current)
@@ -380,9 +435,11 @@ function resolveStaticDecoratorWrapperCall(call, checker, projectSources, check)
     const objectAccess = typescript_1.default.isPropertyAccessExpression(unwrappedCallee)
         || typescript_1.default.isElementAccessExpression(unwrappedCallee);
     const stable = Boolean((!objectAccess || isNamespaceImportAccess(unwrappedCallee, checker))
-        && declaration && typescript_1.default.isVariableDeclaration(declaration)
+        && declaration && ((typescript_1.default.isVariableDeclaration(declaration)
         && typescript_1.default.isVariableDeclarationList(declaration.parent)
-        && declaration.parent.flags & typescript_1.default.NodeFlags.Const);
+        && declaration.parent.flags & typescript_1.default.NodeFlags.Const)
+        || (typescript_1.default.isFunctionDeclaration(declaration)
+            && !callableBindingMayBeWritten(symbol, symbol.declarations ?? [], checker, projectSources, check))));
     const { body } = implementation;
     if (!body)
         return undefined;
@@ -761,61 +818,6 @@ function containsStaticSymbolFrom(expression, checker, check, moduleName, import
         }
         return false;
     };
-    const callableBindingMayBeWritten = (symbol, declarations) => {
-        let projectCache = projectSources && CALLABLE_REFERENCE_CACHE.get(projectSources);
-        if (projectSources && !projectCache) {
-            projectCache = new WeakMap();
-            CALLABLE_REFERENCE_CACHE.set(projectSources, projectCache);
-        }
-        const cached = projectCache?.get(symbol);
-        if (cached !== undefined)
-            return cached;
-        let written = false;
-        const references = projectSources ? [...projectSources] : [];
-        while (references.length > 0 && !written) {
-            const reference = references.pop();
-            check();
-            if (typescript_1.default.isIdentifier(reference)) {
-                let referenceSymbol = checker.getSymbolAtLocation(reference);
-                if (referenceSymbol?.flags && referenceSymbol.flags & typescript_1.default.SymbolFlags.Alias) {
-                    referenceSymbol = checker.getAliasedSymbol(referenceSymbol);
-                }
-                if (referenceSymbol === symbol) {
-                    const declarationName = declarations.some((declaration) => ('name' in declaration && declaration.name === reference));
-                    let usage = reference;
-                    while (typescript_1.default.isParenthesizedExpression(usage.parent)
-                        || typescript_1.default.isAsExpression(usage.parent) || typescript_1.default.isTypeAssertionExpression(usage.parent)
-                        || typescript_1.default.isSatisfiesExpression(usage.parent) || typescript_1.default.isNonNullExpression(usage.parent)) {
-                        usage = usage.parent;
-                    }
-                    let target = usage;
-                    while (!declarationName && target.parent && !typescript_1.default.isStatement(target)) {
-                        const parent = target.parent;
-                        if (typescript_1.default.isBinaryExpression(parent) && parent.left === target
-                            && parent.operatorToken.kind >= typescript_1.default.SyntaxKind.FirstAssignment
-                            && parent.operatorToken.kind <= typescript_1.default.SyntaxKind.LastAssignment) {
-                            written = true;
-                            break;
-                        }
-                        if ((typescript_1.default.isPrefixUnaryExpression(parent) || typescript_1.default.isPostfixUnaryExpression(parent))
-                            && parent.operand === target) {
-                            written = true;
-                            break;
-                        }
-                        if ((typescript_1.default.isForOfStatement(parent) || typescript_1.default.isForInStatement(parent))
-                            && parent.initializer === target) {
-                            written = true;
-                            break;
-                        }
-                        target = parent;
-                    }
-                }
-            }
-            typescript_1.default.forEachChild(reference, (child) => { references.push(child); });
-        }
-        projectCache?.set(symbol, written);
-        return written;
-    };
     const staticallyUnreachable = (candidate, branchDepth, branchBindings) => {
         let child = candidate;
         let parent = candidate.parent;
@@ -1066,7 +1068,7 @@ function containsStaticSymbolFrom(expression, checker, check, moduleName, import
                     && variableDeclaration.parent.flags & typescript_1.default.NodeFlags.Const
                     ? unwrapExpression(variableDeclaration.initializer) : undefined;
                 if (symbol && functionDeclaration
-                    && callableBindingMayBeWritten(symbol, declarations))
+                    && callableBindingMayBeWritten(symbol, declarations, checker, projectSources, check))
                     return true;
                 if (!functionDeclaration && variableDeclaration && !variableInitializer)
                     return true;
@@ -2249,7 +2251,7 @@ function containsStaticSymbolFrom(expression, checker, check, moduleName, import
                     && variableDeclaration.parent.flags & typescript_1.default.NodeFlags.Const
                     ? unwrapExpression(variableDeclaration.initializer) : undefined;
                 if (functionDeclaration) {
-                    if (calleeSymbol && callableBindingMayBeWritten(calleeSymbol, declarations))
+                    if (calleeSymbol && callableBindingMayBeWritten(calleeSymbol, declarations, checker, projectSources, check))
                         return true;
                     callee = functionDeclaration;
                 }

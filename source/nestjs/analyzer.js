@@ -55,6 +55,490 @@ function sourceLocation(node, workspaceRoot) {
 function digest(sourceFile) {
     return `sha256:${(0, node_crypto_1.createHash)('sha256').update(sourceFile.text).digest('hex')}`;
 }
+function isProvidersName(node) {
+    return (typescript_1.default.isIdentifier(node) || typescript_1.default.isStringLiteral(node)) && node.text === 'providers';
+}
+function resolvedSymbolAt(node, checker) {
+    let symbol = typescript_1.default.isShorthandPropertyAssignment(node.parent)
+        ? checker.getShorthandAssignmentValueSymbol(node.parent)
+        : checker.getSymbolAtLocation(node);
+    if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+        symbol = checker.getAliasedSymbol(symbol);
+    return symbol;
+}
+function resolveConstObject(input, checker, projectSources, check, seen = new Set(), depth = 0) {
+    check();
+    if (depth > 64)
+        return undefined;
+    let expression = input;
+    while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+        || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+        || typescript_1.default.isNonNullExpression(expression))
+        expression = expression.expression;
+    if (typescript_1.default.isObjectLiteralExpression(expression))
+        return expression;
+    if (!typescript_1.default.isIdentifier(expression))
+        return undefined;
+    const symbol = resolvedSymbolAt(expression, checker);
+    if (!symbol || seen.has(symbol))
+        return undefined;
+    const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+        || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+        || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+        return undefined;
+    seen.add(symbol);
+    return resolveConstObject(declaration.initializer, checker, projectSources, check, seen, depth + 1);
+}
+function effectiveObjectProperty(object, propertyName, checker, projectSources, check, seen = new Set()) {
+    check();
+    if (seen.has(object))
+        return { present: true, candidates: [object], accessor: false };
+    seen.add(object);
+    const returnedExpressions = (body) => {
+        const result = [];
+        const collectReturns = (statement) => {
+            check();
+            if (typescript_1.default.isReturnStatement(statement)) {
+                if (statement.expression)
+                    result.push(statement.expression);
+                return true;
+            }
+            if (typescript_1.default.isBlock(statement)) {
+                for (const child of statement.statements) {
+                    if (collectReturns(child))
+                        return true;
+                }
+            }
+            else if (typescript_1.default.isIfStatement(statement)) {
+                const condition = statement.expression.kind === typescript_1.default.SyntaxKind.TrueKeyword
+                    ? true : statement.expression.kind === typescript_1.default.SyntaxKind.FalseKeyword ? false : undefined;
+                const thenReturns = condition !== false && collectReturns(statement.thenStatement);
+                const elseReturns = condition !== true && Boolean(statement.elseStatement
+                    && collectReturns(statement.elseStatement));
+                return condition === true ? thenReturns : condition === false ? elseReturns
+                    : thenReturns && elseReturns;
+            }
+            else if (typescript_1.default.isTryStatement(statement)) {
+                const start = result.length;
+                const tryReturns = collectReturns(statement.tryBlock);
+                const catchReturns = Boolean(statement.catchClause
+                    && collectReturns(statement.catchClause.block));
+                if (!statement.finallyBlock)
+                    return tryReturns && (!statement.catchClause || catchReturns);
+                const finallyStart = result.length;
+                const finallyReturns = collectReturns(statement.finallyBlock);
+                if (finallyReturns)
+                    result.splice(start, finallyStart - start);
+                return finallyReturns || (tryReturns && (!statement.catchClause || catchReturns));
+            }
+            else if (typescript_1.default.isSwitchStatement(statement)) {
+                let allReturn = statement.caseBlock.clauses.length > 0;
+                for (const clause of statement.caseBlock.clauses) {
+                    let clauseReturns = false;
+                    for (const child of clause.statements) {
+                        if (collectReturns(child)) {
+                            clauseReturns = true;
+                            break;
+                        }
+                    }
+                    allReturn &&= clauseReturns;
+                }
+                return allReturn && statement.caseBlock.clauses.some(typescript_1.default.isDefaultClause);
+            }
+            else if (typescript_1.default.isWhileStatement(statement)) {
+                if (statement.expression.kind !== typescript_1.default.SyntaxKind.FalseKeyword) {
+                    collectReturns(statement.statement);
+                }
+            }
+            else if (typescript_1.default.isDoStatement(statement)) {
+                collectReturns(statement.statement);
+            }
+            else if (typescript_1.default.isForStatement(statement)) {
+                if (statement.condition?.kind !== typescript_1.default.SyntaxKind.FalseKeyword) {
+                    collectReturns(statement.statement);
+                }
+            }
+            else if (typescript_1.default.isForInStatement(statement) || typescript_1.default.isForOfStatement(statement)) {
+                collectReturns(statement.statement);
+            }
+            return false;
+        };
+        collectReturns(body);
+        return result;
+    };
+    let result = {
+        present: false, candidates: [], accessor: false,
+    };
+    for (const property of object.properties) {
+        if (typescript_1.default.isPropertyAssignment(property)) {
+            const name = typescript_1.default.isComputedPropertyName(property.name)
+                ? (0, decorator_symbols_1.resolveStaticPropertyKey)(property.name.expression, checker, check)
+                : (typescript_1.default.isIdentifier(property.name) || typescript_1.default.isStringLiteral(property.name))
+                    ? property.name.text : undefined;
+            if (name === propertyName) {
+                result = { present: true, candidates: [property.initializer], accessor: false };
+            }
+            else if (typescript_1.default.isComputedPropertyName(property.name) && name === undefined
+                && !(0, decorator_symbols_1.isDefinitelyNonProvidePropertyKey)(property.name.expression)) {
+                result = {
+                    present: true, candidates: [...result.candidates, property.initializer], accessor: false,
+                };
+            }
+        }
+        else if (typescript_1.default.isShorthandPropertyAssignment(property) && property.name.text === propertyName) {
+            result = { present: true, candidates: [property.name], accessor: false };
+        }
+        else if (typescript_1.default.isGetAccessorDeclaration(property)) {
+            const name = typescript_1.default.isComputedPropertyName(property.name)
+                ? (0, decorator_symbols_1.resolveStaticPropertyKey)(property.name.expression, checker, check)
+                : (typescript_1.default.isIdentifier(property.name) || typescript_1.default.isStringLiteral(property.name))
+                    ? property.name.text : undefined;
+            if (name === propertyName) {
+                result = {
+                    present: true, candidates: property.body ? returnedExpressions(property.body) : [], accessor: true,
+                };
+            }
+            else if (typescript_1.default.isComputedPropertyName(property.name) && name === undefined
+                && !(0, decorator_symbols_1.isDefinitelyNonProvidePropertyKey)(property.name.expression)) {
+                result = {
+                    present: true,
+                    candidates: [...result.candidates, ...(property.body ? returnedExpressions(property.body) : [])],
+                    accessor: true,
+                };
+            }
+        }
+        else if (typescript_1.default.isSetAccessorDeclaration(property) || typescript_1.default.isMethodDeclaration(property)) {
+            const name = typescript_1.default.isComputedPropertyName(property.name)
+                ? (0, decorator_symbols_1.resolveStaticPropertyKey)(property.name.expression, checker, check)
+                : (typescript_1.default.isIdentifier(property.name) || typescript_1.default.isStringLiteral(property.name))
+                    ? property.name.text : undefined;
+            if (name === propertyName) {
+                if (typescript_1.default.isMethodDeclaration(property)) {
+                    result = { present: true, candidates: [], accessor: false };
+                }
+                else if (!result.accessor)
+                    result = { present: true, candidates: [], accessor: true };
+            }
+        }
+        else if (typescript_1.default.isSpreadAssignment(property)) {
+            const spread = resolveConstObject(property.expression, checker, projectSources, check);
+            if (spread) {
+                const nested = effectiveObjectProperty(spread, propertyName, checker, projectSources, check, new Set(seen));
+                if (nested.present)
+                    result = nested;
+            }
+            else {
+                result = {
+                    present: true, candidates: [...result.candidates, property.expression], accessor: false,
+                };
+            }
+        }
+    }
+    return result;
+}
+function registeredProviderObjects(checker, projectSources, check) {
+    const providers = new Set();
+    const candidates = [];
+    const collect = (input, seen, depth) => {
+        check();
+        if (depth > 64)
+            return false;
+        let expression = input;
+        while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+            || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+            || typescript_1.default.isNonNullExpression(expression))
+            expression = expression.expression;
+        if (typescript_1.default.isObjectLiteralExpression(expression)) {
+            providers.add(expression);
+            return true;
+        }
+        if (typescript_1.default.isArrayLiteralExpression(expression)) {
+            let complete = true;
+            for (const element of expression.elements) {
+                complete = collect(typescript_1.default.isSpreadElement(element) ? element.expression : element, new Set(seen), depth + 1) && complete;
+            }
+            return complete;
+        }
+        if (typescript_1.default.isCallExpression(expression) && expression.arguments.length === 0
+            && typescript_1.default.isIdentifier(expression.expression)) {
+            let symbol = checker.getSymbolAtLocation(expression.expression);
+            if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+                symbol = checker.getAliasedSymbol(symbol);
+            const declarations = symbol?.declarations?.filter((candidate) => (typescript_1.default.isFunctionDeclaration(candidate) && candidate.body !== undefined
+                && projectSources.has(candidate.getSourceFile()))) ?? [];
+            const declaration = declarations.length === 1 ? declarations[0] : undefined;
+            const returned = declaration?.body?.statements.length === 1
+                && typescript_1.default.isReturnStatement(declaration.body.statements[0])
+                ? declaration.body.statements[0].expression : undefined;
+            if (symbol && returned && !seen.has(symbol)) {
+                seen.add(symbol);
+                return collect(returned, seen, depth + 1);
+            }
+            return false;
+        }
+        if (!typescript_1.default.isIdentifier(expression))
+            return false;
+        let symbol = typescript_1.default.isShorthandPropertyAssignment(expression.parent)
+            ? checker.getShorthandAssignmentValueSymbol(expression.parent)
+            : checker.getSymbolAtLocation(expression);
+        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        if (!symbol || seen.has(symbol))
+            return false;
+        const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+            || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+            return false;
+        seen.add(symbol);
+        collect(declaration.initializer, seen, depth + 1);
+        return false;
+    };
+    for (const sourceFile of projectSources) {
+        const nodes = [sourceFile];
+        while (nodes.length > 0) {
+            const node = nodes.pop();
+            check();
+            if (typescript_1.default.isClassLike(node)) {
+                for (const decorator of decorators(node)) {
+                    const module = (0, decorator_symbols_1.resolveDecoratorSymbol)(decorator, checker, check);
+                    const metadataArgument = module?.name === 'Module' && module.nestJsCommon
+                        ? module.call.arguments[0] : undefined;
+                    const metadata = metadataArgument
+                        ? resolveConstObject(metadataArgument, checker, projectSources, check) : undefined;
+                    if (!metadata) {
+                        if (metadataArgument)
+                            candidates.push(metadataArgument);
+                        continue;
+                    }
+                    const effectiveProviders = effectiveObjectProperty(metadata, 'providers', checker, projectSources, check);
+                    for (const providerExpression of effectiveProviders.candidates) {
+                        if (!collect(providerExpression, new Set(), 0)) {
+                            candidates.push(providerExpression);
+                        }
+                    }
+                }
+            }
+            typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+        }
+    }
+    return { providers, candidates };
+}
+function isProviderRegistration(node, registeredProviders) {
+    const entry = node.parent;
+    return typescript_1.default.isObjectLiteralExpression(entry) && registeredProviders.has(entry);
+}
+function indexIdentifierReferences(checker, projectSources, check) {
+    const references = new Map();
+    for (const sourceFile of projectSources) {
+        const nodes = [sourceFile];
+        while (nodes.length > 0) {
+            const node = nodes.pop();
+            check();
+            if (typescript_1.default.isIdentifier(node)) {
+                const symbol = resolvedSymbolAt(node, checker);
+                if (symbol) {
+                    const entries = references.get(symbol) ?? [];
+                    entries.push(node);
+                    references.set(symbol, entries);
+                }
+            }
+            typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+        }
+    }
+    return references;
+}
+function containsCanonicalProviderToken(input, checker, projectSources, check, maxSteps, referencesBySymbol) {
+    const READ_ONLY_ARRAY_METHODS = new Set([
+        'at', 'concat', 'entries', 'every', 'filter', 'find', 'findIndex', 'findLast',
+        'findLastIndex', 'flat', 'flatMap', 'forEach', 'includes', 'indexOf', 'join', 'keys',
+        'lastIndexOf', 'map', 'reduce', 'reduceRight', 'slice', 'some', 'toLocaleString',
+        'toReversed', 'toSorted', 'toSpliced', 'toString', 'values', 'with',
+    ]);
+    const expressions = [input];
+    const seenExpressions = new Set();
+    const seenSymbols = new Set();
+    let steps = 0;
+    const symbolAt = (node) => resolvedSymbolAt(node, checker);
+    const collectReturns = (statement) => {
+        check();
+        if (typescript_1.default.isReturnStatement(statement)) {
+            if (statement.expression)
+                expressions.push(statement.expression);
+            return true;
+        }
+        if (typescript_1.default.isBlock(statement)) {
+            for (const child of statement.statements) {
+                if (collectReturns(child))
+                    return true;
+            }
+            return false;
+        }
+        if (typescript_1.default.isIfStatement(statement)) {
+            const condition = statement.expression.kind === typescript_1.default.SyntaxKind.TrueKeyword
+                ? true : statement.expression.kind === typescript_1.default.SyntaxKind.FalseKeyword ? false : undefined;
+            if (condition !== false && collectReturns(statement.thenStatement))
+                return condition === true;
+            return condition !== true && Boolean(statement.elseStatement
+                && collectReturns(statement.elseStatement));
+        }
+        return false;
+    };
+    const staticallyUnreachable = (node) => {
+        let child = node;
+        let parent = node.parent;
+        while (parent) {
+            if (typescript_1.default.isIfStatement(parent)) {
+                if (parent.expression.kind === typescript_1.default.SyntaxKind.FalseKeyword && child === parent.thenStatement)
+                    return true;
+                if (parent.expression.kind === typescript_1.default.SyntaxKind.TrueKeyword && child === parent.elseStatement)
+                    return true;
+            }
+            if (typescript_1.default.isBlock(parent) && typescript_1.default.isStatement(child)) {
+                const index = parent.statements.indexOf(child);
+                if (index > 0 && parent.statements.slice(0, index).some(typescript_1.default.isReturnStatement))
+                    return true;
+            }
+            child = parent;
+            parent = parent.parent;
+        }
+        return false;
+    };
+    const queueSymbolEdges = (symbol) => {
+        if (seenSymbols.has(symbol))
+            return;
+        seenSymbols.add(symbol);
+        for (const declaration of symbol.declarations ?? []) {
+            if (!projectSources.has(declaration.getSourceFile()))
+                continue;
+            if (typescript_1.default.isVariableDeclaration(declaration) && declaration.initializer) {
+                if (typescript_1.default.isArrowFunction(declaration.initializer)
+                    || typescript_1.default.isFunctionExpression(declaration.initializer)) {
+                    if (typescript_1.default.isBlock(declaration.initializer.body))
+                        collectReturns(declaration.initializer.body);
+                    else
+                        expressions.push(declaration.initializer.body);
+                }
+                else
+                    expressions.push(declaration.initializer);
+            }
+            else if (typescript_1.default.isFunctionDeclaration(declaration) && declaration.body) {
+                collectReturns(declaration.body);
+            }
+        }
+        for (const node of referencesBySymbol.get(symbol) ?? []) {
+            if (staticallyUnreachable(node))
+                continue;
+            const access = (typescript_1.default.isPropertyAccessExpression(node.parent)
+                || typescript_1.default.isElementAccessExpression(node.parent)) && node.parent.expression === node
+                ? node.parent : undefined;
+            const call = access && typescript_1.default.isCallExpression(access.parent) && access.parent.expression === access
+                ? access.parent : undefined;
+            const accessName = access && (typescript_1.default.isPropertyAccessExpression(access)
+                ? access.name.text : access.argumentExpression
+                ? (0, decorator_symbols_1.resolveStaticPropertyKey)(access.argumentExpression, checker, check) : undefined);
+            if (access && call && (accessName === undefined || !READ_ONLY_ARRAY_METHODS.has(accessName))) {
+                for (const argument of call.arguments) {
+                    expressions.push(typescript_1.default.isSpreadElement(argument) ? argument.expression : argument);
+                }
+            }
+            let aliasInitializer = node;
+            while ((typescript_1.default.isParenthesizedExpression(aliasInitializer.parent)
+                || typescript_1.default.isAsExpression(aliasInitializer.parent)
+                || typescript_1.default.isTypeAssertionExpression(aliasInitializer.parent)
+                || typescript_1.default.isSatisfiesExpression(aliasInitializer.parent)
+                || typescript_1.default.isNonNullExpression(aliasInitializer.parent))
+                && aliasInitializer.parent.expression === aliasInitializer) {
+                aliasInitializer = aliasInitializer.parent;
+            }
+            const aliasDeclaration = typescript_1.default.isVariableDeclaration(aliasInitializer.parent)
+                && aliasInitializer.parent.initializer === aliasInitializer ? aliasInitializer.parent : undefined;
+            if (aliasDeclaration && typescript_1.default.isIdentifier(aliasDeclaration.name)
+                && typescript_1.default.isVariableDeclarationList(aliasDeclaration.parent)
+                && aliasDeclaration.parent.flags & typescript_1.default.NodeFlags.Const)
+                expressions.push(aliasDeclaration.name);
+            let target = access ?? node;
+            while (target.parent && !typescript_1.default.isStatement(target)) {
+                const parent = target.parent;
+                if (typescript_1.default.isBinaryExpression(parent) && parent.left === target
+                    && parent.operatorToken.kind >= typescript_1.default.SyntaxKind.FirstAssignment
+                    && parent.operatorToken.kind <= typescript_1.default.SyntaxKind.LastAssignment) {
+                    expressions.push(parent.right);
+                    break;
+                }
+                target = parent;
+            }
+        }
+    };
+    while (expressions.length > 0) {
+        let expression = expressions.pop();
+        check();
+        steps += 1;
+        if (steps > maxSteps)
+            throw new source_analysis_1.SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+        if (seenExpressions.has(expression))
+            continue;
+        seenExpressions.add(expression);
+        while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+            || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+            || typescript_1.default.isNonNullExpression(expression))
+            expression = expression.expression;
+        if ((0, decorator_symbols_1.isStaticSymbolFrom)(expression, checker, check, '@nestjs/core', 'APP_GUARD'))
+            return true;
+        if (typescript_1.default.isIdentifier(expression)) {
+            const symbol = symbolAt(expression);
+            if (symbol)
+                queueSymbolEdges(symbol);
+        }
+        else if (typescript_1.default.isCallExpression(expression) && typescript_1.default.isIdentifier(expression.expression)) {
+            const symbol = symbolAt(expression.expression);
+            if (symbol)
+                queueSymbolEdges(symbol);
+        }
+        else if (typescript_1.default.isArrayLiteralExpression(expression)) {
+            for (const element of expression.elements) {
+                expressions.push(typescript_1.default.isSpreadElement(element) ? element.expression : element);
+            }
+        }
+        else if (typescript_1.default.isObjectLiteralExpression(expression)) {
+            const effectiveProperties = [
+                ['providers', effectiveObjectProperty(expression, 'providers', checker, projectSources, check)],
+                ['provide', effectiveObjectProperty(expression, 'provide', checker, projectSources, check)],
+            ];
+            for (const [name, property] of effectiveProperties) {
+                for (const initializer of property.candidates) {
+                    if ((0, decorator_symbols_1.containsStaticSymbolFrom)(initializer, checker, check, '@nestjs/core', 'APP_GUARD', projectSources))
+                        return true;
+                    if (name === 'providers')
+                        expressions.push(initializer);
+                }
+            }
+        }
+        else if (typescript_1.default.isConditionalExpression(expression)) {
+            let conditionExpression = expression.condition;
+            while (typescript_1.default.isParenthesizedExpression(conditionExpression)
+                || typescript_1.default.isAsExpression(conditionExpression) || typescript_1.default.isTypeAssertionExpression(conditionExpression)
+                || typescript_1.default.isSatisfiesExpression(conditionExpression)
+                || typescript_1.default.isNonNullExpression(conditionExpression))
+                conditionExpression = conditionExpression.expression;
+            const undefinedIdentifier = typescript_1.default.isIdentifier(conditionExpression)
+                && conditionExpression.text === 'undefined'
+                && !checker.getSymbolAtLocation(conditionExpression)?.declarations?.length;
+            const condition = conditionExpression.kind === typescript_1.default.SyntaxKind.TrueKeyword
+                ? true : conditionExpression.kind === typescript_1.default.SyntaxKind.FalseKeyword
+                || conditionExpression.kind === typescript_1.default.SyntaxKind.NullKeyword
+                || typescript_1.default.isVoidExpression(conditionExpression) || undefinedIdentifier ? false : undefined;
+            if (condition !== false)
+                expressions.push(expression.whenTrue);
+            if (condition !== true)
+                expressions.push(expression.whenFalse);
+        }
+    }
+    return false;
+}
 function routePath(controllerPath, methodPath) {
     let canonical;
     try {
@@ -688,6 +1172,14 @@ async function analyze(context, authConfig) {
     const useDefineForClassFields = compilerOptions.useDefineForClassFields
         ?? (compilerOptions.target ?? typescript_1.default.ScriptTarget.ES5) >= typescript_1.default.ScriptTarget.ES2022;
     const projectSources = new Set(loaded.sourceFiles.filter((sourceFile) => (!sourceFile.isDeclarationFile && !sourceFile.fileName.replaceAll('\\', '/').includes('/node_modules/'))));
+    const providerRegistrations = registeredProviderObjects(checker, projectSources, check);
+    const providerCandidates = [
+        ...providerRegistrations.candidates, ...providerRegistrations.providers,
+    ];
+    const identifierReferences = providerCandidates.length > 0
+        ? indexIdentifierReferences(checker, projectSources, check) : new Map();
+    const potentialGlobalProvider = providerCandidates.find((candidate) => (containsCanonicalProviderToken(candidate, checker, projectSources, check, context.limits.maxAstNodes, identifierReferences)));
+    const registeredProviders = providerRegistrations.providers;
     const operations = new Map();
     const diagnostics = [];
     const unresolvedOperations = [];
@@ -722,6 +1214,10 @@ async function analyze(context, authConfig) {
             ...sourceLocation(node, context.workspaceRoot),
         });
     };
+    if (potentialGlobalProvider) {
+        addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', potentialGlobalProvider);
+        globalGuardFound = true;
+    }
     const addUnresolved = (methods, node, reason) => {
         consume(methods.length);
         unresolvedMethodCount += methods.length;
@@ -756,7 +1252,9 @@ async function analyze(context, authConfig) {
                 : typescript_1.default.isComputedPropertyName(node.name) && (propertyNames === undefined
                     || (propertyNames.length === 1 && propertyNames[0] === 'provide')));
             const globalGuardProvider = (typescript_1.default.isPropertyAssignment(node) && providerKeyPossible
+                && isProviderRegistration(node, registeredProviders)
                 && (0, decorator_symbols_1.containsStaticSymbolFrom)(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD', projectSources)) || (typescript_1.default.isShorthandPropertyAssignment(node) && node.name.text === 'provide'
+                && isProviderRegistration(node, registeredProviders)
                 && (0, decorator_symbols_1.isStaticShorthandSymbolFrom)(node, checker, check, '@nestjs/core', 'APP_GUARD', projectSources));
             if (globalGuardProvider) {
                 if (!globalGuardFound)

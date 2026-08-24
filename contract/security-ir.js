@@ -44,6 +44,18 @@ function sortedSet(values, field, state, transform = (value) => value) {
     consume(state, values.length);
     return [...new Set(values.map((value) => nonEmpty(transform(nonEmpty(value, field)), field)))].sort(compareText);
 }
+function sortedRawSet(values, field, state) {
+    if (!Array.isArray(values))
+        throw new Error(`invalid ${field}`);
+    consume(state, values.length);
+    for (const value of values) {
+        if (typeof value !== 'string' || value.length > MAX_STRING_LENGTH)
+            throw new Error(`invalid ${field}`);
+        if (SECRET_PATTERN.test(value.trim()))
+            throw new Error('secret-like value is not allowed');
+    }
+    return [...new Set(values)].sort(compareText);
+}
 function normalizeConstraints(input, state, depth = 0, ancestors = new Set()) {
     if (!input || typeof input !== 'object' || !exports.VALUE_TYPES.includes(input.type)) {
         throw new Error('invalid value constraints');
@@ -299,7 +311,7 @@ function normalizeAuth(input, state) {
         analysis = {
             guards,
             explicitPublic: booleanValue(input.analysis.explicitPublic, 'explicit public override'),
-            roles: sortedSet(input.analysis.roles, 'authorization role', state),
+            roles: sortedRawSet(input.analysis.roles, 'authorization role', state),
             enforcementConfidence: input.analysis.enforcementConfidence,
             capabilityReasons: sortedSet(input.analysis.capabilityReasons, 'authentication capability reason', state),
         };

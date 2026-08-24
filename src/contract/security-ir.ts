@@ -170,6 +170,16 @@ function sortedSet(
   return [...new Set(values.map((value) => nonEmpty(transform(nonEmpty(value, field)), field)))].sort(compareText);
 }
 
+function sortedRawSet(values: readonly string[], field: string, state: NormalizationState): string[] {
+  if (!Array.isArray(values)) throw new Error(`invalid ${field}`);
+  consume(state, values.length);
+  for (const value of values) {
+    if (typeof value !== 'string' || value.length > MAX_STRING_LENGTH) throw new Error(`invalid ${field}`);
+    if (SECRET_PATTERN.test(value.trim())) throw new Error('secret-like value is not allowed');
+  }
+  return [...new Set(values)].sort(compareText);
+}
+
 function normalizeConstraints(
   input: ValueConstraintsV1,
   state: NormalizationState,
@@ -423,7 +433,7 @@ function normalizeAuth(input: ApiAuthenticationContractV1, state: NormalizationS
     analysis = {
       guards,
       explicitPublic: booleanValue(input.analysis.explicitPublic, 'explicit public override'),
-      roles: sortedSet(input.analysis.roles, 'authorization role', state),
+      roles: sortedRawSet(input.analysis.roles, 'authorization role', state),
       enforcementConfidence: input.analysis.enforcementConfidence,
       capabilityReasons: sortedSet(input.analysis.capabilityReasons, 'authentication capability reason', state),
     };

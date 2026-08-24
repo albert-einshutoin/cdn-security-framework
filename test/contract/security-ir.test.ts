@@ -183,18 +183,23 @@ describe('Security IR v1', () => {
         { symbol: 'ApiKeyGuard', authKind: 'api-key' },
       ],
       explicitPublic: true,
-      roles: ['ops', 'admin', 'ops'],
+      roles: ['ops', ' admin ', '', 'ops'],
       enforcementConfidence: 'high',
       capabilityReasons: [],
     };
     const contract = createSecurityContract(input);
+    const schema = JSON.parse(fs.readFileSync(
+      path.join(process.cwd(), 'schemas/security-ir-v1.schema.json'), 'utf8',
+    ));
+    const validate = new Ajv({ allErrors: true }).compile(schema);
+    expect(validate(contract), JSON.stringify(validate.errors)).toBe(true);
     expect(contract.operations.find(({ routeKey }) => routeKey === 'POST /users')?.auth.analysis).toEqual({
       guards: [
         { symbol: 'JwtAuthGuard', authKind: 'bearer' },
         { symbol: 'ApiKeyGuard', authKind: 'api-key' },
       ],
       explicitPublic: true,
-      roles: ['admin', 'ops'],
+      roles: ['', ' admin ', 'ops'],
       enforcementConfidence: 'high',
       capabilityReasons: [],
     });

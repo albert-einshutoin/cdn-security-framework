@@ -28,6 +28,69 @@ const CALLABLE_REFERENCE_CACHE = new WeakMap<ReadonlySet<ts.SourceFile>, WeakMap
 const WRAPPER_MUTATION_CACHE = new WeakMap<ReadonlySet<ts.SourceFile>, WeakMap<ts.Symbol, boolean>>();
 const WRAPPED_RECEIVER_CACHE = new WeakMap<ReadonlySet<ts.SourceFile>, ReadonlySet<ts.Symbol>>();
 
+function callableBindingMayBeWritten(
+  symbol: ts.Symbol,
+  declarations: readonly ts.Declaration[],
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile> | undefined,
+  check: () => void,
+): boolean {
+  let projectCache = projectSources && CALLABLE_REFERENCE_CACHE.get(projectSources);
+  if (projectSources && !projectCache) {
+    projectCache = new WeakMap();
+    CALLABLE_REFERENCE_CACHE.set(projectSources, projectCache);
+  }
+  const cached = projectCache?.get(symbol);
+  if (cached !== undefined) return cached;
+  let written = false;
+  const references: ts.Node[] = projectSources ? [...projectSources] : [];
+  while (references.length > 0 && !written) {
+    const reference = references.pop()!;
+    check();
+    if (ts.isIdentifier(reference)) {
+      let referenceSymbol = checker.getSymbolAtLocation(reference);
+      if (referenceSymbol?.flags && referenceSymbol.flags & ts.SymbolFlags.Alias) {
+        referenceSymbol = checker.getAliasedSymbol(referenceSymbol);
+      }
+      if (referenceSymbol === symbol) {
+        const declarationName = declarations.some((declaration) => (
+          'name' in declaration && declaration.name === reference
+        ));
+        let usage: ts.Expression = reference;
+        while (ts.isParenthesizedExpression(usage.parent)
+          || ts.isAsExpression(usage.parent) || ts.isTypeAssertionExpression(usage.parent)
+          || ts.isSatisfiesExpression(usage.parent) || ts.isNonNullExpression(usage.parent)) {
+          usage = usage.parent;
+        }
+        let target: ts.Node = usage;
+        while (!declarationName && target.parent && !ts.isStatement(target)) {
+          const parent = target.parent;
+          if (ts.isBinaryExpression(parent) && parent.left === target
+            && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+            && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+            written = true;
+            break;
+          }
+          if ((ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent))
+            && parent.operand === target) {
+            written = true;
+            break;
+          }
+          if ((ts.isForOfStatement(parent) || ts.isForInStatement(parent))
+            && parent.initializer === target) {
+            written = true;
+            break;
+          }
+          target = parent;
+        }
+      }
+    }
+    ts.forEachChild(reference, (child) => { references.push(child); });
+  }
+  projectCache?.set(symbol, written);
+  return written;
+}
+
 function unwrapExpression(expression: ts.Expression): ts.Expression {
   let current = expression;
   while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current)
@@ -441,9 +504,13 @@ export function resolveStaticDecoratorWrapperCall(
   const objectAccess = ts.isPropertyAccessExpression(unwrappedCallee)
     || ts.isElementAccessExpression(unwrappedCallee);
   const stable = Boolean((!objectAccess || isNamespaceImportAccess(unwrappedCallee, checker))
-    && declaration && ts.isVariableDeclaration(declaration)
-    && ts.isVariableDeclarationList(declaration.parent)
-    && declaration.parent.flags & ts.NodeFlags.Const);
+    && declaration && ((ts.isVariableDeclaration(declaration)
+      && ts.isVariableDeclarationList(declaration.parent)
+      && declaration.parent.flags & ts.NodeFlags.Const)
+      || (ts.isFunctionDeclaration(declaration)
+        && !callableBindingMayBeWritten(
+          symbol, symbol.declarations ?? [], checker, projectSources, check,
+        ))));
   const { body } = implementation;
   if (!body) return undefined;
   const resolveReturnedCall = (
@@ -834,65 +901,6 @@ export function containsStaticSymbolFrom(
     }
     return false;
   };
-  const callableBindingMayBeWritten = (
-    symbol: ts.Symbol,
-    declarations: readonly ts.Declaration[],
-  ): boolean => {
-    let projectCache = projectSources && CALLABLE_REFERENCE_CACHE.get(projectSources);
-    if (projectSources && !projectCache) {
-      projectCache = new WeakMap();
-      CALLABLE_REFERENCE_CACHE.set(projectSources, projectCache);
-    }
-    const cached = projectCache?.get(symbol);
-    if (cached !== undefined) return cached;
-    let written = false;
-    const references: ts.Node[] = projectSources ? [...projectSources] : [];
-    while (references.length > 0 && !written) {
-      const reference = references.pop()!;
-      check();
-      if (ts.isIdentifier(reference)) {
-        let referenceSymbol = checker.getSymbolAtLocation(reference);
-        if (referenceSymbol?.flags && referenceSymbol.flags & ts.SymbolFlags.Alias) {
-          referenceSymbol = checker.getAliasedSymbol(referenceSymbol);
-        }
-        if (referenceSymbol === symbol) {
-          const declarationName = declarations.some((declaration) => (
-            'name' in declaration && declaration.name === reference
-          ));
-          let usage: ts.Expression = reference;
-          while (ts.isParenthesizedExpression(usage.parent)
-            || ts.isAsExpression(usage.parent) || ts.isTypeAssertionExpression(usage.parent)
-            || ts.isSatisfiesExpression(usage.parent) || ts.isNonNullExpression(usage.parent)) {
-            usage = usage.parent;
-          }
-          let target: ts.Node = usage;
-          while (!declarationName && target.parent && !ts.isStatement(target)) {
-            const parent = target.parent;
-            if (ts.isBinaryExpression(parent) && parent.left === target
-              && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
-              && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
-              written = true;
-              break;
-            }
-            if ((ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent))
-              && parent.operand === target) {
-              written = true;
-              break;
-            }
-            if ((ts.isForOfStatement(parent) || ts.isForInStatement(parent))
-              && parent.initializer === target) {
-              written = true;
-              break;
-            }
-            target = parent;
-          }
-        }
-      }
-      ts.forEachChild(reference, (child) => { references.push(child); });
-    }
-    projectCache?.set(symbol, written);
-    return written;
-  };
   const staticallyUnreachable = (
     candidate: ts.Node,
     branchDepth: number,
@@ -1152,7 +1160,7 @@ export function containsStaticSymbolFrom(
           && variableDeclaration.parent.flags & ts.NodeFlags.Const
           ? unwrapExpression(variableDeclaration.initializer) : undefined;
         if (symbol && functionDeclaration
-          && callableBindingMayBeWritten(symbol, declarations)) return true;
+          && callableBindingMayBeWritten(symbol, declarations, checker, projectSources, check)) return true;
         if (!functionDeclaration && variableDeclaration && !variableInitializer) return true;
         const callable = functionDeclaration ?? variableInitializer;
         if (callable && (ts.isFunctionDeclaration(callable)
@@ -2281,7 +2289,9 @@ export function containsStaticSymbolFrom(
           && variableDeclaration.parent.flags & ts.NodeFlags.Const
           ? unwrapExpression(variableDeclaration.initializer) : undefined;
         if (functionDeclaration) {
-          if (calleeSymbol && callableBindingMayBeWritten(calleeSymbol, declarations)) return true;
+          if (calleeSymbol && callableBindingMayBeWritten(
+            calleeSymbol, declarations, checker, projectSources, check,
+          )) return true;
           callee = functionDeclaration;
         }
         else if (variableInitializer && (ts.isArrowFunction(variableInitializer)

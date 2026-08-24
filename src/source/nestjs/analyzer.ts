@@ -96,6 +96,482 @@ function digest(sourceFile: ts.SourceFile): string {
   return `sha256:${createHash('sha256').update(sourceFile.text).digest('hex')}`;
 }
 
+function isProvidersName(node: ts.BindingName | ts.PropertyName): boolean {
+  return (ts.isIdentifier(node) || ts.isStringLiteral(node)) && node.text === 'providers';
+}
+
+function resolvedSymbolAt(node: ts.Identifier, checker: ts.TypeChecker): ts.Symbol | undefined {
+  let symbol = ts.isShorthandPropertyAssignment(node.parent)
+    ? checker.getShorthandAssignmentValueSymbol(node.parent)
+    : checker.getSymbolAtLocation(node);
+  if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+  return symbol;
+}
+
+function resolveConstObject(
+  input: ts.Expression,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+  seen = new Set<ts.Symbol>(),
+  depth = 0,
+): ts.ObjectLiteralExpression | undefined {
+  check();
+  if (depth > 64) return undefined;
+  let expression = input;
+  while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+    || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+    || ts.isNonNullExpression(expression)) expression = expression.expression;
+  if (ts.isObjectLiteralExpression(expression)) return expression;
+  if (!ts.isIdentifier(expression)) return undefined;
+  const symbol = resolvedSymbolAt(expression, checker);
+  if (!symbol || seen.has(symbol)) return undefined;
+  const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+  const declaration = declarations.length === 1 ? declarations[0] : undefined;
+  if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+    || !ts.isVariableDeclarationList(declaration.parent)
+    || !(declaration.parent.flags & ts.NodeFlags.Const)) return undefined;
+  seen.add(symbol);
+  return resolveConstObject(
+    declaration.initializer, checker, projectSources, check, seen, depth + 1,
+  );
+}
+
+function effectiveObjectProperty(
+  object: ts.ObjectLiteralExpression,
+  propertyName: string,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+  seen = new Set<ts.ObjectLiteralExpression>(),
+): { present: boolean; candidates: ts.Expression[]; accessor: boolean } {
+  check();
+  if (seen.has(object)) return { present: true, candidates: [object], accessor: false };
+  seen.add(object);
+  const returnedExpressions = (body: ts.Block): ts.Expression[] => {
+    const result: ts.Expression[] = [];
+    const collectReturns = (statement: ts.Statement): boolean => {
+      check();
+      if (ts.isReturnStatement(statement)) {
+        if (statement.expression) result.push(statement.expression);
+        return true;
+      }
+      if (ts.isBlock(statement)) {
+        for (const child of statement.statements) {
+          if (collectReturns(child)) return true;
+        }
+      } else if (ts.isIfStatement(statement)) {
+        const condition = statement.expression.kind === ts.SyntaxKind.TrueKeyword
+          ? true : statement.expression.kind === ts.SyntaxKind.FalseKeyword ? false : undefined;
+        const thenReturns = condition !== false && collectReturns(statement.thenStatement);
+        const elseReturns = condition !== true && Boolean(statement.elseStatement
+          && collectReturns(statement.elseStatement));
+        return condition === true ? thenReturns : condition === false ? elseReturns
+          : thenReturns && elseReturns;
+      } else if (ts.isTryStatement(statement)) {
+        const start = result.length;
+        const tryReturns = collectReturns(statement.tryBlock);
+        const catchReturns = Boolean(statement.catchClause
+          && collectReturns(statement.catchClause.block));
+        if (!statement.finallyBlock) return tryReturns && (!statement.catchClause || catchReturns);
+        const finallyStart = result.length;
+        const finallyReturns = collectReturns(statement.finallyBlock);
+        if (finallyReturns) result.splice(start, finallyStart - start);
+        return finallyReturns || (tryReturns && (!statement.catchClause || catchReturns));
+      } else if (ts.isSwitchStatement(statement)) {
+        let allReturn = statement.caseBlock.clauses.length > 0;
+        for (const clause of statement.caseBlock.clauses) {
+          let clauseReturns = false;
+          for (const child of clause.statements) {
+            if (collectReturns(child)) { clauseReturns = true; break; }
+          }
+          allReturn &&= clauseReturns;
+        }
+        return allReturn && statement.caseBlock.clauses.some(ts.isDefaultClause);
+      } else if (ts.isWhileStatement(statement)) {
+        if (statement.expression.kind !== ts.SyntaxKind.FalseKeyword) {
+          collectReturns(statement.statement);
+        }
+      } else if (ts.isDoStatement(statement)) {
+        collectReturns(statement.statement);
+      } else if (ts.isForStatement(statement)) {
+        if (statement.condition?.kind !== ts.SyntaxKind.FalseKeyword) {
+          collectReturns(statement.statement);
+        }
+      } else if (ts.isForInStatement(statement) || ts.isForOfStatement(statement)) {
+        collectReturns(statement.statement);
+      }
+      return false;
+    };
+    collectReturns(body);
+    return result;
+  };
+  let result: { present: boolean; candidates: ts.Expression[]; accessor: boolean } = {
+    present: false, candidates: [], accessor: false,
+  };
+  for (const property of object.properties) {
+    if (ts.isPropertyAssignment(property)) {
+      const name = ts.isComputedPropertyName(property.name)
+        ? resolveStaticPropertyKey(property.name.expression, checker, check)
+        : (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
+          ? property.name.text : undefined;
+      if (name === propertyName) {
+        result = { present: true, candidates: [property.initializer], accessor: false };
+      }
+      else if (ts.isComputedPropertyName(property.name) && name === undefined
+        && !isDefinitelyNonProvidePropertyKey(property.name.expression)) {
+        result = {
+          present: true, candidates: [...result.candidates, property.initializer], accessor: false,
+        };
+      }
+    } else if (ts.isShorthandPropertyAssignment(property) && property.name.text === propertyName) {
+      result = { present: true, candidates: [property.name], accessor: false };
+    } else if (ts.isGetAccessorDeclaration(property)) {
+      const name = ts.isComputedPropertyName(property.name)
+        ? resolveStaticPropertyKey(property.name.expression, checker, check)
+        : (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
+          ? property.name.text : undefined;
+      if (name === propertyName) {
+        result = {
+          present: true, candidates: property.body ? returnedExpressions(property.body) : [], accessor: true,
+        };
+      } else if (ts.isComputedPropertyName(property.name) && name === undefined
+        && !isDefinitelyNonProvidePropertyKey(property.name.expression)) {
+        result = {
+          present: true,
+          candidates: [...result.candidates, ...(property.body ? returnedExpressions(property.body) : [])],
+          accessor: true,
+        };
+      }
+    } else if (ts.isSetAccessorDeclaration(property) || ts.isMethodDeclaration(property)) {
+      const name = ts.isComputedPropertyName(property.name)
+        ? resolveStaticPropertyKey(property.name.expression, checker, check)
+        : (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
+          ? property.name.text : undefined;
+      if (name === propertyName) {
+        if (ts.isMethodDeclaration(property)) {
+          result = { present: true, candidates: [], accessor: false };
+        } else if (!result.accessor) result = { present: true, candidates: [], accessor: true };
+      }
+    } else if (ts.isSpreadAssignment(property)) {
+      const spread = resolveConstObject(property.expression, checker, projectSources, check);
+      if (spread) {
+        const nested = effectiveObjectProperty(
+          spread, propertyName, checker, projectSources, check, new Set(seen),
+        );
+        if (nested.present) result = nested;
+      } else {
+        result = {
+          present: true, candidates: [...result.candidates, property.expression], accessor: false,
+        };
+      }
+    }
+  }
+  return result;
+}
+
+function registeredProviderObjects(
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+): {
+  providers: ReadonlySet<ts.ObjectLiteralExpression>;
+  candidates: readonly ts.Expression[];
+} {
+  const providers = new Set<ts.ObjectLiteralExpression>();
+  const candidates: ts.Expression[] = [];
+  const collect = (input: ts.Expression, seen: Set<ts.Symbol>, depth: number): boolean => {
+    check();
+    if (depth > 64) return false;
+    let expression = input;
+    while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+      || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+      || ts.isNonNullExpression(expression)) expression = expression.expression;
+    if (ts.isObjectLiteralExpression(expression)) {
+      providers.add(expression);
+      return true;
+    }
+    if (ts.isArrayLiteralExpression(expression)) {
+      let complete = true;
+      for (const element of expression.elements) {
+        complete = collect(
+          ts.isSpreadElement(element) ? element.expression : element, new Set(seen), depth + 1,
+        ) && complete;
+      }
+      return complete;
+    }
+    if (ts.isCallExpression(expression) && expression.arguments.length === 0
+      && ts.isIdentifier(expression.expression)) {
+      let symbol = checker.getSymbolAtLocation(expression.expression);
+      if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+      const declarations = symbol?.declarations?.filter((candidate): candidate is ts.FunctionDeclaration => (
+        ts.isFunctionDeclaration(candidate) && candidate.body !== undefined
+        && projectSources.has(candidate.getSourceFile())
+      )) ?? [];
+      const declaration = declarations.length === 1 ? declarations[0] : undefined;
+      const returned = declaration?.body?.statements.length === 1
+        && ts.isReturnStatement(declaration.body.statements[0])
+        ? declaration.body.statements[0].expression : undefined;
+      if (symbol && returned && !seen.has(symbol)) {
+        seen.add(symbol);
+        return collect(returned, seen, depth + 1);
+      }
+      return false;
+    }
+    if (!ts.isIdentifier(expression)) return false;
+    let symbol = ts.isShorthandPropertyAssignment(expression.parent)
+      ? checker.getShorthandAssignmentValueSymbol(expression.parent)
+      : checker.getSymbolAtLocation(expression);
+    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (!symbol || seen.has(symbol)) return false;
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+      || !ts.isVariableDeclarationList(declaration.parent)
+      || !(declaration.parent.flags & ts.NodeFlags.Const)) return false;
+    seen.add(symbol);
+    collect(declaration.initializer, seen, depth + 1);
+    return false;
+  };
+  for (const sourceFile of projectSources) {
+    const nodes: ts.Node[] = [sourceFile];
+    while (nodes.length > 0) {
+      const node = nodes.pop()!;
+      check();
+      if (ts.isClassLike(node)) {
+        for (const decorator of decorators(node)) {
+          const module = resolveDecoratorSymbol(decorator, checker, check);
+          const metadataArgument = module?.name === 'Module' && module.nestJsCommon
+            ? module.call.arguments[0] : undefined;
+          const metadata = metadataArgument
+            ? resolveConstObject(metadataArgument, checker, projectSources, check) : undefined;
+          if (!metadata) {
+            if (metadataArgument) candidates.push(metadataArgument);
+            continue;
+          }
+          const effectiveProviders = effectiveObjectProperty(
+            metadata, 'providers', checker, projectSources, check,
+          );
+          for (const providerExpression of effectiveProviders.candidates) {
+            if (!collect(providerExpression, new Set(), 0)) {
+              candidates.push(providerExpression);
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, (child) => { nodes.push(child); });
+    }
+  }
+  return { providers, candidates };
+}
+
+function isProviderRegistration(
+  node: ts.ObjectLiteralElementLike,
+  registeredProviders: ReadonlySet<ts.ObjectLiteralExpression>,
+): boolean {
+  const entry = node.parent;
+  return ts.isObjectLiteralExpression(entry) && registeredProviders.has(entry);
+}
+
+function indexIdentifierReferences(
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+): ReadonlyMap<ts.Symbol, readonly ts.Identifier[]> {
+  const references = new Map<ts.Symbol, ts.Identifier[]>();
+  for (const sourceFile of projectSources) {
+    const nodes: ts.Node[] = [sourceFile];
+    while (nodes.length > 0) {
+      const node = nodes.pop()!;
+      check();
+      if (ts.isIdentifier(node)) {
+        const symbol = resolvedSymbolAt(node, checker);
+        if (symbol) {
+          const entries = references.get(symbol) ?? [];
+          entries.push(node);
+          references.set(symbol, entries);
+        }
+      }
+      ts.forEachChild(node, (child) => { nodes.push(child); });
+    }
+  }
+  return references;
+}
+
+function containsCanonicalProviderToken(
+  input: ts.Expression,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+  maxSteps: number,
+  referencesBySymbol: ReadonlyMap<ts.Symbol, readonly ts.Identifier[]>,
+): boolean {
+  const READ_ONLY_ARRAY_METHODS = new Set([
+    'at', 'concat', 'entries', 'every', 'filter', 'find', 'findIndex', 'findLast',
+    'findLastIndex', 'flat', 'flatMap', 'forEach', 'includes', 'indexOf', 'join', 'keys',
+    'lastIndexOf', 'map', 'reduce', 'reduceRight', 'slice', 'some', 'toLocaleString',
+    'toReversed', 'toSorted', 'toSpliced', 'toString', 'values', 'with',
+  ]);
+  const expressions: ts.Expression[] = [input];
+  const seenExpressions = new Set<ts.Expression>();
+  const seenSymbols = new Set<ts.Symbol>();
+  let steps = 0;
+  const symbolAt = (node: ts.Identifier) => resolvedSymbolAt(node, checker);
+  const collectReturns = (statement: ts.Statement): boolean => {
+    check();
+    if (ts.isReturnStatement(statement)) {
+      if (statement.expression) expressions.push(statement.expression);
+      return true;
+    }
+    if (ts.isBlock(statement)) {
+      for (const child of statement.statements) {
+        if (collectReturns(child)) return true;
+      }
+      return false;
+    }
+    if (ts.isIfStatement(statement)) {
+      const condition = statement.expression.kind === ts.SyntaxKind.TrueKeyword
+        ? true : statement.expression.kind === ts.SyntaxKind.FalseKeyword ? false : undefined;
+      if (condition !== false && collectReturns(statement.thenStatement)) return condition === true;
+      return condition !== true && Boolean(statement.elseStatement
+        && collectReturns(statement.elseStatement));
+    }
+    return false;
+  };
+  const staticallyUnreachable = (node: ts.Node): boolean => {
+    let child = node;
+    let parent = node.parent;
+    while (parent) {
+      if (ts.isIfStatement(parent)) {
+        if (parent.expression.kind === ts.SyntaxKind.FalseKeyword && child === parent.thenStatement) return true;
+        if (parent.expression.kind === ts.SyntaxKind.TrueKeyword && child === parent.elseStatement) return true;
+      }
+      if (ts.isBlock(parent) && ts.isStatement(child)) {
+        const index = parent.statements.indexOf(child);
+        if (index > 0 && parent.statements.slice(0, index).some(ts.isReturnStatement)) return true;
+      }
+      child = parent;
+      parent = parent.parent;
+    }
+    return false;
+  };
+  const queueSymbolEdges = (symbol: ts.Symbol): void => {
+    if (seenSymbols.has(symbol)) return;
+    seenSymbols.add(symbol);
+    for (const declaration of symbol.declarations ?? []) {
+      if (!projectSources.has(declaration.getSourceFile())) continue;
+      if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
+        if (ts.isArrowFunction(declaration.initializer)
+          || ts.isFunctionExpression(declaration.initializer)) {
+          if (ts.isBlock(declaration.initializer.body)) collectReturns(declaration.initializer.body);
+          else expressions.push(declaration.initializer.body);
+        } else expressions.push(declaration.initializer);
+      } else if (ts.isFunctionDeclaration(declaration) && declaration.body) {
+        collectReturns(declaration.body);
+      }
+    }
+    for (const node of referencesBySymbol.get(symbol) ?? []) {
+      if (staticallyUnreachable(node)) continue;
+      const access = (ts.isPropertyAccessExpression(node.parent)
+        || ts.isElementAccessExpression(node.parent)) && node.parent.expression === node
+        ? node.parent : undefined;
+      const call = access && ts.isCallExpression(access.parent) && access.parent.expression === access
+        ? access.parent : undefined;
+      const accessName = access && (ts.isPropertyAccessExpression(access)
+        ? access.name.text : access.argumentExpression
+          ? resolveStaticPropertyKey(access.argumentExpression, checker, check) : undefined);
+      if (access && call && (accessName === undefined || !READ_ONLY_ARRAY_METHODS.has(accessName))) {
+        for (const argument of call.arguments) {
+          expressions.push(ts.isSpreadElement(argument) ? argument.expression : argument);
+        }
+      }
+      let aliasInitializer: ts.Expression = node;
+      while ((ts.isParenthesizedExpression(aliasInitializer.parent)
+        || ts.isAsExpression(aliasInitializer.parent)
+        || ts.isTypeAssertionExpression(aliasInitializer.parent)
+        || ts.isSatisfiesExpression(aliasInitializer.parent)
+        || ts.isNonNullExpression(aliasInitializer.parent))
+        && aliasInitializer.parent.expression === aliasInitializer) {
+        aliasInitializer = aliasInitializer.parent;
+      }
+      const aliasDeclaration = ts.isVariableDeclaration(aliasInitializer.parent)
+        && aliasInitializer.parent.initializer === aliasInitializer ? aliasInitializer.parent : undefined;
+      if (aliasDeclaration && ts.isIdentifier(aliasDeclaration.name)
+        && ts.isVariableDeclarationList(aliasDeclaration.parent)
+        && aliasDeclaration.parent.flags & ts.NodeFlags.Const) expressions.push(aliasDeclaration.name);
+      let target: ts.Node = access ?? node;
+      while (target.parent && !ts.isStatement(target)) {
+        const parent = target.parent;
+        if (ts.isBinaryExpression(parent) && parent.left === target
+          && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+          && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+          expressions.push(parent.right);
+          break;
+        }
+        target = parent;
+      }
+    }
+  };
+  while (expressions.length > 0) {
+    let expression = expressions.pop()!;
+    check();
+    steps += 1;
+    if (steps > maxSteps) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+    if (seenExpressions.has(expression)) continue;
+    seenExpressions.add(expression);
+    while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+      || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+      || ts.isNonNullExpression(expression)) expression = expression.expression;
+    if (isStaticSymbolFrom(expression, checker, check, '@nestjs/core', 'APP_GUARD')) return true;
+    if (ts.isIdentifier(expression)) {
+      const symbol = symbolAt(expression);
+      if (symbol) queueSymbolEdges(symbol);
+    } else if (ts.isCallExpression(expression) && ts.isIdentifier(expression.expression)) {
+      const symbol = symbolAt(expression.expression);
+      if (symbol) queueSymbolEdges(symbol);
+    } else if (ts.isArrayLiteralExpression(expression)) {
+      for (const element of expression.elements) {
+        expressions.push(ts.isSpreadElement(element) ? element.expression : element);
+      }
+    } else if (ts.isObjectLiteralExpression(expression)) {
+      const effectiveProperties: Array<[
+        'providers' | 'provide', ReturnType<typeof effectiveObjectProperty>,
+      ]> = [
+        ['providers', effectiveObjectProperty(
+          expression, 'providers', checker, projectSources, check,
+        )],
+        ['provide', effectiveObjectProperty(
+          expression, 'provide', checker, projectSources, check,
+        )],
+      ];
+      for (const [name, property] of effectiveProperties) {
+        for (const initializer of property.candidates) {
+          if (containsStaticSymbolFrom(
+            initializer, checker, check, '@nestjs/core', 'APP_GUARD', projectSources,
+          )) return true;
+          if (name === 'providers') expressions.push(initializer);
+        }
+      }
+    } else if (ts.isConditionalExpression(expression)) {
+      let conditionExpression = expression.condition;
+      while (ts.isParenthesizedExpression(conditionExpression)
+        || ts.isAsExpression(conditionExpression) || ts.isTypeAssertionExpression(conditionExpression)
+        || ts.isSatisfiesExpression(conditionExpression)
+        || ts.isNonNullExpression(conditionExpression)) conditionExpression = conditionExpression.expression;
+      const undefinedIdentifier = ts.isIdentifier(conditionExpression)
+        && conditionExpression.text === 'undefined'
+        && !checker.getSymbolAtLocation(conditionExpression)?.declarations?.length;
+      const condition = conditionExpression.kind === ts.SyntaxKind.TrueKeyword
+        ? true : conditionExpression.kind === ts.SyntaxKind.FalseKeyword
+          || conditionExpression.kind === ts.SyntaxKind.NullKeyword
+          || ts.isVoidExpression(conditionExpression) || undefinedIdentifier ? false : undefined;
+      if (condition !== false) expressions.push(expression.whenTrue);
+      if (condition !== true) expressions.push(expression.whenFalse);
+    }
+  }
+  return false;
+}
+
 function routePath(controllerPath: string, methodPath: string): { path: string; complete: boolean } | undefined {
   let canonical: string;
   try { canonical = canonicalizePath(`${controllerPath}/${methodPath}`); } catch { return undefined; }
@@ -776,6 +1252,18 @@ async function analyze(
   const projectSources = new Set(loaded.sourceFiles.filter((sourceFile) => (
     !sourceFile.isDeclarationFile && !sourceFile.fileName.replaceAll('\\', '/').includes('/node_modules/')
   )));
+  const providerRegistrations = registeredProviderObjects(checker, projectSources, check);
+  const providerCandidates = [
+    ...providerRegistrations.candidates, ...providerRegistrations.providers,
+  ];
+  const identifierReferences = providerCandidates.length > 0
+    ? indexIdentifierReferences(checker, projectSources, check) : new Map();
+  const potentialGlobalProvider = providerCandidates.find((candidate) => (
+    containsCanonicalProviderToken(
+      candidate, checker, projectSources, check, context.limits.maxAstNodes, identifierReferences,
+    )
+  ));
+  const registeredProviders = providerRegistrations.providers;
   const operations = new Map<string, ApiOperationInputV1>();
   const diagnostics: AnalyzerDiagnostic[] = [];
   const unresolvedOperations: UnresolvedSourceOperationCandidate[] = [];
@@ -815,6 +1303,10 @@ async function analyze(
       ...sourceLocation(node, context.workspaceRoot),
     });
   };
+  if (potentialGlobalProvider) {
+    addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', potentialGlobalProvider);
+    globalGuardFound = true;
+  }
   const addUnresolved = (methods: readonly HttpMethod[], node: ts.Node, reason: UnresolvedSourceOperationCandidate['reason']) => {
     consume(methods.length);
     unresolvedMethodCount += methods.length;
@@ -850,9 +1342,11 @@ async function analyze(
             || (propertyNames.length === 1 && propertyNames[0] === 'provide'))
       );
       const globalGuardProvider = (ts.isPropertyAssignment(node) && providerKeyPossible
+        && isProviderRegistration(node, registeredProviders)
         && containsStaticSymbolFrom(
           node.initializer, checker, check, '@nestjs/core', 'APP_GUARD', projectSources,
         )) || (ts.isShorthandPropertyAssignment(node) && node.name.text === 'provide'
+        && isProviderRegistration(node, registeredProviders)
         && isStaticShorthandSymbolFrom(
           node, checker, check, '@nestjs/core', 'APP_GUARD', projectSources,
         ));

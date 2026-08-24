@@ -43,8 +43,14 @@ function workspace(source: string, extraFiles: Record<string, string> = {}): str
     export declare function Get(path?: string): MethodDecorator;
     export declare function UseGuards(...guards: unknown[]): ClassDecorator & MethodDecorator;
     export declare function applyDecorators(...decorators: Array<ClassDecorator | MethodDecorator>): ClassDecorator & MethodDecorator;
+    export declare function Module(metadata: { providers?: readonly unknown[] }): ClassDecorator;
   `);
-  write(root, 'src/controller.ts', source);
+  const registersProviders = /\b(?:const|let|var)\s+providers\b/u.test(source);
+  write(root, 'src/controller.ts', registersProviders ? `
+    import { Module } from '@nestjs/common';
+    ${source}
+    @Module({ providers }) class GeneratedTestModule {}
+  ` : source);
   for (const [relative, contents] of Object.entries(extraFiles)) write(root, relative, contents);
   return root;
 }
@@ -322,11 +328,13 @@ describe('NestJS auth metadata analyzer', () => {
       import { Controller, Get, UseGuards, applyDecorators } from '@nestjs/common';
       import { ApiKeyGuard, JwtAuthGuard } from './auth';
       const Auth = (): MethodDecorator => UseGuards(ApiKeyGuard);
+      function FunctionAuth(): MethodDecorator { return UseGuards(ApiKeyGuard); }
       @Controller('composed') @UseGuards(JwtAuthGuard)
       class ComposedController {
         @Get() @applyDecorators(UseGuards(ApiKeyGuard)) read() {}
         @Get('wrapped') @Auth() wrapped() {}
         @Get('nested') @applyDecorators(Auth()) nested() {}
+        @Get('function') @FunctionAuth() functionWrapped() {}
       }
     `, {
       'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
@@ -351,7 +359,9 @@ describe('NestJS auth metadata analyzer', () => {
         },
       },
     });
-    for (const routeKey of ['GET /composed/wrapped', 'GET /composed/nested']) {
+    for (const routeKey of [
+      'GET /composed/wrapped', 'GET /composed/nested', 'GET /composed/function',
+    ]) {
       expect(operations[routeKey]).toMatchObject({
         exposure: 'authenticated',
         auth: {
@@ -632,6 +642,248 @@ describe('NestJS auth metadata analyzer', () => {
         },
       },
     });
+  });
+
+  test('ignores APP_GUARD-shaped objects outside provider registration', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      const unused = { provide: APP_GUARD, useClass: JwtAuthGuard };
+      @Controller('local') class LocalController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+    expect(execution.result.contract.operations[0]).toMatchObject({
+      auth: { mode: 'alternatives', analysis: { enforcementConfidence: 'high' } },
+    });
+
+    for (const [index, providers] of [
+      `const authProviders = [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
+       @Module({ providers: authProviders }) class AppModule {}`,
+      `const globalGuard = { provide: APP_GUARD, useClass: JwtAuthGuard };
+       @Module({ providers: [globalGuard] }) class AppModule {}`,
+      `declare const enabled: boolean;
+       const providers = enabled ? [{ provide: APP_GUARD, useClass: JwtAuthGuard }] : [];
+       @Module({ providers }) class AppModule {}`,
+      `function make() {
+         const provider = { provide: APP_GUARD, useClass: JwtAuthGuard };
+         return [provider];
+       }
+       @Module({ providers: make() }) class AppModule {}`,
+      `const make = () => [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
+       @Module({ providers: make() }) class AppModule {}`,
+      `const metadata = {
+         providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
+       };
+       @Module(metadata) class AppModule {}`,
+      `const metadata = {
+         providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
+       };
+       @Module({ ...metadata }) class AppModule {}`,
+      `const base = { provide: APP_GUARD };
+       @Module({ providers: [{ ...base, useClass: JwtAuthGuard }] }) class AppModule {}`,
+      `const NestModule = Module;
+       @NestModule({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+       class AppModule {}`,
+      `@Module({
+         get providers() { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; },
+       }) class AppModule {}`,
+      `const providers: unknown[] = [];
+       providers.push({ provide: APP_GUARD, useClass: JwtAuthGuard });
+       @Module({ providers }) class AppModule {}`,
+      `const providers: unknown[] = [];
+       providers.push(...[{ provide: APP_GUARD, useClass: JwtAuthGuard }]);
+       @Module({ providers }) class AppModule {}`,
+      `const providers: unknown[] = [];
+       providers['push']({ provide: APP_GUARD, useClass: JwtAuthGuard });
+       @Module({ providers }) class AppModule {}`,
+      `const providers: unknown[] = [];
+       const alias = providers;
+       alias.push({ provide: APP_GUARD, useClass: JwtAuthGuard });
+       @Module({ providers }) class AppModule {}`,
+      `const providers: unknown[] = [];
+       const alias = providers as unknown[];
+       alias.push({ provide: APP_GUARD, useClass: JwtAuthGuard });
+       @Module({ providers }) class AppModule {}`,
+      `declare const enabled: boolean;
+       const TOKEN = enabled ? APP_GUARD : Symbol('other');
+       const providers: unknown[] = [];
+       providers.push({ provide: TOKEN, useClass: JwtAuthGuard });
+       @Module({ providers }) class AppModule {}`,
+      `@Module({ providers: [{
+         get provide() { return APP_GUARD; },
+         set provide(_value: unknown) {},
+         useClass: JwtAuthGuard,
+       }] }) class AppModule {}`,
+      `@Module({
+         get providers() {
+           try { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+           finally {}
+         },
+       }) class AppModule {}`,
+    ].entries()) {
+      const aliasRoot = workspace(`
+        import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+        import { APP_GUARD } from '@nestjs/core';
+        import { JwtAuthGuard } from './auth';
+        ${providers}
+        @Controller('module-alias') class AliasController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, {
+        'src/auth.ts': 'export class JwtAuthGuard {}\n',
+        'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
+        'node_modules/@nestjs/core/package.json': JSON.stringify({
+          name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+        }),
+        'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+      });
+      const aliasExecution = await runSourceAnalyzer(
+        createNestJsSourceAnalyzer(authConfig), context(aliasRoot),
+      );
+      expect(aliasExecution.status).toBe('success');
+      if (aliasExecution.status !== 'success') continue;
+      expect(aliasExecution.result.diagnostics, `provider registration fixture ${index}`).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+      ]));
+      expect(aliasExecution.result.contract.operations[0].auth.mode).toBe('unknown');
+    }
+
+    const readOnlyRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      const providers: unknown[] = [];
+      providers.includes(APP_GUARD);
+      providers.with(0, { provide: APP_GUARD, useClass: JwtAuthGuard });
+      providers.toSpliced(0, 0, { provide: APP_GUARD, useClass: JwtAuthGuard });
+      @Module({ providers }) class AppModule {}
+      @Controller('read-only') class ReadOnlyController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+    });
+    const readOnlyExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(readOnlyRoot),
+    );
+    expect(readOnlyExecution.status).toBe('success');
+    if (readOnlyExecution.status === 'success') {
+      expect(readOnlyExecution.result.diagnostics).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+      ]));
+      expect(readOnlyExecution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
+
+    for (const [index, { setup, expected }] of [
+      {
+        setup: `declare const enabled: boolean;
+          const guarded = { providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] };
+          @Module({ ...(enabled ? guarded : {}) }) class AppModule {}`,
+        expected: 'unknown',
+      },
+      {
+        setup: `const guarded = { providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] };
+          @Module({ ...guarded, providers: [] }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `const guarded = { provide: APP_GUARD };
+          const OTHER_TOKEN = Symbol('other');
+          @Module({ providers: [{ ...guarded, provide: OTHER_TOKEN, useClass: JwtAuthGuard }] })
+          class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `const guarded = { provide: APP_GUARD };
+          @Module({ providers: [{ ...guarded, set provide(_value: unknown) {}, useClass: JwtAuthGuard }] })
+          class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `@Module({
+          get providers() {
+            if (false) return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
+            return [];
+          },
+        }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+    ].entries()) {
+      const overrideRoot = workspace(`
+        import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+        import { APP_GUARD } from '@nestjs/core';
+        import { JwtAuthGuard } from './auth';
+        ${setup}
+        @Controller('spread-${index}') class SpreadController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, {
+        'src/auth.ts': 'export class JwtAuthGuard {}\n',
+        'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
+        'node_modules/@nestjs/core/package.json': JSON.stringify({
+          name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+        }),
+        'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+      });
+      const overrideExecution = await runSourceAnalyzer(
+        createNestJsSourceAnalyzer(authConfig), context(overrideRoot),
+      );
+      expect(overrideExecution.status).toBe('success');
+      if (overrideExecution.status === 'success') {
+        expect(overrideExecution.result.contract.operations[0].auth.mode, `spread fixture ${index}`)
+          .toBe(expected);
+      }
+    }
+
+    const unreachableRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      function makeProviders() {
+        if (false) return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
+        return [];
+      }
+      @Module({ providers: makeProviders() }) class AppModule {}
+      @Controller('unreachable-provider') class UnreachableController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+    });
+    const unreachableExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(unreachableRoot),
+    );
+    expect(unreachableExecution.status).toBe('success');
+    if (unreachableExecution.status === 'success') {
+      expect(unreachableExecution.result.diagnostics).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+      ]));
+      expect(unreachableExecution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
   });
 
   test('detects direct-import shorthand APP_GUARD without trusting mutable bindings', async () => {
@@ -1341,7 +1593,7 @@ describe('NestJS auth metadata analyzer', () => {
       ['let TOKEN: unknown; [TOKEN] = [APP_GUARD];', 'TOKEN', 'unknown'],
       ['let TOKEN: unknown; for (TOKEN of [APP_GUARD]) {}', 'TOKEN', 'unknown'],
       [
-        'let TOKEN: unknown = APP_GUARD; const providers = make(); TOKEN = OTHER_TOKEN; function make() { return TOKEN; }',
+        'let TOKEN: unknown = APP_GUARD; const observed = make(); TOKEN = OTHER_TOKEN; function make() { return TOKEN; }',
         'make()',
         'unknown',
       ],
