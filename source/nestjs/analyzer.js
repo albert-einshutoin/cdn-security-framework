@@ -120,6 +120,9 @@ function staticSwitchValue(input) {
     return undefined;
 }
 function staticallyUnreachable(node) {
+    const stopsSequentialFlow = (statement) => (typescript_1.default.isReturnStatement(statement) || typescript_1.default.isThrowStatement(statement)
+        || typescript_1.default.isBreakStatement(statement) || typescript_1.default.isContinueStatement(statement)
+        || (typescript_1.default.isBlock(statement) && statement.statements.some(stopsSequentialFlow)));
     let current = node;
     while (!typescript_1.default.isSourceFile(current)) {
         const parent = current.parent;
@@ -157,15 +160,17 @@ function staticallyUnreachable(node) {
                 const selectedIndex = matchingIndex >= 0 ? matchingIndex
                     : parent.clauses.findIndex(typescript_1.default.isDefaultClause);
                 const currentIndex = parent.clauses.indexOf(current);
-                if (selectedIndex < 0 || currentIndex < selectedIndex)
+                if (selectedIndex < 0 || currentIndex < selectedIndex
+                    || (currentIndex > selectedIndex
+                        && parent.clauses.slice(selectedIndex, currentIndex).some((clause) => clause.statements.some(stopsSequentialFlow))))
                     return true;
             }
         }
         else if ((typescript_1.default.isBlock(parent) || typescript_1.default.isCaseClause(parent) || typescript_1.default.isDefaultClause(parent))
             && typescript_1.default.isStatement(current)) {
             const index = parent.statements.indexOf(current);
-            if (!typescript_1.default.isFunctionDeclaration(current) && parent.statements.slice(0, index).some((statement) => (typescript_1.default.isReturnStatement(statement) || typescript_1.default.isThrowStatement(statement)
-                || typescript_1.default.isBreakStatement(statement) || typescript_1.default.isContinueStatement(statement))))
+            if (!typescript_1.default.isFunctionDeclaration(current)
+                && parent.statements.slice(0, index).some(stopsSequentialFlow))
                 return true;
         }
         current = parent;

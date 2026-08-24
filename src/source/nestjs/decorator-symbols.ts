@@ -904,7 +904,12 @@ export function resolveDecoratorCallSymbol(
       ? resolveStaticPropertyKey(outer.argumentExpression, checker, check) : undefined;
   const outerReceiver = (ts.isPropertyAccessExpression(outer)
     || ts.isElementAccessExpression(outer)) ? unwrapExpression(outer.expression) : undefined;
-  if ((outerInvocation === 'apply' || outerInvocation === 'construct') && outerReceiver
+  const prototypeMethod = (outerInvocation === 'call' || outerInvocation === 'apply') && outerReceiver
+    ? standardFunctionPrototypeMethod(outerReceiver, checker, check) : undefined;
+  if (prototypeMethod && call.arguments[0]) {
+    indirectInvocation = true;
+    expression = call.arguments[0];
+  } else if ((outerInvocation === 'apply' || outerInvocation === 'construct') && outerReceiver
     && isStandardReflectReceiver(outerReceiver, checker, check) && call.arguments[0]) {
     indirectInvocation = true;
     expression = call.arguments[0];

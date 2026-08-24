@@ -96,6 +96,8 @@ describe('NestJS auth metadata analyzer', () => {
         @Get('global-reflect-apply')
         @globalThis.Reflect.apply(Guards, undefined, [ApiKeyGuard]) globalReflectApplyGuard() {}
         @Get('reflect-construct') @Reflect.construct(Guards, [ApiKeyGuard]) reflectConstructGuard() {}
+        @Get('function-prototype')
+        @Function.prototype.apply.call(Guards, undefined, [ApiKeyGuard]) functionPrototypeGuard() {}
         @Get('public') @Open() @Open('overwritten') publicRoute() {}
         @Get('unknown') @Guards(UnknownGuard) unknown() {}
       }
@@ -146,6 +148,7 @@ describe('NestJS auth metadata analyzer', () => {
     for (const route of [
       'GET /users/call', 'GET /users/apply', 'GET /users/reflect-apply',
       'GET /users/global-reflect-apply', 'GET /users/reflect-construct',
+      'GET /users/function-prototype',
     ]) {
       expect(operations[route]).toMatchObject({
         exposure: 'unknown',
@@ -4405,6 +4408,8 @@ describe('NestJS auth metadata analyzer', () => {
         case 2: app.useGlobalGuards({}); break;
         case 1: break;
       }
+      switch (1) { case 1: break; case 2: app.useGlobalGuards({}); }
+      switch (1) { case 1: {} case 2: break; case 3: app.useGlobalGuards({}); }
       app.useGlobalGuards();
       app.useGlobalGuards(...[]);
       app.useGlobalGuards.call(app);

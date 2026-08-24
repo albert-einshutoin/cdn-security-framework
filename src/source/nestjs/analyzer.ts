@@ -155,6 +155,11 @@ function staticSwitchValue(input: ts.Expression): string | undefined {
 }
 
 function staticallyUnreachable(node: ts.Node): boolean {
+  const stopsSequentialFlow = (statement: ts.Statement): boolean => (
+    ts.isReturnStatement(statement) || ts.isThrowStatement(statement)
+    || ts.isBreakStatement(statement) || ts.isContinueStatement(statement)
+    || (ts.isBlock(statement) && statement.statements.some(stopsSequentialFlow))
+  );
   let current = node;
   while (!ts.isSourceFile(current)) {
     const parent = current.parent;
@@ -188,15 +193,17 @@ function staticallyUnreachable(node: ts.Node): boolean {
         const selectedIndex = matchingIndex >= 0 ? matchingIndex
           : parent.clauses.findIndex(ts.isDefaultClause);
         const currentIndex = parent.clauses.indexOf(current);
-        if (selectedIndex < 0 || currentIndex < selectedIndex) return true;
+        if (selectedIndex < 0 || currentIndex < selectedIndex
+          || (currentIndex > selectedIndex
+            && parent.clauses.slice(selectedIndex, currentIndex).some(
+              (clause) => clause.statements.some(stopsSequentialFlow),
+            ))) return true;
       }
     } else if ((ts.isBlock(parent) || ts.isCaseClause(parent) || ts.isDefaultClause(parent))
       && ts.isStatement(current)) {
       const index = parent.statements.indexOf(current);
-      if (!ts.isFunctionDeclaration(current) && parent.statements.slice(0, index).some((statement) => (
-        ts.isReturnStatement(statement) || ts.isThrowStatement(statement)
-        || ts.isBreakStatement(statement) || ts.isContinueStatement(statement)
-      ))) return true;
+      if (!ts.isFunctionDeclaration(current)
+        && parent.statements.slice(0, index).some(stopsSequentialFlow)) return true;
     }
     current = parent;
   }
