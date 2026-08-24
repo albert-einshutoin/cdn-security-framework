@@ -30,6 +30,7 @@ import {
 import {
   classifyNestJsRouteDecorator,
   containsStaticSymbolFrom,
+  isBareDecoratorBindingStable,
   isDefinitelyNonProvidePropertyKey,
   isNestJsUseGlobalGuardsCall,
   isStaticShorthandSymbolFrom,
@@ -1042,9 +1043,10 @@ function ownAuthMetadata(
   for (const decorator of [...decorators(node)].reverse()) {
     const bareName = resolveBareDecoratorName(decorator, checker, check);
     if (bareName && config.public_decorators.includes(bareName)) {
+      const stable = isBareDecoratorBindingStable(decorator, checker, projectSources, check);
       result.publicPresent = true;
-      result.explicitPublic = true;
-      result.publicDynamic = false;
+      result.explicitPublic = stable;
+      result.publicDynamic = !stable;
       result.publicEvidence = [decorator];
       continue;
     }

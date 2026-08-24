@@ -309,6 +309,51 @@ describe('NestJS auth metadata analyzer', () => {
     ]));
   });
 
+  test('fails closed when a configured bare public decorator is reassigned', async () => {
+    const controller = (declaration: string) => `
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      ${declaration}
+      @Controller('mutable-public') @UseGuards(JwtAuthGuard)
+      class MutablePublicController { @Get() @Public read() {} }
+    `;
+    const auth = (binding: string) => ({
+      'src/auth.ts': `export class JwtAuthGuard {}\n${binding}`,
+    });
+    const rootsToCheck = [
+      workspace(controller(`
+        import { JwtAuthGuard, Public as publicDecorator } from './auth';
+        let Public = publicDecorator;
+        Public = () => {};
+      `), auth('export const Public: MethodDecorator = () => {};')),
+      workspace(controller("import { JwtAuthGuard, Public } from './auth';"), auth(`
+        export let Public: MethodDecorator = () => {};
+        Public = () => {};
+      `)),
+      workspace(controller(`
+        import { JwtAuthGuard, Public } from './auth';
+        let decorators = { Public };
+        decorators = { Public: () => {} };
+      `).replace('@Public', '@decorators.Public'), auth(
+        'export const Public: MethodDecorator = () => {};',
+      )),
+    ];
+
+    for (const root of rootsToCheck) {
+      const execution = await runSourceAnalyzer(
+        createNestJsSourceAnalyzer(authConfig), context(root),
+      );
+      expect(execution.status).toBe('success');
+      if (execution.status !== 'success') continue;
+      expect(execution.result.contract.operations[0]).toMatchObject({
+        exposure: 'unknown',
+        auth: {
+          mode: 'unknown',
+          analysis: { explicitPublic: false, enforcementConfidence: 'unknown' },
+        },
+      });
+    }
+  });
+
   test('resolves a precomputed guard decorator used without a call', async () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';

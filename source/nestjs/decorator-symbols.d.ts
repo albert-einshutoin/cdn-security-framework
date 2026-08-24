@@ -23,6 +23,7 @@ export declare function resolveDecoratorSymbol(decorator: ts.Decorator, checker:
     trustedNestJsCommon: boolean;
 } | undefined;
 export declare function resolveBareDecoratorName(decorator: ts.Decorator, checker: ts.TypeChecker, check: () => void): string | undefined;
+export declare function isBareDecoratorBindingStable(decorator: ts.Decorator, checker: ts.TypeChecker, projectSources: ReadonlySet<ts.SourceFile>, check: () => void): boolean;
 export declare function resolveDecoratorCallSymbol(call: ts.CallExpression, checker: ts.TypeChecker, check: () => void): {
     name: string;
     call: ts.CallExpression;

@@ -988,9 +988,10 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps,
     for (const decorator of [...decorators(node)].reverse()) {
         const bareName = (0, decorator_symbols_1.resolveBareDecoratorName)(decorator, checker, check);
         if (bareName && config.public_decorators.includes(bareName)) {
+            const stable = (0, decorator_symbols_1.isBareDecoratorBindingStable)(decorator, checker, projectSources, check);
             result.publicPresent = true;
-            result.explicitPublic = true;
-            result.publicDynamic = false;
+            result.explicitPublic = stable;
+            result.publicDynamic = !stable;
             result.publicEvidence = [decorator];
             continue;
         }

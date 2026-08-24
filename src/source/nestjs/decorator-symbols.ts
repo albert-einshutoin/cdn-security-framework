@@ -468,6 +468,23 @@ export function resolveBareDecoratorName(
   return !symbol || symbol === UNKNOWN_NESTJS_ROUTE ? undefined : symbol.getName();
 }
 
+export function isBareDecoratorBindingStable(
+  decorator: ts.Decorator,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+): boolean {
+  const expression = unwrapExpression(decorator.expression);
+  if (ts.isCallExpression(expression)) return false;
+  if ((ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression))
+    && !isNamespaceImportAccess(expression, checker)) return false;
+  const symbol = targetSymbol(expression, checker, check);
+  if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) return false;
+  return !callableBindingMayBeWritten(
+    symbol, symbol.declarations ?? [], checker, projectSources, check,
+  );
+}
+
 export function resolveDecoratorCallSymbol(
   call: ts.CallExpression,
   checker: ts.TypeChecker,

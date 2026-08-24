@@ -9,6 +9,7 @@ exports.resolveStaticPropertyKey = resolveStaticPropertyKey;
 exports.classifyNestJsRouteDecorator = classifyNestJsRouteDecorator;
 exports.resolveDecoratorSymbol = resolveDecoratorSymbol;
 exports.resolveBareDecoratorName = resolveBareDecoratorName;
+exports.isBareDecoratorBindingStable = isBareDecoratorBindingStable;
 exports.resolveDecoratorCallSymbol = resolveDecoratorCallSymbol;
 exports.resolveStaticDecoratorWrapperCall = resolveStaticDecoratorWrapperCall;
 exports.resolveStaticSymbolName = resolveStaticSymbolName;
@@ -413,6 +414,18 @@ function resolveBareDecoratorName(decorator, checker, check) {
         return undefined;
     const symbol = targetSymbol(expression, checker, check);
     return !symbol || symbol === UNKNOWN_NESTJS_ROUTE ? undefined : symbol.getName();
+}
+function isBareDecoratorBindingStable(decorator, checker, projectSources, check) {
+    const expression = unwrapExpression(decorator.expression);
+    if (typescript_1.default.isCallExpression(expression))
+        return false;
+    if ((typescript_1.default.isPropertyAccessExpression(expression) || typescript_1.default.isElementAccessExpression(expression))
+        && !isNamespaceImportAccess(expression, checker))
+        return false;
+    const symbol = targetSymbol(expression, checker, check);
+    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE)
+        return false;
+    return !callableBindingMayBeWritten(symbol, symbol.declarations ?? [], checker, projectSources, check);
 }
 function resolveDecoratorCallSymbol(call, checker, check) {
     const symbol = targetSymbol(call.expression, checker, check);
