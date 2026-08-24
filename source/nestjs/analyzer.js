@@ -4725,6 +4725,8 @@ async function analyze(context, authConfig) {
     const projectSources = new Set(loaded.sourceFiles.filter((sourceFile) => (!sourceFile.isDeclarationFile && !sourceFile.fileName.replaceAll('\\', '/').includes('/node_modules/'))));
     const localFunctions = new Map();
     const localFunctionSymbols = new WeakMap();
+    const localClasses = new Map();
+    const localClassSymbols = new WeakMap();
     for (const sourceFile of projectSources) {
         if (!typescript_1.default.isExternalModule(sourceFile))
             continue;
@@ -4739,6 +4741,23 @@ async function analyze(context, authConfig) {
                 if (symbol && bodies.length === 1) {
                     localFunctions.set(symbol, { callable: node, binding: node.name });
                     localFunctionSymbols.set(node, symbol);
+                }
+            }
+            else if (typescript_1.default.isClassDeclaration(node) && node.name
+                && !decorators(node).length
+                && !node.members.some((member) => decorators(member).length
+                    || (typescript_1.default.isFunctionLike(member) && member.parameters.some((parameter) => (decorators(parameter).length > 0))))
+                && !node.modifiers?.some(({ kind }) => (kind === typescript_1.default.SyntaxKind.ExportKeyword || kind === typescript_1.default.SyntaxKind.DefaultKeyword)) && !node.members.some((member) => {
+                const modifiers = typescript_1.default.canHaveModifiers(member) ? typescript_1.default.getModifiers(member) : undefined;
+                const isStatic = modifiers?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.StaticKeyword);
+                return typescript_1.default.isClassStaticBlockDeclaration(member)
+                    || Boolean(isStatic && typescript_1.default.isPropertyDeclaration(member) && member.initializer);
+            })) {
+                const symbol = resolvedSymbolAt(node.name, checker);
+                const declarations = symbol?.declarations?.filter(typescript_1.default.isClassDeclaration) ?? [];
+                if (symbol && declarations.length === 1) {
+                    localClasses.set(symbol, { declaration: node, binding: node.name });
+                    localClassSymbols.set(node, symbol);
                 }
             }
             else if (typescript_1.default.isVariableDeclaration(node) && typescript_1.default.isIdentifier(node.name) && node.initializer
@@ -4764,7 +4783,8 @@ async function analyze(context, authConfig) {
         }
     }
     const referencedLocalFunctions = new Set();
-    if (localFunctions.size > 0) {
+    const referencedLocalClasses = new Set();
+    if (localFunctions.size > 0 || localClasses.size > 0) {
         for (const sourceFile of projectSources) {
             const nodes = [sourceFile];
             while (nodes.length > 0) {
@@ -4786,18 +4806,45 @@ async function analyze(context, authConfig) {
                         if (node !== local.binding && !insideDeclaration)
                             referencedLocalFunctions.add(symbol);
                     }
+                    const localClass = symbol ? localClasses.get(symbol) : undefined;
+                    if (symbol && localClass) {
+                        let insideDeclaration = false;
+                        for (let parent = node; parent; parent = parent.parent) {
+                            if (parent === localClass.declaration) {
+                                insideDeclaration = true;
+                                break;
+                            }
+                            if (typescript_1.default.isSourceFile(parent))
+                                break;
+                        }
+                        if (node !== localClass.binding && !insideDeclaration)
+                            referencedLocalClasses.add(symbol);
+                    }
                 }
                 typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
             }
         }
     }
     const provablyUninvokedLocalFunctions = new Set([...localFunctions.keys()].filter((symbol) => (!referencedLocalFunctions.has(symbol))));
+    const provablyUnusedLocalClasses = new Set([...localClasses.keys()].filter((symbol) => (!referencedLocalClasses.has(symbol))));
     const isInsideProvablyUninvokedFunction = (node) => {
         for (let parent = node.parent; !typescript_1.default.isSourceFile(parent); parent = parent.parent) {
             if (typescript_1.default.isFunctionDeclaration(parent) || typescript_1.default.isArrowFunction(parent)
                 || typescript_1.default.isFunctionExpression(parent)) {
                 const symbol = localFunctionSymbols.get(parent);
                 if (symbol && provablyUninvokedLocalFunctions.has(symbol))
+                    return true;
+            }
+            if ((typescript_1.default.isConstructorDeclaration(parent) || typescript_1.default.isMethodDeclaration(parent)
+                || typescript_1.default.isGetAccessorDeclaration(parent) || typescript_1.default.isSetAccessorDeclaration(parent))
+                && typescript_1.default.isClassDeclaration(parent.parent)) {
+                const modifiers = typescript_1.default.canHaveModifiers(parent) ? typescript_1.default.getModifiers(parent) : undefined;
+                const symbol = localClassSymbols.get(parent.parent);
+                let insideBody = false;
+                for (let current = node; current && current !== parent; current = current.parent)
+                    insideBody ||= current === parent.body;
+                if (!modifiers?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.StaticKeyword)
+                    && insideBody && symbol && provablyUnusedLocalClasses.has(symbol))
                     return true;
             }
         }

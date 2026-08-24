@@ -3841,6 +3841,10 @@ describe('NestJS auth metadata analyzer', () => {
       }
       function unused() { app.useGlobalGuards({}); }
       const unusedCallback = () => app.useGlobalGuards({});
+      class UnusedInstaller {
+        constructor() { app.useGlobalGuards({}); }
+        install() { app.useGlobalGuards({}); }
+      }
       app.useGlobalGuards();
       app.useGlobalGuards(...[]);
       app.useGlobalGuards.call(app);

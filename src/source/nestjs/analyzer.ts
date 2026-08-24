@@ -4523,6 +4523,8 @@ async function analyze(
   type LocalFunction = ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression;
   const localFunctions = new Map<ts.Symbol, { callable: LocalFunction; binding: ts.Identifier }>();
   const localFunctionSymbols = new WeakMap<LocalFunction, ts.Symbol>();
+  const localClasses = new Map<ts.Symbol, { declaration: ts.ClassDeclaration; binding: ts.Identifier }>();
+  const localClassSymbols = new WeakMap<ts.ClassDeclaration, ts.Symbol>();
   for (const sourceFile of projectSources) {
     if (!ts.isExternalModule(sourceFile)) continue;
     const nodes: ts.Node[] = [sourceFile];
@@ -4540,6 +4542,26 @@ async function analyze(
         if (symbol && bodies.length === 1) {
           localFunctions.set(symbol, { callable: node, binding: node.name });
           localFunctionSymbols.set(node, symbol);
+        }
+      } else if (ts.isClassDeclaration(node) && node.name
+        && !decorators(node).length
+        && !node.members.some((member) => decorators(member).length
+          || (ts.isFunctionLike(member) && member.parameters.some((parameter) => (
+            decorators(parameter).length > 0
+          ))))
+        && !node.modifiers?.some(({ kind }) => (
+          kind === ts.SyntaxKind.ExportKeyword || kind === ts.SyntaxKind.DefaultKeyword
+        )) && !node.members.some((member) => {
+          const modifiers = ts.canHaveModifiers(member) ? ts.getModifiers(member) : undefined;
+          const isStatic = modifiers?.some(({ kind }) => kind === ts.SyntaxKind.StaticKeyword);
+          return ts.isClassStaticBlockDeclaration(member)
+            || Boolean(isStatic && ts.isPropertyDeclaration(member) && member.initializer);
+        })) {
+        const symbol = resolvedSymbolAt(node.name, checker);
+        const declarations = symbol?.declarations?.filter(ts.isClassDeclaration) ?? [];
+        if (symbol && declarations.length === 1) {
+          localClasses.set(symbol, { declaration: node, binding: node.name });
+          localClassSymbols.set(node, symbol);
         }
       } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer
         && ts.isVariableDeclarationList(node.parent)
@@ -4563,7 +4585,8 @@ async function analyze(
     }
   }
   const referencedLocalFunctions = new Set<ts.Symbol>();
-  if (localFunctions.size > 0) {
+  const referencedLocalClasses = new Set<ts.Symbol>();
+  if (localFunctions.size > 0 || localClasses.size > 0) {
     for (const sourceFile of projectSources) {
       const nodes: ts.Node[] = [sourceFile];
       while (nodes.length > 0) {
@@ -4583,6 +4606,18 @@ async function analyze(
             }
             if (node !== local.binding && !insideDeclaration) referencedLocalFunctions.add(symbol);
           }
+          const localClass = symbol ? localClasses.get(symbol) : undefined;
+          if (symbol && localClass) {
+            let insideDeclaration = false;
+            for (let parent: ts.Node | undefined = node; parent; parent = parent.parent) {
+              if (parent === localClass.declaration) {
+                insideDeclaration = true;
+                break;
+              }
+              if (ts.isSourceFile(parent)) break;
+            }
+            if (node !== localClass.binding && !insideDeclaration) referencedLocalClasses.add(symbol);
+          }
         }
         ts.forEachChild(node, (child) => { nodes.push(child); });
       }
@@ -4591,12 +4626,26 @@ async function analyze(
   const provablyUninvokedLocalFunctions = new Set([...localFunctions.keys()].filter((symbol) => (
     !referencedLocalFunctions.has(symbol)
   )));
+  const provablyUnusedLocalClasses = new Set([...localClasses.keys()].filter((symbol) => (
+    !referencedLocalClasses.has(symbol)
+  )));
   const isInsideProvablyUninvokedFunction = (node: ts.Node): boolean => {
     for (let parent = node.parent; !ts.isSourceFile(parent); parent = parent.parent) {
       if (ts.isFunctionDeclaration(parent) || ts.isArrowFunction(parent)
         || ts.isFunctionExpression(parent)) {
         const symbol = localFunctionSymbols.get(parent);
         if (symbol && provablyUninvokedLocalFunctions.has(symbol)) return true;
+      }
+      if ((ts.isConstructorDeclaration(parent) || ts.isMethodDeclaration(parent)
+        || ts.isGetAccessorDeclaration(parent) || ts.isSetAccessorDeclaration(parent))
+        && ts.isClassDeclaration(parent.parent)) {
+        const modifiers = ts.canHaveModifiers(parent) ? ts.getModifiers(parent) : undefined;
+        const symbol = localClassSymbols.get(parent.parent);
+        let insideBody = false;
+        for (let current: ts.Node | undefined = node; current && current !== parent;
+          current = current.parent) insideBody ||= current === parent.body;
+        if (!modifiers?.some(({ kind }) => kind === ts.SyntaxKind.StaticKeyword)
+          && insideBody && symbol && provablyUnusedLocalClasses.has(symbol)) return true;
       }
     }
     return false;
