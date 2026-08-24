@@ -3236,29 +3236,125 @@ function containsCanonicalProviderToken(
     return expression.kind === ts.SyntaxKind.TrueKeyword
       ? true : expression.kind === ts.SyntaxKind.FalseKeyword ? false : undefined;
   };
-  const collectReturns = (statement: ts.Statement): boolean => {
+  type ReturnFlow = { candidates: ts.Expression[]; definitelyReturns: boolean; mayThrow: boolean };
+  const identifierMayThrow = (node: ts.Identifier): boolean => {
+    if ((ts.isPropertyAssignment(node.parent) || ts.isMethodDeclaration(node.parent)
+      || ts.isPropertyDeclaration(node.parent) || ts.isGetAccessorDeclaration(node.parent)
+      || ts.isSetAccessorDeclaration(node.parent)) && node.parent.name === node
+      && !ts.isComputedPropertyName(node.parent.name)) return false;
+    const symbol = resolvedSymbolAt(node, checker);
+    if (!symbol?.declarations?.length) return true;
+    if (symbol.declarations.every((declaration) => !projectSources.has(declaration.getSourceFile()))) {
+      return false;
+    }
+    const containingFunction = (input: ts.Node): ts.SignatureDeclaration | undefined => {
+      for (let parent = input.parent; parent && !ts.isSourceFile(parent); parent = parent.parent) {
+        if (ts.isFunctionLike(parent)) return parent;
+      }
+      return undefined;
+    };
+    const readFunction = containingFunction(node);
+    return symbol.declarations.some((declaration) => {
+      if (ts.isParameter(declaration) || ts.isFunctionDeclaration(declaration)
+        || ts.isImportSpecifier(declaration) || ts.isImportClause(declaration)
+        || ts.isNamespaceImport(declaration)) return false;
+      if (ts.isVariableDeclaration(declaration)) {
+        const lexical = Boolean((declaration.parent.flags & ts.NodeFlags.Let)
+          || (declaration.parent.flags & ts.NodeFlags.Const));
+        if (!lexical) return false;
+        const variableStatement = ts.isVariableStatement(declaration.parent.parent)
+          ? declaration.parent.parent : undefined;
+        const ambient = declaration.getSourceFile().isDeclarationFile
+          || Boolean(variableStatement?.modifiers?.some(({ kind }) => (
+            kind === ts.SyntaxKind.DeclareKeyword
+          )));
+        if (!declaration.initializer && (ambient
+          || Boolean(declaration.parent.flags & ts.NodeFlags.Const))) return true;
+        if (readFunction && containingFunction(declaration) !== readFunction
+          && lexical) return true;
+      }
+      return declaration.getSourceFile() !== node.getSourceFile()
+        || declaration.end > node.getStart();
+    });
+  };
+  const mayThrow = (input: ts.Node): boolean => {
+    const nodes: ts.Node[] = [input];
+    while (nodes.length > 0) {
+      const node = nodes.pop()!;
+      check();
+      if (ts.isFunctionLike(node)) continue;
+      if (ts.isIdentifier(node) && identifierMayThrow(node)) return true;
+      if (ts.isTypeNode(node)) continue;
+      if (node !== input && ts.isClassLike(node)) continue;
+      if (ts.isThrowStatement(node) || ts.isCallExpression(node) || ts.isNewExpression(node)
+        || ts.isAwaitExpression(node) || ts.isYieldExpression(node)
+        || ts.isTaggedTemplateExpression(node) || ts.isPropertyAccessExpression(node)
+        || ts.isElementAccessExpression(node)) return true;
+      ts.forEachChild(node, (child) => { nodes.push(child); });
+    }
+    return false;
+  };
+  const collectReturns = (statement: ts.Statement): ReturnFlow => {
     check();
     if (ts.isReturnStatement(statement)) {
-      if (statement.expression) expressions.push(statement.expression);
-      return true;
+      return {
+        candidates: statement.expression ? [statement.expression] : [],
+        definitelyReturns: true,
+        mayThrow: Boolean(statement.expression && mayThrow(statement.expression)),
+      };
+    }
+    if (ts.isThrowStatement(statement)) {
+      return { candidates: [], definitelyReturns: true, mayThrow: true };
     }
     if (ts.isBlock(statement)) {
+      const flow: ReturnFlow = { candidates: [], definitelyReturns: false, mayThrow: false };
       for (const child of statement.statements) {
-        if (collectReturns(child)) return true;
+        const childFlow = collectReturns(child);
+        flow.candidates.push(...childFlow.candidates);
+        flow.mayThrow ||= childFlow.mayThrow;
+        if (childFlow.definitelyReturns) {
+          flow.definitelyReturns = true;
+          break;
+        }
       }
-      return false;
+      return flow;
     }
     if (ts.isIfStatement(statement)) {
       const condition = staticBoolean(statement.expression);
       if (condition === true) return collectReturns(statement.thenStatement);
-      if (condition === false) return Boolean(statement.elseStatement
-        && collectReturns(statement.elseStatement));
+      if (condition === false) return statement.elseStatement
+        ? collectReturns(statement.elseStatement)
+        : { candidates: [], definitelyReturns: false, mayThrow: false };
       const whenTrue = collectReturns(statement.thenStatement);
-      const whenFalse = Boolean(statement.elseStatement
-        && collectReturns(statement.elseStatement));
-      return whenTrue && whenFalse;
+      const whenFalse = statement.elseStatement ? collectReturns(statement.elseStatement)
+        : { candidates: [], definitelyReturns: false, mayThrow: false };
+      return {
+        candidates: [...whenTrue.candidates, ...whenFalse.candidates],
+        definitelyReturns: whenTrue.definitelyReturns && whenFalse.definitelyReturns,
+        mayThrow: mayThrow(statement.expression) || whenTrue.mayThrow || whenFalse.mayThrow,
+      };
     }
-    return false;
+    if (ts.isTryStatement(statement)) {
+      const tryFlow = collectReturns(statement.tryBlock);
+      const catchFlow = statement.catchClause && tryFlow.mayThrow
+        ? collectReturns(statement.catchClause.block) : undefined;
+      let flow: ReturnFlow = {
+        candidates: [...tryFlow.candidates, ...(catchFlow?.candidates ?? [])],
+        definitelyReturns: tryFlow.definitelyReturns
+          && (!tryFlow.mayThrow || Boolean(catchFlow?.definitelyReturns)),
+        mayThrow: catchFlow ? catchFlow.mayThrow : tryFlow.mayThrow,
+      };
+      if (statement.finallyBlock) {
+        const finallyFlow = collectReturns(statement.finallyBlock);
+        flow = finallyFlow.definitelyReturns ? finallyFlow : {
+          candidates: [...flow.candidates, ...finallyFlow.candidates],
+          definitelyReturns: flow.definitelyReturns,
+          mayThrow: flow.mayThrow || finallyFlow.mayThrow,
+        };
+      }
+      return flow;
+    }
+    return { candidates: [], definitelyReturns: false, mayThrow: mayThrow(statement) };
   };
   const staticallyUnreachable = (node: ts.Node): boolean => {
     let child = node;
@@ -3286,11 +3382,13 @@ function containsCanonicalProviderToken(
       if (ts.isVariableDeclaration(declaration) && declaration.initializer) {
         if (ts.isArrowFunction(declaration.initializer)
           || ts.isFunctionExpression(declaration.initializer)) {
-          if (ts.isBlock(declaration.initializer.body)) collectReturns(declaration.initializer.body);
+          if (ts.isBlock(declaration.initializer.body)) {
+            expressions.push(...collectReturns(declaration.initializer.body).candidates);
+          }
           else expressions.push(declaration.initializer.body);
         } else expressions.push(declaration.initializer);
       } else if (ts.isFunctionDeclaration(declaration) && declaration.body) {
-        collectReturns(declaration.body);
+        expressions.push(...collectReturns(declaration.body).candidates);
       }
     }
     for (const node of referencesBySymbol.get(symbol) ?? []) {
@@ -4680,13 +4778,11 @@ async function analyze(
       if ((ts.isConstructorDeclaration(parent) || ts.isMethodDeclaration(parent)
         || ts.isGetAccessorDeclaration(parent) || ts.isSetAccessorDeclaration(parent))
         && ts.isClassDeclaration(parent.parent)) {
-        const modifiers = ts.canHaveModifiers(parent) ? ts.getModifiers(parent) : undefined;
         const symbol = localClassSymbols.get(parent.parent);
         let insideBody = false;
         for (let current: ts.Node | undefined = node; current && current !== parent;
           current = current.parent) insideBody ||= current === parent.body;
-        if (!modifiers?.some(({ kind }) => kind === ts.SyntaxKind.StaticKeyword)
-          && insideBody && symbol && provablyUnusedLocalClasses.has(symbol)) return true;
+        if (insideBody && symbol && provablyUnusedLocalClasses.has(symbol)) return true;
       }
       const objectMember = (ts.isMethodDeclaration(parent) || ts.isGetAccessorDeclaration(parent)
         || ts.isSetAccessorDeclaration(parent)) && ts.isObjectLiteralExpression(parent.parent)

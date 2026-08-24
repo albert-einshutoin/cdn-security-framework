@@ -3003,6 +3003,31 @@ describe('NestJS auth metadata analyzer', () => {
       }),
       'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
     });
+    const tryFactoryRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const enabled: boolean;
+      function createProviders() {
+        try {
+          if (enabled) throw new Error('fallback');
+          return [];
+        } catch {
+          return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
+        }
+      }
+      @Module({ providers: createProviders() }) class AppModule {}
+      @Controller('try-factory') class TryFactoryController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
     const unresolvedProvidersRoot = workspace(`
       import { Controller, Get, Module, UseGuards } from '@nestjs/common';
       import { JwtAuthGuard } from './auth';
@@ -3498,6 +3523,7 @@ describe('NestJS auth metadata analyzer', () => {
     for (const [name, root] of [
       ['iife', iifeRoot], ['external', externalRoot], ['factory', factoryRoot],
       ['mutable', mutableRoot], ['logical', logicalRoot], ['branch-factory', branchFactoryRoot],
+      ['try-factory', tryFactoryRoot],
       ['unresolved-providers', unresolvedProvidersRoot],
       ['parameter-assigned-providers', parameterAssignedProvidersRoot],
       ['unresolved-namespace-providers', unresolvedNamespaceProvidersRoot],
@@ -3762,6 +3788,71 @@ describe('NestJS auth metadata analyzer', () => {
       expect(unreachableExecution.result.diagnostics).not.toEqual(expect.arrayContaining([
         expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
       ]));
+    }
+  });
+
+  test('resolves provider factory try flows conservatively', async () => {
+    for (const { before, after, body, expected } of [
+      { before: '', after: '', expected: 'alternatives', body: `
+        try { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+        finally { return []; }
+      ` },
+      { before: '', after: '', expected: 'alternatives', body: `
+        try { return []; }
+        catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+      ` },
+      { before: 'declare function dangerous(): void;', after: '', expected: 'alternatives', body: `
+        try { return [() => dangerous()]; }
+        catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+      ` },
+      { before: 'declare const providers: unknown[];', after: '', expected: 'unknown', body: `
+        try { return providers; }
+        catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+      ` },
+      { before: '', after: 'const providers: unknown[] = [];', expected: 'unknown', body: `
+        try { return providers; }
+        catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+      ` },
+      { before: '', after: '', expected: 'alternatives', body: `
+        const providers: unknown[] = [];
+        try { return providers; }
+        catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+      ` },
+      { before: '', after: '', expected: 'alternatives', body: `
+        try { return providers; }
+        catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+        var providers: unknown[] = [];
+      ` },
+      { before: '', after: '', expected: 'alternatives', body: `
+        let providers: unknown[];
+        try { return providers; }
+        catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+      ` },
+    ]) {
+      const root = workspace(`
+        import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+        import { APP_GUARD } from '@nestjs/core';
+        import { JwtAuthGuard } from './auth';
+        ${before}
+        function createProviders() { ${body} }
+        @Module({ providers: createProviders() }) class AppModule {}
+        ${after}
+        @Controller('provider-flow') class ProviderFlowController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, {
+        'src/auth.ts': 'export class JwtAuthGuard {}\n',
+        'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
+        'node_modules/@nestjs/core/package.json': JSON.stringify({
+          name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+        }),
+        'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+      });
+      const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+      expect(execution.status).toBe('success');
+      if (execution.status === 'success') {
+        expect(execution.result.contract.operations[0].auth.mode).toBe(expected);
+      }
     }
   });
 
@@ -5458,6 +5549,36 @@ describe('NestJS auth metadata analyzer', () => {
     expect(execution.status).toBe('success');
     if (execution.status !== 'success') return;
     expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('ignores global-guard calls in static methods of unused classes', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import type { INestApplication } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const app: INestApplication;
+      declare const guard: unknown;
+      class Unused {
+        static register() { app.useGlobalGuards(guard); }
+      }
+      @Controller('unused-static') class UnusedStaticController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('alternatives');
   });
 
   test('fails closed when duplicate routes have conflicting auth metadata', async () => {
