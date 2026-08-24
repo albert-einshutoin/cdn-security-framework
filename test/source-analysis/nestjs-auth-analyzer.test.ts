@@ -968,6 +968,9 @@ describe('NestJS auth metadata analyzer', () => {
         @Get('loop') @auth.Loop(flag) loop() {}
         @Get('deep') @auth.Deep(flag) deep() {}
         @Get('stored') @auth.Stored stored() {}
+        @Get('returned') @auth.Returned() returned() {}
+        @Get('tagged') @auth.Tagged() tagged() {}
+        @Get('constructed') @auth.Constructed() constructed() {}
       }
     `, {
       'src/guards.ts': 'export class JwtAuthGuard {}\n',
@@ -985,6 +988,13 @@ describe('NestJS auth metadata analyzer', () => {
         export let Stored: MethodDecorator = () => {};
         function install(value: MethodDecorator) { Stored = value; }
         install(UseGuards(ApiKeyGuard));
+        export const Returned = (): MethodDecorator => (target, key, descriptor) => {
+          UseGuards(ApiKeyGuard)(target, key!, descriptor!);
+        };
+        declare const tag: (strings: TemplateStringsArray) => MethodDecorator;
+        declare const Decorator: { new(): MethodDecorator };
+        export const Tagged = (): MethodDecorator => tag\`guard\`;
+        export const Constructed = (): MethodDecorator => new Decorator();
       `,
       'src/api-key.ts': 'export class ApiKeyGuard {}\n',
     });
@@ -3678,8 +3688,14 @@ describe('NestJS auth metadata analyzer', () => {
       const register = app.useGlobalGuards.bind(app);
       const registerAlias = register;
       registerAlias(guard);
+      const prebound = app.useGlobalGuards.bind(app, guard);
+      prebound();
+      prebound.call(undefined);
+      prebound.apply(undefined, []);
       const unbound = app.useGlobalGuards;
       unbound.call(app, guard);
+      let { useGlobalGuards } = app;
+      useGlobalGuards.call(app, guard);
       @Controller('bound') class BoundController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }
@@ -3712,6 +3728,9 @@ describe('NestJS auth metadata analyzer', () => {
       declare const guard: unknown;
       app.useGlobalGuards.call(app, guard);
       app.useGlobalGuards.apply(app, [guard]);
+      app.useGlobalGuards(...[,]);
+      app.useGlobalGuards.apply(app, [,] as never);
+      app.useGlobalGuards.call.call(app.useGlobalGuards, app, guard);
       @Controller('call-apply') class CallApplyController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }
@@ -3731,6 +3750,47 @@ describe('NestJS auth metadata analyzer', () => {
     if (execution.status !== 'success') return;
     expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
     expect(execution.result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+  });
+
+  test('ignores empty useGlobalGuards registrations', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import type { INestApplication } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const app: INestApplication;
+      app.useGlobalGuards();
+      app.useGlobalGuards(...[]);
+      app.useGlobalGuards.call(app);
+      app.useGlobalGuards.call(app, ...[]);
+      app.useGlobalGuards.call.call(app.useGlobalGuards, app);
+      app.useGlobalGuards.call.bind(app.useGlobalGuards, app)();
+      app.useGlobalGuards.apply(app, []);
+      app.useGlobalGuards.apply(app, null as never);
+      app.useGlobalGuards.apply(app, undefined as never);
+      let { useGlobalGuards } = app;
+      useGlobalGuards = (..._guards: unknown[]) => app;
+      useGlobalGuards({});
+      @Controller('empty-global') class EmptyGlobalController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(execution.result.diagnostics).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
   });

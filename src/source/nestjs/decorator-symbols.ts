@@ -711,7 +711,20 @@ export function resolveStaticDecoratorWrapperCall(
     if (depth > 64) return { dynamic: true };
     const expression = unwrapExpression(input);
     if (ts.isCallExpression(expression)) return { call: expression, dynamic: false };
-    if (ts.isFunctionLike(expression) || ts.isClassLike(expression)) return undefined;
+    if (ts.isFunctionLike(expression)) {
+      if (!expression.body) return { dynamic: true };
+      const nodes: ts.Node[] = [expression.body];
+      while (nodes.length > 0) {
+        const node = nodes.pop()!;
+        check();
+        if (ts.isCallExpression(node) || ts.isNewExpression(node)
+          || ts.isTaggedTemplateExpression(node)) return { dynamic: true };
+        if (node !== expression.body && ts.isFunctionLike(node)) continue;
+        ts.forEachChild(node, (child) => { nodes.push(child); });
+      }
+      return undefined;
+    }
+    if (ts.isClassLike(expression)) return undefined;
     if (ts.isIdentifier(expression)) {
       const valueSymbol = targetSymbol(expression, checker, check);
       if (!valueSymbol || valueSymbol === UNKNOWN_NESTJS_ROUTE || resolving.has(valueSymbol)) {
@@ -2999,36 +3012,158 @@ export function isNestJsUseGlobalGuardsCall(
   check: () => void,
   projectSources?: ReadonlySet<ts.SourceFile>,
 ): boolean {
-  let expression = resolveConstInitializer(call.expression, checker, check, projectSources);
-  if (ts.isCallExpression(expression)) {
-    const bind = unwrapExpression(expression.expression);
-    const bindName = bind && (ts.isPropertyAccessExpression(bind)
-      ? bind.name.text
-      : ts.isElementAccessExpression(bind) && bind.argumentExpression
-        ? resolveStaticPropertyKey(bind.argumentExpression, checker, check) : undefined);
-    if (bindName === 'bind'
-      && (ts.isPropertyAccessExpression(bind) || ts.isElementAccessExpression(bind))) {
-      expression = unwrapExpression(bind.expression);
+  const flattenArguments = (args: readonly ts.Expression[]): ts.Expression[] | undefined => {
+    const pending = [...args];
+    const flattened: ts.Expression[] = [];
+    let steps = 0;
+    while (pending.length > 0) {
+      check();
+      if (steps++ >= 64) return undefined;
+      const argument = pending.shift()!;
+      if (!ts.isSpreadElement(argument)) {
+        flattened.push(argument);
+        continue;
+      }
+      const spread = unwrapExpression(argument.expression);
+      if (!ts.isArrayLiteralExpression(spread)) return undefined;
+      if (spread.elements.some(ts.isOmittedExpression)) return undefined;
+      pending.unshift(...spread.elements.filter((element): element is ts.Expression => (
+        !ts.isOmittedExpression(element)
+      )));
     }
+    return flattened;
+  };
+  const isDefinitelyNullish = (input: ts.Expression): boolean => {
+    const value = unwrapExpression(input);
+    if (value.kind === ts.SyntaxKind.NullKeyword || ts.isVoidExpression(value)) return true;
+    return ts.isIdentifier(value) && value.text === 'undefined'
+      && !checker.getSymbolAtLocation(value)?.declarations?.length;
+  };
+  let effectiveArguments = flattenArguments(call.arguments);
+  let expression = resolveConstInitializer(call.expression, checker, check, projectSources);
+  let depthLimitReached = false;
+  for (let depth = 0; depth <= 64; depth += 1) {
+    check();
+    if (depth === 64) {
+      depthLimitReached = true;
+      break;
+    }
+    if (ts.isCallExpression(expression)) {
+      const bind = unwrapExpression(expression.expression);
+      const bindName = ts.isPropertyAccessExpression(bind) ? bind.name.text
+        : ts.isElementAccessExpression(bind) && bind.argumentExpression
+          ? resolveStaticPropertyKey(bind.argumentExpression, checker, check) : undefined;
+      if (bindName === 'bind'
+        && (ts.isPropertyAccessExpression(bind) || ts.isElementAccessExpression(bind))) {
+        const bound = flattenArguments(expression.arguments.slice(1));
+        effectiveArguments = bound && effectiveArguments
+          ? [...bound, ...effectiveArguments] : undefined;
+        expression = resolveConstInitializer(bind.expression, checker, check, projectSources);
+        continue;
+      }
+    }
+    const invocation = ts.isPropertyAccessExpression(expression) ? expression.name.text
+      : ts.isElementAccessExpression(expression) && expression.argumentExpression
+        ? resolveStaticPropertyKey(expression.argumentExpression, checker, check) : undefined;
+    if ((invocation === 'call' || invocation === 'apply')
+      && (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression))) {
+      if (invocation === 'call') {
+        effectiveArguments = effectiveArguments?.slice(1);
+      } else if (effectiveArguments) {
+        const argument = effectiveArguments[1];
+        if (!argument || isDefinitelyNullish(argument)) effectiveArguments = [];
+        else {
+          const guards = unwrapExpression(argument);
+          effectiveArguments = ts.isArrayLiteralExpression(guards)
+            ? guards.elements.some(ts.isOmittedExpression) ? undefined
+              : flattenArguments(guards.elements.filter((element): element is ts.Expression => (
+                !ts.isOmittedExpression(element)
+              ))) : undefined;
+        }
+      }
+      expression = resolveConstInitializer(expression.expression, checker, check, projectSources);
+      continue;
+    }
+    break;
   }
-  const invocation = ts.isPropertyAccessExpression(expression)
-    ? expression.name.text
-    : ts.isElementAccessExpression(expression) && expression.argumentExpression
-      ? resolveStaticPropertyKey(expression.argumentExpression, checker, check) : undefined;
-  if ((invocation === 'call' || invocation === 'apply')
-    && (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression))) {
-    expression = resolveConstInitializer(expression.expression, checker, check, projectSources);
+  if (depthLimitReached) {
+    const nodes: ts.Node[] = [expression];
+    let steps = 0;
+    while (nodes.length > 0 && steps++ < 4096) {
+      check();
+      const node = nodes.pop()!;
+      if (ts.isCallExpression(node)) {
+        nodes.push(node.expression);
+        continue;
+      }
+      if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
+        const key = ts.isPropertyAccessExpression(node) ? node.name.text
+          : node.argumentExpression
+            ? resolveStaticPropertyKey(node.argumentExpression, checker, check) : undefined;
+        if (key === 'useGlobalGuards') {
+          const symbol = checker.getNonNullableType(
+            checker.getTypeAtLocation(node.expression),
+          ).getProperty(key);
+          if (matchesConsumerModule(node, symbol, '@nestjs/common')
+            || matchesConsumerModule(node, symbol, '@nestjs/core')) return true;
+        }
+        nodes.push(node.expression);
+        continue;
+      } else if (ts.isIdentifier(node)) {
+        const resolved = resolveConstInitializer(node, checker, check, projectSources);
+        if (resolved !== node) nodes.push(resolved);
+        const binding = checker.getSymbolAtLocation(node)?.declarations?.find(ts.isBindingElement);
+        const pattern = binding?.parent;
+        const declaration = pattern && ts.isObjectBindingPattern(pattern)
+          && ts.isVariableDeclaration(pattern.parent) ? pattern.parent : undefined;
+        const key = binding?.propertyName && (ts.isIdentifier(binding.propertyName)
+          || ts.isStringLiteral(binding.propertyName))
+          ? binding.propertyName.text
+          : binding && ts.isIdentifier(binding.name) ? binding.name.text : undefined;
+        if (key === 'useGlobalGuards' && declaration?.initializer) {
+          const bindingSymbol = checker.getSymbolAtLocation(node);
+          if (!bindingSymbol || !projectSources || callableBindingMayBeWritten(
+            bindingSymbol, bindingSymbol.declarations ?? [], checker, projectSources, check,
+          )) continue;
+          const symbol = checker.getNonNullableType(
+            checker.getTypeAtLocation(declaration.initializer),
+          ).getProperty(key);
+          if (matchesConsumerModule(node, symbol, '@nestjs/common')
+            || matchesConsumerModule(node, symbol, '@nestjs/core')) return true;
+        }
+        continue;
+      }
+      ts.forEachChild(node, (child) => { nodes.push(child); });
+    }
+    return nodes.length > 0;
   }
-  const property = ts.isPropertyAccessExpression(expression)
+  let property = ts.isPropertyAccessExpression(expression)
     ? expression.name.text
     : ts.isElementAccessExpression(expression) && expression.argumentExpression
       ? resolveStaticPropertyKey(expression.argumentExpression, checker, check)
       : undefined;
-  if (property !== 'useGlobalGuards'
-    || (!ts.isPropertyAccessExpression(expression) && !ts.isElementAccessExpression(expression))) return false;
-  const symbol = ts.isPropertyAccessExpression(expression)
-    ? checker.getSymbolAtLocation(expression.name)
-    : checker.getNonNullableType(checker.getTypeAtLocation(expression.expression)).getProperty(property);
+  let receiver: ts.Expression | undefined = (ts.isPropertyAccessExpression(expression)
+    || ts.isElementAccessExpression(expression))
+    ? expression.expression : undefined;
+  if (!receiver && ts.isIdentifier(expression)) {
+    const binding = checker.getSymbolAtLocation(expression)?.declarations?.find(ts.isBindingElement);
+    const pattern = binding?.parent;
+    const declaration = pattern && ts.isObjectBindingPattern(pattern)
+      && ts.isVariableDeclaration(pattern.parent) ? pattern.parent : undefined;
+    if (binding && declaration?.initializer && ts.isVariableDeclarationList(declaration.parent)) {
+      const bindingSymbol = checker.getSymbolAtLocation(expression);
+      if (!bindingSymbol || !projectSources || callableBindingMayBeWritten(
+        bindingSymbol, bindingSymbol.declarations ?? [], checker, projectSources, check,
+      )) return false;
+      property = binding.propertyName && (ts.isIdentifier(binding.propertyName)
+        || ts.isStringLiteral(binding.propertyName))
+        ? binding.propertyName.text : ts.isIdentifier(binding.name) ? binding.name.text : undefined;
+      receiver = declaration.initializer;
+    }
+  }
+  const hasGuardArgument = !effectiveArguments || effectiveArguments.length > 0;
+  if (!hasGuardArgument || property !== 'useGlobalGuards' || !receiver) return false;
+  const symbol = checker.getNonNullableType(checker.getTypeAtLocation(receiver)).getProperty(property);
   return matchesConsumerModule(expression, symbol, '@nestjs/common')
     || matchesConsumerModule(expression, symbol, '@nestjs/core');
 }

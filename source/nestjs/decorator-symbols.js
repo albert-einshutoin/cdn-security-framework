@@ -625,7 +625,23 @@ function resolveStaticDecoratorWrapperCall(call, checker, projectSources, check)
         const expression = unwrapExpression(input);
         if (typescript_1.default.isCallExpression(expression))
             return { call: expression, dynamic: false };
-        if (typescript_1.default.isFunctionLike(expression) || typescript_1.default.isClassLike(expression))
+        if (typescript_1.default.isFunctionLike(expression)) {
+            if (!expression.body)
+                return { dynamic: true };
+            const nodes = [expression.body];
+            while (nodes.length > 0) {
+                const node = nodes.pop();
+                check();
+                if (typescript_1.default.isCallExpression(node) || typescript_1.default.isNewExpression(node)
+                    || typescript_1.default.isTaggedTemplateExpression(node))
+                    return { dynamic: true };
+                if (node !== expression.body && typescript_1.default.isFunctionLike(node))
+                    continue;
+                typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+            }
+            return undefined;
+        }
+        if (typescript_1.default.isClassLike(expression))
             return undefined;
         if (typescript_1.default.isIdentifier(expression)) {
             const valueSymbol = targetSymbol(expression, checker, check);
@@ -2962,37 +2978,159 @@ function isStaticShorthandSymbolFrom(shorthand, checker, check, moduleName, impo
     return containsStaticSymbolFrom(expression, checker, check, moduleName, importedName, projectSources);
 }
 function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
-    let expression = resolveConstInitializer(call.expression, checker, check, projectSources);
-    if (typescript_1.default.isCallExpression(expression)) {
-        const bind = unwrapExpression(expression.expression);
-        const bindName = bind && (typescript_1.default.isPropertyAccessExpression(bind)
-            ? bind.name.text
-            : typescript_1.default.isElementAccessExpression(bind) && bind.argumentExpression
-                ? resolveStaticPropertyKey(bind.argumentExpression, checker, check) : undefined);
-        if (bindName === 'bind'
-            && (typescript_1.default.isPropertyAccessExpression(bind) || typescript_1.default.isElementAccessExpression(bind))) {
-            expression = unwrapExpression(bind.expression);
+    const flattenArguments = (args) => {
+        const pending = [...args];
+        const flattened = [];
+        let steps = 0;
+        while (pending.length > 0) {
+            check();
+            if (steps++ >= 64)
+                return undefined;
+            const argument = pending.shift();
+            if (!typescript_1.default.isSpreadElement(argument)) {
+                flattened.push(argument);
+                continue;
+            }
+            const spread = unwrapExpression(argument.expression);
+            if (!typescript_1.default.isArrayLiteralExpression(spread))
+                return undefined;
+            if (spread.elements.some(typescript_1.default.isOmittedExpression))
+                return undefined;
+            pending.unshift(...spread.elements.filter((element) => (!typescript_1.default.isOmittedExpression(element))));
         }
+        return flattened;
+    };
+    const isDefinitelyNullish = (input) => {
+        const value = unwrapExpression(input);
+        if (value.kind === typescript_1.default.SyntaxKind.NullKeyword || typescript_1.default.isVoidExpression(value))
+            return true;
+        return typescript_1.default.isIdentifier(value) && value.text === 'undefined'
+            && !checker.getSymbolAtLocation(value)?.declarations?.length;
+    };
+    let effectiveArguments = flattenArguments(call.arguments);
+    let expression = resolveConstInitializer(call.expression, checker, check, projectSources);
+    let depthLimitReached = false;
+    for (let depth = 0; depth <= 64; depth += 1) {
+        check();
+        if (depth === 64) {
+            depthLimitReached = true;
+            break;
+        }
+        if (typescript_1.default.isCallExpression(expression)) {
+            const bind = unwrapExpression(expression.expression);
+            const bindName = typescript_1.default.isPropertyAccessExpression(bind) ? bind.name.text
+                : typescript_1.default.isElementAccessExpression(bind) && bind.argumentExpression
+                    ? resolveStaticPropertyKey(bind.argumentExpression, checker, check) : undefined;
+            if (bindName === 'bind'
+                && (typescript_1.default.isPropertyAccessExpression(bind) || typescript_1.default.isElementAccessExpression(bind))) {
+                const bound = flattenArguments(expression.arguments.slice(1));
+                effectiveArguments = bound && effectiveArguments
+                    ? [...bound, ...effectiveArguments] : undefined;
+                expression = resolveConstInitializer(bind.expression, checker, check, projectSources);
+                continue;
+            }
+        }
+        const invocation = typescript_1.default.isPropertyAccessExpression(expression) ? expression.name.text
+            : typescript_1.default.isElementAccessExpression(expression) && expression.argumentExpression
+                ? resolveStaticPropertyKey(expression.argumentExpression, checker, check) : undefined;
+        if ((invocation === 'call' || invocation === 'apply')
+            && (typescript_1.default.isPropertyAccessExpression(expression) || typescript_1.default.isElementAccessExpression(expression))) {
+            if (invocation === 'call') {
+                effectiveArguments = effectiveArguments?.slice(1);
+            }
+            else if (effectiveArguments) {
+                const argument = effectiveArguments[1];
+                if (!argument || isDefinitelyNullish(argument))
+                    effectiveArguments = [];
+                else {
+                    const guards = unwrapExpression(argument);
+                    effectiveArguments = typescript_1.default.isArrayLiteralExpression(guards)
+                        ? guards.elements.some(typescript_1.default.isOmittedExpression) ? undefined
+                            : flattenArguments(guards.elements.filter((element) => (!typescript_1.default.isOmittedExpression(element)))) : undefined;
+                }
+            }
+            expression = resolveConstInitializer(expression.expression, checker, check, projectSources);
+            continue;
+        }
+        break;
     }
-    const invocation = typescript_1.default.isPropertyAccessExpression(expression)
-        ? expression.name.text
-        : typescript_1.default.isElementAccessExpression(expression) && expression.argumentExpression
-            ? resolveStaticPropertyKey(expression.argumentExpression, checker, check) : undefined;
-    if ((invocation === 'call' || invocation === 'apply')
-        && (typescript_1.default.isPropertyAccessExpression(expression) || typescript_1.default.isElementAccessExpression(expression))) {
-        expression = resolveConstInitializer(expression.expression, checker, check, projectSources);
+    if (depthLimitReached) {
+        const nodes = [expression];
+        let steps = 0;
+        while (nodes.length > 0 && steps++ < 4096) {
+            check();
+            const node = nodes.pop();
+            if (typescript_1.default.isCallExpression(node)) {
+                nodes.push(node.expression);
+                continue;
+            }
+            if (typescript_1.default.isPropertyAccessExpression(node) || typescript_1.default.isElementAccessExpression(node)) {
+                const key = typescript_1.default.isPropertyAccessExpression(node) ? node.name.text
+                    : node.argumentExpression
+                        ? resolveStaticPropertyKey(node.argumentExpression, checker, check) : undefined;
+                if (key === 'useGlobalGuards') {
+                    const symbol = checker.getNonNullableType(checker.getTypeAtLocation(node.expression)).getProperty(key);
+                    if (matchesConsumerModule(node, symbol, '@nestjs/common')
+                        || matchesConsumerModule(node, symbol, '@nestjs/core'))
+                        return true;
+                }
+                nodes.push(node.expression);
+                continue;
+            }
+            else if (typescript_1.default.isIdentifier(node)) {
+                const resolved = resolveConstInitializer(node, checker, check, projectSources);
+                if (resolved !== node)
+                    nodes.push(resolved);
+                const binding = checker.getSymbolAtLocation(node)?.declarations?.find(typescript_1.default.isBindingElement);
+                const pattern = binding?.parent;
+                const declaration = pattern && typescript_1.default.isObjectBindingPattern(pattern)
+                    && typescript_1.default.isVariableDeclaration(pattern.parent) ? pattern.parent : undefined;
+                const key = binding?.propertyName && (typescript_1.default.isIdentifier(binding.propertyName)
+                    || typescript_1.default.isStringLiteral(binding.propertyName))
+                    ? binding.propertyName.text
+                    : binding && typescript_1.default.isIdentifier(binding.name) ? binding.name.text : undefined;
+                if (key === 'useGlobalGuards' && declaration?.initializer) {
+                    const bindingSymbol = checker.getSymbolAtLocation(node);
+                    if (!bindingSymbol || !projectSources || callableBindingMayBeWritten(bindingSymbol, bindingSymbol.declarations ?? [], checker, projectSources, check))
+                        continue;
+                    const symbol = checker.getNonNullableType(checker.getTypeAtLocation(declaration.initializer)).getProperty(key);
+                    if (matchesConsumerModule(node, symbol, '@nestjs/common')
+                        || matchesConsumerModule(node, symbol, '@nestjs/core'))
+                        return true;
+                }
+                continue;
+            }
+            typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+        }
+        return nodes.length > 0;
     }
-    const property = typescript_1.default.isPropertyAccessExpression(expression)
+    let property = typescript_1.default.isPropertyAccessExpression(expression)
         ? expression.name.text
         : typescript_1.default.isElementAccessExpression(expression) && expression.argumentExpression
             ? resolveStaticPropertyKey(expression.argumentExpression, checker, check)
             : undefined;
-    if (property !== 'useGlobalGuards'
-        || (!typescript_1.default.isPropertyAccessExpression(expression) && !typescript_1.default.isElementAccessExpression(expression)))
+    let receiver = (typescript_1.default.isPropertyAccessExpression(expression)
+        || typescript_1.default.isElementAccessExpression(expression))
+        ? expression.expression : undefined;
+    if (!receiver && typescript_1.default.isIdentifier(expression)) {
+        const binding = checker.getSymbolAtLocation(expression)?.declarations?.find(typescript_1.default.isBindingElement);
+        const pattern = binding?.parent;
+        const declaration = pattern && typescript_1.default.isObjectBindingPattern(pattern)
+            && typescript_1.default.isVariableDeclaration(pattern.parent) ? pattern.parent : undefined;
+        if (binding && declaration?.initializer && typescript_1.default.isVariableDeclarationList(declaration.parent)) {
+            const bindingSymbol = checker.getSymbolAtLocation(expression);
+            if (!bindingSymbol || !projectSources || callableBindingMayBeWritten(bindingSymbol, bindingSymbol.declarations ?? [], checker, projectSources, check))
+                return false;
+            property = binding.propertyName && (typescript_1.default.isIdentifier(binding.propertyName)
+                || typescript_1.default.isStringLiteral(binding.propertyName))
+                ? binding.propertyName.text : typescript_1.default.isIdentifier(binding.name) ? binding.name.text : undefined;
+            receiver = declaration.initializer;
+        }
+    }
+    const hasGuardArgument = !effectiveArguments || effectiveArguments.length > 0;
+    if (!hasGuardArgument || property !== 'useGlobalGuards' || !receiver)
         return false;
-    const symbol = typescript_1.default.isPropertyAccessExpression(expression)
-        ? checker.getSymbolAtLocation(expression.name)
-        : checker.getNonNullableType(checker.getTypeAtLocation(expression.expression)).getProperty(property);
+    const symbol = checker.getNonNullableType(checker.getTypeAtLocation(receiver)).getProperty(property);
     return matchesConsumerModule(expression, symbol, '@nestjs/common')
         || matchesConsumerModule(expression, symbol, '@nestjs/core');
 }
