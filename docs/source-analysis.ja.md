@@ -62,6 +62,9 @@ option、source/標準Library content、TypeScript version、Loader versionをdi
 
 ## NestJS認証Metadata
 
+Runnerは`cdn-security-framework/source-analysis`、NestJS Analyzerは
+`cdn-security-framework/source/nestjs`からimportします。
+
 `createNestJsSourceAnalyzer()`は検証済みのprogrammatic auth optionを受け取ります。
 同じplain data構造を`schemas/nestjs-source-analysis-options.schema.json`で定義します。
 AnalyzerはJavaScript設定をloadせず、Decoratorも実行しません。意味を持つのは、設定で

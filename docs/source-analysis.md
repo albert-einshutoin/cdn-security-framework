@@ -75,6 +75,9 @@ Program may be reused internally, but cache-free execution remains correct.
 
 ## NestJS authentication metadata
 
+Import the runner from `cdn-security-framework/source-analysis` and the NestJS
+analyzer from `cdn-security-framework/source/nestjs`.
+
 `createNestJsSourceAnalyzer()` accepts a validated programmatic auth option;
 `schemas/nestjs-source-analysis-options.schema.json` describes the same plain-data
 shape. The analyzer never loads JavaScript configuration or executes decorators.
