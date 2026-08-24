@@ -50,6 +50,7 @@
     "./schemas/finding-v1.schema.json": "./schemas/finding-v1.schema.json",
     "./schemas/finding-exceptions-v1.schema.json": "./schemas/finding-exceptions-v1.schema.json",
     "./schemas/contract-diff-report-v1.schema.json": "./schemas/contract-diff-report-v1.schema.json",
+    "./schemas/nestjs-source-analysis-options.schema.json": "./schemas/nestjs-source-analysis-options.schema.json",
     "./bin/cli": "./bin/cli.js",
     "./bin/cli.js": "./bin/cli.js"
   },

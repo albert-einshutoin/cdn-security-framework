@@ -43,7 +43,7 @@ function workspace(source: string, extraFiles: Record<string, string> = {}): str
     export declare function Get(path?: string): MethodDecorator;
     export declare function UseGuards(...guards: unknown[]): ClassDecorator & MethodDecorator;
     export declare function applyDecorators(...decorators: Array<ClassDecorator | MethodDecorator>): ClassDecorator & MethodDecorator;
-    export declare function Module(metadata: { providers?: readonly unknown[] }): ClassDecorator;
+    export declare function Module(metadata: { imports?: readonly unknown[]; providers?: readonly unknown[] }): ClassDecorator;
   `);
   const registersProviders = /\b(?:const|let|var)\s+providers\b/u.test(source);
   write(root, 'src/controller.ts', registersProviders ? `
@@ -900,7 +900,7 @@ describe('NestJS auth metadata analyzer', () => {
       const overrideExecution = await runSourceAnalyzer(
         createNestJsSourceAnalyzer(authConfig), context(overrideRoot),
       );
-      expect(overrideExecution.status).toBe('success');
+      expect(overrideExecution.status, JSON.stringify(overrideExecution)).toBe('success');
       if (overrideExecution.status === 'success') {
         expect(overrideExecution.result.contract.operations[0].auth.mode, `spread fixture ${index}`)
           .toBe(expected);
@@ -2401,6 +2401,157 @@ describe('NestJS auth metadata analyzer', () => {
       expect.objectContaining({ code: 'SOURCE_ANALYZER_DYNAMIC_ROUTE' }),
       expect.objectContaining({ code: 'SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA' }),
     ]));
+  });
+
+  test('fails closed on synchronous provider factories and external module imports', async () => {
+    const iifeRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({ providers: (() => [{ provide: APP_GUARD, useClass: JwtAuthGuard }])() })
+      class AppModule {}
+      @Controller('iife') class IifeController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const externalRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { ExternalModule } from 'external-module';
+      import { JwtAuthGuard } from './auth';
+      @Module({ imports: [ExternalModule] }) class AppModule {}
+      @Controller('external-module') class ExternalModuleController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-module/index.d.ts': 'export declare class ExternalModule {}\n',
+      'node_modules/external-module/package.json': JSON.stringify({
+        name: 'external-module', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const factoryRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { ExternalModule } from 'external-module';
+      import { JwtAuthGuard } from './auth';
+      function createImports() { return [ExternalModule]; }
+      @Module({ imports: createImports() }) class AppModule {}
+      @Controller('factory-module') class FactoryModuleController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-module/index.d.ts': 'export declare class ExternalModule {}\n',
+      'node_modules/external-module/package.json': JSON.stringify({
+        name: 'external-module', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const mutableRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { ExternalModule } from 'external-module';
+      import { JwtAuthGuard } from './auth';
+      let moduleImports = [ExternalModule];
+      @Module({ imports: moduleImports }) class AppModule {}
+      @Controller('mutable-module') class MutableModuleController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-module/index.d.ts': 'export declare class ExternalModule {}\n',
+      'node_modules/external-module/package.json': JSON.stringify({
+        name: 'external-module', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const logicalRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { ExternalModule } from 'external-module';
+      import { JwtAuthGuard } from './auth';
+      declare const enabled: boolean;
+      @Module({ imports: [enabled && ExternalModule] }) class AppModule {}
+      @Controller('logical-module') class LogicalModuleController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-module/index.d.ts': 'export declare class ExternalModule {}\n',
+      'node_modules/external-module/package.json': JSON.stringify({
+        name: 'external-module', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+
+    for (const [name, root] of [
+      ['iife', iifeRoot], ['external', externalRoot], ['factory', factoryRoot],
+      ['mutable', mutableRoot], ['logical', logicalRoot],
+    ] as const) {
+      const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+      expect(execution.status, `${name}: ${JSON.stringify(execution)}`).toBe('success');
+      if (execution.status !== 'success') continue;
+      expect(execution.result.contract.operations[0].auth.mode, name).toBe('unknown');
+      expect(execution.result.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+      ]));
+    }
+
+    const namespaceRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import * as Features from './features';
+      import { JwtAuthGuard } from './auth';
+      @Module({ imports: [Features.FeatureModule] }) class AppModule {}
+      @Controller('namespace-module') class NamespaceModuleController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'src/features.ts': 'export class FeatureModule {}\n',
+    });
+    const namespaceExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(namespaceRoot),
+    );
+    expect(namespaceExecution.status).toBe('success');
+    if (namespaceExecution.status === 'success') {
+      expect(namespaceExecution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
+
+    const unreachableRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { ExternalModule } from 'external-module';
+      import { JwtAuthGuard } from './auth';
+      class LocalModule {}
+      const selected = LocalModule;
+      @Module({ imports: [
+        false && ExternalModule,
+        true || ExternalModule,
+        true ? LocalModule : ExternalModule,
+        LocalModule || ExternalModule,
+        LocalModule ? LocalModule : ExternalModule,
+        selected || ExternalModule,
+      ] }) class AppModule {}
+      @Controller('unreachable-module') class UnreachableModuleController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-module/index.d.ts': 'export declare class ExternalModule {}\n',
+      'node_modules/external-module/package.json': JSON.stringify({
+        name: 'external-module', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unreachableExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(unreachableRoot),
+    );
+    expect(unreachableExecution.status).toBe('success');
+    if (unreachableExecution.status === 'success') {
+      expect(unreachableExecution.result.contract.operations[0].auth.mode).toBe('alternatives');
+      expect(unreachableExecution.result.diagnostics).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+      ]));
+    }
   });
 
   test('fails closed on a bound useGlobalGuards alias', async () => {

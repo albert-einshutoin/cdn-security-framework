@@ -277,6 +277,7 @@ function registeredProviderObjects(
 ): {
   providers: ReadonlySet<ts.ObjectLiteralExpression>;
   candidates: readonly ts.Expression[];
+  externalModuleImport?: ts.Expression;
 } {
   const providers = new Set<ts.ObjectLiteralExpression>();
   const candidates: ts.Expression[] = [];
@@ -338,6 +339,10 @@ function registeredProviderObjects(
     }
     if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
     if (!symbol || seen.has(symbol)) return {};
+    if (symbol.declarations?.some((declaration) => (
+      (ts.isClassLike(declaration) || ts.isFunctionDeclaration(declaration))
+      && projectSources.has(declaration.getSourceFile())
+    ))) return { truthy: true, nullish: false };
     const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
     const declaration = declarations.length === 1 ? declarations[0] : undefined;
     if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
@@ -386,9 +391,22 @@ function registeredProviderObjects(
       const right = collect(expression.right, new Set(seen), depth + 1);
       return left && right;
     }
-    if (ts.isCallExpression(expression) && expression.arguments.length === 0
-      && ts.isIdentifier(expression.expression)) {
-      let symbol = checker.getSymbolAtLocation(expression.expression);
+    if (ts.isCallExpression(expression) && expression.arguments.length === 0) {
+      let callee: ts.Expression = expression.expression;
+      while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+      if ((ts.isArrowFunction(callee) || ts.isFunctionExpression(callee))
+        && callee.parameters.length === 0
+        && !callee.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.AsyncKeyword)
+        && (!ts.isFunctionExpression(callee) || callee.asteriskToken === undefined)) {
+        const returned = ts.isBlock(callee.body)
+          && callee.body.statements.length === 1
+          && ts.isReturnStatement(callee.body.statements[0])
+          ? callee.body.statements[0].expression
+          : ts.isBlock(callee.body) ? undefined : callee.body;
+        return returned ? collect(returned, seen, depth + 1) : false;
+      }
+      if (!ts.isIdentifier(callee)) return false;
+      let symbol = checker.getSymbolAtLocation(callee);
       if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
       const declarations = symbol?.declarations?.filter((candidate): candidate is ts.FunctionDeclaration => (
         ts.isFunctionDeclaration(candidate) && candidate.body !== undefined
@@ -419,6 +437,100 @@ function registeredProviderObjects(
     collect(declaration.initializer, seen, depth + 1);
     return false;
   };
+  const isExternalModuleReference = (
+    input: ts.Expression,
+    seen = new Set<ts.Symbol>(),
+    depth = 0,
+  ): boolean => {
+    check();
+    if (depth > 64) return true;
+    let expression = input;
+    while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+      || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+      || ts.isNonNullExpression(expression)) expression = expression.expression;
+    if (ts.isArrayLiteralExpression(expression)) {
+      return expression.elements.some((element) => isExternalModuleReference(
+        ts.isSpreadElement(element) ? element.expression : element, new Set(seen), depth + 1,
+      ));
+    }
+    if (ts.isConditionalExpression(expression)) {
+      const state = staticState(expression.condition);
+      if (state.truthy === true) {
+        return isExternalModuleReference(expression.whenTrue, seen, depth + 1);
+      }
+      if (state.truthy === false) {
+        return isExternalModuleReference(expression.whenFalse, seen, depth + 1);
+      }
+      return isExternalModuleReference(expression.whenTrue, new Set(seen), depth + 1)
+        || isExternalModuleReference(expression.whenFalse, new Set(seen), depth + 1);
+    }
+    if (ts.isBinaryExpression(expression) && (
+      expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+      || expression.operatorToken.kind === ts.SyntaxKind.BarBarToken
+      || expression.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+    )) {
+      const state = staticState(expression.left);
+      if (expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+        if (state.truthy === false) return false;
+        if (state.truthy === true) {
+          return isExternalModuleReference(expression.right, seen, depth + 1);
+        }
+      } else if (expression.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        if (state.truthy === true) return false;
+        if (state.truthy === false) {
+          return isExternalModuleReference(expression.right, seen, depth + 1);
+        }
+      } else {
+        if (state.nullish === false) return false;
+        if (state.nullish === true) {
+          return isExternalModuleReference(expression.right, seen, depth + 1);
+        }
+      }
+      return isExternalModuleReference(expression.left, new Set(seen), depth + 1)
+        || isExternalModuleReference(expression.right, new Set(seen), depth + 1);
+    }
+    if (ts.isCallExpression(expression)) return true;
+    if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
+      let symbol = checker.getSymbolAtLocation(
+        ts.isPropertyAccessExpression(expression) ? expression.name : expression,
+      );
+      if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+      if (symbol?.declarations?.some((declaration) => (
+        declaration.getSourceFile().fileName.replaceAll('\\', '/').includes('/node_modules/')
+      ))) return true;
+      if (symbol?.declarations?.some((declaration) => (
+        ts.isClassLike(declaration) && projectSources.has(declaration.getSourceFile())
+      ))) return false;
+      return true;
+    }
+    if (ts.isClassExpression(expression)) return false;
+    if (expression.kind === ts.SyntaxKind.TrueKeyword
+      || expression.kind === ts.SyntaxKind.FalseKeyword
+      || expression.kind === ts.SyntaxKind.NullKeyword
+      || ts.isVoidExpression(expression) || ts.isStringLiteral(expression)
+      || ts.isNoSubstitutionTemplateLiteral(expression) || ts.isNumericLiteral(expression)
+      || ts.isBigIntLiteral(expression)) return false;
+    if (!ts.isIdentifier(expression)) return true;
+    let symbol = checker.getSymbolAtLocation(expression);
+    if (!symbol || seen.has(symbol)) return true;
+    seen.add(symbol);
+    if (symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (symbol.declarations?.some((declaration) => (
+      declaration.getSourceFile().fileName.replaceAll('\\', '/').includes('/node_modules/')
+    ))) return true;
+    if (symbol.declarations?.some((declaration) => (
+      ts.isClassLike(declaration) && projectSources.has(declaration.getSourceFile())
+    ))) return false;
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (declaration?.initializer && projectSources.has(declaration.getSourceFile())
+      && ts.isVariableDeclarationList(declaration.parent)
+      && declaration.parent.flags & ts.NodeFlags.Const) {
+      return isExternalModuleReference(declaration.initializer, seen, depth + 1);
+    }
+    return true;
+  };
+  let externalModuleImport: ts.Expression | undefined;
   for (const sourceFile of projectSources) {
     const nodes: ts.Node[] = [sourceFile];
     while (nodes.length > 0) {
@@ -443,12 +555,18 @@ function registeredProviderObjects(
               candidates.push(providerExpression);
             }
           }
+          const effectiveImports = effectiveObjectProperty(
+            metadata, 'imports', checker, projectSources, check,
+          );
+          externalModuleImport ??= effectiveImports.candidates.find((candidate) => (
+            isExternalModuleReference(candidate)
+          ));
         }
       }
       ts.forEachChild(node, (child) => { nodes.push(child); });
     }
   }
-  return { providers, candidates };
+  return { providers, candidates, externalModuleImport };
 }
 
 function isProviderRegistration(
@@ -1389,8 +1507,9 @@ async function analyze(
       ...sourceLocation(node, context.workspaceRoot),
     });
   };
-  if (potentialGlobalProvider) {
-    addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', potentialGlobalProvider);
+  const unsupportedGlobalGuard = potentialGlobalProvider ?? providerRegistrations.externalModuleImport;
+  if (unsupportedGlobalGuard) {
+    addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', unsupportedGlobalGuard);
     globalGuardFound = true;
   }
   const addUnresolved = (methods: readonly HttpMethod[], node: ts.Node, reason: UnresolvedSourceOperationCandidate['reason']) => {

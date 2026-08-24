@@ -153,6 +153,7 @@ function assertPackageContents(pack: PackResult) {
     'schemas/finding-exceptions-v1.schema.json',
     'schemas/finding-v1.schema.json',
     'schemas/contract-diff-report-v1.schema.json',
+    'schemas/nestjs-source-analysis-options.schema.json',
     'openapi/index.js',
     'openapi/index.d.ts',
     'openapi/load-document.js',
@@ -236,6 +237,7 @@ function smokeInstalledPackage(tarballPath: string) {
       const exceptionSchema = require(${JSON.stringify(`${packageName}/schemas/finding-exceptions-v1.schema.json`)});
       const findingSchema = require(${JSON.stringify(`${packageName}/schemas/finding-v1.schema.json`)});
       const contractDiffSchema = require(${JSON.stringify(`${packageName}/schemas/contract-diff-report-v1.schema.json`)});
+      const nestJsOptionsSchema = require(${JSON.stringify(`${packageName}/schemas/nestjs-source-analysis-options.schema.json`)});
       const openapi = require(${JSON.stringify(`${packageName}/openapi`)});
       const recommendation = require(${JSON.stringify(`${packageName}/recommendation`)});
       assert.strictEqual(typeof pkg.compile, 'function');
@@ -248,6 +250,7 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(exceptionSchema.properties.version.const, 1);
       assert.strictEqual(findingSchema.properties.schemaVersion.const, 1);
       assert.strictEqual(contractDiffSchema.properties.schemaVersion.const, 1);
+      assert.strictEqual(nestJsOptionsSchema.type, 'object');
       assert.strictEqual(typeof contract.loadFindingExceptions, 'function');
       assert.strictEqual(typeof contract.applyFindingExceptions, 'function');
       assert.strictEqual(typeof contract.diffSecurityContracts, 'function');

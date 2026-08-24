@@ -309,6 +309,9 @@ function registeredProviderObjects(checker, projectSources, check) {
             symbol = checker.getAliasedSymbol(symbol);
         if (!symbol || seen.has(symbol))
             return {};
+        if (symbol.declarations?.some((declaration) => ((typescript_1.default.isClassLike(declaration) || typescript_1.default.isFunctionDeclaration(declaration))
+            && projectSources.has(declaration.getSourceFile()))))
+            return { truthy: true, nullish: false };
         const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
         const declaration = declarations.length === 1 ? declarations[0] : undefined;
         if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
@@ -364,9 +367,24 @@ function registeredProviderObjects(checker, projectSources, check) {
             const right = collect(expression.right, new Set(seen), depth + 1);
             return left && right;
         }
-        if (typescript_1.default.isCallExpression(expression) && expression.arguments.length === 0
-            && typescript_1.default.isIdentifier(expression.expression)) {
-            let symbol = checker.getSymbolAtLocation(expression.expression);
+        if (typescript_1.default.isCallExpression(expression) && expression.arguments.length === 0) {
+            let callee = expression.expression;
+            while (typescript_1.default.isParenthesizedExpression(callee))
+                callee = callee.expression;
+            if ((typescript_1.default.isArrowFunction(callee) || typescript_1.default.isFunctionExpression(callee))
+                && callee.parameters.length === 0
+                && !callee.modifiers?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.AsyncKeyword)
+                && (!typescript_1.default.isFunctionExpression(callee) || callee.asteriskToken === undefined)) {
+                const returned = typescript_1.default.isBlock(callee.body)
+                    && callee.body.statements.length === 1
+                    && typescript_1.default.isReturnStatement(callee.body.statements[0])
+                    ? callee.body.statements[0].expression
+                    : typescript_1.default.isBlock(callee.body) ? undefined : callee.body;
+                return returned ? collect(returned, seen, depth + 1) : false;
+            }
+            if (!typescript_1.default.isIdentifier(callee))
+                return false;
+            let symbol = checker.getSymbolAtLocation(callee);
             if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
                 symbol = checker.getAliasedSymbol(symbol);
             const declarations = symbol?.declarations?.filter((candidate) => (typescript_1.default.isFunctionDeclaration(candidate) && candidate.body !== undefined
@@ -400,6 +418,100 @@ function registeredProviderObjects(checker, projectSources, check) {
         collect(declaration.initializer, seen, depth + 1);
         return false;
     };
+    const isExternalModuleReference = (input, seen = new Set(), depth = 0) => {
+        check();
+        if (depth > 64)
+            return true;
+        let expression = input;
+        while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+            || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+            || typescript_1.default.isNonNullExpression(expression))
+            expression = expression.expression;
+        if (typescript_1.default.isArrayLiteralExpression(expression)) {
+            return expression.elements.some((element) => isExternalModuleReference(typescript_1.default.isSpreadElement(element) ? element.expression : element, new Set(seen), depth + 1));
+        }
+        if (typescript_1.default.isConditionalExpression(expression)) {
+            const state = staticState(expression.condition);
+            if (state.truthy === true) {
+                return isExternalModuleReference(expression.whenTrue, seen, depth + 1);
+            }
+            if (state.truthy === false) {
+                return isExternalModuleReference(expression.whenFalse, seen, depth + 1);
+            }
+            return isExternalModuleReference(expression.whenTrue, new Set(seen), depth + 1)
+                || isExternalModuleReference(expression.whenFalse, new Set(seen), depth + 1);
+        }
+        if (typescript_1.default.isBinaryExpression(expression) && (expression.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+            || expression.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken
+            || expression.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken)) {
+            const state = staticState(expression.left);
+            if (expression.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken) {
+                if (state.truthy === false)
+                    return false;
+                if (state.truthy === true) {
+                    return isExternalModuleReference(expression.right, seen, depth + 1);
+                }
+            }
+            else if (expression.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken) {
+                if (state.truthy === true)
+                    return false;
+                if (state.truthy === false) {
+                    return isExternalModuleReference(expression.right, seen, depth + 1);
+                }
+            }
+            else {
+                if (state.nullish === false)
+                    return false;
+                if (state.nullish === true) {
+                    return isExternalModuleReference(expression.right, seen, depth + 1);
+                }
+            }
+            return isExternalModuleReference(expression.left, new Set(seen), depth + 1)
+                || isExternalModuleReference(expression.right, new Set(seen), depth + 1);
+        }
+        if (typescript_1.default.isCallExpression(expression))
+            return true;
+        if (typescript_1.default.isPropertyAccessExpression(expression) || typescript_1.default.isElementAccessExpression(expression)) {
+            let symbol = checker.getSymbolAtLocation(typescript_1.default.isPropertyAccessExpression(expression) ? expression.name : expression);
+            if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+                symbol = checker.getAliasedSymbol(symbol);
+            if (symbol?.declarations?.some((declaration) => (declaration.getSourceFile().fileName.replaceAll('\\', '/').includes('/node_modules/'))))
+                return true;
+            if (symbol?.declarations?.some((declaration) => (typescript_1.default.isClassLike(declaration) && projectSources.has(declaration.getSourceFile()))))
+                return false;
+            return true;
+        }
+        if (typescript_1.default.isClassExpression(expression))
+            return false;
+        if (expression.kind === typescript_1.default.SyntaxKind.TrueKeyword
+            || expression.kind === typescript_1.default.SyntaxKind.FalseKeyword
+            || expression.kind === typescript_1.default.SyntaxKind.NullKeyword
+            || typescript_1.default.isVoidExpression(expression) || typescript_1.default.isStringLiteral(expression)
+            || typescript_1.default.isNoSubstitutionTemplateLiteral(expression) || typescript_1.default.isNumericLiteral(expression)
+            || typescript_1.default.isBigIntLiteral(expression))
+            return false;
+        if (!typescript_1.default.isIdentifier(expression))
+            return true;
+        let symbol = checker.getSymbolAtLocation(expression);
+        if (!symbol || seen.has(symbol))
+            return true;
+        seen.add(symbol);
+        if (symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        if (symbol.declarations?.some((declaration) => (declaration.getSourceFile().fileName.replaceAll('\\', '/').includes('/node_modules/'))))
+            return true;
+        if (symbol.declarations?.some((declaration) => (typescript_1.default.isClassLike(declaration) && projectSources.has(declaration.getSourceFile()))))
+            return false;
+        const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (declaration?.initializer && projectSources.has(declaration.getSourceFile())
+            && typescript_1.default.isVariableDeclarationList(declaration.parent)
+            && declaration.parent.flags & typescript_1.default.NodeFlags.Const) {
+            return isExternalModuleReference(declaration.initializer, seen, depth + 1);
+        }
+        return true;
+    };
+    let externalModuleImport;
     for (const sourceFile of projectSources) {
         const nodes = [sourceFile];
         while (nodes.length > 0) {
@@ -423,12 +535,14 @@ function registeredProviderObjects(checker, projectSources, check) {
                             candidates.push(providerExpression);
                         }
                     }
+                    const effectiveImports = effectiveObjectProperty(metadata, 'imports', checker, projectSources, check);
+                    externalModuleImport ??= effectiveImports.candidates.find((candidate) => (isExternalModuleReference(candidate)));
                 }
             }
             typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
         }
     }
-    return { providers, candidates };
+    return { providers, candidates, externalModuleImport };
 }
 function isProviderRegistration(node, registeredProviders) {
     const entry = node.parent;
@@ -1317,8 +1431,9 @@ async function analyze(context, authConfig) {
             ...sourceLocation(node, context.workspaceRoot),
         });
     };
-    if (potentialGlobalProvider) {
-        addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', potentialGlobalProvider);
+    const unsupportedGlobalGuard = potentialGlobalProvider ?? providerRegistrations.externalModuleImport;
+    if (unsupportedGlobalGuard) {
+        addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', unsupportedGlobalGuard);
         globalGuardFound = true;
     }
     const addUnresolved = (methods, node, reason) => {

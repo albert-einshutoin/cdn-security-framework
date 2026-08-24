@@ -48,6 +48,7 @@ test('package metadata exposes typed root api and bounded exports', () => {
     './schemas/contract-diff-report-v1.schema.json',
     './schemas/finding-exceptions-v1.schema.json',
     './schemas/finding-v1.schema.json',
+    './schemas/nestjs-source-analysis-options.schema.json',
     './schemas/openapi-inspection-v1.schema.json',
     './schemas/security-ir-v1.schema.json',
     './validator',
@@ -75,6 +76,10 @@ test('package metadata exposes typed root api and bounded exports', () => {
   assert.strictEqual(
     pkg.exports['./schemas/openapi-inspection-v1.schema.json'],
     './schemas/openapi-inspection-v1.schema.json',
+  );
+  assert.strictEqual(
+    pkg.exports['./schemas/nestjs-source-analysis-options.schema.json'],
+    './schemas/nestjs-source-analysis-options.schema.json',
   );
   assert.strictEqual(pkg.exports['./bin/cli.js'], './bin/cli.js');
 });
