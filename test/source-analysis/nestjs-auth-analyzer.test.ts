@@ -275,10 +275,17 @@ describe('NestJS auth metadata analyzer', () => {
       import { Controller, Get, UseGuards } from '@nestjs/common';
       import { JwtAuthGuard, Public } from './auth';
       const Open = Public();
+      const Roles: MethodDecorator = () => {};
+      const decorators = { Public, Roles };
+      const { Public: BareOpen } = decorators;
+      const { Public: BareOpenAgain } = decorators;
+      void decorators.Public;
       @Controller('bare') @UseGuards(JwtAuthGuard)
       class BareController {
         @Get() @Public read() {}
         @Get('precomputed') @Open precomputed() {}
+        @Get('destructured') @BareOpen destructured() {}
+        @Get('destructured-again') @BareOpenAgain destructuredAgain() {}
       }
     `, {
       'src/auth.ts': `
@@ -306,6 +313,16 @@ describe('NestJS auth metadata analyzer', () => {
           mode: 'none', analysis: expect.objectContaining({ explicitPublic: true }),
         }),
       }),
+      expect.objectContaining({
+        routeKey: 'GET /bare/destructured',
+        exposure: 'public',
+        auth: expect.objectContaining({ mode: 'none' }),
+      }),
+      expect.objectContaining({
+        routeKey: 'GET /bare/destructured-again',
+        exposure: 'public',
+        auth: expect.objectContaining({ mode: 'none' }),
+      }),
     ]));
   });
 
@@ -319,6 +336,15 @@ describe('NestJS auth metadata analyzer', () => {
     const auth = (binding: string) => ({
       'src/auth.ts': `export class JwtAuthGuard {}\n${binding}`,
     });
+    const mutableBindingRoot = workspace(controller(`
+      import { JwtAuthGuard, Public } from './auth';
+      const Other: MethodDecorator = () => {};
+      const decorators = { Public };
+      let { Public: Bare } = decorators;
+      Bare = Other;
+    `).replace('@Public', '@Bare'), auth(
+      'export const Public: MethodDecorator = () => {};',
+    ));
     const rootsToCheck = [
       workspace(controller(`
         import { JwtAuthGuard, Public as publicDecorator } from './auth';
@@ -336,6 +362,100 @@ describe('NestJS auth metadata analyzer', () => {
       `).replace('@Public', '@decorators.Public'), auth(
         'export const Public: MethodDecorator = () => {};',
       )),
+      workspace(controller(`
+        import { JwtAuthGuard, Public as publicDecorator } from './auth';
+        let decorators = { Public: publicDecorator };
+        decorators = { Public: () => {} };
+        const { Public } = decorators;
+        const Alias = Public;
+      `).replace('@Public', '@Alias'), auth('export const Public: MethodDecorator = () => {};')),
+      workspace(controller(`
+        import { JwtAuthGuard, Public as publicDecorator } from './auth';
+        const decorators = { Public: publicDecorator };
+        function mutate(value: { Public: MethodDecorator }) { value.Public = () => {}; }
+        mutate(decorators);
+        const { Public } = decorators;
+      `), auth('export const Public: MethodDecorator = () => {};')),
+      workspace(controller(`
+        import { JwtAuthGuard } from './auth';
+        const NotPublic: MethodDecorator = () => {};
+        const { Public } = { Public: NotPublic };
+      `), auth('')),
+      workspace(controller(`
+        import { JwtAuthGuard, Public as publicDecorator } from './auth';
+        const Public = publicDecorator;
+        const Other: MethodDecorator = () => {};
+        const decorators = { Public, ['Public']: Other };
+        const { Public: Bare } = decorators;
+      `).replace('@Public', '@Bare'), auth(
+        'export const Public: MethodDecorator = () => {};',
+      )),
+      workspace(controller(`
+        import { JwtAuthGuard, Public as publicDecorator } from './auth';
+        const { Public } = { get Public() { return publicDecorator; } };
+      `), auth('export const Public: MethodDecorator = () => {};')),
+      workspace(controller(`
+        import { JwtAuthGuard, Public as publicDecorator } from './auth';
+        const overrides: { Public?: MethodDecorator } = { Public: () => {} };
+        const { Public } = { Public: publicDecorator, ...overrides };
+      `), auth('export const Public: MethodDecorator = () => {};')),
+      workspace(controller(`
+        import { JwtAuthGuard, Public as publicDecorator } from './auth';
+        const Other: MethodDecorator = () => {};
+        const decorators = {
+          Public: publicDecorator,
+          mutate() { this.Public = Other; },
+        };
+        decorators.mutate();
+        const { Public } = decorators;
+      `), auth('export const Public: MethodDecorator = () => {};')),
+      workspace(controller(`
+        import { JwtAuthGuard, Public } from './auth';
+        const Other: MethodDecorator = () => {};
+        const decorators = { Public };
+        for (decorators.Public of [Other]) break;
+        const { Public: Bare } = decorators;
+      `).replace('@Public', '@Bare'), auth(
+        'export const Public: MethodDecorator = () => {};',
+      )),
+      workspace(controller(`
+        import { JwtAuthGuard, Public } from './auth';
+        const decorators = { Public };
+        decorators.Public\`replace\`;
+        const { Public: Bare } = decorators;
+      `).replace('@Public', '@Bare'), auth(
+        'export const Public: MethodDecorator = () => {};',
+      )),
+      workspace(`
+        import { decorators, make } from './decorators';
+        const Other: MethodDecorator = () => {};
+        function mutate(value: { Public: MethodDecorator }) { value.Public = Other; }
+        mutate(decorators);
+        make();
+      `, {
+        ...auth('export const Public: MethodDecorator = () => {};'),
+        'src/decorators.ts': `
+          import { Controller, Get, UseGuards } from '@nestjs/common';
+          import { JwtAuthGuard, Public } from './auth';
+          export const decorators = { Public };
+          export function make() {
+            const { Public: Bare } = decorators;
+            @Controller('cross-file') @UseGuards(JwtAuthGuard)
+            class CrossFileController { @Get() @Bare read() {} }
+            return CrossFileController;
+          }
+        `,
+      }),
+      workspace(controller(`
+        import { JwtAuthGuard, Public as publicDecorator } from './auth';
+        const Other: MethodDecorator = () => {};
+        const decorators = {
+          Public: publicDecorator,
+          get trigger() { Object.assign(this, { Public: Other }); return true; },
+        };
+        void decorators.trigger;
+        const { Public } = decorators;
+      `), auth('export const Public: MethodDecorator = () => {};')),
     ];
 
     for (const root of rootsToCheck) {
@@ -350,6 +470,16 @@ describe('NestJS auth metadata analyzer', () => {
           mode: 'unknown',
           analysis: { explicitPublic: false, enforcementConfidence: 'unknown' },
         },
+      });
+    }
+    const mutableBinding = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(mutableBindingRoot),
+    );
+    expect(mutableBinding.status).toBe('success');
+    if (mutableBinding.status === 'success') {
+      expect(mutableBinding.result.contract.operations[0]).toMatchObject({
+        exposure: 'authenticated',
+        auth: { mode: 'alternatives', analysis: { explicitPublic: false } },
       });
     }
   });
@@ -957,8 +1087,8 @@ describe('NestJS auth metadata analyzer', () => {
       import { APP_GUARD } from '@nestjs/core';
       import { JwtAuthGuard } from './auth';
       function makeProviders() {
-        if (false) return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
-        return [];
+        if (true as const) return [];
+        else return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
       }
       @Module({ providers: makeProviders() }) class AppModule {}
       @Controller('unreachable-provider') class UnreachableController {
@@ -2529,10 +2659,31 @@ describe('NestJS auth metadata analyzer', () => {
         name: 'external-module', version: '1.0.0', types: 'index.d.ts',
       }),
     });
+    const branchFactoryRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const enabled: boolean;
+      function createProviders() {
+        if (enabled) return [];
+        else return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
+      }
+      @Module({ providers: createProviders() }) class AppModule {}
+      @Controller('branch-factory') class BranchFactoryController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
 
     for (const [name, root] of [
       ['iife', iifeRoot], ['external', externalRoot], ['factory', factoryRoot],
-      ['mutable', mutableRoot], ['logical', logicalRoot],
+      ['mutable', mutableRoot], ['logical', logicalRoot], ['branch-factory', branchFactoryRoot],
     ] as const) {
       const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
       expect(execution.status, `${name}: ${JSON.stringify(execution)}`).toBe('success');

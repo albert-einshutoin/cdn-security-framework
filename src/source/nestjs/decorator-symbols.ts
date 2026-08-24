@@ -25,6 +25,9 @@ const MEMBER_REFERENCE_CACHE = new WeakMap<
   ReadonlySet<ts.SourceFile>, ReadonlyMap<ts.Symbol, readonly ts.Expression[]>
 >();
 const CALLABLE_REFERENCE_CACHE = new WeakMap<ReadonlySet<ts.SourceFile>, WeakMap<ts.Symbol, boolean>>();
+const BARE_RECEIVER_STABILITY_CACHE = new WeakMap<
+  ReadonlySet<ts.SourceFile>, WeakMap<ts.Symbol, boolean>
+>();
 const WRAPPER_MUTATION_CACHE = new WeakMap<ReadonlySet<ts.SourceFile>, WeakMap<ts.Symbol, boolean>>();
 const WRAPPED_RECEIVER_CACHE = new WeakMap<ReadonlySet<ts.SourceFile>, ReadonlySet<ts.Symbol>>();
 
@@ -476,6 +479,147 @@ export function isBareDecoratorBindingStable(
 ): boolean {
   const expression = unwrapExpression(decorator.expression);
   if (ts.isCallExpression(expression)) return false;
+  if (ts.isIdentifier(expression)) {
+    let bindingExpression: ts.Expression = expression;
+    const seen = new Set<ts.Symbol>();
+    let binding: ts.BindingElement | undefined;
+    while (ts.isIdentifier(bindingExpression)) {
+      const symbol = checker.getSymbolAtLocation(bindingExpression);
+      if (!symbol || seen.has(symbol)) break;
+      seen.add(symbol);
+      binding = symbol.declarations
+        ?.find((declaration): declaration is ts.BindingElement => ts.isBindingElement(declaration));
+      if (binding) break;
+      const alias = symbol.declarations?.find((declaration): declaration is ts.VariableDeclaration => (
+        ts.isVariableDeclaration(declaration) && declaration.initializer !== undefined
+        && ts.isVariableDeclarationList(declaration.parent)
+        && Boolean(declaration.parent.flags & ts.NodeFlags.Const)
+      ));
+      if (!alias) break;
+      bindingExpression = unwrapExpression(alias.initializer!);
+    }
+    if (binding) {
+      const declaration = ts.isVariableDeclaration(binding.parent.parent)
+        ? binding.parent.parent : undefined;
+      const bindingSymbol = ts.isIdentifier(binding.name)
+        ? checker.getSymbolAtLocation(binding.name) : undefined;
+      if (!declaration || !ts.isVariableDeclarationList(declaration.parent)
+        || !(declaration.parent.flags & ts.NodeFlags.Const) || !bindingSymbol
+        || callableBindingMayBeWritten(
+          bindingSymbol, bindingSymbol.declarations ?? [], checker, projectSources, check,
+        )) return false;
+      const receiver = declaration?.initializer && unwrapExpression(declaration.initializer);
+      if (!receiver) return false;
+      const propertyName = binding.propertyName ?? binding.name;
+      const key = ts.isIdentifier(propertyName) || ts.isStringLiteral(propertyName)
+        ? propertyName.text : undefined;
+      const stableObjectProperty = (object: ts.ObjectLiteralExpression): boolean => {
+        if (!key || object.properties.some((property) => (
+          !ts.isShorthandPropertyAssignment(property)
+        ))) return false;
+        const properties = object.properties.filter((property): property is (
+          ts.ShorthandPropertyAssignment
+        ) => (
+          ts.isShorthandPropertyAssignment(property)
+          && property.name.text === key
+        ));
+        if (properties.length !== 1) return false;
+        const value = checker.getShorthandAssignmentValueSymbol(properties[0]);
+        const symbol = value
+          ? (value.flags & ts.SymbolFlags.Alias ? checker.getAliasedSymbol(value) : value)
+          : undefined;
+        return Boolean(symbol && symbol.getName() === key && !callableBindingMayBeWritten(
+          symbol, symbol.declarations ?? [], checker, projectSources, check,
+        ));
+      };
+      if (!ts.isObjectLiteralExpression(receiver)) {
+        if (!ts.isIdentifier(receiver)) return false;
+        const receiverSymbol = checker.getSymbolAtLocation(receiver);
+        if (!receiverSymbol) return false;
+        const receiverDeclaration = receiverSymbol?.declarations?.find(ts.isVariableDeclaration);
+        if (!receiverSymbol.declarations?.some(ts.isNamespaceImport)) {
+          if (!receiverDeclaration?.initializer
+            || !ts.isObjectLiteralExpression(unwrapExpression(receiverDeclaration.initializer))
+            || !stableObjectProperty(unwrapExpression(
+              receiverDeclaration.initializer,
+            ) as ts.ObjectLiteralExpression)
+            || !ts.isVariableDeclarationList(receiverDeclaration.parent)
+            || !(receiverDeclaration.parent.flags & ts.NodeFlags.Const)
+            || callableBindingMayBeWritten(
+              receiverSymbol, receiverSymbol.declarations ?? [], checker, projectSources, check,
+            )) return false;
+          let cache = BARE_RECEIVER_STABILITY_CACHE.get(projectSources);
+          if (!cache) {
+            cache = new WeakMap();
+            BARE_RECEIVER_STABILITY_CACHE.set(projectSources, cache);
+          }
+          let isolated = cache.get(receiverSymbol);
+          if (isolated === undefined) {
+            isolated = true;
+            const references: ts.Node[] = [...projectSources];
+            while (references.length > 0 && isolated) {
+              const reference = references.pop()!;
+              check();
+              if (ts.isIdentifier(reference) && reference !== receiver
+                && reference !== receiverDeclaration.name) {
+                let referenceSymbol = checker.getSymbolAtLocation(reference);
+                if (referenceSymbol?.flags && referenceSymbol.flags & ts.SymbolFlags.Alias) {
+                  referenceSymbol = checker.getAliasedSymbol(referenceSymbol);
+                }
+                if (referenceSymbol !== receiverSymbol) {
+                  ts.forEachChild(reference, (child) => { references.push(child); });
+                  continue;
+                }
+                let usage: ts.Expression = reference;
+                while (ts.isParenthesizedExpression(usage.parent)
+                  || ts.isAsExpression(usage.parent) || ts.isTypeAssertionExpression(usage.parent)
+                  || ts.isSatisfiesExpression(usage.parent) || ts.isNonNullExpression(usage.parent)) {
+                  usage = usage.parent;
+                }
+                const member = (ts.isPropertyAccessExpression(usage.parent)
+                  || ts.isElementAccessExpression(usage.parent))
+                  && usage.parent.expression === usage ? usage.parent : undefined;
+                let memberUsage: ts.Expression | undefined = member;
+                while (memberUsage && (ts.isParenthesizedExpression(memberUsage.parent)
+                  || ts.isAsExpression(memberUsage.parent)
+                  || ts.isTypeAssertionExpression(memberUsage.parent)
+                  || ts.isSatisfiesExpression(memberUsage.parent)
+                  || ts.isNonNullExpression(memberUsage.parent))) memberUsage = memberUsage.parent;
+                let memberUnsafe = false;
+                let target: ts.Node | undefined = memberUsage;
+                while (target?.parent && !ts.isStatement(target)) {
+                  const parent = target.parent;
+                  if ((ts.isBinaryExpression(parent) && parent.left === target
+                    && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+                    && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment)
+                    || ((ts.isForOfStatement(parent) || ts.isForInStatement(parent))
+                      && parent.initializer === target)
+                    || (ts.isDeleteExpression(parent) && parent.expression === target)
+                    || ((ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent))
+                      && parent.operand === target)
+                    || (ts.isCallExpression(parent) && parent.expression === target)
+                    || (ts.isTaggedTemplateExpression(parent) && parent.tag === target)) {
+                    memberUnsafe = true;
+                    break;
+                  }
+                  target = parent;
+                }
+                const destructuredAgain = ts.isVariableDeclaration(usage.parent)
+                  && usage.parent.initializer === usage
+                  && ts.isObjectBindingPattern(usage.parent.name);
+                if ((!member || memberUnsafe) && !destructuredAgain) isolated = false;
+              }
+              ts.forEachChild(reference, (child) => { references.push(child); });
+            }
+            cache.set(receiverSymbol, isolated);
+          }
+          if (!isolated) return false;
+        }
+      } else if (!stableObjectProperty(receiver)) {
+        return false;
+      }
+    }
+  }
   if ((ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression))
     && !isNamespaceImportAccess(expression, checker)) return false;
   const symbol = targetSymbol(expression, checker, check);

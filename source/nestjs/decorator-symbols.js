@@ -30,6 +30,7 @@ const NESTJS_ORIGIN_CACHE = new WeakMap();
 const MEMBER_ESCAPE_CACHE = new WeakMap();
 const MEMBER_REFERENCE_CACHE = new WeakMap();
 const CALLABLE_REFERENCE_CACHE = new WeakMap();
+const BARE_RECEIVER_STABILITY_CACHE = new WeakMap();
 const WRAPPER_MUTATION_CACHE = new WeakMap();
 const WRAPPED_RECEIVER_CACHE = new WeakMap();
 function callableBindingMayBeWritten(symbol, declarations, checker, projectSources, check) {
@@ -419,6 +420,145 @@ function isBareDecoratorBindingStable(decorator, checker, projectSources, check)
     const expression = unwrapExpression(decorator.expression);
     if (typescript_1.default.isCallExpression(expression))
         return false;
+    if (typescript_1.default.isIdentifier(expression)) {
+        let bindingExpression = expression;
+        const seen = new Set();
+        let binding;
+        while (typescript_1.default.isIdentifier(bindingExpression)) {
+            const symbol = checker.getSymbolAtLocation(bindingExpression);
+            if (!symbol || seen.has(symbol))
+                break;
+            seen.add(symbol);
+            binding = symbol.declarations
+                ?.find((declaration) => typescript_1.default.isBindingElement(declaration));
+            if (binding)
+                break;
+            const alias = symbol.declarations?.find((declaration) => (typescript_1.default.isVariableDeclaration(declaration) && declaration.initializer !== undefined
+                && typescript_1.default.isVariableDeclarationList(declaration.parent)
+                && Boolean(declaration.parent.flags & typescript_1.default.NodeFlags.Const)));
+            if (!alias)
+                break;
+            bindingExpression = unwrapExpression(alias.initializer);
+        }
+        if (binding) {
+            const declaration = typescript_1.default.isVariableDeclaration(binding.parent.parent)
+                ? binding.parent.parent : undefined;
+            const bindingSymbol = typescript_1.default.isIdentifier(binding.name)
+                ? checker.getSymbolAtLocation(binding.name) : undefined;
+            if (!declaration || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+                || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const) || !bindingSymbol
+                || callableBindingMayBeWritten(bindingSymbol, bindingSymbol.declarations ?? [], checker, projectSources, check))
+                return false;
+            const receiver = declaration?.initializer && unwrapExpression(declaration.initializer);
+            if (!receiver)
+                return false;
+            const propertyName = binding.propertyName ?? binding.name;
+            const key = typescript_1.default.isIdentifier(propertyName) || typescript_1.default.isStringLiteral(propertyName)
+                ? propertyName.text : undefined;
+            const stableObjectProperty = (object) => {
+                if (!key || object.properties.some((property) => (!typescript_1.default.isShorthandPropertyAssignment(property))))
+                    return false;
+                const properties = object.properties.filter((property) => (typescript_1.default.isShorthandPropertyAssignment(property)
+                    && property.name.text === key));
+                if (properties.length !== 1)
+                    return false;
+                const value = checker.getShorthandAssignmentValueSymbol(properties[0]);
+                const symbol = value
+                    ? (value.flags & typescript_1.default.SymbolFlags.Alias ? checker.getAliasedSymbol(value) : value)
+                    : undefined;
+                return Boolean(symbol && symbol.getName() === key && !callableBindingMayBeWritten(symbol, symbol.declarations ?? [], checker, projectSources, check));
+            };
+            if (!typescript_1.default.isObjectLiteralExpression(receiver)) {
+                if (!typescript_1.default.isIdentifier(receiver))
+                    return false;
+                const receiverSymbol = checker.getSymbolAtLocation(receiver);
+                if (!receiverSymbol)
+                    return false;
+                const receiverDeclaration = receiverSymbol?.declarations?.find(typescript_1.default.isVariableDeclaration);
+                if (!receiverSymbol.declarations?.some(typescript_1.default.isNamespaceImport)) {
+                    if (!receiverDeclaration?.initializer
+                        || !typescript_1.default.isObjectLiteralExpression(unwrapExpression(receiverDeclaration.initializer))
+                        || !stableObjectProperty(unwrapExpression(receiverDeclaration.initializer))
+                        || !typescript_1.default.isVariableDeclarationList(receiverDeclaration.parent)
+                        || !(receiverDeclaration.parent.flags & typescript_1.default.NodeFlags.Const)
+                        || callableBindingMayBeWritten(receiverSymbol, receiverSymbol.declarations ?? [], checker, projectSources, check))
+                        return false;
+                    let cache = BARE_RECEIVER_STABILITY_CACHE.get(projectSources);
+                    if (!cache) {
+                        cache = new WeakMap();
+                        BARE_RECEIVER_STABILITY_CACHE.set(projectSources, cache);
+                    }
+                    let isolated = cache.get(receiverSymbol);
+                    if (isolated === undefined) {
+                        isolated = true;
+                        const references = [...projectSources];
+                        while (references.length > 0 && isolated) {
+                            const reference = references.pop();
+                            check();
+                            if (typescript_1.default.isIdentifier(reference) && reference !== receiver
+                                && reference !== receiverDeclaration.name) {
+                                let referenceSymbol = checker.getSymbolAtLocation(reference);
+                                if (referenceSymbol?.flags && referenceSymbol.flags & typescript_1.default.SymbolFlags.Alias) {
+                                    referenceSymbol = checker.getAliasedSymbol(referenceSymbol);
+                                }
+                                if (referenceSymbol !== receiverSymbol) {
+                                    typescript_1.default.forEachChild(reference, (child) => { references.push(child); });
+                                    continue;
+                                }
+                                let usage = reference;
+                                while (typescript_1.default.isParenthesizedExpression(usage.parent)
+                                    || typescript_1.default.isAsExpression(usage.parent) || typescript_1.default.isTypeAssertionExpression(usage.parent)
+                                    || typescript_1.default.isSatisfiesExpression(usage.parent) || typescript_1.default.isNonNullExpression(usage.parent)) {
+                                    usage = usage.parent;
+                                }
+                                const member = (typescript_1.default.isPropertyAccessExpression(usage.parent)
+                                    || typescript_1.default.isElementAccessExpression(usage.parent))
+                                    && usage.parent.expression === usage ? usage.parent : undefined;
+                                let memberUsage = member;
+                                while (memberUsage && (typescript_1.default.isParenthesizedExpression(memberUsage.parent)
+                                    || typescript_1.default.isAsExpression(memberUsage.parent)
+                                    || typescript_1.default.isTypeAssertionExpression(memberUsage.parent)
+                                    || typescript_1.default.isSatisfiesExpression(memberUsage.parent)
+                                    || typescript_1.default.isNonNullExpression(memberUsage.parent)))
+                                    memberUsage = memberUsage.parent;
+                                let memberUnsafe = false;
+                                let target = memberUsage;
+                                while (target?.parent && !typescript_1.default.isStatement(target)) {
+                                    const parent = target.parent;
+                                    if ((typescript_1.default.isBinaryExpression(parent) && parent.left === target
+                                        && parent.operatorToken.kind >= typescript_1.default.SyntaxKind.FirstAssignment
+                                        && parent.operatorToken.kind <= typescript_1.default.SyntaxKind.LastAssignment)
+                                        || ((typescript_1.default.isForOfStatement(parent) || typescript_1.default.isForInStatement(parent))
+                                            && parent.initializer === target)
+                                        || (typescript_1.default.isDeleteExpression(parent) && parent.expression === target)
+                                        || ((typescript_1.default.isPrefixUnaryExpression(parent) || typescript_1.default.isPostfixUnaryExpression(parent))
+                                            && parent.operand === target)
+                                        || (typescript_1.default.isCallExpression(parent) && parent.expression === target)
+                                        || (typescript_1.default.isTaggedTemplateExpression(parent) && parent.tag === target)) {
+                                        memberUnsafe = true;
+                                        break;
+                                    }
+                                    target = parent;
+                                }
+                                const destructuredAgain = typescript_1.default.isVariableDeclaration(usage.parent)
+                                    && usage.parent.initializer === usage
+                                    && typescript_1.default.isObjectBindingPattern(usage.parent.name);
+                                if ((!member || memberUnsafe) && !destructuredAgain)
+                                    isolated = false;
+                            }
+                            typescript_1.default.forEachChild(reference, (child) => { references.push(child); });
+                        }
+                        cache.set(receiverSymbol, isolated);
+                    }
+                    if (!isolated)
+                        return false;
+                }
+            }
+            else if (!stableObjectProperty(receiver)) {
+                return false;
+            }
+        }
+    }
     if ((typescript_1.default.isPropertyAccessExpression(expression) || typescript_1.default.isElementAccessExpression(expression))
         && !isNamespaceImportAccess(expression, checker))
         return false;

@@ -622,6 +622,14 @@ function containsCanonicalProviderToken(
   const seenSymbols = new Set<ts.Symbol>();
   let steps = 0;
   const symbolAt = (node: ts.Identifier) => resolvedSymbolAt(node, checker);
+  const staticBoolean = (input: ts.Expression): boolean | undefined => {
+    let expression = input;
+    while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+      || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+      || ts.isNonNullExpression(expression)) expression = expression.expression;
+    return expression.kind === ts.SyntaxKind.TrueKeyword
+      ? true : expression.kind === ts.SyntaxKind.FalseKeyword ? false : undefined;
+  };
   const collectReturns = (statement: ts.Statement): boolean => {
     check();
     if (ts.isReturnStatement(statement)) {
@@ -635,11 +643,14 @@ function containsCanonicalProviderToken(
       return false;
     }
     if (ts.isIfStatement(statement)) {
-      const condition = statement.expression.kind === ts.SyntaxKind.TrueKeyword
-        ? true : statement.expression.kind === ts.SyntaxKind.FalseKeyword ? false : undefined;
-      if (condition !== false && collectReturns(statement.thenStatement)) return condition === true;
-      return condition !== true && Boolean(statement.elseStatement
+      const condition = staticBoolean(statement.expression);
+      if (condition === true) return collectReturns(statement.thenStatement);
+      if (condition === false) return Boolean(statement.elseStatement
         && collectReturns(statement.elseStatement));
+      const whenTrue = collectReturns(statement.thenStatement);
+      const whenFalse = Boolean(statement.elseStatement
+        && collectReturns(statement.elseStatement));
+      return whenTrue && whenFalse;
     }
     return false;
   };
@@ -648,8 +659,9 @@ function containsCanonicalProviderToken(
     let parent = node.parent;
     while (parent) {
       if (ts.isIfStatement(parent)) {
-        if (parent.expression.kind === ts.SyntaxKind.FalseKeyword && child === parent.thenStatement) return true;
-        if (parent.expression.kind === ts.SyntaxKind.TrueKeyword && child === parent.elseStatement) return true;
+        const condition = staticBoolean(parent.expression);
+        if (condition === false && child === parent.thenStatement) return true;
+        if (condition === true && child === parent.elseStatement) return true;
       }
       if (ts.isBlock(parent) && ts.isStatement(child)) {
         const index = parent.statements.indexOf(child);

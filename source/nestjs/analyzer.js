@@ -580,6 +580,15 @@ function containsCanonicalProviderToken(input, checker, projectSources, check, m
     const seenSymbols = new Set();
     let steps = 0;
     const symbolAt = (node) => resolvedSymbolAt(node, checker);
+    const staticBoolean = (input) => {
+        let expression = input;
+        while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+            || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+            || typescript_1.default.isNonNullExpression(expression))
+            expression = expression.expression;
+        return expression.kind === typescript_1.default.SyntaxKind.TrueKeyword
+            ? true : expression.kind === typescript_1.default.SyntaxKind.FalseKeyword ? false : undefined;
+    };
     const collectReturns = (statement) => {
         check();
         if (typescript_1.default.isReturnStatement(statement)) {
@@ -595,12 +604,16 @@ function containsCanonicalProviderToken(input, checker, projectSources, check, m
             return false;
         }
         if (typescript_1.default.isIfStatement(statement)) {
-            const condition = statement.expression.kind === typescript_1.default.SyntaxKind.TrueKeyword
-                ? true : statement.expression.kind === typescript_1.default.SyntaxKind.FalseKeyword ? false : undefined;
-            if (condition !== false && collectReturns(statement.thenStatement))
-                return condition === true;
-            return condition !== true && Boolean(statement.elseStatement
+            const condition = staticBoolean(statement.expression);
+            if (condition === true)
+                return collectReturns(statement.thenStatement);
+            if (condition === false)
+                return Boolean(statement.elseStatement
+                    && collectReturns(statement.elseStatement));
+            const whenTrue = collectReturns(statement.thenStatement);
+            const whenFalse = Boolean(statement.elseStatement
                 && collectReturns(statement.elseStatement));
+            return whenTrue && whenFalse;
         }
         return false;
     };
@@ -609,9 +622,10 @@ function containsCanonicalProviderToken(input, checker, projectSources, check, m
         let parent = node.parent;
         while (parent) {
             if (typescript_1.default.isIfStatement(parent)) {
-                if (parent.expression.kind === typescript_1.default.SyntaxKind.FalseKeyword && child === parent.thenStatement)
+                const condition = staticBoolean(parent.expression);
+                if (condition === false && child === parent.thenStatement)
                     return true;
-                if (parent.expression.kind === typescript_1.default.SyntaxKind.TrueKeyword && child === parent.elseStatement)
+                if (condition === true && child === parent.elseStatement)
                     return true;
             }
             if (typescript_1.default.isBlock(parent) && typescript_1.default.isStatement(child)) {
