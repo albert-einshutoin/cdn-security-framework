@@ -38,7 +38,7 @@ export declare function resolveStaticDecoratorWrapperCall(call: ts.CallExpressio
     stable: boolean;
     dynamic: boolean;
 } | undefined;
-export declare function resolveStaticSymbolName(expression: ts.Expression, checker: ts.TypeChecker, check: () => void): string | undefined;
+export declare function resolveStaticSymbolName(expression: ts.Expression, checker: ts.TypeChecker, check: () => void, projectSources?: ReadonlySet<ts.SourceFile>): string | undefined;
 export declare function isStaticSymbolFrom(expression: ts.Expression, checker: ts.TypeChecker, check: () => void, moduleName: string, importedName: string): boolean;
 export declare function containsStaticSymbolFrom(expression: ts.Expression, checker: ts.TypeChecker, check: () => void, moduleName: string, importedName: string, projectSources?: ReadonlySet<ts.SourceFile>): boolean;
 export declare function isStaticShorthandSymbolFrom(shorthand: ts.ShorthandPropertyAssignment, checker: ts.TypeChecker, check: () => void, moduleName: string, importedName: string, projectSources?: ReadonlySet<ts.SourceFile>): boolean;

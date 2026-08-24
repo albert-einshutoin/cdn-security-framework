@@ -2930,6 +2930,13 @@ function registeredProviderObjects(
     }
     return false;
   };
+  const localFunctionSymbol = (node: ts.SignatureDeclaration): ts.Symbol | undefined => {
+    if (ts.isFunctionDeclaration(node) && node.name) return symbolAt(node.name);
+    const declaration = (ts.isArrowFunction(node) || ts.isFunctionExpression(node))
+      && ts.isVariableDeclaration(node.parent) && node.parent.initializer === node
+      && ts.isIdentifier(node.parent.name) ? node.parent : undefined;
+    return declaration ? symbolAt(declaration.name) : undefined;
+  };
   const invokedLocalFunctions = new Set<ts.Symbol>();
   const functionsWithResolvedBootstrap = new Set<ts.Symbol>();
   for (const sourceFile of projectSources) {
@@ -2948,10 +2955,14 @@ function registeredProviderObjects(
         }
         if (!functionAncestor && node.arguments.length === 0 && ts.isIdentifier(callee)) {
           const symbol = symbolAt(callee);
-          const declarations = symbol?.declarations?.filter((declaration): declaration is (
-            ts.FunctionDeclaration
-          ) => ts.isFunctionDeclaration(declaration) && declaration.body !== undefined
-            && projectSources.has(declaration.getSourceFile())) ?? [];
+          const declarations = symbol?.declarations?.filter((declaration) => (
+            (ts.isFunctionDeclaration(declaration) && declaration.body !== undefined
+              && !declaration.asteriskToken)
+              || (ts.isVariableDeclaration(declaration) && declaration.initializer
+                && (ts.isArrowFunction(declaration.initializer)
+                  || (ts.isFunctionExpression(declaration.initializer)
+                    && !declaration.initializer.asteriskToken)))
+          ) && projectSources.has(declaration.getSourceFile())) ?? [];
           if (symbol && declarations.length === 1 && !reassignedSymbols.has(symbol)
             && !unresolvedAssignments.has(symbol)) invokedLocalFunctions.add(symbol);
         }
@@ -2964,9 +2975,8 @@ function registeredProviderObjects(
           && (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee))
           && containsStaticSymbolFrom(
             callee.expression, checker, check, '@nestjs/core', 'NestFactory', projectSources,
-          ) && moduleSymbol(node.arguments[0])
-          && ts.isFunctionDeclaration(functionAncestor) && functionAncestor.name) {
-          const symbol = symbolAt(functionAncestor.name);
+          ) && moduleSymbol(node.arguments[0])) {
+          const symbol = localFunctionSymbol(functionAncestor);
           if (symbol) functionsWithResolvedBootstrap.add(symbol);
         }
       }
@@ -2994,8 +3004,7 @@ function registeredProviderObjects(
           else moduleGraphComplete = false;
           for (let parent = node.parent; !ts.isSourceFile(parent); parent = parent.parent) {
             if (ts.isFunctionLike(parent)) {
-              const functionSymbol = ts.isFunctionDeclaration(parent) && parent.name
-                ? symbolAt(parent.name) : undefined;
+              const functionSymbol = localFunctionSymbol(parent);
               if (!functionSymbol || !invokedLocalFunctions.has(functionSymbol)
                 || !functionsWithResolvedBootstrap.has(functionSymbol)) {
                 moduleGraphComplete = false;
@@ -4045,7 +4054,7 @@ function ownAuthMetadata(
         return true;
       }
       for (const argument of resolved.call.arguments) {
-        const symbol = resolveStaticSymbolName(argument, checker, check);
+        const symbol = resolveStaticSymbolName(argument, checker, check, projectSources);
         if (symbol) result.guards.push(symbol);
         else {
           result.guardDynamic = true;

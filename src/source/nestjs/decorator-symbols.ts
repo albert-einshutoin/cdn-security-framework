@@ -982,7 +982,16 @@ export function resolveStaticSymbolName(
   expression: ts.Expression,
   checker: ts.TypeChecker,
   check: () => void,
+  projectSources?: ReadonlySet<ts.SourceFile>,
 ): string | undefined {
+  const reference = unwrapExpression(expression);
+  if (projectSources && ts.isIdentifier(reference)) {
+    let binding = checker.getSymbolAtLocation(reference);
+    if (binding?.flags && binding.flags & ts.SymbolFlags.Alias) binding = checker.getAliasedSymbol(binding);
+    if (binding && callableBindingMayBeWritten(
+      binding, binding.declarations ?? [], checker, projectSources, check,
+    )) return undefined;
+  }
   const symbol = targetSymbol(expression, checker, check);
   return !symbol || symbol === UNKNOWN_NESTJS_ROUTE
     || !symbol.declarations?.some(ts.isClassLike) ? undefined : symbol.getName();

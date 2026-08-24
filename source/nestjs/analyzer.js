@@ -3116,6 +3116,14 @@ function registeredProviderObjects(checker, projectSources, check) {
         }
         return false;
     };
+    const localFunctionSymbol = (node) => {
+        if (typescript_1.default.isFunctionDeclaration(node) && node.name)
+            return symbolAt(node.name);
+        const declaration = (typescript_1.default.isArrowFunction(node) || typescript_1.default.isFunctionExpression(node))
+            && typescript_1.default.isVariableDeclaration(node.parent) && node.parent.initializer === node
+            && typescript_1.default.isIdentifier(node.parent.name) ? node.parent : undefined;
+        return declaration ? symbolAt(declaration.name) : undefined;
+    };
     const invokedLocalFunctions = new Set();
     const functionsWithResolvedBootstrap = new Set();
     for (const sourceFile of projectSources) {
@@ -3134,8 +3142,12 @@ function registeredProviderObjects(checker, projectSources, check) {
                 }
                 if (!functionAncestor && node.arguments.length === 0 && typescript_1.default.isIdentifier(callee)) {
                     const symbol = symbolAt(callee);
-                    const declarations = symbol?.declarations?.filter((declaration) => typescript_1.default.isFunctionDeclaration(declaration) && declaration.body !== undefined
-                        && projectSources.has(declaration.getSourceFile())) ?? [];
+                    const declarations = symbol?.declarations?.filter((declaration) => ((typescript_1.default.isFunctionDeclaration(declaration) && declaration.body !== undefined
+                        && !declaration.asteriskToken)
+                        || (typescript_1.default.isVariableDeclaration(declaration) && declaration.initializer
+                            && (typescript_1.default.isArrowFunction(declaration.initializer)
+                                || (typescript_1.default.isFunctionExpression(declaration.initializer)
+                                    && !declaration.initializer.asteriskToken)))) && projectSources.has(declaration.getSourceFile())) ?? [];
                     if (symbol && declarations.length === 1 && !reassignedSymbols.has(symbol)
                         && !unresolvedAssignments.has(symbol))
                         invokedLocalFunctions.add(symbol);
@@ -3147,9 +3159,8 @@ function registeredProviderObjects(checker, projectSources, check) {
                     && (method === 'create' || method === 'createApplicationContext'
                         || method === 'createMicroservice')
                     && (typescript_1.default.isPropertyAccessExpression(callee) || typescript_1.default.isElementAccessExpression(callee))
-                    && (0, decorator_symbols_1.containsStaticSymbolFrom)(callee.expression, checker, check, '@nestjs/core', 'NestFactory', projectSources) && moduleSymbol(node.arguments[0])
-                    && typescript_1.default.isFunctionDeclaration(functionAncestor) && functionAncestor.name) {
-                    const symbol = symbolAt(functionAncestor.name);
+                    && (0, decorator_symbols_1.containsStaticSymbolFrom)(callee.expression, checker, check, '@nestjs/core', 'NestFactory', projectSources) && moduleSymbol(node.arguments[0])) {
+                    const symbol = localFunctionSymbol(functionAncestor);
                     if (symbol)
                         functionsWithResolvedBootstrap.add(symbol);
                 }
@@ -3178,8 +3189,7 @@ function registeredProviderObjects(checker, projectSources, check) {
                         moduleGraphComplete = false;
                     for (let parent = node.parent; !typescript_1.default.isSourceFile(parent); parent = parent.parent) {
                         if (typescript_1.default.isFunctionLike(parent)) {
-                            const functionSymbol = typescript_1.default.isFunctionDeclaration(parent) && parent.name
-                                ? symbolAt(parent.name) : undefined;
+                            const functionSymbol = localFunctionSymbol(parent);
                             if (!functionSymbol || !invokedLocalFunctions.has(functionSymbol)
                                 || !functionsWithResolvedBootstrap.has(functionSymbol)) {
                                 moduleGraphComplete = false;
@@ -4249,7 +4259,7 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps,
                 return true;
             }
             for (const argument of resolved.call.arguments) {
-                const symbol = (0, decorator_symbols_1.resolveStaticSymbolName)(argument, checker, check);
+                const symbol = (0, decorator_symbols_1.resolveStaticSymbolName)(argument, checker, check, projectSources);
                 if (symbol)
                     result.guards.push(symbol);
                 else {

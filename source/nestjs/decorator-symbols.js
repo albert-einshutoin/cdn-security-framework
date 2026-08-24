@@ -906,7 +906,15 @@ function resolveStaticDecoratorWrapperCall(call, checker, projectSources, check)
     }
     return { symbol, stable, dynamic: true };
 }
-function resolveStaticSymbolName(expression, checker, check) {
+function resolveStaticSymbolName(expression, checker, check, projectSources) {
+    const reference = unwrapExpression(expression);
+    if (projectSources && typescript_1.default.isIdentifier(reference)) {
+        let binding = checker.getSymbolAtLocation(reference);
+        if (binding?.flags && binding.flags & typescript_1.default.SymbolFlags.Alias)
+            binding = checker.getAliasedSymbol(binding);
+        if (binding && callableBindingMayBeWritten(binding, binding.declarations ?? [], checker, projectSources, check))
+            return undefined;
+    }
     const symbol = targetSymbol(expression, checker, check);
     return !symbol || symbol === UNKNOWN_NESTJS_ROUTE
         || !symbol.declarations?.some(typescript_1.default.isClassLike) ? undefined : symbol.getName();
