@@ -3041,6 +3041,29 @@ export function isNestJsUseGlobalGuardsCall(
   };
   let effectiveArguments = flattenArguments(call.arguments);
   let expression = resolveConstInitializer(call.expression, checker, check, projectSources);
+  const reflectCall = unwrapExpression(call.expression);
+  const reflectMethod = ts.isPropertyAccessExpression(reflectCall) ? reflectCall.name.text
+    : ts.isElementAccessExpression(reflectCall) && reflectCall.argumentExpression
+      ? resolveStaticPropertyKey(reflectCall.argumentExpression, checker, check) : undefined;
+  const reflectReceiver = (ts.isPropertyAccessExpression(reflectCall)
+    || ts.isElementAccessExpression(reflectCall))
+    ? unwrapExpression(reflectCall.expression) : undefined;
+  const reflectSymbol = reflectReceiver && ts.isIdentifier(reflectReceiver)
+    ? checker.getSymbolAtLocation(reflectReceiver) : undefined;
+  const standardReflectApply = reflectMethod === 'apply' && reflectReceiver
+    && ts.isIdentifier(reflectReceiver) && reflectReceiver.text === 'Reflect'
+    && !reflectSymbol?.declarations?.some((declaration) => (
+      projectSources?.has(declaration.getSourceFile())
+    ));
+  if (standardReflectApply && call.arguments[0]) {
+    expression = resolveConstInitializer(call.arguments[0], checker, check, projectSources);
+    const guards = call.arguments[2] ? unwrapExpression(call.arguments[2]) : undefined;
+    effectiveArguments = guards && ts.isArrayLiteralExpression(guards)
+      ? guards.elements.some(ts.isOmittedExpression) ? undefined
+        : flattenArguments(guards.elements.filter((element): element is ts.Expression => (
+          !ts.isOmittedExpression(element)
+        ))) : guards ? undefined : [];
+  }
   let depthLimitReached = false;
   for (let depth = 0; depth <= 64; depth += 1) {
     check();

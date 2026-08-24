@@ -3009,6 +3009,25 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
     };
     let effectiveArguments = flattenArguments(call.arguments);
     let expression = resolveConstInitializer(call.expression, checker, check, projectSources);
+    const reflectCall = unwrapExpression(call.expression);
+    const reflectMethod = typescript_1.default.isPropertyAccessExpression(reflectCall) ? reflectCall.name.text
+        : typescript_1.default.isElementAccessExpression(reflectCall) && reflectCall.argumentExpression
+            ? resolveStaticPropertyKey(reflectCall.argumentExpression, checker, check) : undefined;
+    const reflectReceiver = (typescript_1.default.isPropertyAccessExpression(reflectCall)
+        || typescript_1.default.isElementAccessExpression(reflectCall))
+        ? unwrapExpression(reflectCall.expression) : undefined;
+    const reflectSymbol = reflectReceiver && typescript_1.default.isIdentifier(reflectReceiver)
+        ? checker.getSymbolAtLocation(reflectReceiver) : undefined;
+    const standardReflectApply = reflectMethod === 'apply' && reflectReceiver
+        && typescript_1.default.isIdentifier(reflectReceiver) && reflectReceiver.text === 'Reflect'
+        && !reflectSymbol?.declarations?.some((declaration) => (projectSources?.has(declaration.getSourceFile())));
+    if (standardReflectApply && call.arguments[0]) {
+        expression = resolveConstInitializer(call.arguments[0], checker, check, projectSources);
+        const guards = call.arguments[2] ? unwrapExpression(call.arguments[2]) : undefined;
+        effectiveArguments = guards && typescript_1.default.isArrayLiteralExpression(guards)
+            ? guards.elements.some(typescript_1.default.isOmittedExpression) ? undefined
+                : flattenArguments(guards.elements.filter((element) => (!typescript_1.default.isOmittedExpression(element)))) : guards ? undefined : [];
+    }
     let depthLimitReached = false;
     for (let depth = 0; depth <= 64; depth += 1) {
         check();

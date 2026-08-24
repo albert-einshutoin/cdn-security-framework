@@ -3754,6 +3754,37 @@ describe('NestJS auth metadata analyzer', () => {
     ]));
   });
 
+  test('fails closed on Reflect.apply useGlobalGuards registrations', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import type { INestApplication } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const app: INestApplication;
+      declare const guard: unknown;
+      Reflect.apply(app.useGlobalGuards, app, [guard]);
+      @Controller('reflect-apply') class ReflectApplyController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(execution.result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+  });
+
   test('ignores empty useGlobalGuards registrations', async () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
