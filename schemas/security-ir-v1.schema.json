@@ -222,7 +222,11 @@
                       "guards": {
                         "type": "array",
                         "minItems": 1,
-                        "items": { "type": "object", "required": ["authKind"] }
+                        "items": {
+                          "type": "object",
+                          "required": ["authKind"],
+                          "properties": { "authKind": { "not": { "const": "unknown" } } }
+                        }
                       }
                     }
                   }

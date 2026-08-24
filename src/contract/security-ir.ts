@@ -439,7 +439,7 @@ function normalizeAuth(input: ApiAuthenticationContractV1, state: NormalizationS
     };
     const highConfidenceMatchesMode = (input.mode === 'none' && analysis.explicitPublic)
       || (input.mode === 'alternatives' && !analysis.explicitPublic && guards.length > 0
-        && guards.every(({ authKind }) => authKind !== undefined)
+        && guards.every(({ authKind }) => authKind !== undefined && authKind !== 'unknown')
         && canonicalAlternatives.length > 0
         && canonicalAlternatives.every(({ anonymous }) => !anonymous));
     if (analysis.enforcementConfidence === 'high' && !highConfidenceMatchesMode) {

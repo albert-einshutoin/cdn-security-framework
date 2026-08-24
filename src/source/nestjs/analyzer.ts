@@ -5196,7 +5196,13 @@ async function analyze(
         let insideBody = false;
         for (let current: ts.Node | undefined = node; current && current !== parent;
           current = current.parent) insideBody ||= current === parent.body;
-        if (insideBody && symbol && provablyUnusedLocalClasses.has(symbol)) return true;
+        const insideParameterInitializer = parent.parameters.some(({ initializer }) => {
+          for (let current: ts.Node | undefined = node; current && current !== parent;
+            current = current.parent) if (current === initializer) return true;
+          return false;
+        });
+        if ((insideBody || insideParameterInitializer)
+          && symbol && provablyUnusedLocalClasses.has(symbol)) return true;
       }
       if (ts.isPropertyDeclaration(parent) && parent.initializer
         && ts.isClassDeclaration(parent.parent)

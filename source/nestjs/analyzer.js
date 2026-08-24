@@ -5428,7 +5428,14 @@ async function analyze(context, authConfig) {
                 let insideBody = false;
                 for (let current = node; current && current !== parent; current = current.parent)
                     insideBody ||= current === parent.body;
-                if (insideBody && symbol && provablyUnusedLocalClasses.has(symbol))
+                const insideParameterInitializer = parent.parameters.some(({ initializer }) => {
+                    for (let current = node; current && current !== parent; current = current.parent)
+                        if (current === initializer)
+                            return true;
+                    return false;
+                });
+                if ((insideBody || insideParameterInitializer)
+                    && symbol && provablyUnusedLocalClasses.has(symbol))
                     return true;
             }
             if (typescript_1.default.isPropertyDeclaration(parent) && parent.initializer

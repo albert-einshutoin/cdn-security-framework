@@ -223,12 +223,20 @@ describe('Security IR v1', () => {
     ];
     expect(() => createSecurityContract(optionalAuth))
       .toThrow('authentication mode and analysis confidence are inconsistent');
+    const unknownKind = structuredClone(input);
+    unknownKind.operations[0].auth.analysis!.explicitPublic = false;
+    unknownKind.operations[0].auth.analysis!.guards[0].authKind = 'unknown';
+    expect(() => createSecurityContract(unknownKind))
+      .toThrow('authentication mode and analysis confidence are inconsistent');
     const schemaOnlyUnknown = structuredClone(contract);
     schemaOnlyUnknown.operations[0].auth.analysis = structuredClone(input.operations[0].auth.analysis);
     expect(validate(schemaOnlyUnknown)).toBe(false);
     const schemaOnlyOptional = structuredClone(contract);
     schemaOnlyOptional.operations[1].auth = structuredClone(optionalAuth.operations[0].auth);
     expect(validate(schemaOnlyOptional)).toBe(false);
+    const schemaOnlyUnknownKind = structuredClone(contract);
+    schemaOnlyUnknownKind.operations[1].auth = structuredClone(unknownKind.operations[0].auth);
+    expect(validate(schemaOnlyUnknownKind)).toBe(false);
     const secretRole = structuredClone(input);
     secretRole.operations[0].auth.analysis!.roles = ['secret=do-not-emit'];
     expect(() => createSecurityContract(secretRole)).toThrow('secret-like value is not allowed');

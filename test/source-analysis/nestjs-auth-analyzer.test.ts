@@ -6068,6 +6068,9 @@ describe('NestJS auth metadata analyzer', () => {
   test('distinguishes definition-time effects from unused class instance effects', async () => {
     for (const { member, expected } of [
       { member: 'field = app.useGlobalGuards(guard);', expected: 'alternatives' },
+      { member: 'constructor(value = app.useGlobalGuards(guard)) {}', expected: 'alternatives' },
+      { member: 'method(value = app.useGlobalGuards(guard)) {}', expected: 'alternatives' },
+      { member: 'set value(input = app.useGlobalGuards(guard)) {}', expected: 'alternatives' },
       { member: '[app.useGlobalGuards(guard) as any] = 1;', expected: 'unknown' },
     ]) {
       const root = workspace(`
