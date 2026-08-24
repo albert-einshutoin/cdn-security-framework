@@ -250,6 +250,34 @@ function registeredProviderObjects(checker, projectSources, check) {
             || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
             || typescript_1.default.isNonNullExpression(expression))
             expression = expression.expression;
+        if (typescript_1.default.isBinaryExpression(expression) && (expression.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+            || expression.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken
+            || expression.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken)) {
+            const left = staticState(expression.left, new Set(seen), depth + 1);
+            if (expression.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken) {
+                if (left.truthy === false)
+                    return left;
+                if (left.truthy === true)
+                    return staticState(expression.right, seen, depth + 1);
+            }
+            else if (expression.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken) {
+                if (left.truthy === true)
+                    return left;
+                if (left.truthy === false)
+                    return staticState(expression.right, seen, depth + 1);
+            }
+            else {
+                if (left.nullish === false)
+                    return left;
+                if (left.nullish === true)
+                    return staticState(expression.right, seen, depth + 1);
+            }
+            const right = staticState(expression.right, seen, depth + 1);
+            return {
+                ...(left.truthy === right.truthy ? { truthy: left.truthy } : {}),
+                ...(left.nullish === right.nullish ? { nullish: left.nullish } : {}),
+            };
+        }
         if (expression.kind === typescript_1.default.SyntaxKind.NullKeyword || typescript_1.default.isVoidExpression(expression)) {
             return { truthy: false, nullish: true };
         }

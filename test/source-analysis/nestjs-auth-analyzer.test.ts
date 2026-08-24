@@ -822,6 +822,9 @@ describe('NestJS auth metadata analyzer', () => {
       @Module({
         providers: undefined && [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
       }) class UndefinedModule {}
+      @Module({
+        providers: (true && []) || [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
+      }) class NestedLogicalModule {}
       @Controller('read-only') class ReadOnlyController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }

@@ -291,6 +291,28 @@ function registeredProviderObjects(
     while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
       || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
       || ts.isNonNullExpression(expression)) expression = expression.expression;
+    if (ts.isBinaryExpression(expression) && (
+      expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+      || expression.operatorToken.kind === ts.SyntaxKind.BarBarToken
+      || expression.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+    )) {
+      const left = staticState(expression.left, new Set(seen), depth + 1);
+      if (expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+        if (left.truthy === false) return left;
+        if (left.truthy === true) return staticState(expression.right, seen, depth + 1);
+      } else if (expression.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        if (left.truthy === true) return left;
+        if (left.truthy === false) return staticState(expression.right, seen, depth + 1);
+      } else {
+        if (left.nullish === false) return left;
+        if (left.nullish === true) return staticState(expression.right, seen, depth + 1);
+      }
+      const right = staticState(expression.right, seen, depth + 1);
+      return {
+        ...(left.truthy === right.truthy ? { truthy: left.truthy } : {}),
+        ...(left.nullish === right.nullish ? { nullish: left.nullish } : {}),
+      };
+    }
     if (expression.kind === ts.SyntaxKind.NullKeyword || ts.isVoidExpression(expression)) {
       return { truthy: false, nullish: true };
     }
