@@ -4017,6 +4017,7 @@ describe('NestJS auth metadata analyzer', () => {
       app.useGlobalGuards(...[,]);
       app.useGlobalGuards.apply(app, [,] as never);
       app.useGlobalGuards.call.call(app.useGlobalGuards, app, guard);
+      (0, app.useGlobalGuards).call(app, guard);
       @Controller('call-apply') class CallApplyController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }
@@ -4069,6 +4070,41 @@ describe('NestJS auth metadata analyzer', () => {
     expect(execution.result.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
+  });
+
+  test('ignores discarded members in deep comma-expression guard targets', async () => {
+    const target = Array.from(
+      { length: 65 }, (_, index) => index,
+    ).reduce((right) => `(app.useGlobalGuards, ${right})`, 'other');
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import type { INestApplication } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const app: INestApplication;
+      declare const guard: unknown;
+      declare const other: (...args: unknown[]) => void;
+      (${target}).call(app, guard);
+      @Controller('deep-comma') class DeepCommaController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), {
+      ...context(root),
+      limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxAnalysisDepth: 1_024 },
+    });
+
+    expect(execution.status, JSON.stringify(execution)).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('alternatives');
   });
 
   test('ignores empty useGlobalGuards registrations', async () => {

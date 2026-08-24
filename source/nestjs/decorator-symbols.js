@@ -3413,6 +3413,11 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
             depthLimitReached = true;
             break;
         }
+        if (typescript_1.default.isBinaryExpression(expression)
+            && expression.operatorToken.kind === typescript_1.default.SyntaxKind.CommaToken) {
+            expression = resolveStableInitializer(expression.right);
+            continue;
+        }
         if (typescript_1.default.isCallExpression(expression)) {
             const bind = unwrapExpression(expression.expression);
             const bindName = typescript_1.default.isPropertyAccessExpression(bind) ? bind.name.text
@@ -3457,6 +3462,11 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
         while (nodes.length > 0 && steps++ < 4096) {
             check();
             const node = nodes.pop();
+            if (typescript_1.default.isBinaryExpression(node)
+                && node.operatorToken.kind === typescript_1.default.SyntaxKind.CommaToken) {
+                nodes.push(node.right);
+                continue;
+            }
             if (typescript_1.default.isCallExpression(node)) {
                 nodes.push(node.expression);
                 continue;
