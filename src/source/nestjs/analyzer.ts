@@ -4431,6 +4431,64 @@ async function analyze(
   const projectSources = new Set(loaded.sourceFiles.filter((sourceFile) => (
     !sourceFile.isDeclarationFile && !sourceFile.fileName.replaceAll('\\', '/').includes('/node_modules/')
   )));
+  const localFunctions = new Map<ts.Symbol, ts.FunctionDeclaration>();
+  for (const sourceFile of projectSources) {
+    if (!ts.isExternalModule(sourceFile)) continue;
+    const nodes: ts.Node[] = [sourceFile];
+    while (nodes.length > 0) {
+      const node = nodes.pop()!;
+      check();
+      if (ts.isFunctionDeclaration(node) && node.body && node.name
+        && !node.modifiers?.some(({ kind }) => (
+          kind === ts.SyntaxKind.ExportKeyword || kind === ts.SyntaxKind.DefaultKeyword
+        ))) {
+        const symbol = resolvedSymbolAt(node.name, checker);
+        const bodies = symbol?.declarations?.filter((declaration) => (
+          ts.isFunctionDeclaration(declaration) && declaration.body
+        )) ?? [];
+        if (symbol && bodies.length === 1) localFunctions.set(symbol, node);
+      }
+      ts.forEachChild(node, (child) => { nodes.push(child); });
+    }
+  }
+  const referencedLocalFunctions = new Set<ts.Symbol>();
+  if (localFunctions.size > 0) {
+    for (const sourceFile of projectSources) {
+      const nodes: ts.Node[] = [sourceFile];
+      while (nodes.length > 0) {
+        const node = nodes.pop()!;
+        check();
+        if (ts.isIdentifier(node)) {
+          const symbol = resolvedSymbolAt(node, checker);
+          const declaration = symbol ? localFunctions.get(symbol) : undefined;
+          if (symbol && declaration) {
+            let insideDeclaration = false;
+            for (let parent: ts.Node | undefined = node; parent; parent = parent.parent) {
+              if (parent === declaration) {
+                insideDeclaration = true;
+                break;
+              }
+              if (ts.isSourceFile(parent)) break;
+            }
+            if (!insideDeclaration) referencedLocalFunctions.add(symbol);
+          }
+        }
+        ts.forEachChild(node, (child) => { nodes.push(child); });
+      }
+    }
+  }
+  const provablyUninvokedLocalFunctions = new Set([...localFunctions.keys()].filter((symbol) => (
+    !referencedLocalFunctions.has(symbol)
+  )));
+  const isInsideProvablyUninvokedFunction = (node: ts.Node): boolean => {
+    for (let parent = node.parent; !ts.isSourceFile(parent); parent = parent.parent) {
+      if (ts.isFunctionDeclaration(parent) && parent.name) {
+        const symbol = resolvedSymbolAt(parent.name, checker);
+        if (symbol && provablyUninvokedLocalFunctions.has(symbol)) return true;
+      }
+    }
+    return false;
+  };
   const providerRegistrations = registeredProviderObjects(checker, projectSources, check);
   const providerCandidates = [
     ...providerRegistrations.candidates, ...providerRegistrations.providers,
@@ -4503,6 +4561,7 @@ async function analyze(
       await checkpoint();
       if (ts.isCallExpression(node)
         && !staticallyUnreachable(node)
+        && !isInsideProvablyUninvokedFunction(node)
         && isNestJsUseGlobalGuardsCall(node, checker, check, projectSources)) {
         if (!globalGuardFound) addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.expression);
         globalGuardFound = true;

@@ -4620,6 +4620,63 @@ async function analyze(context, authConfig) {
     const useDefineForClassFields = compilerOptions.useDefineForClassFields
         ?? (compilerOptions.target ?? typescript_1.default.ScriptTarget.ES5) >= typescript_1.default.ScriptTarget.ES2022;
     const projectSources = new Set(loaded.sourceFiles.filter((sourceFile) => (!sourceFile.isDeclarationFile && !sourceFile.fileName.replaceAll('\\', '/').includes('/node_modules/'))));
+    const localFunctions = new Map();
+    for (const sourceFile of projectSources) {
+        if (!typescript_1.default.isExternalModule(sourceFile))
+            continue;
+        const nodes = [sourceFile];
+        while (nodes.length > 0) {
+            const node = nodes.pop();
+            check();
+            if (typescript_1.default.isFunctionDeclaration(node) && node.body && node.name
+                && !node.modifiers?.some(({ kind }) => (kind === typescript_1.default.SyntaxKind.ExportKeyword || kind === typescript_1.default.SyntaxKind.DefaultKeyword))) {
+                const symbol = resolvedSymbolAt(node.name, checker);
+                const bodies = symbol?.declarations?.filter((declaration) => (typescript_1.default.isFunctionDeclaration(declaration) && declaration.body)) ?? [];
+                if (symbol && bodies.length === 1)
+                    localFunctions.set(symbol, node);
+            }
+            typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+        }
+    }
+    const referencedLocalFunctions = new Set();
+    if (localFunctions.size > 0) {
+        for (const sourceFile of projectSources) {
+            const nodes = [sourceFile];
+            while (nodes.length > 0) {
+                const node = nodes.pop();
+                check();
+                if (typescript_1.default.isIdentifier(node)) {
+                    const symbol = resolvedSymbolAt(node, checker);
+                    const declaration = symbol ? localFunctions.get(symbol) : undefined;
+                    if (symbol && declaration) {
+                        let insideDeclaration = false;
+                        for (let parent = node; parent; parent = parent.parent) {
+                            if (parent === declaration) {
+                                insideDeclaration = true;
+                                break;
+                            }
+                            if (typescript_1.default.isSourceFile(parent))
+                                break;
+                        }
+                        if (!insideDeclaration)
+                            referencedLocalFunctions.add(symbol);
+                    }
+                }
+                typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+            }
+        }
+    }
+    const provablyUninvokedLocalFunctions = new Set([...localFunctions.keys()].filter((symbol) => (!referencedLocalFunctions.has(symbol))));
+    const isInsideProvablyUninvokedFunction = (node) => {
+        for (let parent = node.parent; !typescript_1.default.isSourceFile(parent); parent = parent.parent) {
+            if (typescript_1.default.isFunctionDeclaration(parent) && parent.name) {
+                const symbol = resolvedSymbolAt(parent.name, checker);
+                if (symbol && provablyUninvokedLocalFunctions.has(symbol))
+                    return true;
+            }
+        }
+        return false;
+    };
     const providerRegistrations = registeredProviderObjects(checker, projectSources, check);
     const providerCandidates = [
         ...providerRegistrations.candidates, ...providerRegistrations.providers,
@@ -4683,6 +4740,7 @@ async function analyze(context, authConfig) {
             await checkpoint();
             if (typescript_1.default.isCallExpression(node)
                 && !staticallyUnreachable(node)
+                && !isInsideProvablyUninvokedFunction(node)
                 && (0, decorator_symbols_1.isNestJsUseGlobalGuardsCall)(node, checker, check, projectSources)) {
                 if (!globalGuardFound)
                     addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.expression);
