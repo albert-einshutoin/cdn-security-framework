@@ -3103,6 +3103,39 @@ describe('NestJS auth metadata analyzer', () => {
     ]));
   });
 
+  test('fails closed on global guards registered through an any-typed Nest application', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare class AppModule {}
+      declare const guard: unknown;
+      async function bootstrap() {
+        const app: any = await NestFactory.create(AppModule);
+        app.useGlobalGuards(guard);
+      }
+      bootstrap();
+      @Controller('any-app') class AnyAppController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+        export declare const NestFactory: { create(module: unknown): Promise<INestApplication> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
   test('fails closed on synchronous provider factories and external module imports', async () => {
     const iifeRoot = workspace(`
       import { Controller, Get, Module, UseGuards } from '@nestjs/common';

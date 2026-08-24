@@ -3591,7 +3591,9 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
     }
     if (!hasGuardArgument || property !== 'useGlobalGuards' || !receiver)
         return false;
-    const symbol = checker.getNonNullableType(checker.getTypeAtLocation(receiver)).getProperty(property);
+    const receiverType = checker.getNonNullableType(checker.getTypeAtLocation(receiver));
+    const symbol = receiverType.getProperty(property);
     return matchesConsumerModule(expression, symbol, '@nestjs/common')
-        || matchesConsumerModule(expression, symbol, '@nestjs/core');
+        || matchesConsumerModule(expression, symbol, '@nestjs/core')
+        || Boolean(receiverType.flags & typescript_1.default.TypeFlags.Any);
 }
