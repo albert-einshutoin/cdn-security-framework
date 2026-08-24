@@ -3736,6 +3736,8 @@ describe('NestJS auth metadata analyzer', () => {
       prebound.apply(undefined, []);
       const unbound = app.useGlobalGuards;
       unbound.call(app, guard);
+      let mutableUnchanged = app.useGlobalGuards;
+      mutableUnchanged.call(app, guard);
       let { useGlobalGuards } = app;
       useGlobalGuards.call(app, guard);
       @Controller('bound') class BoundController {
@@ -3759,6 +3761,112 @@ describe('NestJS auth metadata analyzer', () => {
     expect(execution.result.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
+  });
+
+  test('tracks top-level mutable useGlobalGuards aliases at the call position', async () => {
+    const aliases = [
+      `let register = app.useGlobalGuards;
+       register.call(app, guard);
+       register = () => app;`,
+      `let register = () => app;
+       register = app.useGlobalGuards;
+       register.call(app, guard);`,
+      `let { useGlobalGuards: register } = app;
+       register.call(app, guard);
+       register = () => app;`,
+      `let { useGlobalGuards: register } = app;
+       register = app.useGlobalGuards;
+       register.call(app, guard);`,
+      `let canonical = app.useGlobalGuards;
+       let register = () => app;
+       if (enabled) register = canonical;
+       register.call(app, guard);`,
+      `let register = () => app;
+       ({ register } = { register: app.useGlobalGuards });
+       register.call(app, guard);`,
+      `let register = () => app;
+       [register] = [app.useGlobalGuards];
+       register.call(app, guard);`,
+      `let register = () => app;
+       [register = app.useGlobalGuards] = [undefined];
+       register.call(app, guard);`,
+      `let register = () => app;
+       ({ x: register = app.useGlobalGuards } = { x: undefined });
+       register.call(app, guard);`,
+      `let register = () => app;
+       ({ register } = { register: () => app, ['register']: app.useGlobalGuards });
+       register.call(app, guard);`,
+      `let register = () => app;
+       ({ register } = { get register() { return app.useGlobalGuards; } });
+       register.call(app, guard);`,
+      `let candidate = () => app;
+       ({ candidate } = { get candidate() { return app.useGlobalGuards; } });
+       let register = () => app;
+       if (enabled) register = candidate;
+       register.call(app, guard);`,
+    ];
+    for (const [index, alias] of aliases.entries()) {
+      const root = workspace(`
+        import { Controller, Get, UseGuards } from '@nestjs/common';
+        import type { INestApplication } from '@nestjs/core';
+        import { JwtAuthGuard } from './auth';
+        declare const app: INestApplication;
+        declare const guard: unknown;
+        declare const enabled: boolean;
+        ${alias}
+        @Controller('mutable-alias') class MutableAliasController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, {
+        'src/auth.ts': 'export class JwtAuthGuard {}\n',
+        'node_modules/@nestjs/core/index.d.ts': `
+          export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+        `,
+        'node_modules/@nestjs/core/package.json': JSON.stringify({
+          name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+        }),
+        'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+      });
+      const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+      expect(execution.status).toBe('success');
+      if (execution.status === 'success') {
+        expect(execution.result.contract.operations[0].auth.mode, `mutable alias fixture ${index}`).toBe('unknown');
+      }
+    }
+  });
+
+  test('does not treat a shadowed undefined value as a destructuring default', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import type { INestApplication } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const app: INestApplication;
+      declare const guard: unknown;
+      const undefined = () => app;
+      let register = () => app;
+      [register = app.useGlobalGuards] = [undefined];
+      register.call(app, guard);
+      @Controller('shadowed-undefined') class ShadowedUndefinedController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(
+      execution.result.contract.operations[0].auth.mode,
+      JSON.stringify(execution.result.diagnostics),
+    ).toBe('alternatives');
   });
 
   test('fails closed on call/apply useGlobalGuards registrations', async () => {

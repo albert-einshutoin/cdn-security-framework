@@ -30,6 +30,199 @@ const BARE_RECEIVER_STABILITY_CACHE = new WeakMap<
 >();
 const WRAPPER_MUTATION_CACHE = new WeakMap<ReadonlySet<ts.SourceFile>, WeakMap<ts.Symbol, boolean>>();
 const WRAPPED_RECEIVER_CACHE = new WeakMap<ReadonlySet<ts.SourceFile>, ReadonlySet<ts.Symbol>>();
+type CallableWriteRecord = {
+  sourceFile: ts.SourceFile;
+  start: number;
+  directTopLevel: boolean;
+  value?: ts.Expression;
+  uncertainCanonical?: boolean;
+};
+const CALLABLE_WRITE_INDEX_CACHE = new WeakMap<
+  ReadonlySet<ts.SourceFile>, ReadonlyMap<ts.Symbol, readonly CallableWriteRecord[]>
+>();
+
+function callableWriteIndex(
+  projectSources: ReadonlySet<ts.SourceFile>,
+  checker: ts.TypeChecker,
+  check: () => void,
+): ReadonlyMap<ts.Symbol, readonly CallableWriteRecord[]> {
+  const cached = CALLABLE_WRITE_INDEX_CACHE.get(projectSources);
+  if (cached) return cached;
+  const index = new Map<ts.Symbol, CallableWriteRecord[]>();
+  const isNestedAssignmentTarget = (node: ts.BinaryExpression): boolean => {
+    let child: ts.Node = node;
+    while (child.parent && !ts.isStatement(child.parent)) {
+      const parent = child.parent;
+      if (ts.isBinaryExpression(parent) && parent.left === child
+        && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment) return true;
+      child = parent;
+    }
+    return false;
+  };
+  const recordSymbol = (target: ts.Identifier, record: CallableWriteRecord): void => {
+    let symbol = ts.isShorthandPropertyAssignment(target.parent) && target.parent.name === target
+      ? checker.getShorthandAssignmentValueSymbol(target.parent)
+      : checker.getSymbolAtLocation(target);
+    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (!symbol) return;
+    const records = index.get(symbol) ?? [];
+    records.push(record);
+    index.set(symbol, records);
+  };
+  const fallback = (target: ts.Node, record: CallableWriteRecord): void => {
+    const current = ts.isExpression(target) ? unwrapExpression(target) : target;
+    if (ts.isIdentifier(current)) {
+      recordSymbol(current, record);
+    } else if (ts.isBinaryExpression(current)
+      && current.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      fallback(current.left, record);
+    } else if (ts.isArrayLiteralExpression(current)) {
+      for (const element of current.elements) {
+        if (!ts.isOmittedExpression(element)) fallback(
+          ts.isSpreadElement(element) ? element.expression : element, record,
+        );
+      }
+    } else if (ts.isObjectLiteralExpression(current)) {
+      for (const property of current.properties) {
+        if (ts.isShorthandPropertyAssignment(property)) fallback(property.name, record);
+        else if (ts.isPropertyAssignment(property)) fallback(property.initializer, record);
+        else if (ts.isSpreadAssignment(property)) fallback(property.expression, record);
+      }
+    }
+  };
+  const undefinedState = (
+    input: ts.Expression,
+    seen = new Set<ts.Symbol>(),
+    depth = 0,
+  ): boolean | undefined => {
+    if (depth >= 64) return undefined;
+    const value = unwrapExpression(input);
+    if (ts.isVoidExpression(value)) return true;
+    if (value.kind === ts.SyntaxKind.NullKeyword || ts.isStringLiteralLike(value)
+      || ts.isNumericLiteral(value) || value.kind === ts.SyntaxKind.TrueKeyword
+      || value.kind === ts.SyntaxKind.FalseKeyword || ts.isObjectLiteralExpression(value)
+      || ts.isArrayLiteralExpression(value) || ts.isFunctionExpression(value)
+      || ts.isArrowFunction(value) || ts.isClassExpression(value)) return false;
+    if (!ts.isIdentifier(value)) return undefined;
+    let symbol = checker.getSymbolAtLocation(value);
+    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (value.text === 'undefined' && (!symbol || !symbol.declarations?.length)) return true;
+    if (!symbol || seen.has(symbol)) return undefined;
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration?.initializer || !ts.isVariableDeclarationList(declaration.parent)
+      || !(declaration.parent.flags & ts.NodeFlags.Const)) return undefined;
+    return undefinedState(declaration.initializer, new Set(seen).add(symbol), depth + 1);
+  };
+  const add = (target: ts.Expression, record: CallableWriteRecord): void => {
+    const current = unwrapExpression(target);
+    if (ts.isIdentifier(current)) {
+      recordSymbol(current, record);
+      return;
+    }
+    if (ts.isBinaryExpression(current)
+      && current.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+      const state = record.value ? undefinedState(record.value) : true;
+      if (state !== true) add(current.left, record);
+      if (state !== false) {
+        add(current.left, { ...record, value: current.right, directTopLevel: false });
+      }
+      return;
+    }
+    const value = record.value && unwrapExpression(record.value);
+    if (ts.isArrayLiteralExpression(current) && value && ts.isArrayLiteralExpression(value)
+      && !current.elements.some(ts.isSpreadElement) && !value.elements.some(ts.isSpreadElement)) {
+      for (let index = 0; index < current.elements.length; index += 1) {
+        const element = current.elements[index];
+        if (ts.isOmittedExpression(element)) continue;
+        const assigned = value.elements[index];
+        add(element, {
+          ...record,
+          ...(assigned && !ts.isOmittedExpression(assigned) ? { value: assigned } : { value: undefined }),
+          directTopLevel: false,
+        });
+      }
+      return;
+    }
+    if (ts.isObjectLiteralExpression(current) && value && ts.isObjectLiteralExpression(value)
+      && !current.properties.some(ts.isSpreadAssignment)
+      && !value.properties.some(ts.isSpreadAssignment)) {
+      for (const property of current.properties) {
+        const key = ts.isShorthandPropertyAssignment(property) ? property.name.text
+          : ts.isPropertyAssignment(property) && (ts.isIdentifier(property.name)
+            || ts.isStringLiteral(property.name) || ts.isNumericLiteral(property.name))
+            ? property.name.text : undefined;
+        const nestedTarget = ts.isShorthandPropertyAssignment(property) ? property.name
+          : ts.isPropertyAssignment(property) ? property.initializer : undefined;
+        if (!key || !nestedTarget) {
+          fallback(property, { ...record, directTopLevel: false, uncertainCanonical: true });
+          continue;
+        }
+        let candidates: Array<{ value?: ts.Expression; uncertainCanonical?: boolean }> = [];
+        for (const source of value.properties) {
+          if (ts.isSpreadAssignment(source)) {
+            candidates.push({ value: source.expression, uncertainCanonical: true });
+            continue;
+          }
+          const sourceKey = ts.isComputedPropertyName(source.name)
+              ? resolveStaticPropertyKey(source.name.expression, checker, check)
+              : (ts.isIdentifier(source.name)
+                || ts.isStringLiteral(source.name) || ts.isNumericLiteral(source.name))
+                ? source.name.text : undefined;
+          const assigned = ts.isShorthandPropertyAssignment(source) ? source.name
+            : ts.isPropertyAssignment(source) ? source.initializer : undefined;
+          const uncertainCanonical = !assigned;
+          if (sourceKey === key) candidates = [{ ...(assigned ? { value: assigned } : {}), uncertainCanonical }];
+          else if (sourceKey === undefined) candidates.push({
+            ...(assigned ? { value: assigned } : {}), uncertainCanonical: true,
+          });
+        }
+        if (candidates.length === 0) {
+          add(nestedTarget, { ...record, value: undefined, directTopLevel: false });
+        } else {
+          for (const candidate of candidates) add(nestedTarget, {
+            ...record, ...candidate, directTopLevel: false,
+          });
+        }
+      }
+      return;
+    }
+    fallback(current, { ...record, directTopLevel: false, uncertainCanonical: true });
+  };
+  for (const sourceFile of projectSources) {
+    const nodes: ts.Node[] = [sourceFile];
+    while (nodes.length > 0) {
+      check();
+      const node = nodes.pop()!;
+      if (ts.isBinaryExpression(node)
+        && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+        && !isNestedAssignmentTarget(node)) {
+        const target = unwrapExpression(node.left);
+        add(target, {
+          sourceFile,
+          start: node.getStart(),
+          directTopLevel: node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+            && ts.isIdentifier(target) && ts.isExpressionStatement(node.parent)
+            && ts.isSourceFile(node.parent.parent),
+          ...(node.operatorToken.kind === ts.SyntaxKind.EqualsToken ? { value: node.right } : {}),
+        });
+      } else if (ts.isForOfStatement(node) || ts.isForInStatement(node)) {
+        if (!ts.isVariableDeclarationList(node.initializer)) add(node.initializer, {
+          sourceFile, start: node.getStart(), directTopLevel: false,
+        });
+      } else if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
+        && (node.operator === ts.SyntaxKind.PlusPlusToken
+          || node.operator === ts.SyntaxKind.MinusMinusToken)) {
+        add(node.operand, { sourceFile, start: node.getStart(), directTopLevel: false });
+      }
+      ts.forEachChild(node, (child) => { nodes.push(child); });
+    }
+  }
+  CALLABLE_WRITE_INDEX_CACHE.set(projectSources, index);
+  return index;
+}
 
 function callableBindingMayBeWritten(
   symbol: ts.Symbol,
@@ -3033,6 +3226,147 @@ export function isNestJsUseGlobalGuardsCall(
   check: () => void,
   projectSources?: ReadonlySet<ts.SourceFile>,
 ): boolean {
+  const writeIndex = projectSources
+    ? callableWriteIndex(projectSources, checker, check) : new Map<ts.Symbol, readonly CallableWriteRecord[]>();
+  const resolveUnmodifiedAlias = (input: ts.Expression): ts.Expression => {
+    const seen = new Set<ts.Symbol>();
+    let value = unwrapExpression(input);
+    while (ts.isIdentifier(value)) {
+      check();
+      let symbol = checker.getSymbolAtLocation(value);
+      if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+      if (!symbol || seen.has(symbol) || seen.size >= 64) break;
+      seen.add(symbol);
+      const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+      const declaration = declarations.length === 1 ? declarations[0] : undefined;
+      if (!declaration?.initializer || (projectSources
+        && !projectSources.has(declaration.getSourceFile()))
+        || !ts.isVariableDeclarationList(declaration.parent)
+        || (!(declaration.parent.flags & ts.NodeFlags.Const)
+          && (writeIndex.get(symbol)?.length ?? 0) > 0)) break;
+      value = unwrapExpression(declaration.initializer);
+    }
+    return value;
+  };
+  const canonicalGuardMember = (input: ts.Expression): boolean => {
+    const value = resolveUnmodifiedAlias(input);
+    const property = ts.isPropertyAccessExpression(value) ? value.name.text
+      : ts.isElementAccessExpression(value) && value.argumentExpression
+        ? resolveStaticPropertyKey(value.argumentExpression, checker, check) : undefined;
+    if (property !== 'useGlobalGuards'
+      || (!ts.isPropertyAccessExpression(value) && !ts.isElementAccessExpression(value))) return false;
+    const symbol = checker.getNonNullableType(checker.getTypeAtLocation(value.expression)).getProperty(property);
+    return matchesConsumerModule(value, symbol, '@nestjs/common')
+      || matchesConsumerModule(value, symbol, '@nestjs/core');
+  };
+  const canonicalExpressionMemo = new WeakMap<ts.Node, boolean | 'visiting'>();
+  const canonicalSymbolMemo = new Map<ts.Symbol, boolean | 'visiting'>();
+  const canonicalAliasEvidence = (input: ts.Expression, depth = 0): boolean => {
+    check();
+    if (depth >= 64) return true;
+    const value = unwrapExpression(input);
+    const cachedExpression = canonicalExpressionMemo.get(value);
+    if (cachedExpression !== undefined) return cachedExpression === 'visiting' ? false : cachedExpression;
+    canonicalExpressionMemo.set(value, 'visiting');
+    let result = canonicalGuardMember(value);
+    if (!result && ts.isArrayLiteralExpression(value)) result = value.elements.some((element) => (
+      !ts.isOmittedExpression(element) && canonicalAliasEvidence(
+        ts.isSpreadElement(element) ? element.expression : element, depth + 1,
+      )
+    ));
+    if (!result && ts.isObjectLiteralExpression(value)) result = value.properties.some((property) => {
+      const candidate = ts.isPropertyAssignment(property) ? property.initializer
+        : ts.isShorthandPropertyAssignment(property) ? property.name
+          : ts.isSpreadAssignment(property) ? property.expression : undefined;
+      return Boolean(candidate && canonicalAliasEvidence(candidate, depth + 1));
+    });
+    if (ts.isConditionalExpression(value)) {
+      result ||= canonicalAliasEvidence(value.whenTrue, depth + 1)
+        || canonicalAliasEvidence(value.whenFalse, depth + 1);
+    }
+    if (ts.isBinaryExpression(value)) {
+      result ||= canonicalAliasEvidence(value.left, depth + 1)
+        || canonicalAliasEvidence(value.right, depth + 1);
+    }
+    if (!result && ts.isIdentifier(value)) {
+      let symbol = checker.getSymbolAtLocation(value);
+      if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+      if (symbol) {
+        const cachedSymbol = canonicalSymbolMemo.get(symbol);
+        if (cachedSymbol !== undefined) result = cachedSymbol === 'visiting' ? false : cachedSymbol;
+        else {
+          canonicalSymbolMemo.set(symbol, 'visiting');
+          const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+          const declaration = declarations.length === 1 ? declarations[0] : undefined;
+          result = Boolean(declaration?.initializer && (!projectSources
+            || projectSources.has(declaration.getSourceFile()))
+            && canonicalAliasEvidence(declaration.initializer, depth + 1))
+            || (writeIndex.get(symbol) ?? []).some((record) => Boolean(record.uncertainCanonical
+              || (record.value && canonicalAliasEvidence(record.value, depth + 1))));
+          canonicalSymbolMemo.set(symbol, result);
+        }
+      }
+    }
+    canonicalExpressionMemo.set(value, result);
+    return result;
+  };
+  const callStatement = ts.isExpressionStatement(call.parent)
+    && ts.isSourceFile(call.parent.parent) ? call.parent : undefined;
+  const mutableAssignmentsAtCall = (symbol: ts.Symbol): {
+    latest?: ts.Expression;
+    ambiguous: boolean;
+    canonicalCandidate: boolean;
+  } => {
+    let latest: ts.Expression | undefined;
+    let latestStart = -1;
+    let ambiguous = !callStatement;
+    let canonicalCandidate = false;
+    for (const record of writeIndex.get(symbol) ?? []) {
+      canonicalCandidate ||= Boolean(record.uncertainCanonical
+        || (record.value && canonicalAliasEvidence(record.value)));
+      const direct = record.directTopLevel && callStatement
+        && record.sourceFile === call.getSourceFile();
+      if (direct && record.start < call.getStart()) {
+        if (record.start > latestStart && record.value) {
+          latest = record.value;
+          latestStart = record.start;
+        }
+      } else if (!(direct && record.start > call.getStart())) {
+        ambiguous = true;
+      }
+    }
+    return { ...(latest ? { latest } : {}), ambiguous, canonicalCandidate };
+  };
+  let uncertainCanonicalAlias = false;
+  const resolveStableInitializer = (input: ts.Expression): ts.Expression => {
+    const seen = new Set<ts.Symbol>();
+    let value = unwrapExpression(input);
+    while (ts.isIdentifier(value)) {
+      check();
+      let symbol = checker.getSymbolAtLocation(value);
+      if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+      if (!symbol || seen.has(symbol)) break;
+      seen.add(symbol);
+      const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+      const declaration = declarations.length === 1 ? declarations[0] : undefined;
+      if (!declaration?.initializer || (projectSources
+        && !projectSources.has(declaration.getSourceFile()))
+        || !ts.isVariableDeclarationList(declaration.parent)) break;
+      if (declaration.parent.flags & ts.NodeFlags.Const) {
+        value = unwrapExpression(declaration.initializer);
+        continue;
+      }
+      if (!projectSources) break;
+      const assignments = mutableAssignmentsAtCall(symbol);
+      if (assignments.ambiguous) {
+        uncertainCanonicalAlias ||= canonicalAliasEvidence(declaration.initializer)
+          || assignments.canonicalCandidate;
+        break;
+      }
+      value = unwrapExpression(assignments.latest ?? declaration.initializer);
+    }
+    return value;
+  };
   const flattenArguments = (args: readonly ts.Expression[]): ts.Expression[] | undefined => {
     const pending = [...args];
     const flattened: ts.Expression[] = [];
@@ -3061,7 +3395,7 @@ export function isNestJsUseGlobalGuardsCall(
       && !checker.getSymbolAtLocation(value)?.declarations?.length;
   };
   let effectiveArguments = flattenArguments(call.arguments);
-  let expression = resolveConstInitializer(call.expression, checker, check, projectSources);
+  let expression = resolveStableInitializer(call.expression);
   const reflectCall = unwrapExpression(call.expression);
   const reflectMethod = ts.isPropertyAccessExpression(reflectCall) ? reflectCall.name.text
     : ts.isElementAccessExpression(reflectCall) && reflectCall.argumentExpression
@@ -3077,7 +3411,7 @@ export function isNestJsUseGlobalGuardsCall(
       projectSources?.has(declaration.getSourceFile())
     ));
   if (standardReflectApply && call.arguments[0]) {
-    expression = resolveConstInitializer(call.arguments[0], checker, check, projectSources);
+    expression = resolveStableInitializer(call.arguments[0]);
     const guards = call.arguments[2] ? unwrapExpression(call.arguments[2]) : undefined;
     effectiveArguments = guards && ts.isArrayLiteralExpression(guards)
       ? guards.elements.some(ts.isOmittedExpression) ? undefined
@@ -3102,7 +3436,7 @@ export function isNestJsUseGlobalGuardsCall(
         const bound = flattenArguments(expression.arguments.slice(1));
         effectiveArguments = bound && effectiveArguments
           ? [...bound, ...effectiveArguments] : undefined;
-        expression = resolveConstInitializer(bind.expression, checker, check, projectSources);
+        expression = resolveStableInitializer(bind.expression);
         continue;
       }
     }
@@ -3125,7 +3459,7 @@ export function isNestJsUseGlobalGuardsCall(
               ))) : undefined;
         }
       }
-      expression = resolveConstInitializer(expression.expression, checker, check, projectSources);
+      expression = resolveStableInitializer(expression.expression);
       continue;
     }
     break;
@@ -3154,7 +3488,7 @@ export function isNestJsUseGlobalGuardsCall(
         nodes.push(node.expression);
         continue;
       } else if (ts.isIdentifier(node)) {
-        const resolved = resolveConstInitializer(node, checker, check, projectSources);
+        const resolved = resolveStableInitializer(node);
         if (resolved !== node) nodes.push(resolved);
         const binding = checker.getSymbolAtLocation(node)?.declarations?.find(ts.isBindingElement);
         const pattern = binding?.parent;
@@ -3189,6 +3523,8 @@ export function isNestJsUseGlobalGuardsCall(
   let receiver: ts.Expression | undefined = (ts.isPropertyAccessExpression(expression)
     || ts.isElementAccessExpression(expression))
     ? expression.expression : undefined;
+  const hasGuardArgument = !effectiveArguments || effectiveArguments.length > 0;
+  if (uncertainCanonicalAlias && hasGuardArgument) return true;
   if (!receiver && ts.isIdentifier(expression)) {
     const binding = checker.getSymbolAtLocation(expression)?.declarations?.find(ts.isBindingElement);
     const pattern = binding?.parent;
@@ -3196,16 +3532,28 @@ export function isNestJsUseGlobalGuardsCall(
       && ts.isVariableDeclaration(pattern.parent) ? pattern.parent : undefined;
     if (binding && declaration?.initializer && ts.isVariableDeclarationList(declaration.parent)) {
       const bindingSymbol = checker.getSymbolAtLocation(expression);
-      if (!bindingSymbol || !projectSources || callableBindingMayBeWritten(
-        bindingSymbol, bindingSymbol.declarations ?? [], checker, projectSources, check,
-      )) return false;
       property = binding.propertyName && (ts.isIdentifier(binding.propertyName)
         || ts.isStringLiteral(binding.propertyName))
         ? binding.propertyName.text : ts.isIdentifier(binding.name) ? binding.name.text : undefined;
       receiver = declaration.initializer;
+      if (!bindingSymbol || !projectSources) return false;
+      if (callableBindingMayBeWritten(
+        bindingSymbol, bindingSymbol.declarations ?? [], checker, projectSources, check,
+      )) {
+        const assignments = mutableAssignmentsAtCall(bindingSymbol);
+        if (assignments.ambiguous) {
+          const symbol = property ? checker.getNonNullableType(
+            checker.getTypeAtLocation(receiver),
+          ).getProperty(property) : undefined;
+          return hasGuardArgument && Boolean(property === 'useGlobalGuards'
+            && (matchesConsumerModule(expression, symbol, '@nestjs/common')
+              || matchesConsumerModule(expression, symbol, '@nestjs/core')
+              || assignments.canonicalCandidate));
+        }
+        if (assignments.latest) return hasGuardArgument && canonicalGuardMember(assignments.latest);
+      }
     }
   }
-  const hasGuardArgument = !effectiveArguments || effectiveArguments.length > 0;
   if (!hasGuardArgument || property !== 'useGlobalGuards' || !receiver) return false;
   const symbol = checker.getNonNullableType(checker.getTypeAtLocation(receiver)).getProperty(property);
   return matchesConsumerModule(expression, symbol, '@nestjs/common')

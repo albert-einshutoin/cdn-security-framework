@@ -33,6 +33,207 @@ const CALLABLE_REFERENCE_CACHE = new WeakMap();
 const BARE_RECEIVER_STABILITY_CACHE = new WeakMap();
 const WRAPPER_MUTATION_CACHE = new WeakMap();
 const WRAPPED_RECEIVER_CACHE = new WeakMap();
+const CALLABLE_WRITE_INDEX_CACHE = new WeakMap();
+function callableWriteIndex(projectSources, checker, check) {
+    const cached = CALLABLE_WRITE_INDEX_CACHE.get(projectSources);
+    if (cached)
+        return cached;
+    const index = new Map();
+    const isNestedAssignmentTarget = (node) => {
+        let child = node;
+        while (child.parent && !typescript_1.default.isStatement(child.parent)) {
+            const parent = child.parent;
+            if (typescript_1.default.isBinaryExpression(parent) && parent.left === child
+                && parent.operatorToken.kind >= typescript_1.default.SyntaxKind.FirstAssignment
+                && parent.operatorToken.kind <= typescript_1.default.SyntaxKind.LastAssignment)
+                return true;
+            child = parent;
+        }
+        return false;
+    };
+    const recordSymbol = (target, record) => {
+        let symbol = typescript_1.default.isShorthandPropertyAssignment(target.parent) && target.parent.name === target
+            ? checker.getShorthandAssignmentValueSymbol(target.parent)
+            : checker.getSymbolAtLocation(target);
+        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        if (!symbol)
+            return;
+        const records = index.get(symbol) ?? [];
+        records.push(record);
+        index.set(symbol, records);
+    };
+    const fallback = (target, record) => {
+        const current = typescript_1.default.isExpression(target) ? unwrapExpression(target) : target;
+        if (typescript_1.default.isIdentifier(current)) {
+            recordSymbol(current, record);
+        }
+        else if (typescript_1.default.isBinaryExpression(current)
+            && current.operatorToken.kind === typescript_1.default.SyntaxKind.EqualsToken) {
+            fallback(current.left, record);
+        }
+        else if (typescript_1.default.isArrayLiteralExpression(current)) {
+            for (const element of current.elements) {
+                if (!typescript_1.default.isOmittedExpression(element))
+                    fallback(typescript_1.default.isSpreadElement(element) ? element.expression : element, record);
+            }
+        }
+        else if (typescript_1.default.isObjectLiteralExpression(current)) {
+            for (const property of current.properties) {
+                if (typescript_1.default.isShorthandPropertyAssignment(property))
+                    fallback(property.name, record);
+                else if (typescript_1.default.isPropertyAssignment(property))
+                    fallback(property.initializer, record);
+                else if (typescript_1.default.isSpreadAssignment(property))
+                    fallback(property.expression, record);
+            }
+        }
+    };
+    const undefinedState = (input, seen = new Set(), depth = 0) => {
+        if (depth >= 64)
+            return undefined;
+        const value = unwrapExpression(input);
+        if (typescript_1.default.isVoidExpression(value))
+            return true;
+        if (value.kind === typescript_1.default.SyntaxKind.NullKeyword || typescript_1.default.isStringLiteralLike(value)
+            || typescript_1.default.isNumericLiteral(value) || value.kind === typescript_1.default.SyntaxKind.TrueKeyword
+            || value.kind === typescript_1.default.SyntaxKind.FalseKeyword || typescript_1.default.isObjectLiteralExpression(value)
+            || typescript_1.default.isArrayLiteralExpression(value) || typescript_1.default.isFunctionExpression(value)
+            || typescript_1.default.isArrowFunction(value) || typescript_1.default.isClassExpression(value))
+            return false;
+        if (!typescript_1.default.isIdentifier(value))
+            return undefined;
+        let symbol = checker.getSymbolAtLocation(value);
+        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        if (value.text === 'undefined' && (!symbol || !symbol.declarations?.length))
+            return true;
+        if (!symbol || seen.has(symbol))
+            return undefined;
+        const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (!declaration?.initializer || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+            return undefined;
+        return undefinedState(declaration.initializer, new Set(seen).add(symbol), depth + 1);
+    };
+    const add = (target, record) => {
+        const current = unwrapExpression(target);
+        if (typescript_1.default.isIdentifier(current)) {
+            recordSymbol(current, record);
+            return;
+        }
+        if (typescript_1.default.isBinaryExpression(current)
+            && current.operatorToken.kind === typescript_1.default.SyntaxKind.EqualsToken) {
+            const state = record.value ? undefinedState(record.value) : true;
+            if (state !== true)
+                add(current.left, record);
+            if (state !== false) {
+                add(current.left, { ...record, value: current.right, directTopLevel: false });
+            }
+            return;
+        }
+        const value = record.value && unwrapExpression(record.value);
+        if (typescript_1.default.isArrayLiteralExpression(current) && value && typescript_1.default.isArrayLiteralExpression(value)
+            && !current.elements.some(typescript_1.default.isSpreadElement) && !value.elements.some(typescript_1.default.isSpreadElement)) {
+            for (let index = 0; index < current.elements.length; index += 1) {
+                const element = current.elements[index];
+                if (typescript_1.default.isOmittedExpression(element))
+                    continue;
+                const assigned = value.elements[index];
+                add(element, {
+                    ...record,
+                    ...(assigned && !typescript_1.default.isOmittedExpression(assigned) ? { value: assigned } : { value: undefined }),
+                    directTopLevel: false,
+                });
+            }
+            return;
+        }
+        if (typescript_1.default.isObjectLiteralExpression(current) && value && typescript_1.default.isObjectLiteralExpression(value)
+            && !current.properties.some(typescript_1.default.isSpreadAssignment)
+            && !value.properties.some(typescript_1.default.isSpreadAssignment)) {
+            for (const property of current.properties) {
+                const key = typescript_1.default.isShorthandPropertyAssignment(property) ? property.name.text
+                    : typescript_1.default.isPropertyAssignment(property) && (typescript_1.default.isIdentifier(property.name)
+                        || typescript_1.default.isStringLiteral(property.name) || typescript_1.default.isNumericLiteral(property.name))
+                        ? property.name.text : undefined;
+                const nestedTarget = typescript_1.default.isShorthandPropertyAssignment(property) ? property.name
+                    : typescript_1.default.isPropertyAssignment(property) ? property.initializer : undefined;
+                if (!key || !nestedTarget) {
+                    fallback(property, { ...record, directTopLevel: false, uncertainCanonical: true });
+                    continue;
+                }
+                let candidates = [];
+                for (const source of value.properties) {
+                    if (typescript_1.default.isSpreadAssignment(source)) {
+                        candidates.push({ value: source.expression, uncertainCanonical: true });
+                        continue;
+                    }
+                    const sourceKey = typescript_1.default.isComputedPropertyName(source.name)
+                        ? resolveStaticPropertyKey(source.name.expression, checker, check)
+                        : (typescript_1.default.isIdentifier(source.name)
+                            || typescript_1.default.isStringLiteral(source.name) || typescript_1.default.isNumericLiteral(source.name))
+                            ? source.name.text : undefined;
+                    const assigned = typescript_1.default.isShorthandPropertyAssignment(source) ? source.name
+                        : typescript_1.default.isPropertyAssignment(source) ? source.initializer : undefined;
+                    const uncertainCanonical = !assigned;
+                    if (sourceKey === key)
+                        candidates = [{ ...(assigned ? { value: assigned } : {}), uncertainCanonical }];
+                    else if (sourceKey === undefined)
+                        candidates.push({
+                            ...(assigned ? { value: assigned } : {}), uncertainCanonical: true,
+                        });
+                }
+                if (candidates.length === 0) {
+                    add(nestedTarget, { ...record, value: undefined, directTopLevel: false });
+                }
+                else {
+                    for (const candidate of candidates)
+                        add(nestedTarget, {
+                            ...record, ...candidate, directTopLevel: false,
+                        });
+                }
+            }
+            return;
+        }
+        fallback(current, { ...record, directTopLevel: false, uncertainCanonical: true });
+    };
+    for (const sourceFile of projectSources) {
+        const nodes = [sourceFile];
+        while (nodes.length > 0) {
+            check();
+            const node = nodes.pop();
+            if (typescript_1.default.isBinaryExpression(node)
+                && node.operatorToken.kind >= typescript_1.default.SyntaxKind.FirstAssignment
+                && node.operatorToken.kind <= typescript_1.default.SyntaxKind.LastAssignment
+                && !isNestedAssignmentTarget(node)) {
+                const target = unwrapExpression(node.left);
+                add(target, {
+                    sourceFile,
+                    start: node.getStart(),
+                    directTopLevel: node.operatorToken.kind === typescript_1.default.SyntaxKind.EqualsToken
+                        && typescript_1.default.isIdentifier(target) && typescript_1.default.isExpressionStatement(node.parent)
+                        && typescript_1.default.isSourceFile(node.parent.parent),
+                    ...(node.operatorToken.kind === typescript_1.default.SyntaxKind.EqualsToken ? { value: node.right } : {}),
+                });
+            }
+            else if (typescript_1.default.isForOfStatement(node) || typescript_1.default.isForInStatement(node)) {
+                if (!typescript_1.default.isVariableDeclarationList(node.initializer))
+                    add(node.initializer, {
+                        sourceFile, start: node.getStart(), directTopLevel: false,
+                    });
+            }
+            else if ((typescript_1.default.isPrefixUnaryExpression(node) || typescript_1.default.isPostfixUnaryExpression(node))
+                && (node.operator === typescript_1.default.SyntaxKind.PlusPlusToken
+                    || node.operator === typescript_1.default.SyntaxKind.MinusMinusToken)) {
+                add(node.operand, { sourceFile, start: node.getStart(), directTopLevel: false });
+            }
+            typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+        }
+    }
+    CALLABLE_WRITE_INDEX_CACHE.set(projectSources, index);
+    return index;
+}
 function callableBindingMayBeWritten(symbol, declarations, checker, projectSources, check) {
     let projectCache = projectSources && CALLABLE_REFERENCE_CACHE.get(projectSources);
     if (projectSources && !projectCache) {
@@ -2999,6 +3200,154 @@ function isStaticShorthandSymbolFrom(shorthand, checker, check, moduleName, impo
     return containsStaticSymbolFrom(expression, checker, check, moduleName, importedName, projectSources);
 }
 function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
+    const writeIndex = projectSources
+        ? callableWriteIndex(projectSources, checker, check) : new Map();
+    const resolveUnmodifiedAlias = (input) => {
+        const seen = new Set();
+        let value = unwrapExpression(input);
+        while (typescript_1.default.isIdentifier(value)) {
+            check();
+            let symbol = checker.getSymbolAtLocation(value);
+            if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+                symbol = checker.getAliasedSymbol(symbol);
+            if (!symbol || seen.has(symbol) || seen.size >= 64)
+                break;
+            seen.add(symbol);
+            const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+            const declaration = declarations.length === 1 ? declarations[0] : undefined;
+            if (!declaration?.initializer || (projectSources
+                && !projectSources.has(declaration.getSourceFile()))
+                || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+                || (!(declaration.parent.flags & typescript_1.default.NodeFlags.Const)
+                    && (writeIndex.get(symbol)?.length ?? 0) > 0))
+                break;
+            value = unwrapExpression(declaration.initializer);
+        }
+        return value;
+    };
+    const canonicalGuardMember = (input) => {
+        const value = resolveUnmodifiedAlias(input);
+        const property = typescript_1.default.isPropertyAccessExpression(value) ? value.name.text
+            : typescript_1.default.isElementAccessExpression(value) && value.argumentExpression
+                ? resolveStaticPropertyKey(value.argumentExpression, checker, check) : undefined;
+        if (property !== 'useGlobalGuards'
+            || (!typescript_1.default.isPropertyAccessExpression(value) && !typescript_1.default.isElementAccessExpression(value)))
+            return false;
+        const symbol = checker.getNonNullableType(checker.getTypeAtLocation(value.expression)).getProperty(property);
+        return matchesConsumerModule(value, symbol, '@nestjs/common')
+            || matchesConsumerModule(value, symbol, '@nestjs/core');
+    };
+    const canonicalExpressionMemo = new WeakMap();
+    const canonicalSymbolMemo = new Map();
+    const canonicalAliasEvidence = (input, depth = 0) => {
+        check();
+        if (depth >= 64)
+            return true;
+        const value = unwrapExpression(input);
+        const cachedExpression = canonicalExpressionMemo.get(value);
+        if (cachedExpression !== undefined)
+            return cachedExpression === 'visiting' ? false : cachedExpression;
+        canonicalExpressionMemo.set(value, 'visiting');
+        let result = canonicalGuardMember(value);
+        if (!result && typescript_1.default.isArrayLiteralExpression(value))
+            result = value.elements.some((element) => (!typescript_1.default.isOmittedExpression(element) && canonicalAliasEvidence(typescript_1.default.isSpreadElement(element) ? element.expression : element, depth + 1)));
+        if (!result && typescript_1.default.isObjectLiteralExpression(value))
+            result = value.properties.some((property) => {
+                const candidate = typescript_1.default.isPropertyAssignment(property) ? property.initializer
+                    : typescript_1.default.isShorthandPropertyAssignment(property) ? property.name
+                        : typescript_1.default.isSpreadAssignment(property) ? property.expression : undefined;
+                return Boolean(candidate && canonicalAliasEvidence(candidate, depth + 1));
+            });
+        if (typescript_1.default.isConditionalExpression(value)) {
+            result ||= canonicalAliasEvidence(value.whenTrue, depth + 1)
+                || canonicalAliasEvidence(value.whenFalse, depth + 1);
+        }
+        if (typescript_1.default.isBinaryExpression(value)) {
+            result ||= canonicalAliasEvidence(value.left, depth + 1)
+                || canonicalAliasEvidence(value.right, depth + 1);
+        }
+        if (!result && typescript_1.default.isIdentifier(value)) {
+            let symbol = checker.getSymbolAtLocation(value);
+            if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+                symbol = checker.getAliasedSymbol(symbol);
+            if (symbol) {
+                const cachedSymbol = canonicalSymbolMemo.get(symbol);
+                if (cachedSymbol !== undefined)
+                    result = cachedSymbol === 'visiting' ? false : cachedSymbol;
+                else {
+                    canonicalSymbolMemo.set(symbol, 'visiting');
+                    const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+                    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+                    result = Boolean(declaration?.initializer && (!projectSources
+                        || projectSources.has(declaration.getSourceFile()))
+                        && canonicalAliasEvidence(declaration.initializer, depth + 1))
+                        || (writeIndex.get(symbol) ?? []).some((record) => Boolean(record.uncertainCanonical
+                            || (record.value && canonicalAliasEvidence(record.value, depth + 1))));
+                    canonicalSymbolMemo.set(symbol, result);
+                }
+            }
+        }
+        canonicalExpressionMemo.set(value, result);
+        return result;
+    };
+    const callStatement = typescript_1.default.isExpressionStatement(call.parent)
+        && typescript_1.default.isSourceFile(call.parent.parent) ? call.parent : undefined;
+    const mutableAssignmentsAtCall = (symbol) => {
+        let latest;
+        let latestStart = -1;
+        let ambiguous = !callStatement;
+        let canonicalCandidate = false;
+        for (const record of writeIndex.get(symbol) ?? []) {
+            canonicalCandidate ||= Boolean(record.uncertainCanonical
+                || (record.value && canonicalAliasEvidence(record.value)));
+            const direct = record.directTopLevel && callStatement
+                && record.sourceFile === call.getSourceFile();
+            if (direct && record.start < call.getStart()) {
+                if (record.start > latestStart && record.value) {
+                    latest = record.value;
+                    latestStart = record.start;
+                }
+            }
+            else if (!(direct && record.start > call.getStart())) {
+                ambiguous = true;
+            }
+        }
+        return { ...(latest ? { latest } : {}), ambiguous, canonicalCandidate };
+    };
+    let uncertainCanonicalAlias = false;
+    const resolveStableInitializer = (input) => {
+        const seen = new Set();
+        let value = unwrapExpression(input);
+        while (typescript_1.default.isIdentifier(value)) {
+            check();
+            let symbol = checker.getSymbolAtLocation(value);
+            if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+                symbol = checker.getAliasedSymbol(symbol);
+            if (!symbol || seen.has(symbol))
+                break;
+            seen.add(symbol);
+            const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+            const declaration = declarations.length === 1 ? declarations[0] : undefined;
+            if (!declaration?.initializer || (projectSources
+                && !projectSources.has(declaration.getSourceFile()))
+                || !typescript_1.default.isVariableDeclarationList(declaration.parent))
+                break;
+            if (declaration.parent.flags & typescript_1.default.NodeFlags.Const) {
+                value = unwrapExpression(declaration.initializer);
+                continue;
+            }
+            if (!projectSources)
+                break;
+            const assignments = mutableAssignmentsAtCall(symbol);
+            if (assignments.ambiguous) {
+                uncertainCanonicalAlias ||= canonicalAliasEvidence(declaration.initializer)
+                    || assignments.canonicalCandidate;
+                break;
+            }
+            value = unwrapExpression(assignments.latest ?? declaration.initializer);
+        }
+        return value;
+    };
     const flattenArguments = (args) => {
         const pending = [...args];
         const flattened = [];
@@ -3029,7 +3378,7 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
             && !checker.getSymbolAtLocation(value)?.declarations?.length;
     };
     let effectiveArguments = flattenArguments(call.arguments);
-    let expression = resolveConstInitializer(call.expression, checker, check, projectSources);
+    let expression = resolveStableInitializer(call.expression);
     const reflectCall = unwrapExpression(call.expression);
     const reflectMethod = typescript_1.default.isPropertyAccessExpression(reflectCall) ? reflectCall.name.text
         : typescript_1.default.isElementAccessExpression(reflectCall) && reflectCall.argumentExpression
@@ -3043,7 +3392,7 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
         && typescript_1.default.isIdentifier(reflectReceiver) && reflectReceiver.text === 'Reflect'
         && !reflectSymbol?.declarations?.some((declaration) => (projectSources?.has(declaration.getSourceFile())));
     if (standardReflectApply && call.arguments[0]) {
-        expression = resolveConstInitializer(call.arguments[0], checker, check, projectSources);
+        expression = resolveStableInitializer(call.arguments[0]);
         const guards = call.arguments[2] ? unwrapExpression(call.arguments[2]) : undefined;
         effectiveArguments = guards && typescript_1.default.isArrayLiteralExpression(guards)
             ? guards.elements.some(typescript_1.default.isOmittedExpression) ? undefined
@@ -3066,7 +3415,7 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
                 const bound = flattenArguments(expression.arguments.slice(1));
                 effectiveArguments = bound && effectiveArguments
                     ? [...bound, ...effectiveArguments] : undefined;
-                expression = resolveConstInitializer(bind.expression, checker, check, projectSources);
+                expression = resolveStableInitializer(bind.expression);
                 continue;
             }
         }
@@ -3089,7 +3438,7 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
                             : flattenArguments(guards.elements.filter((element) => (!typescript_1.default.isOmittedExpression(element)))) : undefined;
                 }
             }
-            expression = resolveConstInitializer(expression.expression, checker, check, projectSources);
+            expression = resolveStableInitializer(expression.expression);
             continue;
         }
         break;
@@ -3118,7 +3467,7 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
                 continue;
             }
             else if (typescript_1.default.isIdentifier(node)) {
-                const resolved = resolveConstInitializer(node, checker, check, projectSources);
+                const resolved = resolveStableInitializer(node);
                 if (resolved !== node)
                     nodes.push(resolved);
                 const binding = checker.getSymbolAtLocation(node)?.declarations?.find(typescript_1.default.isBindingElement);
@@ -3152,6 +3501,9 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
     let receiver = (typescript_1.default.isPropertyAccessExpression(expression)
         || typescript_1.default.isElementAccessExpression(expression))
         ? expression.expression : undefined;
+    const hasGuardArgument = !effectiveArguments || effectiveArguments.length > 0;
+    if (uncertainCanonicalAlias && hasGuardArgument)
+        return true;
     if (!receiver && typescript_1.default.isIdentifier(expression)) {
         const binding = checker.getSymbolAtLocation(expression)?.declarations?.find(typescript_1.default.isBindingElement);
         const pattern = binding?.parent;
@@ -3159,15 +3511,26 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
             && typescript_1.default.isVariableDeclaration(pattern.parent) ? pattern.parent : undefined;
         if (binding && declaration?.initializer && typescript_1.default.isVariableDeclarationList(declaration.parent)) {
             const bindingSymbol = checker.getSymbolAtLocation(expression);
-            if (!bindingSymbol || !projectSources || callableBindingMayBeWritten(bindingSymbol, bindingSymbol.declarations ?? [], checker, projectSources, check))
-                return false;
             property = binding.propertyName && (typescript_1.default.isIdentifier(binding.propertyName)
                 || typescript_1.default.isStringLiteral(binding.propertyName))
                 ? binding.propertyName.text : typescript_1.default.isIdentifier(binding.name) ? binding.name.text : undefined;
             receiver = declaration.initializer;
+            if (!bindingSymbol || !projectSources)
+                return false;
+            if (callableBindingMayBeWritten(bindingSymbol, bindingSymbol.declarations ?? [], checker, projectSources, check)) {
+                const assignments = mutableAssignmentsAtCall(bindingSymbol);
+                if (assignments.ambiguous) {
+                    const symbol = property ? checker.getNonNullableType(checker.getTypeAtLocation(receiver)).getProperty(property) : undefined;
+                    return hasGuardArgument && Boolean(property === 'useGlobalGuards'
+                        && (matchesConsumerModule(expression, symbol, '@nestjs/common')
+                            || matchesConsumerModule(expression, symbol, '@nestjs/core')
+                            || assignments.canonicalCandidate));
+                }
+                if (assignments.latest)
+                    return hasGuardArgument && canonicalGuardMember(assignments.latest);
+            }
         }
     }
-    const hasGuardArgument = !effectiveArguments || effectiveArguments.length > 0;
     if (!hasGuardArgument || property !== 'useGlobalGuards' || !receiver)
         return false;
     const symbol = checker.getNonNullableType(checker.getTypeAtLocation(receiver)).getProperty(property);
