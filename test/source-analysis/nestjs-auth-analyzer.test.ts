@@ -314,8 +314,9 @@ describe('NestJS auth metadata analyzer', () => {
       import { Controller, Get, UseGuards } from '@nestjs/common';
       import { ApiKeyGuard, JwtAuthGuard } from './auth';
       const Authenticated = UseGuards(ApiKeyGuard);
+      const AuthenticatedAlias = Authenticated;
       @Controller('precomputed') @UseGuards(JwtAuthGuard)
-      class PrecomputedController { @Get() @Authenticated read() {} }
+      class PrecomputedController { @Get() @AuthenticatedAlias read() {} }
     `, {
       'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
     });
@@ -2396,7 +2397,8 @@ describe('NestJS auth metadata analyzer', () => {
       declare const app: INestApplication;
       declare const guard: unknown;
       const register = app.useGlobalGuards.bind(app);
-      register(guard);
+      const registerAlias = register;
+      registerAlias(guard);
       @Controller('bound') class BoundController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }

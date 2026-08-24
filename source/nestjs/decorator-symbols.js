@@ -94,6 +94,28 @@ function unwrapExpression(expression) {
         current = current.expression;
     return current;
 }
+function resolveConstInitializer(input, checker, check, projectSources) {
+    const seen = new Set();
+    let expression = unwrapExpression(input);
+    while (typescript_1.default.isIdentifier(expression)) {
+        check();
+        let symbol = checker.getSymbolAtLocation(expression);
+        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        if (!symbol || seen.has(symbol))
+            break;
+        seen.add(symbol);
+        const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (!declaration?.initializer || (projectSources
+            && !projectSources.has(declaration.getSourceFile()))
+            || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+            break;
+        expression = unwrapExpression(declaration.initializer);
+    }
+    return expression;
+}
 function isDefinitelyNonProvidePropertyKey(expression) {
     const key = unwrapExpression(expression);
     return typescript_1.default.isPrefixUnaryExpression(key)
@@ -379,20 +401,7 @@ function classifyNestJsRouteDecorator(decorator, checker, check) {
     };
 }
 function resolveDecoratorSymbol(decorator, checker, check, projectSources) {
-    let expression = unwrapExpression(decorator.expression);
-    if (!typescript_1.default.isCallExpression(expression) && typescript_1.default.isIdentifier(expression)) {
-        let symbol = checker.getSymbolAtLocation(expression);
-        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
-            symbol = checker.getAliasedSymbol(symbol);
-        const declarations = symbol?.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
-        const declaration = declarations.length === 1 ? declarations[0] : undefined;
-        if (declaration?.initializer && (!projectSources
-            || projectSources.has(declaration.getSourceFile()))
-            && typescript_1.default.isVariableDeclarationList(declaration.parent)
-            && declaration.parent.flags & typescript_1.default.NodeFlags.Const) {
-            expression = unwrapExpression(declaration.initializer);
-        }
-    }
+    const expression = resolveConstInitializer(decorator.expression, checker, check, projectSources);
     const call = typescript_1.default.isCallExpression(expression) ? expression : undefined;
     if (!call)
         return undefined;
@@ -2799,24 +2808,15 @@ function isStaticShorthandSymbolFrom(shorthand, checker, check, moduleName, impo
     const expression = binding && typescript_1.default.isIdentifier(binding.name) ? binding.name : shorthand.name;
     return containsStaticSymbolFrom(expression, checker, check, moduleName, importedName, projectSources);
 }
-function isNestJsUseGlobalGuardsCall(call, checker, check) {
-    let expression = unwrapExpression(call.expression);
-    if (typescript_1.default.isIdentifier(expression)) {
-        let symbol = checker.getSymbolAtLocation(expression);
-        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
-            symbol = checker.getAliasedSymbol(symbol);
-        const declarations = symbol?.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
-        const declaration = declarations.length === 1 ? declarations[0] : undefined;
-        const initializer = declaration?.initializer && typescript_1.default.isVariableDeclarationList(declaration.parent)
-            && declaration.parent.flags & typescript_1.default.NodeFlags.Const
-            ? unwrapExpression(declaration.initializer) : undefined;
-        const bind = initializer && typescript_1.default.isCallExpression(initializer)
-            ? unwrapExpression(initializer.expression) : undefined;
+function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
+    let expression = resolveConstInitializer(call.expression, checker, check, projectSources);
+    if (typescript_1.default.isCallExpression(expression)) {
+        const bind = unwrapExpression(expression.expression);
         const bindName = bind && (typescript_1.default.isPropertyAccessExpression(bind)
             ? bind.name.text
             : typescript_1.default.isElementAccessExpression(bind) && bind.argumentExpression
                 ? resolveStaticPropertyKey(bind.argumentExpression, checker, check) : undefined);
-        if (bindName === 'bind' && bind
+        if (bindName === 'bind'
             && (typescript_1.default.isPropertyAccessExpression(bind) || typescript_1.default.isElementAccessExpression(bind))) {
             expression = unwrapExpression(bind.expression);
         }

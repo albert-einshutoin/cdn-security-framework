@@ -99,6 +99,31 @@ function unwrapExpression(expression: ts.Expression): ts.Expression {
   return current;
 }
 
+function resolveConstInitializer(
+  input: ts.Expression,
+  checker: ts.TypeChecker,
+  check: () => void,
+  projectSources?: ReadonlySet<ts.SourceFile>,
+): ts.Expression {
+  const seen = new Set<ts.Symbol>();
+  let expression = unwrapExpression(input);
+  while (ts.isIdentifier(expression)) {
+    check();
+    let symbol = checker.getSymbolAtLocation(expression);
+    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (!symbol || seen.has(symbol)) break;
+    seen.add(symbol);
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration?.initializer || (projectSources
+      && !projectSources.has(declaration.getSourceFile()))
+      || !ts.isVariableDeclarationList(declaration.parent)
+      || !(declaration.parent.flags & ts.NodeFlags.Const)) break;
+    expression = unwrapExpression(declaration.initializer);
+  }
+  return expression;
+}
+
 export function isDefinitelyNonProvidePropertyKey(expression: ts.Expression): boolean {
   const key = unwrapExpression(expression);
   return ts.isPrefixUnaryExpression(key)
@@ -424,19 +449,9 @@ export function resolveDecoratorSymbol(
   nestJsCommon: boolean;
   trustedNestJsCommon: boolean;
 } | undefined {
-  let expression = unwrapExpression(decorator.expression);
-  if (!ts.isCallExpression(expression) && ts.isIdentifier(expression)) {
-    let symbol = checker.getSymbolAtLocation(expression);
-    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-    const declarations = symbol?.declarations?.filter(ts.isVariableDeclaration) ?? [];
-    const declaration = declarations.length === 1 ? declarations[0] : undefined;
-    if (declaration?.initializer && (!projectSources
-      || projectSources.has(declaration.getSourceFile()))
-      && ts.isVariableDeclarationList(declaration.parent)
-      && declaration.parent.flags & ts.NodeFlags.Const) {
-      expression = unwrapExpression(declaration.initializer);
-    }
-  }
+  const expression = resolveConstInitializer(
+    decorator.expression, checker, check, projectSources,
+  );
   const call = ts.isCallExpression(expression) ? expression : undefined;
   if (!call) return undefined;
   return resolveDecoratorCallSymbol(call, checker, check);
@@ -2821,23 +2836,16 @@ export function isNestJsUseGlobalGuardsCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
   check: () => void,
+  projectSources?: ReadonlySet<ts.SourceFile>,
 ): boolean {
-  let expression = unwrapExpression(call.expression);
-  if (ts.isIdentifier(expression)) {
-    let symbol = checker.getSymbolAtLocation(expression);
-    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-    const declarations = symbol?.declarations?.filter(ts.isVariableDeclaration) ?? [];
-    const declaration = declarations.length === 1 ? declarations[0] : undefined;
-    const initializer = declaration?.initializer && ts.isVariableDeclarationList(declaration.parent)
-      && declaration.parent.flags & ts.NodeFlags.Const
-      ? unwrapExpression(declaration.initializer) : undefined;
-    const bind = initializer && ts.isCallExpression(initializer)
-      ? unwrapExpression(initializer.expression) : undefined;
+  let expression = resolveConstInitializer(call.expression, checker, check, projectSources);
+  if (ts.isCallExpression(expression)) {
+    const bind = unwrapExpression(expression.expression);
     const bindName = bind && (ts.isPropertyAccessExpression(bind)
       ? bind.name.text
       : ts.isElementAccessExpression(bind) && bind.argumentExpression
         ? resolveStaticPropertyKey(bind.argumentExpression, checker, check) : undefined);
-    if (bindName === 'bind' && bind
+    if (bindName === 'bind'
       && (ts.isPropertyAccessExpression(bind) || ts.isElementAccessExpression(bind))) {
       expression = unwrapExpression(bind.expression);
     }

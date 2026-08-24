@@ -39,4 +39,4 @@ export declare function resolveStaticSymbolName(expression: ts.Expression, check
 export declare function isStaticSymbolFrom(expression: ts.Expression, checker: ts.TypeChecker, check: () => void, moduleName: string, importedName: string): boolean;
 export declare function containsStaticSymbolFrom(expression: ts.Expression, checker: ts.TypeChecker, check: () => void, moduleName: string, importedName: string, projectSources?: ReadonlySet<ts.SourceFile>): boolean;
 export declare function isStaticShorthandSymbolFrom(shorthand: ts.ShorthandPropertyAssignment, checker: ts.TypeChecker, check: () => void, moduleName: string, importedName: string, projectSources?: ReadonlySet<ts.SourceFile>): boolean;
-export declare function isNestJsUseGlobalGuardsCall(call: ts.CallExpression, checker: ts.TypeChecker, check: () => void): boolean;
+export declare function isNestJsUseGlobalGuardsCall(call: ts.CallExpression, checker: ts.TypeChecker, check: () => void, projectSources?: ReadonlySet<ts.SourceFile>): boolean;

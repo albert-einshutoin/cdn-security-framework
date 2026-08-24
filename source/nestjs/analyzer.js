@@ -1230,7 +1230,8 @@ async function analyze(context, authConfig) {
         while (nodes.length > 0) {
             const node = nodes.pop();
             await checkpoint();
-            if (typescript_1.default.isCallExpression(node) && (0, decorator_symbols_1.isNestJsUseGlobalGuardsCall)(node, checker, check)) {
+            if (typescript_1.default.isCallExpression(node)
+                && (0, decorator_symbols_1.isNestJsUseGlobalGuardsCall)(node, checker, check, projectSources)) {
                 if (!globalGuardFound)
                     addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.expression);
                 globalGuardFound = true;
