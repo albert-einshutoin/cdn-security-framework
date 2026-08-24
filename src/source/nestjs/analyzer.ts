@@ -3923,6 +3923,10 @@ function ownAuthMetadata(
     depth: number,
   ): boolean => {
     check();
+    if (resolved.indirectInvocation) {
+      result.guardDynamic = true;
+      return true;
+    }
     if (depth > maxDepth) {
       result.guardDynamic = true;
       return true;

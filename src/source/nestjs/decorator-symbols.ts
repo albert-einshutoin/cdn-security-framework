@@ -451,6 +451,7 @@ export function resolveDecoratorSymbol(
   call: ts.CallExpression;
   nestJsCommon: boolean;
   trustedNestJsCommon: boolean;
+  indirectInvocation: boolean;
 } | undefined {
   const expression = resolveConstInitializer(
     decorator.expression, checker, check, projectSources,
@@ -638,20 +639,40 @@ export function resolveDecoratorCallSymbol(
   call: ts.CallExpression;
   nestJsCommon: boolean;
   trustedNestJsCommon: boolean;
+  indirectInvocation: boolean;
 } | undefined {
-  const symbol = targetSymbol(call.expression, checker, check);
+  let expression = call.expression;
+  let indirectInvocation = false;
+  while (true) {
+    check();
+    const callee = unwrapExpression(expression);
+    const invocation = ts.isPropertyAccessExpression(callee) ? callee.name.text
+      : ts.isElementAccessExpression(callee) && callee.argumentExpression
+        ? resolveStaticPropertyKey(callee.argumentExpression, checker, check) : undefined;
+    if ((invocation !== 'call' && invocation !== 'apply')
+      || (!ts.isPropertyAccessExpression(callee) && !ts.isElementAccessExpression(callee))) break;
+    indirectInvocation = true;
+    expression = callee.expression;
+  }
+  const symbol = targetSymbol(expression, checker, check);
   if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) {
-    return !symbol && ts.isElementAccessExpression(unwrapExpression(call.expression))
-      ? { name: '', call, nestJsCommon: false, trustedNestJsCommon: false }
+    return !symbol && ts.isElementAccessExpression(unwrapExpression(expression))
+      ? {
+        name: '', call, nestJsCommon: false, trustedNestJsCommon: false, indirectInvocation,
+      }
       : undefined;
   }
   const nestJsCommon = originatesFromNestJsCommon(symbol);
+  if (indirectInvocation && (!nestJsCommon
+    || (symbol.getName() !== 'UseGuards' && symbol.getName() !== 'applyDecorators'))) return undefined;
   return {
     name: symbol.getName(),
     call,
     nestJsCommon,
-    trustedNestJsCommon: nestJsCommon && directNestJsImport(call.expression, checker)
-      && matchesConsumerNestJsCommon(call.expression, symbol),
+    trustedNestJsCommon: !indirectInvocation && nestJsCommon
+      && directNestJsImport(expression, checker)
+      && matchesConsumerNestJsCommon(expression, symbol),
+    indirectInvocation,
   };
 }
 

@@ -90,6 +90,8 @@ describe('NestJS auth metadata analyzer', () => {
       class UsersController {
         @Get('admin') @Guards(ApiKeyGuard) @Guards(SecondGuard)
         @Permissions(['admin', 'ops']) @Permissions('reader') admin() {}
+        @Get('call') @Guards.call(undefined, ApiKeyGuard) callGuard() {}
+        @Get('apply') @Guards.apply(undefined, [ApiKeyGuard]) applyGuard() {}
         @Get('public') @Open() @Open('overwritten') publicRoute() {}
         @Get('unknown') @Guards(UnknownGuard) unknown() {}
       }
@@ -137,6 +139,12 @@ describe('NestJS auth metadata analyzer', () => {
         },
       },
     });
+    for (const route of ['GET /users/call', 'GET /users/apply']) {
+      expect(operations[route]).toMatchObject({
+        exposure: 'unknown',
+        auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+      });
+    }
     expect(operations['GET /users/public']).toMatchObject({
       exposure: 'public',
       auth: {

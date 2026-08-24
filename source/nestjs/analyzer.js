@@ -4115,6 +4115,10 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps,
     const resolvingWrappers = new Set();
     const applyResolved = (resolved, evidence, depth) => {
         check();
+        if (resolved.indirectInvocation) {
+            result.guardDynamic = true;
+            return true;
+        }
         if (depth > maxDepth) {
             result.guardDynamic = true;
             return true;

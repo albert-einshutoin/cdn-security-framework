@@ -568,19 +568,40 @@ function isBareDecoratorBindingStable(decorator, checker, projectSources, check)
     return !callableBindingMayBeWritten(symbol, symbol.declarations ?? [], checker, projectSources, check);
 }
 function resolveDecoratorCallSymbol(call, checker, check) {
-    const symbol = targetSymbol(call.expression, checker, check);
+    let expression = call.expression;
+    let indirectInvocation = false;
+    while (true) {
+        check();
+        const callee = unwrapExpression(expression);
+        const invocation = typescript_1.default.isPropertyAccessExpression(callee) ? callee.name.text
+            : typescript_1.default.isElementAccessExpression(callee) && callee.argumentExpression
+                ? resolveStaticPropertyKey(callee.argumentExpression, checker, check) : undefined;
+        if ((invocation !== 'call' && invocation !== 'apply')
+            || (!typescript_1.default.isPropertyAccessExpression(callee) && !typescript_1.default.isElementAccessExpression(callee)))
+            break;
+        indirectInvocation = true;
+        expression = callee.expression;
+    }
+    const symbol = targetSymbol(expression, checker, check);
     if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) {
-        return !symbol && typescript_1.default.isElementAccessExpression(unwrapExpression(call.expression))
-            ? { name: '', call, nestJsCommon: false, trustedNestJsCommon: false }
+        return !symbol && typescript_1.default.isElementAccessExpression(unwrapExpression(expression))
+            ? {
+                name: '', call, nestJsCommon: false, trustedNestJsCommon: false, indirectInvocation,
+            }
             : undefined;
     }
     const nestJsCommon = originatesFromNestJsCommon(symbol);
+    if (indirectInvocation && (!nestJsCommon
+        || (symbol.getName() !== 'UseGuards' && symbol.getName() !== 'applyDecorators')))
+        return undefined;
     return {
         name: symbol.getName(),
         call,
         nestJsCommon,
-        trustedNestJsCommon: nestJsCommon && directNestJsImport(call.expression, checker)
-            && matchesConsumerNestJsCommon(call.expression, symbol),
+        trustedNestJsCommon: !indirectInvocation && nestJsCommon
+            && directNestJsImport(expression, checker)
+            && matchesConsumerNestJsCommon(expression, symbol),
+        indirectInvocation,
     };
 }
 function resolveStaticDecoratorWrapperCall(call, checker, projectSources, check) {
