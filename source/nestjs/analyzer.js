@@ -100,6 +100,25 @@ function staticNullish(input) {
         return false;
     return undefined;
 }
+function staticSwitchValue(input) {
+    let expression = input;
+    while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+        || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+        || typescript_1.default.isNonNullExpression(expression))
+        expression = expression.expression;
+    if (typescript_1.default.isStringLiteral(expression) || typescript_1.default.isNoSubstitutionTemplateLiteral(expression)) {
+        return `string:${expression.text}`;
+    }
+    if (typescript_1.default.isNumericLiteral(expression))
+        return `number:${Number(expression.text)}`;
+    if (expression.kind === typescript_1.default.SyntaxKind.TrueKeyword)
+        return 'boolean:true';
+    if (expression.kind === typescript_1.default.SyntaxKind.FalseKeyword)
+        return 'boolean:false';
+    if (expression.kind === typescript_1.default.SyntaxKind.NullKeyword)
+        return 'null';
+    return undefined;
+}
 function staticallyUnreachable(node) {
     let current = node;
     while (!typescript_1.default.isSourceFile(current)) {
@@ -128,6 +147,15 @@ function staticallyUnreachable(node) {
                 || (parent.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken && truth === true)
                 || (parent.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken
                     && staticNullish(parent.left) === false))
+                return true;
+        }
+        else if (typescript_1.default.isCaseBlock(parent) && typescript_1.default.isCaseClause(current)) {
+            const selected = staticSwitchValue(parent.parent.expression);
+            if (selected !== undefined && !parent.clauses.some(typescript_1.default.isDefaultClause)
+                && parent.clauses.every((clause) => typescript_1.default.isCaseClause(clause)
+                    && staticSwitchValue(clause.expression) !== undefined)
+                && !parent.clauses.some((clause) => typescript_1.default.isCaseClause(clause)
+                    && staticSwitchValue(clause.expression) === selected))
                 return true;
         }
         else if ((typescript_1.default.isBlock(parent) || typescript_1.default.isCaseClause(parent) || typescript_1.default.isDefaultClause(parent))

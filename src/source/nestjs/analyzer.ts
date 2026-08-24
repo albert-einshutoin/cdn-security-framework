@@ -139,6 +139,21 @@ function staticNullish(input: ts.Expression): boolean | undefined {
   return undefined;
 }
 
+function staticSwitchValue(input: ts.Expression): string | undefined {
+  let expression = input;
+  while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+    || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+    || ts.isNonNullExpression(expression)) expression = expression.expression;
+  if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+    return `string:${expression.text}`;
+  }
+  if (ts.isNumericLiteral(expression)) return `number:${Number(expression.text)}`;
+  if (expression.kind === ts.SyntaxKind.TrueKeyword) return 'boolean:true';
+  if (expression.kind === ts.SyntaxKind.FalseKeyword) return 'boolean:false';
+  if (expression.kind === ts.SyntaxKind.NullKeyword) return 'null';
+  return undefined;
+}
+
 function staticallyUnreachable(node: ts.Node): boolean {
   let current = node;
   while (!ts.isSourceFile(current)) {
@@ -161,6 +176,13 @@ function staticallyUnreachable(node: ts.Node): boolean {
         || (parent.operatorToken.kind === ts.SyntaxKind.BarBarToken && truth === true)
         || (parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
           && staticNullish(parent.left) === false)) return true;
+    } else if (ts.isCaseBlock(parent) && ts.isCaseClause(current)) {
+      const selected = staticSwitchValue(parent.parent.expression);
+      if (selected !== undefined && !parent.clauses.some(ts.isDefaultClause)
+        && parent.clauses.every((clause) => ts.isCaseClause(clause)
+          && staticSwitchValue(clause.expression) !== undefined)
+        && !parent.clauses.some((clause) => ts.isCaseClause(clause)
+          && staticSwitchValue(clause.expression) === selected)) return true;
     } else if ((ts.isBlock(parent) || ts.isCaseClause(parent) || ts.isDefaultClause(parent))
       && ts.isStatement(current)) {
       const index = parent.statements.indexOf(current);

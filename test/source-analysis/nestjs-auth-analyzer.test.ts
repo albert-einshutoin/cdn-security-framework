@@ -3800,6 +3800,7 @@ describe('NestJS auth metadata analyzer', () => {
       import { JwtAuthGuard } from './auth';
       declare const app: INestApplication;
       if (false) app.useGlobalGuards({});
+      switch (1) { case 2: app.useGlobalGuards({}); }
       function unreachable() {
         return;
         app.useGlobalGuards({});
