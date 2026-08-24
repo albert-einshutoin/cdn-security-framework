@@ -4284,6 +4284,37 @@ describe('NestJS auth metadata analyzer', () => {
   test('handles Function.prototype useGlobalGuards invocations', async () => {
     for (const [registration, expected] of [
       ['Function.prototype.apply.call(app.useGlobalGuards, app, [guard]);', 'unknown'],
+      ['const hooks = { register: app.useGlobalGuards }; hooks.register.call(app, guard);', 'unknown'],
+      ['const base = { register: app.useGlobalGuards }; const hooks = { ...base }; hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: app.useGlobalGuards, register: audit }; hooks.register.call(app, guard);', 'alternatives'],
+      ['const hooks = { register: audit, register: app.useGlobalGuards }; hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: audit }; hooks.register = app.useGlobalGuards; hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: app.useGlobalGuards }; hooks.register = audit; hooks.register.call(app, guard);', 'alternatives'],
+      ['const hooks = { register: audit }; Object.assign(hooks, { register: app.useGlobalGuards }); hooks.register.call(app, guard);', 'unknown'],
+      ['declare function mutate(value: { register: (...args: unknown[]) => unknown }): void; const hooks = { register: audit }; mutate(hooks); hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: audit, mutate() { this.register = app.useGlobalGuards; } }; hooks.mutate(); hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: audit, mutate() { this.register = app.useGlobalGuards; } }; (hooks.mutate as any)(); hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: audit, mutate: () => { hooks.register = app.useGlobalGuards; } }; const mutate = hooks.mutate; mutate(); hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: audit, mutate() { Object.assign(hooks, { register: app.useGlobalGuards }); } }; hooks.register.call(app, guard);', 'alternatives'],
+      ['const hooks = { register: audit, mutate() { this.register = app.useGlobalGuards; } }; (0, hooks.mutate)(); hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: audit, mutate() { this.register = app.useGlobalGuards; } }; (hooks.mutate || audit)(); hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: audit, mutate() { this.register = app.useGlobalGuards; } }; (hooks.mutate && audit)(); hooks.register.call(app, guard);', 'alternatives'],
+      ['const hooks = { register: audit, mutate() { this.register = app.useGlobalGuards; } }; (true ? audit : hooks.mutate)(); hooks.register.call(app, guard);', 'alternatives'],
+      ['const hooks = { register: audit, mutate() { this.register = app.useGlobalGuards; } }; (true || hooks.mutate); (false && hooks.mutate); (0 ? hooks.mutate : audit)(); hooks.register.call(app, guard);', 'alternatives'],
+      ['const hooks = { register: audit, get mutate() { hooks.register = app.useGlobalGuards; return audit; } }; (true ? audit : hooks.mutate)(); hooks.register.call(app, guard);', 'alternatives'],
+      ['const hooks = { register: audit, get mutate() { this.register = app.useGlobalGuards; return true; } }; void hooks.mutate; hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: audit, nested: { get trigger() { hooks.register = app.useGlobalGuards; return true; } } }; if (hooks.nested.trigger) {} hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks: { register: typeof audit; nested: { trigger: boolean } } = { register: audit, nested: { get trigger() { hooks.register = app.useGlobalGuards; return true; } } }; if (hooks.nested.trigger) {} hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: app.useGlobalGuards }; delete hooks.register; hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: audit }; if (hooks) hooks.register.call(app, guard);', 'alternatives'],
+      ['declare function mutate(value: { register: (...args: unknown[]) => unknown }): void; const hooks = { register: audit }; mutate(false || hooks); hooks.register.call(app, guard);', 'unknown'],
+      ['const hooks = { register: audit }; if (hooks && hooks) hooks.register.call(app, guard);', 'alternatives'],
+      ['const hooks = { register: audit }; if ((0, hooks)) hooks.register.call(app, guard);', 'alternatives'],
+      ['const hooks = { register: audit }; void hooks; typeof hooks; hooks === hooks; hooks.register.call(app, guard);', 'alternatives'],
+      ['interface H { register: (...args: unknown[]) => unknown } const a: H = { register: app.useGlobalGuards }; const b: H = { register: audit }; b.register = audit; a.register.call(app, guard);', 'unknown'],
+      ['interface H { register: (...args: unknown[]) => unknown } const a: H = { register: audit }; const b: H = { register: audit }; b.register = app.useGlobalGuards; a.register.call(app, guard);', 'alternatives'],
+      ['const hooks = { register: audit, ...42 }; hooks.register.call(app, guard);', 'alternatives'],
+      [`const a0 = { register: audit }; ${Array.from({ length: 128 }, (_, index) => `const a${index + 1} = a${index};`).join(' ')} a128.register.call(app, guard);`, 'alternatives'],
       ['Function.prototype.apply.call(app.useGlobalGuards, app, null);', 'alternatives'],
     ] as const) {
       const root = workspace(`
@@ -4292,6 +4323,7 @@ describe('NestJS auth metadata analyzer', () => {
         import { JwtAuthGuard } from './auth';
         declare const app: INestApplication;
         declare const guard: unknown;
+        declare const audit: (...args: unknown[]) => void;
         ${registration}
         @Controller('function-prototype') class FunctionPrototypeController {
           @Get() @UseGuards(JwtAuthGuard) read() {}
@@ -4310,7 +4342,7 @@ describe('NestJS auth metadata analyzer', () => {
 
       expect(execution.status).toBe('success');
       if (execution.status === 'success') {
-        expect(execution.result.contract.operations[0].auth.mode).toBe(expected);
+        expect(execution.result.contract.operations[0].auth.mode, registration).toBe(expected);
       }
     }
   });

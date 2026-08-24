@@ -35,6 +35,8 @@ const BARE_RECEIVER_STABILITY_CACHE = new WeakMap();
 const WRAPPER_MUTATION_CACHE = new WeakMap();
 const WRAPPED_RECEIVER_CACHE = new WeakMap();
 const CALLABLE_WRITE_INDEX_CACHE = new WeakMap();
+const MEMBER_WRITE_INDEX_CACHE = new WeakMap();
+const STABLE_RECEIVER_SYMBOL_CACHE = new WeakMap();
 function callableWriteIndex(projectSources, checker, check) {
     const cached = CALLABLE_WRITE_INDEX_CACHE.get(projectSources);
     if (cached)
@@ -233,6 +235,295 @@ function callableWriteIndex(projectSources, checker, check) {
         }
     }
     CALLABLE_WRITE_INDEX_CACHE.set(projectSources, index);
+    return index;
+}
+function stableReceiverSymbol(input, checker, writes, check) {
+    const value = unwrapExpression(input);
+    if (!typescript_1.default.isIdentifier(value))
+        return undefined;
+    const memo = STABLE_RECEIVER_SYMBOL_CACHE.get(writes) ?? new Map();
+    STABLE_RECEIVER_SYMBOL_CACHE.set(writes, memo);
+    const path = [];
+    const seen = new Set();
+    let current = value;
+    let result = false;
+    while (true) {
+        check();
+        let symbol = checker.getSymbolAtLocation(current);
+        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        if (!symbol || seen.has(symbol))
+            break;
+        const cached = memo.get(symbol);
+        if (cached !== undefined) {
+            result = cached;
+            break;
+        }
+        path.push(symbol);
+        seen.add(symbol);
+        const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (!declaration?.initializer || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const)
+            || (writes.get(symbol)?.length ?? 0) > 0)
+            break;
+        const initializer = unwrapExpression(declaration.initializer);
+        if (!typescript_1.default.isIdentifier(initializer)) {
+            result = symbol;
+            break;
+        }
+        current = initializer;
+    }
+    for (const symbol of path)
+        memo.set(symbol, result);
+    return result || undefined;
+}
+function memberWriteIndex(projectSources, checker, check) {
+    const cached = MEMBER_WRITE_INDEX_CACHE.get(projectSources);
+    if (cached)
+        return cached;
+    const callableWrites = callableWriteIndex(projectSources, checker, check);
+    const index = new Map();
+    const record = (receiver, entry) => {
+        const records = index.get(receiver) ?? [];
+        records.push(entry);
+        index.set(receiver, records);
+    };
+    const deferredInitializerMutation = (node, receiver) => {
+        const declarations = receiver.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const initializer = declarations.length === 1 ? declarations[0].initializer : undefined;
+        if (!initializer)
+            return false;
+        let ancestor = node.parent;
+        let deferred = false;
+        while (ancestor && ancestor !== initializer) {
+            deferred ||= typescript_1.default.isFunctionLike(ancestor);
+            ancestor = ancestor.parent;
+        }
+        return ancestor === initializer && deferred;
+    };
+    const nodes = [...projectSources];
+    while (nodes.length > 0) {
+        const node = nodes.pop();
+        check();
+        if (typescript_1.default.isBinaryExpression(node)
+            && node.operatorToken.kind >= typescript_1.default.SyntaxKind.FirstAssignment
+            && node.operatorToken.kind <= typescript_1.default.SyntaxKind.LastAssignment) {
+            const target = unwrapExpression(node.left);
+            if (typescript_1.default.isPropertyAccessExpression(target) || typescript_1.default.isElementAccessExpression(target)) {
+                const receiver = stableReceiverSymbol(target.expression, checker, callableWrites, check);
+                if (receiver && !deferredInitializerMutation(node, receiver)) {
+                    const key = typescript_1.default.isPropertyAccessExpression(target) ? target.name.text
+                        : target.argumentExpression
+                            ? resolveStaticPropertyKey(target.argumentExpression, checker, check) : undefined;
+                    record(receiver, {
+                        ...(key === undefined ? {} : { key }),
+                        node,
+                        ...(node.operatorToken.kind === typescript_1.default.SyntaxKind.EqualsToken ? { value: node.right } : {}),
+                    });
+                }
+            }
+        }
+        const mutationTarget = typescript_1.default.isDeleteExpression(node) ? node.expression
+            : typescript_1.default.isPostfixUnaryExpression(node) || (typescript_1.default.isPrefixUnaryExpression(node)
+                && (node.operator === typescript_1.default.SyntaxKind.PlusPlusToken
+                    || node.operator === typescript_1.default.SyntaxKind.MinusMinusToken)) ? node.operand : undefined;
+        if (mutationTarget) {
+            const target = unwrapExpression(mutationTarget);
+            if (typescript_1.default.isPropertyAccessExpression(target) || typescript_1.default.isElementAccessExpression(target)) {
+                const receiver = stableReceiverSymbol(target.expression, checker, callableWrites, check);
+                if (receiver && !deferredInitializerMutation(node, receiver)) {
+                    const key = typescript_1.default.isPropertyAccessExpression(target) ? target.name.text
+                        : target.argumentExpression
+                            ? resolveStaticPropertyKey(target.argumentExpression, checker, check) : undefined;
+                    record(receiver, { ...(key === undefined ? {} : { key }), node });
+                }
+            }
+        }
+        if (typescript_1.default.isIdentifier(node)) {
+            const receiver = stableReceiverSymbol(node, checker, callableWrites, check);
+            if (receiver) {
+                const deferredReceiverUse = deferredInitializerMutation(node, receiver);
+                let reference = node;
+                while (reference.parent) {
+                    const wrapper = reference.parent;
+                    const transparent = typescript_1.default.isParenthesizedExpression(wrapper) || typescript_1.default.isAsExpression(wrapper)
+                        || typescript_1.default.isTypeAssertionExpression(wrapper) || typescript_1.default.isNonNullExpression(wrapper)
+                        || typescript_1.default.isSatisfiesExpression(wrapper) || typescript_1.default.isBinaryExpression(wrapper)
+                        && (wrapper.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+                            || wrapper.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken
+                            || wrapper.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken)
+                        || typescript_1.default.isBinaryExpression(wrapper)
+                            && wrapper.operatorToken.kind === typescript_1.default.SyntaxKind.CommaToken && wrapper.right === reference
+                        || typescript_1.default.isConditionalExpression(wrapper)
+                            && (wrapper.whenTrue === reference || wrapper.whenFalse === reference);
+                    if (!transparent)
+                        break;
+                    reference = wrapper;
+                }
+                const parent = reference.parent;
+                const stableAlias = typescript_1.default.isVariableDeclaration(parent) && parent.initializer === reference
+                    && typescript_1.default.isIdentifier(parent.name) && typescript_1.default.isVariableDeclarationList(parent.parent)
+                    && Boolean(parent.parent.flags & typescript_1.default.NodeFlags.Const)
+                    && (callableWrites.get(checker.getSymbolAtLocation(parent.name))?.length ?? 0) === 0;
+                const declarationName = typescript_1.default.isVariableDeclaration(parent) && parent.name === reference;
+                const member = (typescript_1.default.isPropertyAccessExpression(parent)
+                    || typescript_1.default.isElementAccessExpression(parent)) && parent.expression === reference ? parent : undefined;
+                const key = member && (typescript_1.default.isPropertyAccessExpression(member) ? member.name.text
+                    : member.argumentExpression
+                        ? resolveStaticPropertyKey(member.argumentExpression, checker, check) : undefined);
+                const memberSymbol = key === undefined ? undefined
+                    : checker.getNonNullableType(checker.getTypeAtLocation(node)).getProperty(key);
+                const receiverDeclaration = receiver.declarations?.filter(typescript_1.default.isVariableDeclaration);
+                const receiverInitializer = receiverDeclaration?.length === 1
+                    && receiverDeclaration[0].initializer
+                    ? unwrapExpression(receiverDeclaration[0].initializer) : undefined;
+                const literalDataMember = key !== undefined && receiverInitializer
+                    && typescript_1.default.isObjectLiteralExpression(receiverInitializer)
+                    && receiverInitializer.properties.some((property) => {
+                        if (!property.name || typescript_1.default.isComputedPropertyName(property.name))
+                            return false;
+                        const propertyKey = typescript_1.default.isIdentifier(property.name) || typescript_1.default.isStringLiteral(property.name)
+                            || typescript_1.default.isNumericLiteral(property.name) ? property.name.text : undefined;
+                        return propertyKey === key && (typescript_1.default.isPropertyAssignment(property)
+                            || typescript_1.default.isShorthandPropertyAssignment(property) || typescript_1.default.isMethodDeclaration(property));
+                    });
+                let memberUse = member;
+                let uncertainChainedMember = false;
+                let discardedMemberValue = false;
+                const literalTruthiness = (input) => {
+                    const value = unwrapExpression(input);
+                    if (value.kind === typescript_1.default.SyntaxKind.TrueKeyword)
+                        return true;
+                    if (value.kind === typescript_1.default.SyntaxKind.FalseKeyword || value.kind === typescript_1.default.SyntaxKind.NullKeyword
+                        || typescript_1.default.isVoidExpression(value))
+                        return false;
+                    if (typescript_1.default.isNumericLiteral(value))
+                        return Number(value.text) !== 0;
+                    if (typescript_1.default.isBigIntLiteral(value))
+                        return value.text !== '0n';
+                    if (typescript_1.default.isStringLiteralLike(value))
+                        return value.text.length > 0;
+                    return undefined;
+                };
+                while (memberUse?.parent) {
+                    const wrapper = memberUse.parent;
+                    if (typescript_1.default.isConditionalExpression(wrapper)
+                        && (wrapper.whenTrue === memberUse || wrapper.whenFalse === memberUse)) {
+                        const condition = literalTruthiness(wrapper.condition);
+                        const selected = condition === true ? wrapper.whenTrue
+                            : condition === false ? wrapper.whenFalse : undefined;
+                        if (selected && selected !== memberUse) {
+                            discardedMemberValue = true;
+                            break;
+                        }
+                    }
+                    if (typescript_1.default.isBinaryExpression(wrapper) && wrapper.right === memberUse) {
+                        const left = unwrapExpression(wrapper.left);
+                        const leftTruthiness = literalTruthiness(left);
+                        const rightUnreachable = wrapper.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken
+                            && leftTruthiness === true
+                            || wrapper.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+                                && leftTruthiness === false
+                            || wrapper.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken
+                                && left.kind !== typescript_1.default.SyntaxKind.NullKeyword && !typescript_1.default.isVoidExpression(left)
+                                && leftTruthiness !== undefined;
+                        if (rightUnreachable) {
+                            discardedMemberValue = true;
+                            break;
+                        }
+                    }
+                    if (typescript_1.default.isBinaryExpression(wrapper)
+                        && wrapper.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+                        && wrapper.left === memberUse)
+                        break;
+                    if ((typescript_1.default.isPropertyAccessExpression(wrapper) || typescript_1.default.isElementAccessExpression(wrapper))
+                        && wrapper.expression === memberUse) {
+                        const chainedKey = typescript_1.default.isPropertyAccessExpression(wrapper) ? wrapper.name.text
+                            : wrapper.argumentExpression
+                                ? resolveStaticPropertyKey(wrapper.argumentExpression, checker, check) : undefined;
+                        const chainedSymbol = chainedKey === undefined ? undefined
+                            : checker.getNonNullableType(checker.getTypeAtLocation(memberUse)).getProperty(chainedKey);
+                        uncertainChainedMember ||= chainedKey === undefined || !chainedSymbol
+                            || Boolean(chainedSymbol.declarations?.some((declaration) => (typescript_1.default.isGetAccessorDeclaration(declaration) || typescript_1.default.isSetAccessorDeclaration(declaration)
+                                || typescript_1.default.isPropertySignature(declaration))));
+                    }
+                    const transparent = typescript_1.default.isParenthesizedExpression(wrapper) || typescript_1.default.isAsExpression(wrapper)
+                        || typescript_1.default.isTypeAssertionExpression(wrapper) || typescript_1.default.isNonNullExpression(wrapper)
+                        || typescript_1.default.isSatisfiesExpression(wrapper) || (typescript_1.default.isPropertyAccessExpression(wrapper)
+                        || typescript_1.default.isElementAccessExpression(wrapper)) && wrapper.expression === memberUse
+                        || typescript_1.default.isBinaryExpression(wrapper)
+                            && (wrapper.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+                                && wrapper.right === memberUse || wrapper.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken
+                                || wrapper.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken
+                                || wrapper.operatorToken.kind === typescript_1.default.SyntaxKind.CommaToken && wrapper.right === memberUse)
+                        || typescript_1.default.isConditionalExpression(wrapper)
+                            && (wrapper.whenTrue === memberUse || wrapper.whenFalse === memberUse);
+                    if (!transparent)
+                        break;
+                    memberUse = wrapper;
+                }
+                const invokedMember = Boolean(memberUse && ((typescript_1.default.isCallExpression(memberUse.parent)
+                    && memberUse.parent.expression === memberUse) || (typescript_1.default.isTaggedTemplateExpression(memberUse.parent)
+                    && memberUse.parent.tag === memberUse)));
+                const uncertainMember = Boolean(member && (key === undefined || (!memberSymbol && !literalDataMember)
+                    || memberSymbol?.declarations?.some((declaration) => typescript_1.default.isGetAccessorDeclaration(declaration)
+                        || typescript_1.default.isSetAccessorDeclaration(declaration))));
+                const conditionRead = (typescript_1.default.isIfStatement(parent) || typescript_1.default.isWhileStatement(parent)
+                    || typescript_1.default.isDoStatement(parent) || typescript_1.default.isSwitchStatement(parent))
+                    && parent.expression === reference
+                    || typescript_1.default.isForStatement(parent) && parent.condition === reference
+                    || typescript_1.default.isConditionalExpression(parent) && parent.condition === reference;
+                const readOnly = conditionRead
+                    || typescript_1.default.isPrefixUnaryExpression(parent) && parent.operator === typescript_1.default.SyntaxKind.ExclamationToken
+                    || (typescript_1.default.isTypeOfExpression(parent) || typescript_1.default.isVoidExpression(parent))
+                        && parent.expression === reference
+                    || typescript_1.default.isExpressionStatement(parent)
+                    || typescript_1.default.isBinaryExpression(parent) && parent.operatorToken.kind === typescript_1.default.SyntaxKind.CommaToken
+                        && parent.left === reference
+                    || typescript_1.default.isBinaryExpression(parent) && (parent.operatorToken.kind === typescript_1.default.SyntaxKind.EqualsEqualsEqualsToken
+                        || parent.operatorToken.kind === typescript_1.default.SyntaxKind.ExclamationEqualsEqualsToken);
+                const memberParent = memberUse?.parent;
+                const deferredMemberMutation = Boolean(member && memberParent
+                    && ((typescript_1.default.isBinaryExpression(memberParent) && unwrapExpression(memberParent.left) === member)
+                        || ((typescript_1.default.isDeleteExpression(memberParent) || typescript_1.default.isPrefixUnaryExpression(memberParent)
+                            || typescript_1.default.isPostfixUnaryExpression(memberParent))
+                            && unwrapExpression(typescript_1.default.isDeleteExpression(memberParent)
+                                ? memberParent.expression : memberParent.operand) === member))
+                    && deferredInitializerMutation(memberParent, receiver));
+                const readOnlyMember = discardedMemberValue || Boolean(memberUse && memberParent
+                    && ((typescript_1.default.isIfStatement(memberParent) || typescript_1.default.isWhileStatement(memberParent)
+                        || typescript_1.default.isDoStatement(memberParent) || typescript_1.default.isSwitchStatement(memberParent))
+                        && memberParent.expression === memberUse
+                        || typescript_1.default.isForStatement(memberParent) && memberParent.condition === memberUse
+                        || typescript_1.default.isConditionalExpression(memberParent) && memberParent.condition === memberUse
+                        || typescript_1.default.isPrefixUnaryExpression(memberParent)
+                            && memberParent.operator === typescript_1.default.SyntaxKind.ExclamationToken
+                        || (typescript_1.default.isTypeOfExpression(memberParent) || typescript_1.default.isVoidExpression(memberParent))
+                            && memberParent.expression === memberUse
+                        || typescript_1.default.isExpressionStatement(memberParent)
+                        || typescript_1.default.isBinaryExpression(memberParent)
+                            && memberParent.operatorToken.kind === typescript_1.default.SyntaxKind.CommaToken
+                            && memberParent.left === memberUse
+                        || typescript_1.default.isBinaryExpression(memberParent)
+                            && memberParent.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+                            && memberParent.left === memberUse
+                        || typescript_1.default.isBinaryExpression(memberParent)
+                            && (memberParent.operatorToken.kind === typescript_1.default.SyntaxKind.EqualsEqualsEqualsToken
+                                || memberParent.operatorToken.kind === typescript_1.default.SyntaxKind.ExclamationEqualsEqualsToken)));
+                if (!stableAlias && !declarationName && !discardedMemberValue && !deferredMemberMutation
+                    && !deferredReceiverUse
+                    && (!member || invokedMember || uncertainMember
+                        || uncertainChainedMember
+                        || !readOnlyMember)
+                    && !readOnly) {
+                    record(receiver, { node: invokedMember ? memberUse.parent : node });
+                }
+            }
+        }
+        typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+    }
+    MEMBER_WRITE_INDEX_CACHE.set(projectSources, index);
     return index;
 }
 function callableBindingMayBeWritten(symbol, declarations, checker, projectSources, check) {
@@ -3313,21 +3604,113 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
         }
         return value;
     };
-    const canonicalGuardMember = (input) => {
+    let canonicalAliasEvidence;
+    const canonicalGuardMember = (input, depth = 0) => {
+        if (depth >= 64)
+            return true;
         const value = resolveUnmodifiedAlias(input);
         const property = typescript_1.default.isPropertyAccessExpression(value) ? value.name.text
             : typescript_1.default.isElementAccessExpression(value) && value.argumentExpression
                 ? staticPropertyName(value.argumentExpression) : undefined;
-        if (property !== 'useGlobalGuards'
-            || (!typescript_1.default.isPropertyAccessExpression(value) && !typescript_1.default.isElementAccessExpression(value)))
+        if (!property || (!typescript_1.default.isPropertyAccessExpression(value) && !typescript_1.default.isElementAccessExpression(value)))
             return false;
+        if (property !== 'useGlobalGuards') {
+            const receiver = resolveUnmodifiedAlias(value.expression);
+            if (!typescript_1.default.isObjectLiteralExpression(receiver))
+                return false;
+            const memberState = (object, memberDepth) => {
+                if (memberDepth >= 64)
+                    return 'unknown';
+                let state = 'absent';
+                for (const candidate of object.properties) {
+                    check();
+                    if (typescript_1.default.isSpreadAssignment(candidate)) {
+                        const spread = resolveUnmodifiedAlias(candidate.expression);
+                        if (typescript_1.default.isObjectLiteralExpression(spread)) {
+                            const spreadState = memberState(spread, memberDepth + 1);
+                            if (spreadState !== 'absent')
+                                state = spreadState;
+                        }
+                        else if (!(spread.kind === typescript_1.default.SyntaxKind.NullKeyword || typescript_1.default.isVoidExpression(spread)
+                            || typescript_1.default.isStringLiteralLike(spread) || typescript_1.default.isNumericLiteral(spread)
+                            || typescript_1.default.isBigIntLiteral(spread) || spread.kind === typescript_1.default.SyntaxKind.TrueKeyword
+                            || spread.kind === typescript_1.default.SyntaxKind.FalseKeyword
+                            || (typescript_1.default.isIdentifier(spread) && spread.text === 'undefined'
+                                && !checker.getSymbolAtLocation(spread)?.declarations?.length)))
+                            state = 'unknown';
+                        continue;
+                    }
+                    const key = typescript_1.default.isComputedPropertyName(candidate.name)
+                        ? staticPropertyName(candidate.name.expression)
+                        : typescript_1.default.isIdentifier(candidate.name) || typescript_1.default.isStringLiteral(candidate.name)
+                            || typescript_1.default.isNumericLiteral(candidate.name) ? candidate.name.text : undefined;
+                    if (key === undefined) {
+                        if (typescript_1.default.isComputedPropertyName(candidate.name))
+                            state = 'unknown';
+                        continue;
+                    }
+                    if (key !== property)
+                        continue;
+                    if (typescript_1.default.isPropertyAssignment(candidate) || typescript_1.default.isShorthandPropertyAssignment(candidate)) {
+                        const initializer = typescript_1.default.isPropertyAssignment(candidate) ? candidate.initializer : candidate.name;
+                        state = canonicalAliasEvidence(initializer, memberDepth + 1)
+                            ? 'canonical' : 'noncanonical';
+                    }
+                    else if (typescript_1.default.isGetAccessorDeclaration(candidate) || typescript_1.default.isSetAccessorDeclaration(candidate)) {
+                        state = 'unknown';
+                    }
+                    else
+                        state = 'noncanonical';
+                }
+                return state;
+            };
+            let state = memberState(receiver, depth + 1);
+            const receiverSymbol = projectSources
+                ? stableReceiverSymbol(value.expression, checker, writeIndex, check)
+                : undefined;
+            if (receiverSymbol && projectSources) {
+                let callStatementNode = call;
+                while (callStatementNode.parent && !typescript_1.default.isStatement(callStatementNode)) {
+                    callStatementNode = callStatementNode.parent;
+                }
+                let latestStart = -1;
+                let ambiguousCanonical = false;
+                for (const record of memberWriteIndex(projectSources, checker, check).get(receiverSymbol) ?? []) {
+                    check();
+                    if (record.node === call)
+                        continue;
+                    if (record.key !== undefined && record.key !== property)
+                        continue;
+                    let statement = record.node;
+                    while (statement.parent && !typescript_1.default.isStatement(statement))
+                        statement = statement.parent;
+                    const direct = typescript_1.default.isExpressionStatement(statement)
+                        && statement.parent === callStatementNode.parent;
+                    if (direct && statement.getStart() < callStatementNode.getStart()) {
+                        if (statement.getStart() > latestStart) {
+                            state = record.key === property && record.value
+                                ? canonicalAliasEvidence(record.value, depth + 1) ? 'canonical' : 'noncanonical'
+                                : 'unknown';
+                            latestStart = statement.getStart();
+                        }
+                    }
+                    else if (!(direct && statement.getStart() > callStatementNode.getStart())) {
+                        ambiguousCanonical ||= record.key === undefined || !record.value
+                            || canonicalAliasEvidence(record.value, depth + 1);
+                    }
+                }
+                if (ambiguousCanonical)
+                    state = 'unknown';
+            }
+            return state === 'canonical' || state === 'unknown';
+        }
         const symbol = checker.getNonNullableType(checker.getTypeAtLocation(value.expression)).getProperty(property);
         return matchesConsumerModule(value, symbol, '@nestjs/common')
             || matchesConsumerModule(value, symbol, '@nestjs/core');
     };
     const canonicalExpressionMemo = new WeakMap();
     const canonicalSymbolMemo = new Map();
-    const canonicalAliasEvidence = (input, depth = 0) => {
+    canonicalAliasEvidence = (input, depth = 0) => {
         check();
         if (depth >= 64)
             return true;
@@ -3658,8 +4041,10 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
             }
         }
     }
-    if (!hasGuardArgument || property !== 'useGlobalGuards' || !receiver)
+    if (!hasGuardArgument || !receiver)
         return false;
+    if (property !== 'useGlobalGuards')
+        return canonicalGuardMember(expression);
     const receiverType = checker.getNonNullableType(checker.getTypeAtLocation(receiver));
     const symbol = receiverType.getProperty(property);
     return matchesConsumerModule(expression, symbol, '@nestjs/common')
