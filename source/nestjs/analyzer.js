@@ -5431,6 +5431,16 @@ async function analyze(context, authConfig) {
                 if (insideBody && symbol && provablyUnusedLocalClasses.has(symbol))
                     return true;
             }
+            if (typescript_1.default.isPropertyDeclaration(parent) && parent.initializer
+                && typescript_1.default.isClassDeclaration(parent.parent)
+                && !typescript_1.default.getModifiers(parent)?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.StaticKeyword)) {
+                const symbol = localClassSymbols.get(parent.parent);
+                let insideInitializer = false;
+                for (let current = node; current && current !== parent; current = current.parent)
+                    insideInitializer ||= current === parent.initializer;
+                if (insideInitializer && symbol && provablyUnusedLocalClasses.has(symbol))
+                    return true;
+            }
             const objectMember = (typescript_1.default.isMethodDeclaration(parent) || typescript_1.default.isGetAccessorDeclaration(parent)
                 || typescript_1.default.isSetAccessorDeclaration(parent)) && typescript_1.default.isObjectLiteralExpression(parent.parent)
                 ? parent : undefined;

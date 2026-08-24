@@ -4281,7 +4281,70 @@ export function isNestJsUseGlobalGuardsCall(
   if (property !== 'useGlobalGuards') return canonicalGuardMember(expression);
   const receiverType = checker.getNonNullableType(checker.getTypeAtLocation(receiver));
   const symbol = receiverType.getProperty(property);
+  let receiverOrigin = resolveStableInitializer(receiver);
+  while (ts.isAwaitExpression(receiverOrigin)) {
+    receiverOrigin = unwrapExpression(receiverOrigin.expression);
+  }
+  const factoryCall = ts.isCallExpression(receiverOrigin) ? receiverOrigin : undefined;
+  const factoryCallee = factoryCall && unwrapExpression(factoryCall.expression);
+  const factoryMethod = factoryCallee && ts.isPropertyAccessExpression(factoryCallee)
+    ? factoryCallee.name.text
+    : factoryCallee && ts.isElementAccessExpression(factoryCallee)
+      && factoryCallee.argumentExpression ? staticPropertyName(factoryCallee.argumentExpression) : undefined;
+  const factoryReceiver = factoryCallee && (ts.isPropertyAccessExpression(factoryCallee)
+    || ts.isElementAccessExpression(factoryCallee)) ? factoryCallee.expression : undefined;
+  const isNestFactory = (input: ts.Expression): boolean => {
+    const candidate = targetSymbol(input, checker, check);
+    return Boolean(candidate && candidate !== UNKNOWN_NESTJS_ROUTE
+      && candidate.getName() === 'NestFactory'
+      && matchesConsumerModule(input, candidate, '@nestjs/core'));
+  };
+  let factoryReceiverValue = factoryReceiver && resolveStableInitializer(factoryReceiver);
+  let uncertainNestFactory = false;
+  if (factoryReceiver && ts.isIdentifier(unwrapExpression(factoryReceiver))) {
+    const identifier = unwrapExpression(factoryReceiver) as ts.Identifier;
+    let binding = checker.getSymbolAtLocation(identifier);
+    if (binding?.flags && binding.flags & ts.SymbolFlags.Alias) binding = checker.getAliasedSymbol(binding);
+    const declarations = binding?.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    const mutable = declaration && ts.isVariableDeclarationList(declaration.parent)
+      && !(declaration.parent.flags & ts.NodeFlags.Const);
+    if (binding && mutable && factoryCall) {
+      let statement: ts.Node = factoryCall;
+      while (statement.parent && !ts.isStatement(statement)) statement = statement.parent;
+      const sourceOrdered = ts.isSourceFile(statement.parent);
+      let latest: ts.Expression | undefined;
+      let latestStart = -1;
+      let ambiguous = !sourceOrdered;
+      for (const record of writeIndex.get(binding) ?? []) {
+        const direct = record.directTopLevel && sourceOrdered
+          && record.sourceFile === factoryCall.getSourceFile();
+        if (direct && record.start < factoryCall.getStart()) {
+          if (record.start > latestStart && record.value) {
+            latest = record.value;
+            latestStart = record.start;
+          }
+        } else if (!(direct && record.start > factoryCall.getStart())) {
+          ambiguous = true;
+        }
+      }
+      if (ambiguous) {
+        uncertainNestFactory = Boolean(declaration.initializer && isNestFactory(declaration.initializer))
+          || (writeIndex.get(binding) ?? []).some((record) => Boolean(
+            record.value && isNestFactory(record.value),
+          ));
+      } else {
+        const value = latest ?? declaration.initializer;
+        if (value) factoryReceiverValue = resolveStableInitializer(value);
+      }
+    }
+  }
+  const nestFactoryCall = factoryCallee
+    && (factoryMethod === 'create' || factoryMethod === 'createApplicationContext'
+      || factoryMethod === 'createMicroservice')
+    && Boolean(uncertainNestFactory || factoryReceiverValue && isNestFactory(factoryReceiverValue));
   return matchesConsumerModule(expression, symbol, '@nestjs/common')
     || matchesConsumerModule(expression, symbol, '@nestjs/core')
+    || Boolean(nestFactoryCall)
     || Boolean(receiverType.flags & ts.TypeFlags.Any);
 }

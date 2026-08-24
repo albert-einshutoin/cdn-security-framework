@@ -5198,6 +5198,15 @@ async function analyze(
           current = current.parent) insideBody ||= current === parent.body;
         if (insideBody && symbol && provablyUnusedLocalClasses.has(symbol)) return true;
       }
+      if (ts.isPropertyDeclaration(parent) && parent.initializer
+        && ts.isClassDeclaration(parent.parent)
+        && !ts.getModifiers(parent)?.some(({ kind }) => kind === ts.SyntaxKind.StaticKeyword)) {
+        const symbol = localClassSymbols.get(parent.parent);
+        let insideInitializer = false;
+        for (let current: ts.Node | undefined = node; current && current !== parent;
+          current = current.parent) insideInitializer ||= current === parent.initializer;
+        if (insideInitializer && symbol && provablyUnusedLocalClasses.has(symbol)) return true;
+      }
       const objectMember = (ts.isMethodDeclaration(parent) || ts.isGetAccessorDeclaration(parent)
         || ts.isSetAccessorDeclaration(parent)) && ts.isObjectLiteralExpression(parent.parent)
         ? parent : undefined;

@@ -4270,7 +4270,73 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
         return canonicalGuardMember(expression);
     const receiverType = checker.getNonNullableType(checker.getTypeAtLocation(receiver));
     const symbol = receiverType.getProperty(property);
+    let receiverOrigin = resolveStableInitializer(receiver);
+    while (typescript_1.default.isAwaitExpression(receiverOrigin)) {
+        receiverOrigin = unwrapExpression(receiverOrigin.expression);
+    }
+    const factoryCall = typescript_1.default.isCallExpression(receiverOrigin) ? receiverOrigin : undefined;
+    const factoryCallee = factoryCall && unwrapExpression(factoryCall.expression);
+    const factoryMethod = factoryCallee && typescript_1.default.isPropertyAccessExpression(factoryCallee)
+        ? factoryCallee.name.text
+        : factoryCallee && typescript_1.default.isElementAccessExpression(factoryCallee)
+            && factoryCallee.argumentExpression ? staticPropertyName(factoryCallee.argumentExpression) : undefined;
+    const factoryReceiver = factoryCallee && (typescript_1.default.isPropertyAccessExpression(factoryCallee)
+        || typescript_1.default.isElementAccessExpression(factoryCallee)) ? factoryCallee.expression : undefined;
+    const isNestFactory = (input) => {
+        const candidate = targetSymbol(input, checker, check);
+        return Boolean(candidate && candidate !== UNKNOWN_NESTJS_ROUTE
+            && candidate.getName() === 'NestFactory'
+            && matchesConsumerModule(input, candidate, '@nestjs/core'));
+    };
+    let factoryReceiverValue = factoryReceiver && resolveStableInitializer(factoryReceiver);
+    let uncertainNestFactory = false;
+    if (factoryReceiver && typescript_1.default.isIdentifier(unwrapExpression(factoryReceiver))) {
+        const identifier = unwrapExpression(factoryReceiver);
+        let binding = checker.getSymbolAtLocation(identifier);
+        if (binding?.flags && binding.flags & typescript_1.default.SymbolFlags.Alias)
+            binding = checker.getAliasedSymbol(binding);
+        const declarations = binding?.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        const mutable = declaration && typescript_1.default.isVariableDeclarationList(declaration.parent)
+            && !(declaration.parent.flags & typescript_1.default.NodeFlags.Const);
+        if (binding && mutable && factoryCall) {
+            let statement = factoryCall;
+            while (statement.parent && !typescript_1.default.isStatement(statement))
+                statement = statement.parent;
+            const sourceOrdered = typescript_1.default.isSourceFile(statement.parent);
+            let latest;
+            let latestStart = -1;
+            let ambiguous = !sourceOrdered;
+            for (const record of writeIndex.get(binding) ?? []) {
+                const direct = record.directTopLevel && sourceOrdered
+                    && record.sourceFile === factoryCall.getSourceFile();
+                if (direct && record.start < factoryCall.getStart()) {
+                    if (record.start > latestStart && record.value) {
+                        latest = record.value;
+                        latestStart = record.start;
+                    }
+                }
+                else if (!(direct && record.start > factoryCall.getStart())) {
+                    ambiguous = true;
+                }
+            }
+            if (ambiguous) {
+                uncertainNestFactory = Boolean(declaration.initializer && isNestFactory(declaration.initializer))
+                    || (writeIndex.get(binding) ?? []).some((record) => Boolean(record.value && isNestFactory(record.value)));
+            }
+            else {
+                const value = latest ?? declaration.initializer;
+                if (value)
+                    factoryReceiverValue = resolveStableInitializer(value);
+            }
+        }
+    }
+    const nestFactoryCall = factoryCallee
+        && (factoryMethod === 'create' || factoryMethod === 'createApplicationContext'
+            || factoryMethod === 'createMicroservice')
+        && Boolean(uncertainNestFactory || factoryReceiverValue && isNestFactory(factoryReceiverValue));
     return matchesConsumerModule(expression, symbol, '@nestjs/common')
         || matchesConsumerModule(expression, symbol, '@nestjs/core')
+        || Boolean(nestFactoryCall)
         || Boolean(receiverType.flags & typescript_1.default.TypeFlags.Any);
 }
