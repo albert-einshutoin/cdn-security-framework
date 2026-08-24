@@ -2901,6 +2901,49 @@ function registeredProviderObjects(
     }
     return false;
   };
+  const invokedLocalFunctions = new Set<ts.Symbol>();
+  const functionsWithResolvedBootstrap = new Set<ts.Symbol>();
+  for (const sourceFile of projectSources) {
+    const nodes: ts.Node[] = [sourceFile];
+    while (nodes.length > 0) {
+      const node = nodes.pop()!;
+      check();
+      if (ts.isCallExpression(node) && !staticallyUnreachable(node)) {
+        let callee = unwrapModuleExpression(node.expression);
+        let functionAncestor: ts.SignatureDeclaration | undefined;
+        for (let parent = node.parent; !ts.isSourceFile(parent); parent = parent.parent) {
+          if (ts.isFunctionLike(parent)) {
+            functionAncestor = parent;
+            break;
+          }
+        }
+        if (!functionAncestor && node.arguments.length === 0 && ts.isIdentifier(callee)) {
+          const symbol = symbolAt(callee);
+          const declarations = symbol?.declarations?.filter((declaration): declaration is (
+            ts.FunctionDeclaration
+          ) => ts.isFunctionDeclaration(declaration) && declaration.body !== undefined
+            && projectSources.has(declaration.getSourceFile())) ?? [];
+          if (symbol && declarations.length === 1 && !reassignedSymbols.has(symbol)
+            && !unresolvedAssignments.has(symbol)) invokedLocalFunctions.add(symbol);
+        }
+        const method = ts.isPropertyAccessExpression(callee) ? callee.name.text
+          : ts.isElementAccessExpression(callee) && callee.argumentExpression
+            ? resolveStaticPropertyKey(callee.argumentExpression, checker, check) : undefined;
+        if (functionAncestor && node.arguments[0]
+          && (method === 'create' || method === 'createApplicationContext'
+            || method === 'createMicroservice')
+          && (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee))
+          && containsStaticSymbolFrom(
+            callee.expression, checker, check, '@nestjs/core', 'NestFactory', projectSources,
+          ) && moduleSymbol(node.arguments[0])
+          && ts.isFunctionDeclaration(functionAncestor) && functionAncestor.name) {
+          const symbol = symbolAt(functionAncestor.name);
+          if (symbol) functionsWithResolvedBootstrap.add(symbol);
+        }
+      }
+      ts.forEachChild(node, (child) => { nodes.push(child); });
+    }
+  }
   for (const sourceFile of projectSources) {
     const nodes: ts.Node[] = [sourceFile];
     while (nodes.length > 0) {
@@ -2922,11 +2965,23 @@ function registeredProviderObjects(
           else moduleGraphComplete = false;
           for (let parent = node.parent; !ts.isSourceFile(parent); parent = parent.parent) {
             if (ts.isFunctionLike(parent)) {
-              moduleGraphComplete = false;
+              const functionSymbol = ts.isFunctionDeclaration(parent) && parent.name
+                ? symbolAt(parent.name) : undefined;
+              if (!functionSymbol || !invokedLocalFunctions.has(functionSymbol)
+                || !functionsWithResolvedBootstrap.has(functionSymbol)) {
+                moduleGraphComplete = false;
+              }
               break;
             }
           }
         } else {
+          const localFunction = ts.isIdentifier(unwrapModuleExpression(callee))
+            ? symbolAt(unwrapModuleExpression(callee)) : undefined;
+          if (localFunction && invokedLocalFunctions.has(localFunction)
+            && functionsWithResolvedBootstrap.has(localFunction)) {
+            ts.forEachChild(node, (child) => { nodes.push(child); });
+            continue;
+          }
           const target = (ts.isPropertyAccessExpression(callee)
             || ts.isElementAccessExpression(callee)) ? callee.expression : undefined;
           const unwrappedTarget = target ? unwrapModuleExpression(target) : undefined;

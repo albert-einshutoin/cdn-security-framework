@@ -3085,6 +3085,47 @@ function registeredProviderObjects(checker, projectSources, check) {
         }
         return false;
     };
+    const invokedLocalFunctions = new Set();
+    const functionsWithResolvedBootstrap = new Set();
+    for (const sourceFile of projectSources) {
+        const nodes = [sourceFile];
+        while (nodes.length > 0) {
+            const node = nodes.pop();
+            check();
+            if (typescript_1.default.isCallExpression(node) && !staticallyUnreachable(node)) {
+                let callee = unwrapModuleExpression(node.expression);
+                let functionAncestor;
+                for (let parent = node.parent; !typescript_1.default.isSourceFile(parent); parent = parent.parent) {
+                    if (typescript_1.default.isFunctionLike(parent)) {
+                        functionAncestor = parent;
+                        break;
+                    }
+                }
+                if (!functionAncestor && node.arguments.length === 0 && typescript_1.default.isIdentifier(callee)) {
+                    const symbol = symbolAt(callee);
+                    const declarations = symbol?.declarations?.filter((declaration) => typescript_1.default.isFunctionDeclaration(declaration) && declaration.body !== undefined
+                        && projectSources.has(declaration.getSourceFile())) ?? [];
+                    if (symbol && declarations.length === 1 && !reassignedSymbols.has(symbol)
+                        && !unresolvedAssignments.has(symbol))
+                        invokedLocalFunctions.add(symbol);
+                }
+                const method = typescript_1.default.isPropertyAccessExpression(callee) ? callee.name.text
+                    : typescript_1.default.isElementAccessExpression(callee) && callee.argumentExpression
+                        ? (0, decorator_symbols_1.resolveStaticPropertyKey)(callee.argumentExpression, checker, check) : undefined;
+                if (functionAncestor && node.arguments[0]
+                    && (method === 'create' || method === 'createApplicationContext'
+                        || method === 'createMicroservice')
+                    && (typescript_1.default.isPropertyAccessExpression(callee) || typescript_1.default.isElementAccessExpression(callee))
+                    && (0, decorator_symbols_1.containsStaticSymbolFrom)(callee.expression, checker, check, '@nestjs/core', 'NestFactory', projectSources) && moduleSymbol(node.arguments[0])
+                    && typescript_1.default.isFunctionDeclaration(functionAncestor) && functionAncestor.name) {
+                    const symbol = symbolAt(functionAncestor.name);
+                    if (symbol)
+                        functionsWithResolvedBootstrap.add(symbol);
+                }
+            }
+            typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+        }
+    }
     for (const sourceFile of projectSources) {
         const nodes = [sourceFile];
         while (nodes.length > 0) {
@@ -3106,12 +3147,24 @@ function registeredProviderObjects(checker, projectSources, check) {
                         moduleGraphComplete = false;
                     for (let parent = node.parent; !typescript_1.default.isSourceFile(parent); parent = parent.parent) {
                         if (typescript_1.default.isFunctionLike(parent)) {
-                            moduleGraphComplete = false;
+                            const functionSymbol = typescript_1.default.isFunctionDeclaration(parent) && parent.name
+                                ? symbolAt(parent.name) : undefined;
+                            if (!functionSymbol || !invokedLocalFunctions.has(functionSymbol)
+                                || !functionsWithResolvedBootstrap.has(functionSymbol)) {
+                                moduleGraphComplete = false;
+                            }
                             break;
                         }
                     }
                 }
                 else {
+                    const localFunction = typescript_1.default.isIdentifier(unwrapModuleExpression(callee))
+                        ? symbolAt(unwrapModuleExpression(callee)) : undefined;
+                    if (localFunction && invokedLocalFunctions.has(localFunction)
+                        && functionsWithResolvedBootstrap.has(localFunction)) {
+                        typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+                        continue;
+                    }
                     const target = (typescript_1.default.isPropertyAccessExpression(callee)
                         || typescript_1.default.isElementAccessExpression(callee)) ? callee.expression : undefined;
                     const unwrappedTarget = target ? unwrapModuleExpression(target) : undefined;

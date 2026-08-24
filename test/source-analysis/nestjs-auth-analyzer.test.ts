@@ -3839,7 +3839,8 @@ describe('NestJS auth metadata analyzer', () => {
       @Module({}) class AppModule {}
       @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
       class UnusedModule {}
-      void NestFactory.create(AppModule);
+      async function bootstrap() { await NestFactory.create(AppModule); }
+      void bootstrap();
       @Controller('active') class ActiveController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }
