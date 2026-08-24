@@ -207,6 +207,22 @@ describe('Security IR v1', () => {
     const invalidKind = structuredClone(input) as any;
     invalidKind.operations[0].auth.analysis.guards[0].authKind = 'jwt';
     expect(() => createSecurityContract(invalidKind)).toThrow('invalid authentication guard analysis');
+    const contradictory = structuredClone(input);
+    contradictory.operations[0].exposure = 'unknown';
+    contradictory.operations[0].auth.mode = 'unknown';
+    expect(() => createSecurityContract(contradictory))
+      .toThrow('authentication mode and analysis confidence are inconsistent');
+    const optionalAuth = structuredClone(input);
+    optionalAuth.operations[0].auth.mode = 'alternatives';
+    optionalAuth.operations[0].auth.analysis!.explicitPublic = false;
+    optionalAuth.operations[0].auth.alternatives = [
+      { anonymous: true, schemes: [] },
+      { anonymous: false, schemes: [{
+        name: 'JwtAuthGuard', kind: 'bearer', scopes: [], capability: 'supported',
+      }] },
+    ];
+    expect(() => createSecurityContract(optionalAuth))
+      .toThrow('authentication mode and analysis confidence are inconsistent');
     const secretRole = structuredClone(input);
     secretRole.operations[0].auth.analysis!.roles = ['secret=do-not-emit'];
     expect(() => createSecurityContract(secretRole)).toThrow('secret-like value is not allowed');

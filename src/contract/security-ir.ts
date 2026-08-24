@@ -437,6 +437,14 @@ function normalizeAuth(input: ApiAuthenticationContractV1, state: NormalizationS
       enforcementConfidence: input.analysis.enforcementConfidence,
       capabilityReasons: sortedSet(input.analysis.capabilityReasons, 'authentication capability reason', state),
     };
+    const highConfidenceMatchesMode = (input.mode === 'none' && analysis.explicitPublic)
+      || (input.mode === 'alternatives' && !analysis.explicitPublic && guards.length > 0
+        && guards.every(({ authKind }) => authKind !== undefined)
+        && canonicalAlternatives.length > 0
+        && canonicalAlternatives.every(({ anonymous }) => !anonymous));
+    if (analysis.enforcementConfidence === 'high' && !highConfidenceMatchesMode) {
+      throw new Error('authentication mode and analysis confidence are inconsistent');
+    }
   }
   return {
     mode: input.mode,
