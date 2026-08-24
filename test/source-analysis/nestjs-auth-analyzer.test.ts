@@ -482,6 +482,11 @@ describe('NestJS auth metadata analyzer', () => {
       };
       const staticKey = 'Public' as const;
       const dynamicKey = flag ? 'Public' : 'Trace';
+      declare const dynamicNumber: number;
+      const unaryNamed = {
+        '': (): MethodDecorator => () => {},
+        1: (): MethodDecorator => Public(),
+      };
       ${aliases.join('\n')}
       @Controller('objects') @UseGuards(JwtAuthGuard)
       class ObjectWrapperController {
@@ -492,6 +497,7 @@ describe('NestJS auth metadata analyzer', () => {
         @Get('static-element') @(named[staticKey]()) staticElement() {}
         @Get('dynamic-element') @(named[dynamicKey]()) dynamicElement() {}
         @Get('long-alias') @(named[key0]()) longAlias() {}
+        @Get('dynamic-unary') @(unaryNamed[+dynamicNumber]()) dynamicUnary() {}
       }
     `, {
       'src/auth.ts': `
@@ -543,6 +549,31 @@ describe('NestJS auth metadata analyzer', () => {
       exposure: 'authenticated',
       auth: { mode: 'alternatives', analysis: { roles: ['admin'] } },
     });
+  });
+
+  test('fails closed on indirect Nest auth decorator imports', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { IndirectUseGuards } from './barrel';
+      import { ApiKeyGuard, JwtAuthGuard } from './auth';
+      @Controller('indirect') @UseGuards(JwtAuthGuard)
+      class IndirectController { @Get() @IndirectUseGuards(ApiKeyGuard) read() {} }
+      @Controller('indirect-class') @IndirectUseGuards(ApiKeyGuard)
+      class IndirectClassController { @Get() @UseGuards(JwtAuthGuard) read() {} }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
+      'src/barrel.ts': "export { UseGuards as IndirectUseGuards } from '@nestjs/common';\n",
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    for (const operation of execution.result.contract.operations) {
+      expect(operation).toMatchObject({
+        exposure: 'unknown',
+        auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+      });
+    }
   });
 
   test('does not analyze auth metadata for an untrusted composed controller', async () => {
@@ -628,22 +659,1090 @@ describe('NestJS auth metadata analyzer', () => {
       export const providers = [{ provide, useClass: JwtAuthGuard }];
       @Controller('mutable') class MutableController { @Get() @UseGuards(JwtAuthGuard) read() {} }
     `, nestCoreFiles);
+    const destructuredShorthandRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      const [provide] = [APP_GUARD];
+      export const providers = [{ provide, useClass: JwtAuthGuard }];
+      @Controller('destructured') class DestructuredController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
     const computedRoot = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
       import { APP_GUARD } from '@nestjs/core';
       import { JwtAuthGuard } from './auth';
-      const providerKey = 'provide';
-      export const providers = [{ [providerKey]: APP_GUARD, useClass: JwtAuthGuard }];
+      declare const enabled: boolean;
+      declare const OTHER_TOKEN: unique symbol;
+      const TOKEN = enabled ? APP_GUARD : OTHER_TOKEN;
+      export const providers = [{ provide: TOKEN, useClass: JwtAuthGuard }];
       @Controller('computed') class ComputedController { @Get() @UseGuards(JwtAuthGuard) read() {} }
     `, nestCoreFiles);
+    const iifeRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      export const providers = [{ provide: (() => APP_GUARD)(), useClass: JwtAuthGuard }];
+      @Controller('iife') class IifeController { @Get() @UseGuards(JwtAuthGuard) read() {} }
+    `, nestCoreFiles);
+    const parameterizedIifeRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      export const providers = [
+        { provide: ((token) => token)(APP_GUARD), useClass: JwtAuthGuard },
+      ];
+      @Controller('parameterized-iife') class ParameterizedIifeController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const defaultIifeRoots = ['', 'undefined', 'void 0', 'maybe', 'supplied'].map((argument) => workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const maybe: unknown;
+      const supplied = undefined as unknown as typeof APP_GUARD;
+      export const providers = [
+        { provide: ((token = APP_GUARD) => token)(${argument}), useClass: JwtAuthGuard },
+      ];
+      @Controller('default-iife') class DefaultIifeController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles));
+    const bypassedDefaultRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const OTHER_TOKEN: unique symbol;
+      export const providers = [
+        { provide: ((token = APP_GUARD) => token)(OTHER_TOKEN), useClass: JwtAuthGuard },
+      ];
+      @Controller('bypassed-default') class BypassedDefaultController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const logicalRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const enabled: boolean;
+      export const providers = [{ provide: enabled && APP_GUARD, useClass: JwtAuthGuard }];
+      @Controller('logical') class LogicalController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const bypassedLogicalRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const enabled: boolean;
+      declare const OTHER_TOKEN: unique symbol;
+      const maybeGuard = enabled ? APP_GUARD : undefined;
+      export const providers = [{ provide: maybeGuard && OTHER_TOKEN, useClass: JwtAuthGuard }];
+      @Controller('bypassed-logical') class BypassedLogicalController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const typedBindingRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const OTHER_TOKEN: unique symbol;
+      const TOKEN = ((x: undefined) => x ? APP_GUARD : OTHER_TOKEN)(APP_GUARD as any);
+      export const providers = [{ provide: TOKEN, useClass: JwtAuthGuard }];
+      @Controller('typed-binding') class TypedBindingController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const mutableTypedRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const OTHER_TOKEN: unique symbol;
+      let enabled: undefined = APP_GUARD as any;
+      export const providers = [{
+        provide: enabled ? APP_GUARD : OTHER_TOKEN,
+        useClass: JwtAuthGuard,
+      }];
+      @Controller('mutable-typed') class MutableTypedController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const nullishRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const override: unknown;
+      export const providers = [{ provide: override ?? APP_GUARD, useClass: JwtAuthGuard }];
+      @Controller('nullish') class NullishController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const bypassedNullishRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const OTHER_TOKEN: unique symbol;
+      export const providers = [{ provide: OTHER_TOKEN ?? APP_GUARD, useClass: JwtAuthGuard }];
+      @Controller('bypassed-nullish') class BypassedNullishController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const assertedNullishRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      const supplied = undefined as unknown as typeof APP_GUARD;
+      export const providers = [{ provide: supplied ?? APP_GUARD, useClass: JwtAuthGuard }];
+      @Controller('asserted-nullish') class AssertedNullishController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const functionTokenRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      export const providers = [{ provide: () => APP_GUARD, useClass: JwtAuthGuard }];
+      @Controller('function-token') class FunctionTokenController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const destructuredIifeRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const OTHER_TOKEN: unique symbol;
+      export const providers = [{
+        provide: (({ token }) => token)({ token: OTHER_TOKEN }),
+        useClass: JwtAuthGuard,
+      }];
+      @Controller('destructured-iife') class DestructuredIifeController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const destructuredGuardRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const enabled: boolean;
+      declare const OTHER_TOKEN: unique symbol;
+      const TOKEN = enabled ? APP_GUARD : OTHER_TOKEN;
+      export const providers = [{
+        provide: (({ token }) => token)({ token: TOKEN }),
+        useClass: JwtAuthGuard,
+      }];
+      @Controller('destructured-guard') class DestructuredGuardController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const numericKeyRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      const n = 1n;
+      const z = 0;
+      const big = 1n;
+      export const providers = [
+        { [0]: APP_GUARD, useClass: JwtAuthGuard },
+        { [-0]: APP_GUARD, useClass: JwtAuthGuard },
+        { [0x10n]: APP_GUARD, useClass: JwtAuthGuard },
+        { [-1n]: APP_GUARD, useClass: JwtAuthGuard },
+        { [-n]: APP_GUARD, useClass: JwtAuthGuard },
+        { [-(z as const)]: APP_GUARD, useClass: JwtAuthGuard },
+        { [+big]: APP_GUARD, useClass: JwtAuthGuard },
+        { [(-n as bigint)]: APP_GUARD, useClass: JwtAuthGuard },
+        { [((+big))]: APP_GUARD, useClass: JwtAuthGuard },
+        { [(-n satisfies bigint)]: APP_GUARD, useClass: JwtAuthGuard },
+      ];
+      @Controller('numeric-key') class NumericKeyController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const discardedTokenRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const OTHER_TOKEN: unique symbol;
+      export const providers = [{ provide: (APP_GUARD, OTHER_TOKEN), useClass: JwtAuthGuard }];
+      @Controller('discarded-token') class DiscardedTokenController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const unreachableTokenRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const OTHER_TOKEN: unique symbol;
+      export const providers = [
+        { provide: false ? APP_GUARD : OTHER_TOKEN, useClass: JwtAuthGuard },
+        { provide: undefined ? APP_GUARD : OTHER_TOKEN, useClass: JwtAuthGuard },
+        { provide: (void 0) ? APP_GUARD : OTHER_TOKEN, useClass: JwtAuthGuard },
+      ];
+      @Controller('unreachable-token') class UnreachableTokenController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const shadowedUndefinedRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const OTHER_TOKEN: unique symbol;
+      export const providers = [{
+        provide: (() => {
+          const { undefined } = { undefined: APP_GUARD as any };
+          return undefined ? APP_GUARD : OTHER_TOKEN;
+        })(),
+        useClass: JwtAuthGuard,
+      }];
+      @Controller('shadowed-undefined') class ShadowedUndefinedController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const unreachableReturnRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const OTHER_TOKEN: unique symbol;
+      export const providers = [
+        { provide: (() => { if (false) return APP_GUARD; return OTHER_TOKEN; })(), useClass: JwtAuthGuard },
+        { provide: (() => { return OTHER_TOKEN; return APP_GUARD; })(), useClass: JwtAuthGuard },
+      ];
+      @Controller('unreachable-return') class UnreachableReturnController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const deepBlockRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      export const providers = [{
+        provide: (() => { ${'{'.repeat(70)} return APP_GUARD; ${'}'.repeat(70)} })(),
+        useClass: JwtAuthGuard,
+      }];
+      @Controller('deep-block') class DeepBlockController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    let nestedCandidate = 'p18';
+    for (let index = 18; index > 0; index -= 1) {
+      nestedCandidate = `((p${index} = p${index - 1}) => ${nestedCandidate})(p${index - 1})`;
+    }
+    const candidateExpansionRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const maybe: unknown;
+      export const providers = [{
+        provide: ((p0 = APP_GUARD) => ${nestedCandidate})(maybe),
+        useClass: JwtAuthGuard,
+      }];
+      @Controller('candidate-expansion') class CandidateExpansionController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const unrelatedSpreadRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const OTHER_TOKEN: unique symbol;
+      export const providers = [{
+        provide: ((token: unknown) => token)(...([OTHER_TOKEN] as const)),
+        useClass: JwtAuthGuard,
+      }];
+      @Controller('unrelated-spread') class UnrelatedSpreadController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const suppliedDefaultSpreadRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const OTHER_TOKEN: unique symbol;
+      export const providers = [{
+        provide: ((token: unknown = APP_GUARD) => token)(...([OTHER_TOKEN] as const)),
+        useClass: JwtAuthGuard,
+      }];
+      @Controller('supplied-default-spread') class SuppliedDefaultSpreadController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const deferredIifeRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      export const providers = [
+        { provide: (async () => APP_GUARD)(), useClass: JwtAuthGuard },
+        { provide: (function* () { return APP_GUARD; })(), useClass: JwtAuthGuard },
+      ];
+      @Controller('deferred-iife') class DeferredIifeController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const assignmentRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      let token: unknown;
+      export const providers = [{ provide: (token = APP_GUARD), useClass: JwtAuthGuard }];
+      @Controller('assignment') class AssignmentController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const logicalAssignmentRoots = [
+      ['let token: typeof APP_GUARD | false = false;', 'token ||= APP_GUARD'],
+      ['let token: typeof APP_GUARD | true = true;', 'token &&= APP_GUARD'],
+      ['let token: typeof APP_GUARD | undefined;', 'token ??= APP_GUARD'],
+    ].map(([declaration, assignment]) => workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      ${declaration}
+      export const providers = [{ provide: (${assignment}), useClass: JwtAuthGuard }];
+      @Controller('logical-assignment') class LogicalAssignmentController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles));
+    const memberAliasRoots = [
+      ['', '({ token: OTHER_TOKEN }).token', 'alternatives'],
+      ['', '({ token: OTHER_TOKEN, token: APP_GUARD }).token', 'unknown'],
+      ['', '({ token: APP_GUARD, token: OTHER_TOKEN }).token', 'alternatives'],
+      [
+        'declare const extra: { token: unknown };',
+        '({ token: OTHER_TOKEN, ...extra }).token',
+        'unknown',
+      ],
+      [
+        'const proto = { token: APP_GUARD }; const TOKENS = { __proto__: proto };',
+        '(TOKENS as any).token',
+        'unknown',
+      ],
+      [
+        'const proto = { token: APP_GUARD } as { token: typeof APP_GUARD } & {}; const TOKENS = { __proto__: proto };',
+        '(TOKENS as any).token',
+        'unknown',
+      ],
+      ['declare const x: any; declare const dynamicKey: string; x[dynamicKey];', '({ token: OTHER_TOKEN }).token', 'alternatives'],
+      ['', '([APP_GUARD] as const)[0]', 'unknown'],
+      ['', '[APP_GUARD][0]', 'unknown'],
+      ['const TOKENS = [APP_GUARD];', 'TOKENS[0]', 'unknown'],
+      ['', '[...[], OTHER_TOKEN][0]', 'alternatives'],
+      ['declare const runtimeIndex: number;', '[APP_GUARD, OTHER_TOKEN][runtimeIndex]', 'unknown'],
+      ['declare const tokens: unknown[]; declare const runtimeIndex: number;', '[...tokens][runtimeIndex]', 'unknown'],
+      ['declare const runtimeKey: string;', '({ a: APP_GUARD, b: OTHER_TOKEN })[runtimeKey]', 'unknown'],
+      [
+        'declare const runtimeKey: string;',
+        '({ factory: () => APP_GUARD, other: OTHER_TOKEN })[runtimeKey]',
+        'alternatives',
+      ],
+      [
+        'declare const runtimeKey: string;',
+        '({ get guard() { return APP_GUARD; }, other: OTHER_TOKEN })[runtimeKey]',
+        'unknown',
+      ],
+      [
+        'declare const runtimeKey: string; const TOKENS = { guard: APP_GUARD, other: OTHER_TOKEN };',
+        'TOKENS[runtimeKey]',
+        'unknown',
+      ],
+      [
+        'declare const runtimeKey: string; const TOKENS = { guard: OTHER_TOKEN }; TOKENS.guard = APP_GUARD;',
+        'TOKENS[runtimeKey]',
+        'unknown',
+      ],
+      [
+        "declare const runtimeKey: string; const key = 'guard' as const;",
+        '({ guard: APP_GUARD, [key]: OTHER_TOKEN })[runtimeKey]',
+        'alternatives',
+      ],
+      [
+        'declare const runtimeKey: PropertyKey;',
+        '({ 16: APP_GUARD, 0x10: OTHER_TOKEN })[runtimeKey]',
+        'alternatives',
+      ],
+      [
+        'declare const runtimeKey: PropertyKey;',
+        '({ __proto__: APP_GUARD, other: OTHER_TOKEN })[runtimeKey]',
+        'alternatives',
+      ],
+      [
+        `declare const runtimeKey: string; const alias0 = { other: OTHER_TOKEN }; ${Array.from(
+          { length: 70 }, (_, index) => `const alias${index + 1} = alias${index};`,
+        ).join(' ')}`,
+        'alias70[runtimeKey]',
+        'unknown',
+      ],
+      ['', '({ get token() { return APP_GUARD; } }).token', 'unknown'],
+      ['', '({} ? OTHER_TOKEN : APP_GUARD)', 'alternatives'],
+      ['', '(-1 ? OTHER_TOKEN : APP_GUARD)', 'alternatives'],
+      ['', '(() => { try { return APP_GUARD; } finally { return OTHER_TOKEN; } })()', 'alternatives'],
+      [
+        '',
+        '(() => { switch (1) { case 0: return APP_GUARD; case 1: return OTHER_TOKEN; } })()',
+        'alternatives',
+      ],
+      ['', '(() => { for (const token of [APP_GUARD]) return token; return OTHER_TOKEN; })()', 'unknown'],
+      [
+        '',
+        '(() => { switch (1) { case 1: { break; } case 2: return APP_GUARD; } return OTHER_TOKEN; })()',
+        'alternatives',
+      ],
+      [
+        '',
+        '(() => { for (const token of [OTHER_TOKEN]) { break; return APP_GUARD; } return OTHER_TOKEN; })()',
+        'alternatives',
+      ],
+      ['', '(() => { for (const token of [OTHER_TOKEN]) { break; } return APP_GUARD; })()', 'unknown'],
+      [
+        'declare const enabled: boolean;',
+        '(() => { switch (1) { case 1: if (enabled) break; else return OTHER_TOKEN; } return APP_GUARD; })()',
+        'unknown',
+      ],
+      ['function pick() { return APP_GUARD; }', 'pick()', 'unknown'],
+      ['const identity = (token: unknown) => token;', 'identity(APP_GUARD)', 'unknown'],
+      ['let pick = () => OTHER_TOKEN; pick = () => APP_GUARD;', 'pick()', 'unknown'],
+      ['function pick() { return OTHER_TOKEN; } pick = () => APP_GUARD;', 'pick()', 'unknown'],
+      [
+        'function pick(token: string): unknown; function pick(token: unknown) { return APP_GUARD; }',
+        "pick('token')",
+        'unknown',
+      ],
+      ['function pick() { return arguments[0]; }', 'pick(APP_GUARD)', 'unknown'],
+      ['function pick() { return (() => arguments[0])(); }', 'pick(APP_GUARD)', 'unknown'],
+      [
+        'function pick() { return ({ arguments: OTHER_TOKEN }).arguments; }',
+        'pick()',
+        'alternatives',
+      ],
+      [
+        'function pick() { const { arguments: value } = { arguments: OTHER_TOKEN }; return value; }',
+        'pick()',
+        'alternatives',
+      ],
+      ['', '(function (token: unknown) { return token; }).call(null, APP_GUARD)', 'unknown'],
+      ['', '({ pick() { return APP_GUARD; } }).pick()', 'unknown'],
+      ['', "(function () { return APP_GUARD; }).bind(null)", 'alternatives'],
+      ['', "(async function () { return APP_GUARD; }).call(null)", 'alternatives'],
+      ['', "(function* () { return APP_GUARD; }).apply(null)", 'alternatives'],
+      [
+        "const key = 'pick' as const;",
+        '({ pick() { return OTHER_TOKEN; }, [key]() { return APP_GUARD; } }).pick()',
+        'unknown',
+      ],
+      ['', '({ pick: () => APP_GUARD }).pick()', 'unknown'],
+      [
+        'declare const extra: { pick(): unknown };',
+        '({ pick() { return OTHER_TOKEN; }, ...extra }).pick()',
+        'unknown',
+      ],
+      ['', '({ get pick() { return () => APP_GUARD; } }).pick()', 'unknown'],
+      ['', 'await APP_GUARD', 'unknown'],
+      ['', 'await Promise.resolve(APP_GUARD)', 'unknown'],
+      ['async function token() { return APP_GUARD; }', 'await token()', 'unknown'],
+      [
+        'async function token(value = APP_GUARD) { return value; }',
+        'await token(undefined)',
+        'unknown',
+      ],
+      [
+        'let token = async () => OTHER_TOKEN; token = async () => APP_GUARD;',
+        'await token()',
+        'unknown',
+      ],
+      ['', 'await { then(resolve: (value: unknown) => void) { resolve(APP_GUARD); } }', 'unknown'],
+      ['', 'await OTHER_TOKEN', 'alternatives'],
+      ['', 'await 123', 'alternatives'],
+      ['', '(function (token = APP_GUARD) { return token; }).call(null)', 'unknown'],
+      ['', '({ pick(token = APP_GUARD) { return token; } }).pick()', 'unknown'],
+      [
+        '',
+        '(function (token = APP_GUARD) { return token; }).call(null, OTHER_TOKEN)',
+        'alternatives',
+      ],
+      ['', '({ pick(token = APP_GUARD) { return token; } }).pick(OTHER_TOKEN)', 'alternatives'],
+      ['', '(function (token = APP_GUARD) { return token; }).apply(null, [OTHER_TOKEN])', 'alternatives'],
+      ['', '(function (token = APP_GUARD) { return token; }).apply(null, [])', 'unknown'],
+      [
+        'declare const args: unknown[];',
+        '(function (token: unknown) { return token; }).apply(null, args)',
+        'unknown',
+      ],
+      [
+        'declare const args: unknown[];',
+        '(function (token: unknown) { return token; }).apply(null, [...args])',
+        'unknown',
+      ],
+      ['', '({ token: APP_GUARD, pick() { return this.token; } }).pick()', 'unknown'],
+      ['', '({ token: APP_GUARD, pick(value = this.token) { return value; } }).pick()', 'unknown'],
+      [
+        'const factories = { token: () => APP_GUARD };',
+        'factories.token()',
+        'unknown',
+      ],
+      [
+        'class Factory { make() { return APP_GUARD; } } const factory = new Factory();',
+        'factory.make()',
+        'unknown',
+      ],
+      [
+        'let api = { pick() { return OTHER_TOKEN; } }; api = { pick() { return APP_GUARD; } };',
+        'api.pick()',
+        'unknown',
+      ],
+      ['function token(_strings: TemplateStringsArray) { return APP_GUARD; }', 'token`x`', 'unknown'],
+      ['function token(_strings: TemplateStringsArray) { return OTHER_TOKEN; }', 'token`x`', 'alternatives'],
+      [
+        'function token(_strings: TemplateStringsArray) { if (false) return APP_GUARD; return OTHER_TOKEN; }',
+        'token`x`',
+        'alternatives',
+      ],
+      [
+        'function token(_strings: TemplateStringsArray) { while (false) return APP_GUARD; return OTHER_TOKEN; }',
+        'token`x`',
+        'alternatives',
+      ],
+      [
+        'function token(_strings: TemplateStringsArray) { try { return APP_GUARD; } finally { return OTHER_TOKEN; } }',
+        'token`x`',
+        'alternatives',
+      ],
+      [
+        'function token(_strings: TemplateStringsArray, value: unknown) { value = APP_GUARD; return value; }',
+        'token`${OTHER_TOKEN}`',
+        'unknown',
+      ],
+      [
+        'function token(_strings: TemplateStringsArray, value: unknown) { function mutate() { value = APP_GUARD; } mutate(); return value; }',
+        'token`${OTHER_TOKEN}`',
+        'unknown',
+      ],
+      ['function token(_strings: TemplateStringsArray, value = APP_GUARD) { return value; }', 'token`x`', 'unknown'],
+      ['const tags = { token() { return APP_GUARD; } };', 'tags.token`x`', 'unknown'],
+      ['async function token() { return APP_GUARD; }', 'token`x`', 'alternatives'],
+      ['function* token() { return APP_GUARD; }', 'token`x`', 'alternatives'],
+      ['function token() { return APP_GUARD; }', '(0, token)()', 'unknown'],
+      [
+        'declare const enabled: boolean; const identity = (value: unknown) => value; const other = () => OTHER_TOKEN;',
+        '(enabled ? identity : other)(APP_GUARD)',
+        'unknown',
+      ],
+      [
+        'declare const enabled: boolean; const app = () => APP_GUARD; const other = () => OTHER_TOKEN;',
+        '(enabled ? app : other)()',
+        'unknown',
+      ],
+      [
+        'declare const enabled: boolean; function app(value = APP_GUARD) { return value; } function other() { return OTHER_TOKEN; }',
+        '(enabled ? app : other)()',
+        'unknown',
+      ],
+      [
+        'declare const enabled: boolean; async function app() { return APP_GUARD; } function other() { return OTHER_TOKEN; }',
+        '(enabled ? app : other)()',
+        'alternatives',
+      ],
+      [
+        'declare const enabled: boolean; const identity = (value: unknown) => value; const other = () => OTHER_TOKEN;',
+        '(enabled ? identity : other)(...[APP_GUARD])',
+        'unknown',
+      ],
+      [
+        'declare const enabled: boolean; const app = async (value: unknown) => value; const other = async () => OTHER_TOKEN;',
+        '(enabled ? app : other)(APP_GUARD)',
+        'alternatives',
+      ],
+      [
+        'declare const enabled: boolean; const api = { app() { return APP_GUARD; } }; const other = () => OTHER_TOKEN;',
+        '(enabled ? api.app : other)()',
+        'unknown',
+      ],
+      [
+        'declare const enabled: boolean; const api = { group: { app() { return APP_GUARD; } } }; const other = () => OTHER_TOKEN;',
+        '(enabled ? api.group.app : other)()',
+        'unknown',
+      ],
+      ['const api = { group: { app() { return APP_GUARD; } } };', 'api.group.app()', 'unknown'],
+      ['', '({ pick() { const unused = APP_GUARD; return OTHER_TOKEN; } }).pick()', 'alternatives'],
+      ['', '({ pick() { return OTHER_TOKEN; return APP_GUARD; } }).pick()', 'alternatives'],
+      ['', '({ pick() { try { return APP_GUARD; } finally { return OTHER_TOKEN; } } }).pick()', 'alternatives'],
+      ['', '(function () { return APP_GUARD; }).bind(null)()', 'unknown'],
+      ['', '[APP_GUARD].at(0)', 'unknown'],
+      ['', '[OTHER_TOKEN, APP_GUARD].pop()', 'unknown'],
+      [
+        'function pick(token: unknown) { token = APP_GUARD; return token; }',
+        'pick(OTHER_TOKEN)',
+        'unknown',
+      ],
+      ['', '(() => { while (false) return APP_GUARD; return OTHER_TOKEN; })()', 'alternatives'],
+      ['', '(() => { for (; false;) return APP_GUARD; return OTHER_TOKEN; })()', 'alternatives'],
+      [
+        'declare function explode(): void;',
+        '(() => { try { for (explode(); false;) {} return OTHER_TOKEN; } catch { return APP_GUARD; } })()',
+        'unknown',
+      ],
+      [
+        '',
+        '(() => { try { for (const { x } = null as any; false;) {} return OTHER_TOKEN; } catch { return APP_GUARD; } })()',
+        'unknown',
+      ],
+      ['', '(({ x }) => APP_GUARD)({ x: OTHER_TOKEN })', 'unknown'],
+      ['', '(() => { let token = APP_GUARD; return token; })()', 'unknown'],
+      ['', '(() => { try { throw APP_GUARD; } catch (token) { return token; } })()', 'unknown'],
+      ['', "(() => { try { return APP_GUARD; } finally { throw new Error('stop'); } })()", 'alternatives'],
+      ['', "(() => { try { return 'OTHER_TOKEN'; } catch { return APP_GUARD; } })()", 'alternatives'],
+      ['', '(() => { try { if ((undefined as any).x) return OTHER_TOKEN; return OTHER_TOKEN; } catch { return APP_GUARD; } })()', 'unknown'],
+      ['', "(() => { class Exploding {} try { if (new Exploding()) return 'OTHER_TOKEN'; } catch { return APP_GUARD; } })()", 'unknown'],
+      ['', '(() => { try { return token; } catch { return APP_GUARD; } const token = OTHER_TOKEN; })()', 'unknown'],
+      ["const TOKENS = { global: APP_GUARD };", 'TOKENS.global', 'unknown'],
+      ['const [TOKEN] = [APP_GUARD];', 'TOKEN', 'unknown'],
+      ["const TOKENS = { global: APP_GUARD, other: OTHER_TOKEN };", 'TOKENS.other', 'alternatives'],
+      ["const TOKENS: { global: symbol } = { global: OTHER_TOKEN };", 'TOKENS.global', 'alternatives'],
+      ["const TOKENS: { global: unknown } = { global: APP_GUARD };", 'TOKENS.global', 'unknown'],
+      ["const TOKENS: any = { global: APP_GUARD };", 'TOKENS.global', 'unknown'],
+      ['', '({ global: APP_GUARD } as any).global', 'unknown'],
+      ['class Tokens { static global = APP_GUARD; }', 'Tokens.global', 'unknown'],
+      [
+        "const extra = { global: APP_GUARD }; const TOKENS: { global: unknown } = { global: OTHER_TOKEN, ...extra };",
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        "const key = 'global' as const; const TOKENS: { global: unknown } = { global: OTHER_TOKEN, [key]: APP_GUARD };",
+        'TOKENS.global',
+        'unknown',
+      ],
+      ["const TOKENS = { global: OTHER_TOKEN }; const same = TOKENS === TOKENS; if (TOKENS) {} typeof TOKENS;", 'TOKENS.global', 'alternatives'],
+      ["const TOKENS = { global: OTHER_TOKEN, other: OTHER_TOKEN }; TOKENS.other = APP_GUARD;", 'TOKENS.global', 'alternatives'],
+      ["const TOKENS = { global: OTHER_TOKEN }; TOKENS.global = APP_GUARD;", 'TOKENS.global', 'unknown'],
+      [
+        'const TOKENS: { global?: unknown } = { global: APP_GUARD }; delete TOKENS.global;',
+        'TOKENS.global',
+        'alternatives',
+      ],
+      ["const TOKENS = { global: OTHER_TOKEN }; for (TOKENS.global of [APP_GUARD]) {}", 'TOKENS.global', 'unknown'],
+      ["const TOKENS = { nested: { global: OTHER_TOKEN } }; TOKENS['nested'].global = APP_GUARD;", "TOKENS['nested'].global", 'unknown'],
+      ["function tokens(): { global: unknown } { return { global: OTHER_TOKEN }; }", 'tokens().global', 'unknown'],
+      ['const [, TOKEN] = [...[OTHER_TOKEN, APP_GUARD], OTHER_TOKEN];', 'TOKEN', 'unknown'],
+      ['const global = APP_GUARD; const TOKENS = { global };', 'TOKENS.global', 'unknown'],
+      ["const TOKENS = { global: OTHER_TOKEN }; [TOKENS.global] = [APP_GUARD];", 'TOKENS.global', 'unknown'],
+      ['const [TOKEN = APP_GUARD] = [undefined];', 'TOKEN', 'unknown'],
+      ["let TOKEN: string = 'ordinary';", 'TOKEN', 'alternatives'],
+      [
+        'let TOKEN: unknown = OTHER_TOKEN; if (false) TOKEN = APP_GUARD;',
+        'TOKEN',
+        'alternatives',
+      ],
+      [
+        'let TOKEN: unknown = OTHER_TOKEN; TOKEN = OTHER_TOKEN; TOKEN = APP_GUARD;',
+        'TOKEN',
+        'unknown',
+      ],
+      ['let TOKEN: any = OTHER_TOKEN; TOKEN &&= APP_GUARD;', 'TOKEN', 'unknown'],
+      ['let TOKEN: unknown; [TOKEN] = [APP_GUARD];', 'TOKEN', 'unknown'],
+      ['let TOKEN: unknown; for (TOKEN of [APP_GUARD]) {}', 'TOKEN', 'unknown'],
+      [
+        'let TOKEN: unknown = APP_GUARD; const providers = make(); TOKEN = OTHER_TOKEN; function make() { return TOKEN; }',
+        'make()',
+        'unknown',
+      ],
+      [
+        'let TOKEN: unknown = OTHER_TOKEN; const value = TOKEN; TOKEN = APP_GUARD;',
+        'value',
+        'alternatives',
+      ],
+      [
+        'let TOKEN: unknown = OTHER_TOKEN; const object: any = {}; object[TOKEN as any] = 1;',
+        'TOKEN',
+        'alternatives',
+      ],
+      ['const global = APP_GUARD; const { global: TOKEN } = { global };', 'TOKEN', 'unknown'],
+      [
+        'const { nested: { global: TOKEN } } = { nested: { global: APP_GUARD } };',
+        'TOKEN',
+        'unknown',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; const mutate = (...xs: any[]) => { xs[0].global = APP_GUARD; }; mutate(...[TOKENS]);',
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; let alias: any; alias = TOKENS; alias.global = APP_GUARD;',
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; function expose(): any { return TOKENS; } const alias = expose(); alias.global = APP_GUARD;',
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; const WRAP = { TOKENS };',
+        'WRAP.TOKENS.global',
+        'alternatives',
+      ],
+      [
+        'const TOKENS: { global: symbol } = { global: APP_GUARD }; TOKENS.global = OTHER_TOKEN;',
+        'TOKENS.global',
+        'alternatives',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; if (false) TOKENS.global = APP_GUARD;',
+        'TOKENS.global',
+        'alternatives',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; const WRAP = { TOKENS }; WRAP.TOKENS.global = APP_GUARD;',
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; const WRAP = { TOKENS }; const alias = WRAP.TOKENS; alias.global = APP_GUARD;',
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; const WRAP = { TOKENS }; const first = WRAP.TOKENS; const second = first; second.global = APP_GUARD;',
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; const WRAP = { TOKENS }; const { TOKENS: alias } = WRAP; alias.global = APP_GUARD;',
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        "declare const key: string; const TOKENS = { first: OTHER_TOKEN, second: OTHER_TOKEN };",
+        'TOKENS[key]',
+        'alternatives',
+      ],
+      [
+        "declare const key: string; const TOKENS = { value: APP_GUARD, value: OTHER_TOKEN };",
+        'TOKENS[key]',
+        'alternatives',
+      ],
+      [
+        "declare const key: string; const TOKENS = { ordinary() { return OTHER_TOKEN; }, set value(_token: unknown) {}, other: OTHER_TOKEN };",
+        'TOKENS[key]',
+        'alternatives',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; const WRAP = { TOKENS }; function mutate(value: any) { value.TOKENS.global = APP_GUARD; } mutate(WRAP);',
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; const WRAP = { tokens: TOKENS }; WRAP.tokens.global = APP_GUARD;',
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; const WRAP = { tokens: TOKENS }; const { tokens: alias } = WRAP; alias.global = APP_GUARD;',
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; const WRAP: any = { tokens: TOKENS }; const alias = WRAP.tokens; alias.global = APP_GUARD;',
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        "const TOKENS = { global: OTHER_TOKEN }; const WRAP = { tokens: TOKENS, tokens: { global: OTHER_TOKEN } }; const { tokens: alias } = WRAP; alias.global = APP_GUARD;",
+        'TOKENS.global',
+        'alternatives',
+      ],
+      [
+        'const TOKENS = { global: OTHER_TOKEN }; const WRAP = { TOKENS, unrelated: { global: OTHER_TOKEN } }; const { unrelated: alias } = WRAP; alias.global = APP_GUARD;',
+        'TOKENS.global',
+        'alternatives',
+      ],
+      [
+        'const { token: TOKEN } = { token: APP_GUARD, token: OTHER_TOKEN };',
+        'TOKEN',
+        'alternatives',
+      ],
+      [
+        'declare const external: object; declare function consume(value: unknown): void; const TOKENS = { global: OTHER_TOKEN }; const unrelated = { ...external }; consume(unrelated);',
+        'TOKENS.global',
+        'alternatives',
+      ],
+      ["const TOKENS = [OTHER_TOKEN] as const;", 'TOKENS[0]', 'alternatives'],
+      [
+        'const TOKENS = [OTHER_TOKEN]; TOKENS.splice(0, 1, APP_GUARD);',
+        'TOKENS[0]',
+        'unknown',
+      ],
+      [
+        'const TOKENS = [OTHER_TOKEN]; [TOKENS[0]] = [APP_GUARD];',
+        'TOKENS[0]',
+        'unknown',
+      ],
+      [
+        'const TOKENS = [OTHER_TOKEN]; for (TOKENS[0] of [APP_GUARD]) { break; }',
+        'TOKENS[0]',
+        'unknown',
+      ],
+      [
+        'const TOKENS: any[] = [function(this: any[]) { this[0] = APP_GUARD; }]; TOKENS[0]();',
+        'TOKENS[0]',
+        'unknown',
+      ],
+      [
+        'const TOKENS: any[] = [function() { return OTHER_TOKEN; }]; const identity = (value: any) => value; identity(TOKENS[0])();',
+        'TOKENS[0]',
+        'alternatives',
+      ],
+      ["const TOKENS = [...[OTHER_TOKEN], OTHER_TOKEN] as const;", 'TOKENS[0]', 'alternatives'],
+      [
+        'const factory = { make: () => OTHER_TOKEN, unused: APP_GUARD };',
+        'factory.make()',
+        'alternatives',
+      ],
+      [
+        'const factory = { make: () => OTHER_TOKEN }; factory.make = () => APP_GUARD;',
+        'factory.make()',
+        'unknown',
+      ],
+      [
+        'const factory = { make: () => OTHER_TOKEN }; [factory.make] = [() => APP_GUARD];',
+        'factory.make()',
+        'unknown',
+      ],
+      [
+        'const factory = { make: () => OTHER_TOKEN, mutate() { this.make = () => APP_GUARD; } }; factory.mutate();',
+        'factory.make()',
+        'unknown',
+      ],
+      [
+        'const proto = { global: APP_GUARD }; const TOKENS = Object.create(proto);',
+        'TOKENS.global',
+        'unknown',
+      ],
+      ['', '(() => APP_GUARD).name', 'alternatives'],
+      ['', '(() => APP_GUARD).bind(null)', 'alternatives'],
+      ['', 'APP_GUARD.valueOf()', 'unknown'],
+      ['', '(APP_GUARD as any).toString()', 'alternatives'],
+      ['', '(APP_GUARD as any).includes("never")', 'alternatives'],
+      [
+        'function token() { return OTHER_TOKEN; } const alias = token;',
+        'token()',
+        'alternatives',
+      ],
+      ['const TOKENS = { nested: { ordinary: OTHER_TOKEN } };', 'TOKENS.nested.ordinary', 'alternatives'],
+      [
+        'const TOKENS = { global: OTHER_TOKEN, get self(): any { return this; } }; const alias: any = TOKENS.self; alias.global = APP_GUARD;',
+        'TOKENS.global',
+        'unknown',
+      ],
+      [
+        'const mutate = function(this: any) { this.global = APP_GUARD; }; const TOKENS = { global: OTHER_TOKEN, mutate }; (TOKENS.mutate as any)();',
+        'TOKENS.global',
+        'unknown',
+      ],
+    ].map(([declaration, expression, expected]) => ({
+      expected,
+      root: workspace(`
+        import { Controller, Get, UseGuards } from '@nestjs/common';
+        import { APP_GUARD } from '@nestjs/core';
+        import { JwtAuthGuard } from './auth';
+        declare const OTHER_TOKEN: unique symbol;
+        ${declaration}
+        export const providers = [{ provide: ${expression}, useClass: JwtAuthGuard }];
+        @Controller('member-alias') class MemberAliasController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, nestCoreFiles),
+    }));
+    const delayedDeleteRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      const TOKENS: { global?: unknown } = { global: APP_GUARD };
+      export const providers = make();
+      delete TOKENS.global;
+      function make() { return [{ provide: TOKENS.global, useClass: JwtAuthGuard }]; }
+      @Controller('delayed-delete') class DelayedDeleteController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, nestCoreFiles);
+    const crossFileMutationRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { TOKENS } from './tokens';
+      import './mutate';
+      export const providers = [{ provide: TOKENS.global, useClass: JwtAuthGuard }];
+      @Controller('cross-file-mutation') class CrossFileMutationController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      ...nestCoreFiles,
+      'src/tokens.ts': `
+        import { APP_GUARD } from '@nestjs/core';
+        declare const OTHER_TOKEN: unique symbol;
+        export const TOKENS = { global: OTHER_TOKEN };
+      `,
+      'src/mutate.ts': `
+        import { APP_GUARD } from '@nestjs/core';
+        import { TOKENS } from './tokens';
+        TOKENS.global = APP_GUARD;
+      `,
+    });
 
     const direct = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(directRoot));
     const mutable = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(mutableRoot));
+    const destructuredShorthand = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(destructuredShorthandRoot),
+    );
     const computed = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(computedRoot));
+    const iife = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(iifeRoot));
+    const parameterizedIife = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(parameterizedIifeRoot),
+    );
+    const defaultIifes = await Promise.all(defaultIifeRoots.map((root) => (
+      runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root))
+    )));
+    const bypassedDefault = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(bypassedDefaultRoot),
+    );
+    const logical = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(logicalRoot),
+    );
+    const bypassedLogical = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(bypassedLogicalRoot),
+    );
+    const typedBinding = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(typedBindingRoot),
+    );
+    const mutableTyped = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(mutableTypedRoot),
+    );
+    const nullish = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(nullishRoot),
+    );
+    const bypassedNullish = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(bypassedNullishRoot),
+    );
+    const assertedNullish = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(assertedNullishRoot),
+    );
+    const functionToken = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(functionTokenRoot),
+    );
+    const destructuredIife = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(destructuredIifeRoot),
+    );
+    const destructuredGuard = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(destructuredGuardRoot),
+    );
+    const numericKey = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(numericKeyRoot),
+    );
+    const discardedToken = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(discardedTokenRoot),
+    );
+    const unreachableToken = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(unreachableTokenRoot),
+    );
+    const shadowedUndefined = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(shadowedUndefinedRoot),
+    );
+    const unreachableReturn = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(unreachableReturnRoot),
+    );
+    const deepBlock = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(deepBlockRoot),
+    );
+    const expansionContext = context(candidateExpansionRoot);
+    const candidateExpansion = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), {
+        ...expansionContext,
+        limits: { ...expansionContext.limits, timeoutMs: 500 },
+      },
+    );
+    const unrelatedSpread = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(unrelatedSpreadRoot),
+    );
+    const suppliedDefaultSpread = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(suppliedDefaultSpreadRoot),
+    );
+    const deferredIife = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(deferredIifeRoot),
+    );
+    const assignment = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(assignmentRoot),
+    );
+    const logicalAssignments = await Promise.all(logicalAssignmentRoots.map((root) => (
+      runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root))
+    )));
+    const memberAliases = await Promise.all(memberAliasRoots.map(async ({ root, expected }) => ({
+      expected,
+      result: await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root)),
+    })));
+    const delayedDelete = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(delayedDeleteRoot),
+    );
+    const crossFileMutation = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(crossFileMutationRoot),
+    );
     expect(direct.status).toBe('success');
     expect(mutable.status).toBe('success');
+    expect(destructuredShorthand.status).toBe('success');
     expect(computed.status).toBe('success');
-    if (direct.status !== 'success' || mutable.status !== 'success' || computed.status !== 'success') return;
+    expect(iife.status).toBe('success');
+    expect(parameterizedIife.status).toBe('success');
+    expect(defaultIifes.every((result) => result.status === 'success')).toBe(true);
+    expect(bypassedDefault.status).toBe('success');
+    expect(logical.status).toBe('success');
+    expect(bypassedLogical.status).toBe('success');
+    expect(typedBinding.status).toBe('success');
+    expect(mutableTyped.status).toBe('success');
+    expect(nullish.status).toBe('success');
+    expect(bypassedNullish.status).toBe('success');
+    expect(assertedNullish.status).toBe('success');
+    expect(functionToken.status).toBe('success');
+    expect(destructuredIife.status).toBe('success');
+    expect(destructuredGuard.status).toBe('success');
+    expect(numericKey.status).toBe('success');
+    expect(discardedToken.status).toBe('success');
+    expect(unreachableToken.status).toBe('success');
+    expect(shadowedUndefined.status).toBe('success');
+    expect(unreachableReturn.status).toBe('success');
+    expect(deepBlock.status).toBe('success');
+    expect(candidateExpansion.status).toBe('success');
+    expect(unrelatedSpread.status).toBe('success');
+    expect(suppliedDefaultSpread.status).toBe('success');
+    expect(deferredIife.status).toBe('success');
+    expect(assignment.status).toBe('success');
+    expect(logicalAssignments.every((result) => result.status === 'success')).toBe(true);
+    for (const [index, { result }] of memberAliases.entries()) {
+      expect(result.status, `member alias fixture ${index}: ${JSON.stringify(result)}`).toBe('success');
+    }
+    expect(delayedDelete.status).toBe('success');
+    expect(crossFileMutation.status).toBe('success');
+    if (direct.status !== 'success' || mutable.status !== 'success'
+      || destructuredShorthand.status !== 'success' || computed.status !== 'success'
+      || iife.status !== 'success' || parameterizedIife.status !== 'success'
+      || defaultIifes.some((result) => result.status !== 'success')
+      || bypassedDefault.status !== 'success' || logical.status !== 'success'
+      || bypassedLogical.status !== 'success' || nullish.status !== 'success'
+      || typedBinding.status !== 'success'
+      || mutableTyped.status !== 'success'
+      || bypassedNullish.status !== 'success'
+      || assertedNullish.status !== 'success' || functionToken.status !== 'success'
+      || destructuredIife.status !== 'success' || destructuredGuard.status !== 'success'
+      || numericKey.status !== 'success' || discardedToken.status !== 'success'
+      || unreachableToken.status !== 'success' || shadowedUndefined.status !== 'success') return;
+    if (unreachableReturn.status !== 'success') return;
+    if (deepBlock.status !== 'success') return;
+    if (candidateExpansion.status !== 'success') return;
+    if (unrelatedSpread.status !== 'success') return;
+    if (suppliedDefaultSpread.status !== 'success') return;
+    if (deferredIife.status !== 'success') return;
+    if (assignment.status !== 'success') return;
+    if (logicalAssignments.some((result) => result.status !== 'success')) return;
+    if (memberAliases.some(({ result }) => result.status !== 'success')) return;
+    if (delayedDelete.status !== 'success') return;
+    if (crossFileMutation.status !== 'success') return;
     expect(direct.result.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
@@ -652,10 +1751,69 @@ describe('NestJS auth metadata analyzer', () => {
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
     expect(mutable.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(destructuredShorthand.result.contract.operations[0].auth.mode).toBe('unknown');
     expect(computed.result.contract.operations[0].auth.mode).toBe('unknown');
     expect(computed.result.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
+    expect(iife.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(parameterizedIife.result.contract.operations[0].auth.mode).toBe('unknown');
+    for (const result of defaultIifes) {
+      if (result.status === 'success') expect(result.result.contract.operations[0].auth.mode).toBe('unknown');
+    }
+    expect(bypassedDefault.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(bypassedDefault.result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+    expect(logical.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(bypassedLogical.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(bypassedLogical.result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+    expect(typedBinding.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(mutableTyped.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(nullish.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(assertedNullish.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(bypassedNullish.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(bypassedNullish.result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+    expect(functionToken.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(destructuredIife.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(destructuredGuard.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(numericKey.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(numericKey.result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+    expect(discardedToken.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(discardedToken.result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+    expect(unreachableToken.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(unreachableToken.result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+    expect(shadowedUndefined.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(unreachableReturn.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(unreachableReturn.result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+    expect(deepBlock.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(candidateExpansion.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(unrelatedSpread.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(suppliedDefaultSpread.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(deferredIife.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(assignment.result.contract.operations[0].auth.mode).toBe('unknown');
+    for (const result of logicalAssignments) {
+      if (result.status === 'success') expect(result.result.contract.operations[0].auth.mode).toBe('unknown');
+    }
+    for (const [index, { expected, result }] of memberAliases.entries()) {
+      if (result.status === 'success') {
+        expect(result.result.contract.operations[0].auth.mode, `member alias fixture ${index}`).toBe(expected);
+      }
+    }
+    expect(delayedDelete.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(crossFileMutation.result.contract.operations[0].auth.mode).toBe('unknown');
   });
 
   test('fails closed on bootstrap global guards and external controller inheritance', async () => {
@@ -665,7 +1823,7 @@ describe('NestJS auth metadata analyzer', () => {
       import { JwtAuthGuard } from './auth';
       declare class AppModule {}
       const app = NestFactory.create(AppModule);
-      app.useGlobalGuards(new JwtAuthGuard());
+      app['useGlobalGuards'](new JwtAuthGuard());
       @Controller('bootstrap') class BootstrapController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }
@@ -689,6 +1847,25 @@ describe('NestJS auth metadata analyzer', () => {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }
     `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const optionalRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import type { INestApplication } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const app: INestApplication | undefined;
+      app?.useGlobalGuards(new JwtAuthGuard());
+      @Controller('optional') class OptionalController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
     const externalRoot = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
       import { ExternalController } from 'external-base';
@@ -705,11 +1882,14 @@ describe('NestJS auth metadata analyzer', () => {
 
     const global = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(globalRoot));
     const unrelated = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(unrelatedRoot));
+    const optional = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(optionalRoot));
     const external = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(externalRoot));
     expect(global.status).toBe('success');
     expect(unrelated.status).toBe('success');
+    expect(optional.status).toBe('success');
     expect(external.status).toBe('success');
-    if (global.status !== 'success' || unrelated.status !== 'success' || external.status !== 'success') return;
+    if (global.status !== 'success' || unrelated.status !== 'success'
+      || optional.status !== 'success' || external.status !== 'success') return;
     expect(global.result.contract.operations[0].auth.mode).toBe('unknown');
     expect(global.result.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
@@ -718,6 +1898,7 @@ describe('NestJS auth metadata analyzer', () => {
     expect(unrelated.result.diagnostics).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
+    expect(optional.result.contract.operations[0].auth.mode).toBe('unknown');
     expect(external.result.contract.operations[0]).toMatchObject({
       exposure: 'unknown',
       auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },

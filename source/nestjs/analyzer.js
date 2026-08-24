@@ -178,6 +178,11 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps,
             }
             return true;
         }
+        if (resolved.nestJsCommon
+            && (resolved.name === 'UseGuards' || resolved.name === 'applyDecorators')) {
+            result.guardDynamic = true;
+            return true;
+        }
         const wrapperCall = (0, decorator_symbols_1.resolveStaticDecoratorWrapperCall)(resolved.call, checker, projectSources, check);
         if (config.public_decorators.includes(resolved.name)) {
             result.publicPresent = true;
@@ -262,11 +267,11 @@ function effectiveClassAuthMetadata(node, checker, projectSources, config, check
             throw new source_analysis_1.SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
         seen.add(current);
         const own = ownAuthMetadata(current, checker, projectSources, config, check, maxSteps, maxDepth);
+        result.guardDynamic ||= own.guardDynamic;
+        result.dynamic ||= own.guardDynamic;
         if (own.guardsPresent) {
             result.guardsPresent = true;
             result.guards = [...own.guards, ...result.guards];
-            result.guardDynamic ||= own.guardDynamic;
-            result.dynamic ||= own.guardDynamic;
             result.guardEvidence = [...own.guardEvidence, ...result.guardEvidence];
         }
         if (!result.publicPresent && own.publicPresent) {
@@ -676,25 +681,30 @@ async function analyze(context, authConfig) {
         while (nodes.length > 0) {
             const node = nodes.pop();
             await checkpoint();
-            if (typescript_1.default.isCallExpression(node) && (0, decorator_symbols_1.isNestJsUseGlobalGuardsCall)(node, checker)) {
+            if (typescript_1.default.isCallExpression(node) && (0, decorator_symbols_1.isNestJsUseGlobalGuardsCall)(node, checker, check)) {
                 if (!globalGuardFound)
                     addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.expression);
                 globalGuardFound = true;
             }
             const propertyNames = typescript_1.default.isPropertyAssignment(node) && typescript_1.default.isComputedPropertyName(node.name)
-                ? (0, static_string_resolver_1.resolveStaticStrings)(node.name.expression, checker, projectSources, {
-                    check, maxSteps: context.limits.maxAstNodes,
-                })
+                ? (() => {
+                    if ((0, decorator_symbols_1.isDefinitelyNonProvidePropertyKey)(node.name.expression))
+                        return [''];
+                    const key = (0, decorator_symbols_1.resolveStaticPropertyKey)(node.name.expression, checker, check);
+                    return key === undefined
+                        ? (0, static_string_resolver_1.resolveStaticStrings)(node.name.expression, checker, projectSources, {
+                            check, maxSteps: context.limits.maxAstNodes,
+                        })
+                        : [key];
+                })()
                 : undefined;
-            const globalGuardProvider = typescript_1.default.isPropertyAssignment(node)
-                && (0, decorator_symbols_1.isStaticSymbolFrom)(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD')
-                ? (typescript_1.default.isIdentifier(node.name) || typescript_1.default.isStringLiteral(node.name))
-                    ? node.name.text === 'provide'
-                    : typescript_1.default.isComputedPropertyName(node.name) && (propertyNames === undefined
-                        || (propertyNames.length === 1 && propertyNames[0] === 'provide'))
-                : typescript_1.default.isShorthandPropertyAssignment(node) && node.name.text === 'provide'
-                    ? (0, decorator_symbols_1.isStaticShorthandSymbolFrom)(node, checker, check, '@nestjs/core', 'APP_GUARD')
-                    : false;
+            const providerKeyPossible = typescript_1.default.isPropertyAssignment(node) && ((typescript_1.default.isIdentifier(node.name) || typescript_1.default.isStringLiteral(node.name))
+                ? node.name.text === 'provide'
+                : typescript_1.default.isComputedPropertyName(node.name) && (propertyNames === undefined
+                    || (propertyNames.length === 1 && propertyNames[0] === 'provide')));
+            const globalGuardProvider = (typescript_1.default.isPropertyAssignment(node) && providerKeyPossible
+                && (0, decorator_symbols_1.containsStaticSymbolFrom)(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD', projectSources)) || (typescript_1.default.isShorthandPropertyAssignment(node) && node.name.text === 'provide'
+                && (0, decorator_symbols_1.isStaticShorthandSymbolFrom)(node, checker, check, '@nestjs/core', 'APP_GUARD', projectSources));
             if (globalGuardProvider) {
                 if (!globalGuardFound)
                     addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node);
