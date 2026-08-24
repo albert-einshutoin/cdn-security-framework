@@ -505,6 +505,188 @@ describe('NestJS auth metadata analyzer', () => {
     ]);
   });
 
+  test('fails closed on a mutable precomputed guard decorator', async () => {
+    const deepAliases = ["const alias99 = UseGuards(ApiKeyGuard);"];
+    for (let index = 98; index >= 0; index -= 1) deepAliases.push(`const alias${index} = alias${index + 1};`);
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard, JwtAuthGuard } from './auth';
+      let Authenticated: MethodDecorator;
+      Authenticated = UseGuards(ApiKeyGuard);
+      let Audit: MethodDecorator = () => {};
+      const table: Record<PropertyKey, unknown> = {};
+      table[Audit as unknown as PropertyKey] = UseGuards(ApiKeyGuard);
+      declare const enabled: boolean;
+      let ConditionalAuth: MethodDecorator = Audit;
+      ConditionalAuth = enabled ? UseGuards(ApiKeyGuard) : Audit;
+      let DestructuredAuth: MethodDecorator = Audit;
+      [DestructuredAuth] = [UseGuards(ApiKeyGuard)];
+      let DefaultAuth: MethodDecorator = Audit;
+      [DefaultAuth = Audit] = [UseGuards(ApiKeyGuard)];
+      let ForOfAuth: MethodDecorator = Audit;
+      for (ForOfAuth of [UseGuards(ApiKeyGuard)]) {}
+      function identity<T>(value: T): T { return value; }
+      let SpreadAuth: MethodDecorator = Audit;
+      SpreadAuth = identity(...([UseGuards(ApiKeyGuard)] as const));
+      function makeAuth(): MethodDecorator { return UseGuards(ApiKeyGuard); }
+      let FactoryAuth: MethodDecorator;
+      FactoryAuth = makeAuth();
+      let mutableFactory = (): MethodDecorator => Audit;
+      mutableFactory = (): MethodDecorator => UseGuards(ApiKeyGuard);
+      let MutableFactoryAuth: MethodDecorator;
+      MutableFactoryAuth = mutableFactory();
+      function reassignedFactory(): MethodDecorator { return Audit; }
+      reassignedFactory = (): MethodDecorator => UseGuards(ApiKeyGuard);
+      let ReassignedFactoryAuth: MethodDecorator;
+      ReassignedFactoryAuth = reassignedFactory();
+      let MutableAlias: MethodDecorator = Audit;
+      MutableAlias = UseGuards(ApiKeyGuard);
+      let AliasedAuth: MethodDecorator;
+      AliasedAuth = MutableAlias;
+      let destructuredFactory = (): MethodDecorator => Audit;
+      [destructuredFactory] = [(): MethodDecorator => UseGuards(ApiKeyGuard)];
+      let DestructuredFactoryAuth: MethodDecorator;
+      DestructuredFactoryAuth = destructuredFactory();
+      let SlotAuth: MethodDecorator = Audit;
+      let ignoredSlot: MethodDecorator = Audit;
+      [SlotAuth, ignoredSlot] = [Audit, UseGuards(ApiKeyGuard)];
+      let cleanFactory = (): MethodDecorator => Audit;
+      let guardedFactory = (): MethodDecorator => Audit;
+      [cleanFactory, guardedFactory] = [
+        (): MethodDecorator => Audit,
+        (): MethodDecorator => UseGuards(ApiKeyGuard),
+      ];
+      let CleanFactoryAuth: MethodDecorator;
+      CleanFactoryAuth = cleanFactory();
+      let MissingArrayAuth: MethodDecorator = Audit;
+      [MissingArrayAuth = Audit] = [];
+      let MissingObjectAuth: MethodDecorator = Audit;
+      ({ auth: MissingObjectAuth = Audit } = {});
+      const Noop: MethodDecorator = () => {};
+      let PresentArrayAuth: MethodDecorator = Audit;
+      [PresentArrayAuth = UseGuards(ApiKeyGuard)] = [Noop];
+      let PresentObjectAuth: MethodDecorator = Audit;
+      ({ auth: PresentObjectAuth = UseGuards(ApiKeyGuard) } = { auth: Noop });
+      const holder = { Auth: Audit };
+      holder.Auth = UseGuards(ApiKeyGuard);
+      const PropertyAliasAuth = holder.Auth;
+      interface Wrapper { Auth: MethodDecorator }
+      const localHolder: Wrapper = { Auth: Audit };
+      const otherHolder: Wrapper = { Auth: Audit };
+      otherHolder.Auth = UseGuards(ApiKeyGuard);
+      const aliasedHolder: Wrapper = { Auth: Audit };
+      let mutableHolderAlias = aliasedHolder;
+      mutableHolderAlias.Auth = UseGuards(ApiKeyGuard);
+      const assignedHolder = { Auth: Audit };
+      Object.assign(assignedHolder, { Auth: UseGuards(ApiKeyGuard) });
+      const nestedAssignedHolder = { Auth: Audit };
+      declare function mutate(value: unknown): void;
+      mutate({ target: [nestedAssignedHolder] });
+      const shorthandAssignedHolder = { Auth: Audit };
+      mutate({ shorthandAssignedHolder });
+      const conditionalHolder = { Auth: enabled ? UseGuards(ApiKeyGuard) : Audit };
+      ${deepAliases.join('\n')}
+      let DeepAuth: MethodDecorator = alias0;
+      const decoratorFactories = {
+        make(): MethodDecorator { return UseGuards(ApiKeyGuard); },
+      };
+      let MethodFactoryAuth: MethodDecorator;
+      MethodFactoryAuth = decoratorFactories.make();
+      const makeMethodAuth = decoratorFactories.make;
+      let AliasedMethodFactoryAuth: MethodDecorator;
+      AliasedMethodFactoryAuth = makeMethodAuth();
+      const makeArrowAuth = (): MethodDecorator => UseGuards(ApiKeyGuard);
+      let ArrowFactoryAuth: MethodDecorator;
+      ArrowFactoryAuth = makeArrowAuth();
+      @Controller('mutable-precomputed') @UseGuards(JwtAuthGuard)
+      class MutablePrecomputedController {
+        @Get() @Authenticated read() {}
+        @Get('audit') @Audit audit() {}
+        @Get('conditional') @ConditionalAuth conditional() {}
+        @Get('destructured') @DestructuredAuth destructured() {}
+        @Get('default') @DefaultAuth defaultTarget() {}
+        @Get('for-of') @ForOfAuth forOf() {}
+        @Get('spread') @SpreadAuth spread() {}
+        @Get('factory') @FactoryAuth factory() {}
+        @Get('mutable-factory') @MutableFactoryAuth mutableFactory() {}
+        @Get('reassigned-factory') @ReassignedFactoryAuth reassignedFactory() {}
+        @Get('mutable-alias') @AliasedAuth mutableAlias() {}
+        @Get('destructured-factory') @DestructuredFactoryAuth destructuredFactory() {}
+        @Get('slot') @SlotAuth slot() {}
+        @Get('clean-factory') @CleanFactoryAuth cleanFactory() {}
+        @Get('missing-array') @MissingArrayAuth missingArray() {}
+        @Get('missing-object') @MissingObjectAuth missingObject() {}
+        @Get('present-array') @PresentArrayAuth presentArray() {}
+        @Get('present-object') @PresentObjectAuth presentObject() {}
+        @Get('property-assignment') @holder.Auth propertyAssignment() {}
+        @Get('property-alias') @PropertyAliasAuth propertyAlias() {}
+        @Get('other-property-assignment') @localHolder.Auth otherPropertyAssignment() {}
+        @Get('mutable-property-alias') @aliasedHolder.Auth mutablePropertyAlias() {}
+        @Get('assigned-property') @assignedHolder.Auth assignedProperty() {}
+        @Get('nested-assigned-property') @nestedAssignedHolder.Auth nestedAssignedProperty() {}
+        @Get('shorthand-assigned-property') @shorthandAssignedHolder.Auth shorthandAssignedProperty() {}
+        @Get('conditional-property') @conditionalHolder.Auth conditionalProperty() {}
+        @Get('deep') @DeepAuth deep() {}
+        @Get('method-factory') @MethodFactoryAuth methodFactory() {}
+        @Get('aliased-method-factory') @AliasedMethodFactoryAuth aliasedMethodFactory() {}
+        @Get('arrow-factory') @ArrowFactoryAuth arrowFactory() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    const operations = Object.fromEntries(execution.result.contract.operations.map((operation) => (
+      [operation.routeKey, operation]
+    )));
+    expect(operations['GET /mutable-precomputed']).toMatchObject({
+      exposure: 'unknown',
+      auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+    });
+    expect(operations['GET /mutable-precomputed/audit']).toMatchObject({
+      exposure: 'authenticated',
+      auth: { mode: 'alternatives', analysis: { enforcementConfidence: 'high' } },
+    });
+    for (const routeKey of [
+      'GET /mutable-precomputed/slot', 'GET /mutable-precomputed/clean-factory',
+      'GET /mutable-precomputed/missing-array', 'GET /mutable-precomputed/missing-object',
+      'GET /mutable-precomputed/present-array', 'GET /mutable-precomputed/present-object',
+    ]) {
+      expect(operations[routeKey], routeKey).toMatchObject({
+        exposure: 'authenticated',
+        auth: { mode: 'alternatives', analysis: { enforcementConfidence: 'high' } },
+      });
+    }
+    for (const routeKey of [
+      'GET /mutable-precomputed/conditional', 'GET /mutable-precomputed/destructured',
+      'GET /mutable-precomputed/default',
+      'GET /mutable-precomputed/for-of', 'GET /mutable-precomputed/deep',
+      'GET /mutable-precomputed/spread',
+      'GET /mutable-precomputed/factory',
+      'GET /mutable-precomputed/mutable-factory',
+      'GET /mutable-precomputed/reassigned-factory', 'GET /mutable-precomputed/mutable-alias',
+      'GET /mutable-precomputed/destructured-factory',
+      'GET /mutable-precomputed/property-assignment',
+      'GET /mutable-precomputed/property-alias',
+      'GET /mutable-precomputed/other-property-assignment',
+      'GET /mutable-precomputed/mutable-property-alias',
+      'GET /mutable-precomputed/assigned-property',
+      'GET /mutable-precomputed/nested-assigned-property',
+      'GET /mutable-precomputed/shorthand-assigned-property',
+      'GET /mutable-precomputed/conditional-property',
+      'GET /mutable-precomputed/method-factory',
+      'GET /mutable-precomputed/aliased-method-factory',
+      'GET /mutable-precomputed/arrow-factory',
+    ]) {
+      expect(operations[routeKey]).toMatchObject({
+        exposure: 'unknown',
+        auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+      });
+    }
+  });
+
   test('accumulates inherited class guards and treats empty method UseGuards as a no-op', async () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
@@ -772,6 +954,50 @@ describe('NestJS auth metadata analyzer', () => {
       exposure: 'authenticated',
       auth: { mode: 'alternatives', analysis: { roles: ['admin'] } },
     });
+  });
+
+  test('fails closed on branching and deeply nested namespace guard wrappers', async () => {
+    const deepBody = `${'if (flag) {'.repeat(40)}return UseGuards(ApiKeyGuard);${'}'.repeat(40)} return () => {};`;
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import * as auth from './auth';
+      import { JwtAuthGuard } from './guards';
+      declare const flag: boolean;
+      @Controller('namespace-flow') @UseGuards(JwtAuthGuard)
+      class NamespaceFlowController {
+        @Get('loop') @auth.Loop(flag) loop() {}
+        @Get('deep') @auth.Deep(flag) deep() {}
+        @Get('stored') @auth.Stored stored() {}
+      }
+    `, {
+      'src/guards.ts': 'export class JwtAuthGuard {}\n',
+      'src/auth.ts': `
+        import { UseGuards } from '@nestjs/common';
+        import { ApiKeyGuard } from './api-key';
+        export function Loop(flag: boolean): MethodDecorator {
+          do {
+            if (flag) break;
+            return () => {};
+          } while (false);
+          return UseGuards(ApiKeyGuard);
+        }
+        export function Deep(flag: boolean): MethodDecorator { ${deepBody} }
+        export let Stored: MethodDecorator = () => {};
+        function install(value: MethodDecorator) { Stored = value; }
+        install(UseGuards(ApiKeyGuard));
+      `,
+      'src/api-key.ts': 'export class ApiKeyGuard {}\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    for (const operation of execution.result.contract.operations) {
+      expect(operation).toMatchObject({
+        exposure: 'unknown',
+        auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+      });
+    }
   });
 
   test('fails closed on indirect Nest auth decorator imports', async () => {
@@ -2680,10 +2906,532 @@ describe('NestJS auth metadata analyzer', () => {
       }),
       'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
     });
+    const unresolvedProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      @Module({ providers: externalProviders }) class AppModule {}
+      @Controller('external-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedNamespaceProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import * as external from 'external-providers';
+      @Module({ providers: external.providers }) class AppModule {}
+      @Controller('external-namespace-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const providers: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedFactoryProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { makeProviders } from 'external-providers';
+      @Module({ providers: makeProviders() }) class AppModule {}
+      @Controller('external-factory-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare function makeProviders(): unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedLocalFactoryProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      function makeProviders() { return externalProviders; }
+      @Module({ providers: makeProviders() }) class AppModule {}
+      @Controller('local-factory-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedMethodFactoryProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      const factories = { make() { return externalProviders; } };
+      @Module({ providers: factories.make() }) class AppModule {}
+      @Controller('method-factory-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedIdentityFactoryProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      function identity<T>(value: T): T { return value; }
+      @Module({ providers: identity(externalProviders) }) class AppModule {}
+      @Controller('identity-factory-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedReassignedMethodFactoryProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      const factories = { make() { return []; } };
+      factories.make = () => externalProviders;
+      @Module({ providers: factories.make() }) class AppModule {}
+      @Controller('reassigned-method-factory-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedArrowFactoryProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      const makeProviders = () => externalProviders;
+      @Module({ providers: makeProviders() }) class AppModule {}
+      @Controller('arrow-factory-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedDeclaredFactoryProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare function makeProviders(): unknown[];
+      @Module({ providers: makeProviders() }) class AppModule {}
+      @Controller('declared-factory-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const unresolvedMutatedProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      const providers: unknown[] = [];
+      const config = { providers };
+      config.providers.push(externalProviders);
+      @Module({ providers }) class AppModule {}
+      @Controller('mutated-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedCallbackMutatedProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      const providers: unknown[] = [{}];
+      providers.forEach((_value, _index, array) => array.push(...externalProviders));
+      @Module({ providers }) class AppModule {}
+      @Controller('callback-mutated-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedExternalProviderObjectRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProvider } from 'external-providers';
+      @Module({ providers: [{ ...externalProvider }] }) class AppModule {}
+      @Controller('external-provider-object') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProvider: object;\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const reassignedExternalProviderTokenRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalToken } from 'external-providers';
+      const holder = { token: 'local' };
+      holder.token = externalToken;
+      @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('reassigned-external-provider-token') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalToken: string;\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const escapedProviderTokenRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare function mutate(value: unknown): void;
+      const holder = { token: 'local' };
+      mutate({ holder });
+      @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('escaped-provider-token') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const customDecoratorMutationRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalToken } from 'external-providers';
+      const holder = { token: 'local' };
+      function Mutate(value: typeof holder) { value.token = externalToken; return () => {}; }
+      @Mutate(holder) @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] })
+      class AppModule {}
+      @Controller('custom-decorator-mutation') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalToken: string;\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const assignedAliasEscapeRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare function mutate(value: unknown): void;
+      const holder = { token: 'local' };
+      let alias: unknown;
+      alias = holder;
+      mutate(alias);
+      @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('assigned-alias-escape') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const receiverMethodMutationRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalToken } from 'external-providers';
+      const holder = { token: 'local', set(value: string) { this.token = value; } };
+      holder.set(externalToken);
+      @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('receiver-method-mutation') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalToken: string;\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const nestedArrowReceiverMutationRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare function run(callback: () => void): void;
+      declare function mutate(value: unknown): void;
+      const holder = { token: 'local', update() { run(() => mutate(this)); } };
+      holder.update();
+      @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('nested-arrow-receiver') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const logicalEscapeRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare function mutate(value: unknown): void;
+      const holder = { token: 'local' };
+      mutate(holder || {});
+      @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('logical-escape') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const mutableHolderEscapeRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare function mutate(value: unknown): void;
+      let holder = { token: 'local' };
+      mutate(holder);
+      @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('mutable-holder-escape') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const selectedHolderEscapeRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare function mutate(value: unknown): void;
+      const holder = { token: 'local' };
+      mutate(({ value: holder }).value);
+      @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('selected-holder-escape') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const spreadSelectedHolderEscapeRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare function mutate(value: unknown): void;
+      const holder = { token: 'local' };
+      mutate(([...[], holder] as const)[0]);
+      @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('spread-selected-holder') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const assignedPropertyEscapeRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare function mutate(value: unknown): void;
+      const holder = { token: 'local' };
+      const config: { value: unknown } = { value: {} };
+      config.value = holder;
+      mutate(config.value);
+      @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('assigned-property-escape') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const nestedReceiverEscapeRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare function mutate(value: unknown): void;
+      const outer = { inner: { token: 'local' } };
+      mutate(outer);
+      @Module({ providers: [{ provide: outer.inner.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('nested-receiver-escape') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const returnedHolderEscapeRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare function mutate(value: unknown): void;
+      const holder = { token: 'local' };
+      function expose() { return holder; }
+      mutate(expose());
+      @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('returned-holder-escape') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const unresolvedAliasedProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders, makeProviders } from 'external-providers';
+      const providersAlias = externalProviders;
+      const factoryAlias = makeProviders;
+      @Module({ providers: providersAlias }) class ListModule {}
+      @Module({ providers: factoryAlias() }) class FactoryModule {}
+      @Controller('external-aliased-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': `
+        export declare const externalProviders: unknown[];
+        export declare function makeProviders(): unknown[];
+      `,
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedDestructuredProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalConfig } from 'external-providers';
+      const { providers } = externalConfig;
+      @Module({ providers }) class AppModule {}
+      @Controller('external-destructured-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalConfig: { providers: unknown[] };\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedObjectProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      const config = { providers: externalProviders };
+      @Module({ providers: config.providers }) class AppModule {}
+      @Controller('external-object-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedSpreadObjectProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      const base = { providers: externalProviders };
+      const config = { providers: [], ...base };
+      @Module({ providers: config.providers }) class AppModule {}
+      @Controller('external-spread-object-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unresolvedWrappedProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      declare const enabled: boolean;
+      let providers = externalProviders;
+      let patternProviders: unknown[] = [];
+      [patternProviders] = [externalProviders];
+      let objectProviders: unknown[] = [];
+      ({ providers: objectProviders } = { providers: externalProviders });
+      let nestedProviders: unknown[] = [];
+      ({ config: { providers: nestedProviders } } = {
+        config: { providers: externalProviders },
+      });
+      const config = { providers };
+      @Module({ providers: [...externalProviders] }) class SpreadModule {}
+      @Module({ providers: enabled ? [] : config.providers }) class ConditionalModule {}
+      @Module({ providers: patternProviders }) class PatternModule {}
+      @Module({ providers: objectProviders }) class ObjectPatternModule {}
+      @Module({ providers: nestedProviders }) class NestedPatternModule {}
+      @Controller('external-wrapped-providers') class ExternalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const localShorthandProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      const providers: unknown[] = [];
+      const config = { providers };
+      @Module({ providers: config.providers }) class AppModule {}
+      @Controller('local-shorthand-providers') class LocalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const parameterAssignedProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      let providers: unknown[] = [];
+      function install(value: unknown[]) { providers = value; }
+      install(externalProviders);
+      @Module({ providers }) class AppModule {}
+      @Controller('parameter-providers') class ParameterProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unrelatedCallResultRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      const holder = { token: 'local' };
+      console.log(Math.random());
+      @Module({ providers: [{ provide: holder.token, useClass: JwtAuthGuard }] }) class AppModule {}
+      @Controller('unrelated-call-result') class LocalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
 
     for (const [name, root] of [
       ['iife', iifeRoot], ['external', externalRoot], ['factory', factoryRoot],
       ['mutable', mutableRoot], ['logical', logicalRoot], ['branch-factory', branchFactoryRoot],
+      ['unresolved-providers', unresolvedProvidersRoot],
+      ['parameter-assigned-providers', parameterAssignedProvidersRoot],
+      ['unresolved-namespace-providers', unresolvedNamespaceProvidersRoot],
+      ['unresolved-factory-providers', unresolvedFactoryProvidersRoot],
+      ['unresolved-local-factory-providers', unresolvedLocalFactoryProvidersRoot],
+      ['unresolved-method-factory-providers', unresolvedMethodFactoryProvidersRoot],
+      ['unresolved-identity-factory-providers', unresolvedIdentityFactoryProvidersRoot],
+      ['unresolved-reassigned-method-factory-providers', unresolvedReassignedMethodFactoryProvidersRoot],
+      ['unresolved-arrow-factory-providers', unresolvedArrowFactoryProvidersRoot],
+      ['unresolved-declared-factory-providers', unresolvedDeclaredFactoryProvidersRoot],
+      ['unresolved-mutated-providers', unresolvedMutatedProvidersRoot],
+      ['unresolved-callback-mutated-providers', unresolvedCallbackMutatedProvidersRoot],
+      ['unresolved-external-provider-object', unresolvedExternalProviderObjectRoot],
+      ['reassigned-external-provider-token', reassignedExternalProviderTokenRoot],
+      ['escaped-provider-token', escapedProviderTokenRoot],
+      ['custom-decorator-mutation', customDecoratorMutationRoot],
+      ['assigned-alias-escape', assignedAliasEscapeRoot],
+      ['receiver-method-mutation', receiverMethodMutationRoot],
+      ['nested-arrow-receiver-mutation', nestedArrowReceiverMutationRoot],
+      ['logical-escape', logicalEscapeRoot],
+      ['mutable-holder-escape', mutableHolderEscapeRoot],
+      ['selected-holder-escape', selectedHolderEscapeRoot],
+      ['spread-selected-holder-escape', spreadSelectedHolderEscapeRoot],
+      ['assigned-property-escape', assignedPropertyEscapeRoot],
+      ['nested-receiver-escape', nestedReceiverEscapeRoot],
+      ['returned-holder-escape', returnedHolderEscapeRoot],
+      ['unresolved-aliased-providers', unresolvedAliasedProvidersRoot],
+      ['unresolved-destructured-providers', unresolvedDestructuredProvidersRoot],
+      ['unresolved-object-providers', unresolvedObjectProvidersRoot],
+      ['unresolved-spread-object-providers', unresolvedSpreadObjectProvidersRoot],
+      ['unresolved-wrapped-providers', unresolvedWrappedProvidersRoot],
     ] as const) {
       const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
       expect(execution.status, `${name}: ${JSON.stringify(execution)}`).toBe('success');
@@ -2692,6 +3440,176 @@ describe('NestJS auth metadata analyzer', () => {
       expect(execution.result.diagnostics).toEqual(expect.arrayContaining([
         expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
       ]));
+    }
+
+    const localShorthandExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(localShorthandProvidersRoot),
+    );
+    expect(localShorthandExecution.status).toBe('success');
+    if (localShorthandExecution.status === 'success') {
+      expect(localShorthandExecution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
+    const unrelatedCallResultExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(unrelatedCallResultRoot),
+    );
+    expect(unrelatedCallResultExecution.status).toBe('success');
+    if (unrelatedCallResultExecution.status === 'success') {
+      expect(unrelatedCallResultExecution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
+
+    const unreachableExternalProvidersRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      @Module({ providers: true ? [] : externalProviders }) class AppModule {}
+      @Controller('unreachable-provider') class LocalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const unreachableProviderExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(unreachableExternalProvidersRoot),
+    );
+    expect(unreachableProviderExecution.status).toBe('success');
+    if (unreachableProviderExecution.status === 'success') {
+      expect(unreachableProviderExecution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
+
+    const deferredProviderTokenRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      import { externalProviders } from 'external-providers';
+      const DeferredProvider = function () { return externalProviders; };
+      @Module({ providers: [DeferredProvider] }) class AppModule {}
+      @Controller('deferred-provider') class LocalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare const externalProviders: unknown[];\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const deferredProviderExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(deferredProviderTokenRoot),
+    );
+    expect(deferredProviderExecution.status).toBe('success');
+    if (deferredProviderExecution.status === 'success') {
+      expect(deferredProviderExecution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
+
+    const externalClassProviderRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { ConfigService } from 'external-providers';
+      import { JwtAuthGuard } from './auth';
+      @Module({ providers: [ConfigService] }) class AppModule {}
+      @Controller('external-class-provider') class LocalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare class ConfigService {}\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const externalClassExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(externalClassProviderRoot),
+    );
+    expect(externalClassExecution.status).toBe('success');
+    if (externalClassExecution.status === 'success') {
+      expect(externalClassExecution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
+
+    const externalNamespaceClassProviderRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import * as external from 'external-providers';
+      import { JwtAuthGuard } from './auth';
+      @Module({ providers: [external.ConfigService] }) class AppModule {}
+      @Controller('external-namespace-class-provider') class LocalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-providers/index.d.ts': 'export declare class ConfigService {}\n',
+      'node_modules/external-providers/package.json': JSON.stringify({
+        name: 'external-providers', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const externalNamespaceClassExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(externalNamespaceClassProviderRoot),
+    );
+    expect(externalNamespaceClassExecution.status).toBe('success');
+    if (externalNamespaceClassExecution.status === 'success') {
+      expect(externalNamespaceClassExecution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
+
+    const overloadedLocalFactoryRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      function makeProviders(): [];
+      function makeProviders() { return []; }
+      @Module({ providers: makeProviders() }) class AppModule {}
+      @Controller('overloaded-local-factory') class LocalProvidersController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const overloadedLocalFactoryExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(overloadedLocalFactoryRoot),
+    );
+    expect(overloadedLocalFactoryExecution.status).toBe('success');
+    if (overloadedLocalFactoryExecution.status === 'success') {
+      expect(overloadedLocalFactoryExecution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
+
+    const localImportFactoryRoot = workspace(`
+      import { Controller, forwardRef, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      class LocalModule {}
+      function localModule() { return LocalModule; }
+      @Module({ imports: [forwardRef(() => LocalModule), localModule()] }) class AppModule {}
+      @Controller('local-import-factory') class LocalImportFactoryController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const localImportFactoryExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(localImportFactoryRoot),
+    );
+    expect(localImportFactoryExecution.status).toBe('success');
+    if (localImportFactoryExecution.status === 'success') {
+      expect(localImportFactoryExecution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
+
+    const reassignedImportFactoryRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { ExternalModule } from 'external-module';
+      import { JwtAuthGuard } from './auth';
+      class LocalModule {}
+      function pick() { return LocalModule; }
+      pick = () => ExternalModule;
+      @Module({ imports: [pick()] }) class AppModule {}
+      @Controller('reassigned-import-factory') class ReassignedImportFactoryController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/external-module/index.d.ts': 'export declare class ExternalModule {}\n',
+      'node_modules/external-module/package.json': JSON.stringify({
+        name: 'external-module', version: '1.0.0', types: 'index.d.ts',
+      }),
+    });
+    const reassignedImportFactoryExecution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(reassignedImportFactoryRoot),
+    );
+    expect(reassignedImportFactoryExecution.status).toBe('success');
+    if (reassignedImportFactoryExecution.status === 'success') {
+      expect(reassignedImportFactoryExecution.result.contract.operations[0].auth.mode).toBe('unknown');
     }
 
     const namespaceRoot = workspace(`
@@ -2760,7 +3678,41 @@ describe('NestJS auth metadata analyzer', () => {
       const register = app.useGlobalGuards.bind(app);
       const registerAlias = register;
       registerAlias(guard);
+      const unbound = app.useGlobalGuards;
+      unbound.call(app, guard);
       @Controller('bound') class BoundController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(execution.result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+  });
+
+  test('fails closed on call/apply useGlobalGuards registrations', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import type { INestApplication } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const app: INestApplication;
+      declare const guard: unknown;
+      app.useGlobalGuards.call(app, guard);
+      app.useGlobalGuards.apply(app, [guard]);
+      @Controller('call-apply') class CallApplyController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }
     `, {

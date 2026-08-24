@@ -55,8 +55,21 @@ import { resolveStaticStrings } from './static-string-resolver';
 export { validateNestJsAuthConfig } from './auth-config';
 
 const ANALYZER_ID = 'nestjs-typescript';
-const ANALYZER_VERSION = '1.1.0';
+const ANALYZER_VERSION = '1.2.0';
 const ANALYZER_IDENTITY = `${ANALYZER_ID}@${ANALYZER_VERSION}`;
+const MAX_PROVIDER_SPREAD_ELEMENTS = 4_096;
+const READ_ONLY_ARRAY_METHODS = new Set([
+  'at', 'concat', 'entries', 'flat', 'includes', 'indexOf', 'join', 'keys',
+  'lastIndexOf', 'slice', 'toLocaleString',
+  'toReversed', 'toSorted', 'toSpliced', 'toString', 'values', 'with',
+]);
+const CALLBACK_ARRAY_METHODS = new Set([
+  'every', 'filter', 'find', 'findIndex', 'findLast', 'findLastIndex', 'flatMap', 'forEach',
+  'map', 'reduce', 'reduceRight', 'some',
+]);
+const MUTABLE_STORED_GUARD_CACHE = new WeakMap<
+  ReadonlySet<ts.SourceFile>, WeakMap<ts.Symbol, boolean>
+>();
 const METHOD_DECORATORS: Readonly<Partial<Record<NestJsRouteDecorator, readonly HttpMethod[]>>> = Object.freeze({
   All: HTTP_METHODS,
   Delete: ['DELETE'],
@@ -271,6 +284,238 @@ function effectiveObjectProperty(
   return result;
 }
 
+function assignmentTargetContainsSymbol(
+  input: ts.Node,
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+  check: () => void,
+): boolean {
+  const nodes: ts.Node[] = [input];
+  while (nodes.length > 0) {
+    check();
+    const node = nodes.pop()!;
+    if (ts.isIdentifier(node)) {
+      let target = checker.getSymbolAtLocation(node);
+      if (target?.flags && target.flags & ts.SymbolFlags.Alias) target = checker.getAliasedSymbol(target);
+      if (target === symbol) return true;
+      continue;
+    }
+    if (ts.isPropertyAccessExpression(node)) {
+      nodes.push(node.expression, node.name);
+      continue;
+    }
+    if (ts.isElementAccessExpression(node)) {
+      const key = node.argumentExpression
+        ? resolveStaticPropertyKey(node.argumentExpression, checker, check) : undefined;
+      const target = key === undefined ? undefined
+        : checker.getNonNullableType(checker.getTypeAtLocation(node.expression)).getProperty(key);
+      if (target === symbol) return true;
+      nodes.push(node.expression);
+      continue;
+    }
+    if (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)
+      || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)
+      || ts.isNonNullExpression(node)) nodes.push(node.expression);
+    else if (ts.isArrayLiteralExpression(node)) {
+      for (const element of node.elements) {
+        if (!ts.isOmittedExpression(element)) {
+          nodes.push(ts.isSpreadElement(element) ? element.expression : element);
+        }
+      }
+    } else if (ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.EqualsToken) nodes.push(node.left);
+    else if (ts.isObjectLiteralExpression(node)) {
+      for (const property of node.properties) {
+        if (ts.isPropertyAssignment(property)) nodes.push(property.initializer);
+        else if (ts.isShorthandPropertyAssignment(property)) nodes.push(property.name);
+        else if (ts.isSpreadAssignment(property)) nodes.push(property.expression);
+      }
+    } else if (ts.isArrayBindingPattern(node) || ts.isObjectBindingPattern(node)) {
+      nodes.push(...node.elements);
+    } else if (ts.isBindingElement(node)) nodes.push(node.name);
+    else if (ts.isVariableDeclarationList(node)) {
+      nodes.push(...node.declarations.map(({ name }) => name));
+    } else if (ts.isVariableDeclaration(node)) nodes.push(node.name);
+  }
+  return false;
+}
+
+function staticUndefinedState(
+  input: ts.Expression,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+  seen = new Set<ts.Symbol>(),
+  depth = 0,
+): boolean | undefined {
+  check();
+  if (depth > 64) return undefined;
+  let expression = input;
+  while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+    || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+    || ts.isNonNullExpression(expression)) expression = expression.expression;
+  if (ts.isVoidExpression(expression)) return true;
+  if (expression.kind === ts.SyntaxKind.NullKeyword || expression.kind === ts.SyntaxKind.TrueKeyword
+    || expression.kind === ts.SyntaxKind.FalseKeyword || ts.isLiteralExpression(expression)
+    || ts.isObjectLiteralExpression(expression) || ts.isArrayLiteralExpression(expression)
+    || ts.isFunctionExpression(expression) || ts.isArrowFunction(expression)
+    || ts.isClassExpression(expression) || ts.isNewExpression(expression)) return false;
+  if (!ts.isIdentifier(expression)) return undefined;
+  let symbol = checker.getSymbolAtLocation(expression);
+  if (expression.text === 'undefined' && !symbol?.declarations?.length) return true;
+  if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+  if (!symbol || seen.has(symbol)) return undefined;
+  if (symbol.declarations?.some((declaration) => (
+    (ts.isClassLike(declaration) || ts.isFunctionDeclaration(declaration))
+    && projectSources.has(declaration.getSourceFile())
+  ))) return false;
+  const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+  const declaration = declarations.length === 1 ? declarations[0] : undefined;
+  if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+    || !ts.isVariableDeclarationList(declaration.parent)
+    || !(declaration.parent.flags & ts.NodeFlags.Const)) return undefined;
+  seen.add(symbol);
+  return staticUndefinedState(
+    declaration.initializer, checker, projectSources, check, seen, depth + 1,
+  );
+}
+
+function isNestedDestructuringDefault(node: ts.BinaryExpression): boolean {
+  if (node.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return false;
+  let current: ts.Node = node;
+  while (current.parent) {
+    const parent = current.parent;
+    if (ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent)
+      || ts.isTypeAssertionExpression(parent) || ts.isSatisfiesExpression(parent)
+      || ts.isNonNullExpression(parent) || ts.isArrayLiteralExpression(parent)) {
+      current = parent;
+      continue;
+    }
+    if (ts.isPropertyAssignment(parent) && parent.initializer === current
+      && ts.isObjectLiteralExpression(parent.parent)) {
+      current = parent.parent;
+      continue;
+    }
+    return (ts.isBinaryExpression(parent) && parent.left === current)
+      || ((ts.isForOfStatement(parent) || ts.isForInStatement(parent))
+        && parent.initializer === current);
+  }
+  return false;
+}
+
+function assignmentValuesForSymbol(
+  input: ts.Expression,
+  value: ts.Expression,
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+  depth = 0,
+): readonly ts.Expression[] | undefined {
+  check();
+  if (depth > 64) return undefined;
+  let target = input;
+  while (ts.isParenthesizedExpression(target) || ts.isAsExpression(target)
+    || ts.isTypeAssertionExpression(target) || ts.isSatisfiesExpression(target)
+    || ts.isNonNullExpression(target)) target = target.expression;
+  if (ts.isIdentifier(target)) {
+    let targetSymbol = checker.getSymbolAtLocation(target);
+    if (targetSymbol?.flags && targetSymbol.flags & ts.SymbolFlags.Alias) {
+      targetSymbol = checker.getAliasedSymbol(targetSymbol);
+    }
+    return targetSymbol === symbol ? [value] : [];
+  }
+  if (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) {
+    let targetSymbol = ts.isPropertyAccessExpression(target)
+      ? checker.getSymbolAtLocation(target.name)
+      : target.argumentExpression
+        ? checker.getNonNullableType(checker.getTypeAtLocation(target.expression)).getProperty(
+          resolveStaticPropertyKey(target.argumentExpression, checker, check) ?? '',
+        ) : undefined;
+    if (targetSymbol?.flags && targetSymbol.flags & ts.SymbolFlags.Alias) {
+      targetSymbol = checker.getAliasedSymbol(targetSymbol);
+    }
+    return targetSymbol === symbol ? [value] : [];
+  }
+  if (ts.isBinaryExpression(target)
+    && target.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+    const undefinedState = staticUndefinedState(value, checker, projectSources, check);
+    const assignedValue = undefinedState === true ? target.right : value;
+    const values = assignmentValuesForSymbol(
+      target.left, assignedValue, symbol, checker, projectSources, check, depth + 1,
+    );
+    return values && undefinedState === undefined ? [...values, target.right] : values;
+  }
+  if (ts.isArrayLiteralExpression(target)) {
+    if (!ts.isArrayLiteralExpression(value)) return undefined;
+    const values: ts.Expression[] = [];
+    for (let index = 0; index < target.elements.length; index += 1) {
+      const element = target.elements[index];
+      if (ts.isOmittedExpression(element)
+        || !assignmentTargetContainsSymbol(element, symbol, checker, check)) continue;
+      const candidate = value.elements[index];
+      if (!candidate || ts.isOmittedExpression(candidate)) {
+        if (!ts.isBinaryExpression(element)
+          || element.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return undefined;
+        const nested = assignmentValuesForSymbol(
+          element.left, element.right, symbol, checker, projectSources, check, depth + 1,
+        );
+        if (!nested) return undefined;
+        values.push(...nested);
+        continue;
+      }
+      if (ts.isSpreadElement(element) || ts.isSpreadElement(candidate)) return undefined;
+      const nested = assignmentValuesForSymbol(
+        element, candidate, symbol, checker, projectSources, check, depth + 1,
+      );
+      if (!nested) return undefined;
+      values.push(...nested);
+    }
+    return values;
+  }
+  if (ts.isObjectLiteralExpression(target)) {
+    if (!ts.isObjectLiteralExpression(value)) return undefined;
+    const values: ts.Expression[] = [];
+    for (const property of target.properties) {
+      if (!ts.isPropertyAssignment(property) && !ts.isShorthandPropertyAssignment(property)) {
+        if (assignmentTargetContainsSymbol(property, symbol, checker, check)) return undefined;
+        continue;
+      }
+      const nestedTarget = ts.isPropertyAssignment(property) ? property.initializer : property.name;
+      if (!assignmentTargetContainsSymbol(nestedTarget, symbol, checker, check)) continue;
+      const { name } = property;
+      const propertyName = ts.isComputedPropertyName(name)
+        ? resolveStaticPropertyKey(name.expression, checker, check)
+        : (ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isNumericLiteral(name))
+          ? name.text : undefined;
+      if (propertyName === undefined) return undefined;
+      const effective = effectiveObjectProperty(
+        value, propertyName, checker, projectSources, check,
+      );
+      if (!effective.present) {
+        if (!ts.isBinaryExpression(nestedTarget)
+          || nestedTarget.operatorToken.kind !== ts.SyntaxKind.EqualsToken) return undefined;
+        const nested = assignmentValuesForSymbol(
+          nestedTarget.left, nestedTarget.right, symbol, checker, projectSources, check, depth + 1,
+        );
+        if (!nested) return undefined;
+        values.push(...nested);
+        continue;
+      }
+      if (effective.accessor) return undefined;
+      for (const candidate of effective.candidates) {
+        const nested = assignmentValuesForSymbol(
+          nestedTarget, candidate, symbol, checker, projectSources, check, depth + 1,
+        );
+        if (!nested) return undefined;
+        values.push(...nested);
+      }
+    }
+    return values;
+  }
+  return assignmentTargetContainsSymbol(target, symbol, checker, check) ? undefined : [];
+}
+
 function registeredProviderObjects(
   checker: ts.TypeChecker,
   projectSources: ReadonlySet<ts.SourceFile>,
@@ -278,6 +523,7 @@ function registeredProviderObjects(
 ): {
   providers: ReadonlySet<ts.ObjectLiteralExpression>;
   candidates: readonly ts.Expression[];
+  unresolvedProvider?: ts.Expression;
   externalModuleImport?: ts.Expression;
 } {
   const providers = new Set<ts.ObjectLiteralExpression>();
@@ -438,6 +684,16 @@ function registeredProviderObjects(
     collect(declaration.initializer, seen, depth + 1);
     return false;
   };
+  const reassignedSymbols = new Set<ts.Symbol>();
+  const escapedSymbols = new Set<ts.Symbol>();
+  const mutatedContainers = new Set<ts.Symbol>();
+  const assignedValues = new Map<ts.Symbol, ts.Expression[]>();
+  const unresolvedAssignments = new Set<ts.Symbol>();
+  const aliases = new Map<ts.Symbol, Set<ts.Symbol>>();
+  const memberMutationCache = new Map<ts.Symbol, boolean>();
+  const pendingEscapes: ts.Expression[] = [];
+  let escapeIndexIncomplete = false;
+  let escapeSteps = 0;
   const isExternalModuleReference = (
     input: ts.Expression,
     seen = new Set<ts.Symbol>(),
@@ -490,7 +746,42 @@ function registeredProviderObjects(
       return isExternalModuleReference(expression.left, new Set(seen), depth + 1)
         || isExternalModuleReference(expression.right, new Set(seen), depth + 1);
     }
-    if (ts.isCallExpression(expression)) return true;
+    if (ts.isCallExpression(expression)) {
+      let callee: ts.Expression = expression.expression;
+      while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+      let callable: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration
+        | ts.MethodDeclaration | undefined;
+      if ((ts.isArrowFunction(callee) || ts.isFunctionExpression(callee))
+        && callee.parameters.length === 0) callable = callee;
+      if (ts.isIdentifier(callee)) {
+        const original = checker.getSymbolAtLocation(callee);
+        const importSpecifier = original?.declarations?.find(ts.isImportSpecifier);
+        const importDeclaration = importSpecifier?.parent.parent.parent;
+        const isForwardRef = callee.text === 'forwardRef' && importDeclaration
+          && ts.isImportDeclaration(importDeclaration)
+          && ts.isStringLiteral(importDeclaration.moduleSpecifier)
+          && importDeclaration.moduleSpecifier.text === '@nestjs/common';
+        const argument = isForwardRef && expression.arguments.length === 1
+          ? expression.arguments[0] : undefined;
+        if (argument && (ts.isArrowFunction(argument) || ts.isFunctionExpression(argument))
+          && argument.parameters.length === 0) callable = argument;
+        if (!callable && expression.arguments.length === 0) {
+          let symbol = original;
+          if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+          if (symbol && reassignedSymbols.has(symbol)) return true;
+          const declarations = symbol?.declarations?.filter((candidate): candidate is ts.FunctionDeclaration => (
+            ts.isFunctionDeclaration(candidate) && candidate.body !== undefined
+            && candidate.parameters.length === 0 && projectSources.has(candidate.getSourceFile())
+          )) ?? [];
+          if (declarations.length === 1) callable = declarations[0];
+        }
+      }
+      const body = callable?.body;
+      const returned = body && !ts.isBlock(body) ? body
+        : body && body.statements.length === 1 && ts.isReturnStatement(body.statements[0])
+          ? body.statements[0].expression : undefined;
+      return returned ? isExternalModuleReference(returned, seen, depth + 1) : true;
+    }
     if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
       let symbol = checker.getSymbolAtLocation(
         ts.isPropertyAccessExpression(expression) ? expression.name : expression,
@@ -531,6 +822,912 @@ function registeredProviderObjects(
     }
     return true;
   };
+  const symbolAt = (node: ts.Node): ts.Symbol | undefined => {
+    let symbol = checker.getSymbolAtLocation(node);
+    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    return symbol;
+  };
+  const rootSymbolAt = (input: ts.Expression): ts.Symbol | undefined => {
+    let expression = input;
+    while (true) {
+      while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+        || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+        || ts.isNonNullExpression(expression)) expression = expression.expression;
+      if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
+        expression = expression.expression;
+        continue;
+      }
+      return ts.isIdentifier(expression) ? resolvedSymbolAt(expression, checker) : undefined;
+    }
+  };
+  const linkAliases = (left: ts.Symbol | undefined, right: ts.Symbol | undefined): void => {
+    if (!left || !right || left === right) return;
+    (aliases.get(left) ?? aliases.set(left, new Set()).get(left)!).add(right);
+    (aliases.get(right) ?? aliases.set(right, new Set()).get(right)!).add(left);
+  };
+  const aliasSetHas = (
+    values: ReadonlySet<ts.Symbol>, symbol: ts.Symbol,
+  ): boolean => {
+    const seen = new Set<ts.Symbol>();
+    const pending = [symbol];
+    while (pending.length > 0) {
+      check();
+      const candidate = pending.pop()!;
+      if (values.has(candidate)) return true;
+      if (seen.has(candidate)) continue;
+      if (seen.size >= MAX_PROVIDER_SPREAD_ELEMENTS) return true;
+      seen.add(candidate);
+      pending.push(...(aliases.get(candidate) ?? []));
+    }
+    return false;
+  };
+  const markAssignmentTarget = (input: ts.Node): void => {
+    let target = input;
+    while (ts.isParenthesizedExpression(target) || ts.isAsExpression(target)
+      || ts.isTypeAssertionExpression(target) || ts.isSatisfiesExpression(target)
+      || ts.isNonNullExpression(target)) target = target.expression;
+    if (ts.isIdentifier(target)) {
+      const symbol = symbolAt(target);
+      if (symbol) reassignedSymbols.add(symbol);
+    } else if (ts.isPropertyAccessExpression(target)) {
+      const symbol = symbolAt(target.name);
+      if (symbol) reassignedSymbols.add(symbol);
+    } else if (ts.isElementAccessExpression(target)) {
+      const key = target.argumentExpression
+        ? resolveStaticPropertyKey(target.argumentExpression, checker, check) : undefined;
+      const symbol = key === undefined ? undefined
+        : checker.getNonNullableType(checker.getTypeAtLocation(target.expression)).getProperty(key);
+      if (symbol) reassignedSymbols.add(symbol);
+      else if (ts.isIdentifier(target.expression)) {
+        const receiver = symbolAt(target.expression);
+        if (receiver) escapedSymbols.add(receiver);
+      }
+    } else if (ts.isArrayLiteralExpression(target)) {
+      for (const element of target.elements) {
+        if (!ts.isOmittedExpression(element)) {
+          markAssignmentTarget(ts.isSpreadElement(element) ? element.expression : element);
+        }
+      }
+    } else if (ts.isObjectLiteralExpression(target)) {
+      for (const property of target.properties) {
+        if (ts.isPropertyAssignment(property)) markAssignmentTarget(property.initializer);
+        else if (ts.isShorthandPropertyAssignment(property)) markAssignmentTarget(property.name);
+        else if (ts.isSpreadAssignment(property)) markAssignmentTarget(property.expression);
+      }
+    } else if (ts.isVariableDeclarationList(target)) {
+      for (const declaration of target.declarations) markAssignmentTarget(declaration.name);
+    } else if (ts.isVariableDeclaration(target) || ts.isBindingElement(target)) {
+      markAssignmentTarget(target.name);
+    } else if (ts.isArrayBindingPattern(target) || ts.isObjectBindingPattern(target)) {
+      for (const element of target.elements) markAssignmentTarget(element);
+    }
+  };
+  const directAssignmentSymbol = (input: ts.Expression): ts.Symbol | undefined => {
+    let target = input;
+    while (ts.isParenthesizedExpression(target) || ts.isAsExpression(target)
+      || ts.isTypeAssertionExpression(target) || ts.isSatisfiesExpression(target)
+      || ts.isNonNullExpression(target)) target = target.expression;
+    if (ts.isIdentifier(target)) return symbolAt(target);
+    if (ts.isPropertyAccessExpression(target)) return symbolAt(target.name);
+    if (!ts.isElementAccessExpression(target)) return undefined;
+    const key = target.argumentExpression
+      ? resolveStaticPropertyKey(target.argumentExpression, checker, check) : undefined;
+    return key === undefined ? undefined
+      : checker.getNonNullableType(checker.getTypeAtLocation(target.expression)).getProperty(key);
+  };
+  const markEscapedValue = (input: ts.Expression, depth = 0): void => {
+    check();
+    if (escapeSteps++ >= MAX_PROVIDER_SPREAD_ELEMENTS) {
+      escapeIndexIncomplete = true;
+      return;
+    }
+    if (depth > 64) {
+      escapeIndexIncomplete = true;
+      return;
+    }
+    let value = input;
+    while (ts.isParenthesizedExpression(value) || ts.isAsExpression(value)
+      || ts.isTypeAssertionExpression(value) || ts.isSatisfiesExpression(value)
+      || ts.isNonNullExpression(value)) value = value.expression;
+    if (ts.isIdentifier(value)) {
+      const symbol = resolvedSymbolAt(value, checker);
+      const declarations = symbol?.declarations?.filter(ts.isVariableDeclaration) ?? [];
+      const declaration = declarations.length === 1 ? declarations[0] : undefined;
+      let initializer = declaration?.initializer;
+      while (initializer && (ts.isParenthesizedExpression(initializer) || ts.isAsExpression(initializer)
+        || ts.isTypeAssertionExpression(initializer) || ts.isSatisfiesExpression(initializer)
+        || ts.isNonNullExpression(initializer))) initializer = initializer.expression;
+      if (symbol && (resolveConstObject(value, checker, projectSources, check)
+        || (initializer && (ts.isObjectLiteralExpression(initializer)
+          || ts.isArrayLiteralExpression(initializer))))) escapedSymbols.add(symbol);
+    } else if (ts.isArrayLiteralExpression(value)) {
+      for (const element of value.elements) {
+        if (!ts.isOmittedExpression(element)) {
+          markEscapedValue(ts.isSpreadElement(element) ? element.expression : element, depth + 1);
+        }
+      }
+    } else if (ts.isObjectLiteralExpression(value)) {
+      for (const property of value.properties) {
+        if (ts.isPropertyAssignment(property)) markEscapedValue(property.initializer, depth + 1);
+        else if (ts.isShorthandPropertyAssignment(property)) markEscapedValue(property.name, depth + 1);
+        else if (ts.isSpreadAssignment(property)) markEscapedValue(property.expression, depth + 1);
+      }
+    } else if (ts.isConditionalExpression(value)) {
+      markEscapedValue(value.whenTrue, depth + 1);
+      markEscapedValue(value.whenFalse, depth + 1);
+    } else if (ts.isPropertyAccessExpression(value) || ts.isElementAccessExpression(value)) {
+      const propertyName = ts.isPropertyAccessExpression(value) ? value.name.text
+        : value.argumentExpression
+          ? resolveStaticPropertyKey(value.argumentExpression, checker, check) : undefined;
+      const object = resolveConstObject(value.expression, checker, projectSources, check);
+      if (propertyName !== undefined && object) {
+        const effective = effectiveObjectProperty(
+          object, propertyName, checker, projectSources, check,
+        );
+        for (const candidate of effective.candidates) markEscapedValue(candidate, depth + 1);
+        const member = symbolAt(ts.isPropertyAccessExpression(value) ? value.name : value);
+        for (const candidate of member ? assignedValues.get(member) ?? [] : []) {
+          markEscapedValue(candidate, depth + 1);
+        }
+        if (member && unresolvedAssignments.has(member)) escapeIndexIncomplete = true;
+        let receiver: ts.Expression = value.expression;
+        while (ts.isParenthesizedExpression(receiver) || ts.isAsExpression(receiver)
+          || ts.isTypeAssertionExpression(receiver) || ts.isSatisfiesExpression(receiver)
+          || ts.isNonNullExpression(receiver)) receiver = receiver.expression;
+        const receiverSymbol = rootSymbolAt(receiver);
+        if (receiverSymbol && (aliasSetHas(escapedSymbols, receiverSymbol)
+          || aliasSetHas(mutatedContainers, receiverSymbol))) escapeIndexIncomplete = true;
+      } else if (ts.isElementAccessExpression(value) && propertyName !== undefined) {
+        let receiver: ts.Expression = value.expression;
+        while (ts.isParenthesizedExpression(receiver) || ts.isAsExpression(receiver)
+          || ts.isTypeAssertionExpression(receiver) || ts.isSatisfiesExpression(receiver)
+          || ts.isNonNullExpression(receiver)) receiver = receiver.expression;
+        if (ts.isIdentifier(receiver)) {
+          const symbol = resolvedSymbolAt(receiver, checker);
+          const declarations = symbol?.declarations?.filter(ts.isVariableDeclaration) ?? [];
+          const declaration = declarations.length === 1 ? declarations[0] : undefined;
+          if (declaration?.initializer && ts.isVariableDeclarationList(declaration.parent)
+            && declaration.parent.flags & ts.NodeFlags.Const) receiver = declaration.initializer;
+          while (ts.isParenthesizedExpression(receiver) || ts.isAsExpression(receiver)
+            || ts.isTypeAssertionExpression(receiver) || ts.isSatisfiesExpression(receiver)
+            || ts.isNonNullExpression(receiver)) receiver = receiver.expression;
+        }
+        const member = symbolAt(value);
+        for (const candidate of member ? assignedValues.get(member) ?? [] : []) {
+          markEscapedValue(candidate, depth + 1);
+        }
+        if (member && unresolvedAssignments.has(member)) escapeIndexIncomplete = true;
+        let sourceReceiver: ts.Expression = value.expression;
+        while (ts.isParenthesizedExpression(sourceReceiver) || ts.isAsExpression(sourceReceiver)
+          || ts.isTypeAssertionExpression(sourceReceiver) || ts.isSatisfiesExpression(sourceReceiver)
+          || ts.isNonNullExpression(sourceReceiver)) sourceReceiver = sourceReceiver.expression;
+        const sourceSymbol = rootSymbolAt(sourceReceiver);
+        if (sourceSymbol && (aliasSetHas(escapedSymbols, sourceSymbol)
+          || aliasSetHas(mutatedContainers, sourceSymbol))) escapeIndexIncomplete = true;
+        const index = Number(propertyName);
+        const canonicalIndex = Number.isInteger(index) && index >= 0 && index < 0xffff_ffff
+          && String(index) === propertyName;
+        let remainingElements = MAX_PROVIDER_SPREAD_ELEMENTS;
+        const flatten = (
+          input: ts.Expression, flattenDepth = 0,
+        ): readonly (ts.Expression | undefined)[] | undefined => {
+          check();
+          if (flattenDepth > 64) return undefined;
+          let array = input;
+          while (ts.isParenthesizedExpression(array) || ts.isAsExpression(array)
+            || ts.isTypeAssertionExpression(array) || ts.isSatisfiesExpression(array)
+            || ts.isNonNullExpression(array)) array = array.expression;
+          if (ts.isIdentifier(array)) {
+            const symbol = resolvedSymbolAt(array, checker);
+            const declarations = symbol?.declarations?.filter(ts.isVariableDeclaration) ?? [];
+            const declaration = declarations.length === 1 ? declarations[0] : undefined;
+            if (!declaration?.initializer || !ts.isVariableDeclarationList(declaration.parent)
+              || !(declaration.parent.flags & ts.NodeFlags.Const)) return undefined;
+            return flatten(declaration.initializer, flattenDepth + 1);
+          }
+          if (!ts.isArrayLiteralExpression(array)) return undefined;
+          const flattened: (ts.Expression | undefined)[] = [];
+          for (const element of array.elements) {
+            if (remainingElements-- <= 0) return undefined;
+            if (ts.isOmittedExpression(element)) flattened.push(undefined);
+            else if (ts.isSpreadElement(element)) {
+              const spread = flatten(element.expression, flattenDepth + 1);
+              if (!spread || spread.length > remainingElements) return undefined;
+              remainingElements -= spread.length;
+              flattened.push(...spread);
+            } else flattened.push(element);
+          }
+          return flattened;
+        };
+        const flattened = flatten(receiver);
+        if (flattened && canonicalIndex) {
+          if (index < flattened.length) {
+            const element = flattened[index];
+            if (element) markEscapedValue(element, depth + 1);
+          }
+        } else escapeIndexIncomplete = true;
+      } else escapeIndexIncomplete = true;
+    } else if (ts.isBinaryExpression(value)) {
+      const state = staticState(value.left);
+      if (value.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+        if (state.truthy !== false) markEscapedValue(value.right, depth + 1);
+        if (state.truthy !== true) markEscapedValue(value.left, depth + 1);
+      } else if (value.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        if (state.truthy !== true) markEscapedValue(value.right, depth + 1);
+        if (state.truthy !== false) markEscapedValue(value.left, depth + 1);
+      } else if (value.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
+        if (state.nullish !== false) markEscapedValue(value.right, depth + 1);
+        if (state.nullish !== true) markEscapedValue(value.left, depth + 1);
+      } else if (value.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+        markEscapedValue(value.right, depth + 1);
+      }
+    } else if (ts.isCallExpression(value)) {
+      let callee: ts.Expression = value.expression;
+      while (ts.isParenthesizedExpression(callee) || ts.isAsExpression(callee)
+        || ts.isTypeAssertionExpression(callee) || ts.isSatisfiesExpression(callee)
+        || ts.isNonNullExpression(callee)) callee = callee.expression;
+      let callable: ts.ArrowFunction | ts.FunctionExpression | ts.FunctionDeclaration
+        | ts.MethodDeclaration | undefined;
+      let localCallReference = false;
+      if (ts.isArrowFunction(callee) || ts.isFunctionExpression(callee)) callable = callee;
+      else if (ts.isIdentifier(callee)) {
+        const symbol = resolvedSymbolAt(callee, checker);
+        localCallReference = symbol?.declarations?.some((declaration) => (
+          projectSources.has(declaration.getSourceFile())
+        )) ?? false;
+        const declarations = symbol?.declarations?.filter((declaration): declaration is (
+          ts.FunctionDeclaration
+        ) => ts.isFunctionDeclaration(declaration) && declaration.body !== undefined
+          && projectSources.has(declaration.getSourceFile())) ?? [];
+        if (declarations.length === 1 && symbol && !reassignedSymbols.has(symbol)) callable = declarations[0];
+      } else if (ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee)) {
+        const symbol = symbolAt(ts.isPropertyAccessExpression(callee) ? callee.name : callee);
+        const receiver = rootSymbolAt(callee.expression);
+        const declarations = symbol?.declarations?.filter((declaration) => (
+          projectSources.has(declaration.getSourceFile()) && (ts.isMethodDeclaration(declaration)
+            || ts.isPropertyAssignment(declaration))
+        )) ?? [];
+        localCallReference = declarations.length > 0;
+        const unstable = (symbol && (reassignedSymbols.has(symbol)
+          || unresolvedAssignments.has(symbol) || assignedValues.has(symbol)))
+          || (receiver && (aliasSetHas(escapedSymbols, receiver)
+            || aliasSetHas(unstableContainers, receiver)));
+        if (declarations.length === 1 && !unstable) {
+          const declaration = declarations[0];
+          const candidate = ts.isMethodDeclaration(declaration) ? declaration
+            : ts.isPropertyAssignment(declaration) ? declaration.initializer : undefined;
+          if (candidate && (ts.isArrowFunction(candidate) || ts.isFunctionExpression(candidate))) {
+            callable = candidate;
+          } else if (candidate && ts.isMethodDeclaration(candidate) && candidate.body) callable = candidate;
+        }
+      }
+      if (!callable?.body) {
+        if (localCallReference) escapeIndexIncomplete = true;
+      }
+      else if (callable.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.AsyncKeyword)
+        || ('asteriskToken' in callable && callable.asteriskToken)) {
+        // Async and generator calls expose a Promise/iterator, not the returned object itself.
+      } else if (callable.parameters.length > 0 || value.arguments.length > 0) {
+        escapeIndexIncomplete = true;
+      }
+      else if (!ts.isBlock(callable.body)) markEscapedValue(callable.body, depth + 1);
+      else {
+        let foundReturn = false;
+        const nodes: ts.Node[] = [...callable.body.statements];
+        while (nodes.length > 0) {
+          check();
+          const node = nodes.pop()!;
+          if (ts.isReturnStatement(node) && node.expression) {
+            foundReturn = true;
+            markEscapedValue(node.expression, depth + 1);
+          } else if (!ts.isFunctionLike(node)) ts.forEachChild(node, (child) => { nodes.push(child); });
+        }
+        if (!foundReturn) escapeIndexIncomplete = true;
+      }
+    }
+  };
+  const markMutatedReceiver = (input: ts.Expression, depth = 0): void => {
+    check();
+    if (depth > 64) return;
+    let receiver = input;
+    while (ts.isParenthesizedExpression(receiver) || ts.isAsExpression(receiver)
+      || ts.isTypeAssertionExpression(receiver) || ts.isSatisfiesExpression(receiver)
+      || ts.isNonNullExpression(receiver)) receiver = receiver.expression;
+    if (ts.isIdentifier(receiver)) {
+      const symbol = resolvedSymbolAt(receiver, checker);
+      if (symbol) mutatedContainers.add(symbol);
+      return;
+    }
+    if (!ts.isPropertyAccessExpression(receiver) && !ts.isElementAccessExpression(receiver)) return;
+    const propertyName = ts.isPropertyAccessExpression(receiver) ? receiver.name.text
+      : receiver.argumentExpression
+        ? resolveStaticPropertyKey(receiver.argumentExpression, checker, check) : undefined;
+    const object = resolveConstObject(receiver.expression, checker, projectSources, check);
+    if (propertyName === undefined || !object) return;
+    const effective = effectiveObjectProperty(object, propertyName, checker, projectSources, check);
+    for (const candidate of effective.candidates) markMutatedReceiver(candidate, depth + 1);
+  };
+  const indexNodes: ts.Node[] = [...projectSources];
+  while (indexNodes.length > 0) {
+    check();
+    const node = indexNodes.pop()!;
+    if (ts.isBinaryExpression(node) && !isNestedDestructuringDefault(node)
+      && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+      && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+      markAssignmentTarget(node.left);
+      const symbol = directAssignmentSymbol(node.left);
+      if (symbol) {
+        if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+          (assignedValues.get(symbol) ?? assignedValues.set(symbol, []).get(symbol)!).push(node.right);
+        } else unresolvedAssignments.add(symbol);
+      }
+      if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken
+        && ts.isIdentifier(node.left) && ts.isIdentifier(node.right)) {
+        linkAliases(symbolAt(node.left), symbolAt(node.right));
+      }
+    }
+    else if (ts.isForOfStatement(node) || ts.isForInStatement(node)) {
+      markAssignmentTarget(node.initializer);
+      if (ts.isExpression(node.initializer)) {
+        const symbol = directAssignmentSymbol(node.initializer);
+        if (symbol) unresolvedAssignments.add(symbol);
+      }
+    } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name)
+      && node.initializer && ts.isIdentifier(node.initializer)) {
+      linkAliases(symbolAt(node.name), symbolAt(node.initializer));
+    } else if (ts.isCallExpression(node)) {
+      const decorator = ts.isDecorator(node.parent)
+        ? resolveDecoratorSymbol(node.parent, checker, check) : undefined;
+      if (decorator?.name !== 'Module' || !decorator.nestJsCommon) {
+        for (const argument of node.arguments) {
+          const value = ts.isSpreadElement(argument) ? argument.expression : argument;
+          pendingEscapes.push(value);
+        }
+      }
+      const access = ts.isPropertyAccessExpression(node.expression)
+        || ts.isElementAccessExpression(node.expression) ? node.expression : undefined;
+      const method = access && (ts.isPropertyAccessExpression(access) ? access.name.text
+        : access.argumentExpression
+          ? resolveStaticPropertyKey(access.argumentExpression, checker, check) : undefined);
+      const memberSymbol = access && symbolAt(ts.isPropertyAccessExpression(access)
+        ? access.name : access);
+      let localCallMayMutateReceiver = memberSymbol
+        ? memberMutationCache.get(memberSymbol) : undefined;
+      if (localCallMayMutateReceiver === undefined) {
+        const localCallables = memberSymbol?.declarations?.filter((declaration) => (
+          projectSources.has(declaration.getSourceFile()) && (ts.isMethodDeclaration(declaration)
+            || ts.isPropertyAssignment(declaration))
+        )) ?? [];
+        localCallMayMutateReceiver = localCallables.length === 0 || localCallables.some((declaration) => {
+          const callable = ts.isMethodDeclaration(declaration) ? declaration
+            : ts.isPropertyAssignment(declaration) ? declaration.initializer : undefined;
+          if (!callable || (!ts.isMethodDeclaration(callable) && !ts.isArrowFunction(callable)
+            && !ts.isFunctionExpression(callable)) || !callable.body) return true;
+          let usesThis = false;
+          const nodes: ts.Node[] = [callable.body];
+          while (nodes.length > 0 && !usesThis) {
+            const current = nodes.pop()!;
+            if (current.kind === ts.SyntaxKind.ThisKeyword) usesThis = true;
+            else if (current !== callable && ts.isFunctionLike(current)
+              && !ts.isArrowFunction(current)) continue;
+            else ts.forEachChild(current, (child) => { nodes.push(child); });
+          }
+          return usesThis;
+        });
+        if (memberSymbol) memberMutationCache.set(memberSymbol, localCallMayMutateReceiver);
+      }
+      let callbackReadOnly = false;
+      if (access && method && CALLBACK_ARRAY_METHODS.has(method)) {
+        const callback = node.arguments[0];
+        const callable = callback && (ts.isArrowFunction(callback) || ts.isFunctionExpression(callback))
+          ? callback : undefined;
+        const receiver = rootSymbolAt(access.expression);
+        const arrayParameterIndex = method === 'reduce' || method === 'reduceRight' ? 4 : 3;
+        if (callable && callable.parameters.length < arrayParameterIndex
+          && !callable.parameters.some(({ dotDotDotToken }) => dotDotDotToken)) {
+          let referencesReceiver = false;
+          let referencesArguments = false;
+          let mutatesElement = false;
+          const elementParameter = callable.parameters[
+            method === 'reduce' || method === 'reduceRight' ? 1 : 0
+          ];
+          const elementSymbol = elementParameter && ts.isIdentifier(elementParameter.name)
+            ? symbolAt(elementParameter.name) : undefined;
+          const elementSymbols = new Set(elementSymbol ? [elementSymbol] : []);
+          let elementSteps = 0;
+          const elementCache = new WeakMap<ts.Node, boolean>();
+          const isElementSymbol = (symbol: ts.Symbol | undefined): boolean => (
+            !!symbol && aliasSetHas(elementSymbols, symbol)
+          );
+          const containsElement = (input: ts.Node): boolean => {
+            if (!elementSymbol) return false;
+            const cached = elementCache.get(input);
+            if (cached !== undefined) return cached;
+            const pending: ts.Node[] = [input];
+            while (pending.length > 0) {
+              check();
+              if (elementSteps++ >= MAX_PROVIDER_SPREAD_ELEMENTS) return true;
+              const candidate = pending.pop()!;
+              if (ts.isIdentifier(candidate)) {
+                const symbol = symbolAt(candidate);
+                if (isElementSymbol(symbol)) {
+                  elementCache.set(input, true);
+                  return true;
+                }
+              }
+              if (candidate !== input && ((ts.isFunctionLike(candidate)
+                && !ts.isArrowFunction(candidate)) || ts.isClassLike(candidate))) continue;
+              ts.forEachChild(candidate, (child) => { pending.push(child); });
+            }
+            elementCache.set(input, false);
+            return false;
+          };
+          const targetMutatesElement = (input: ts.Node): boolean => {
+            let target = input;
+            while (ts.isParenthesizedExpression(target) || ts.isAsExpression(target)
+              || ts.isTypeAssertionExpression(target) || ts.isSatisfiesExpression(target)
+              || ts.isNonNullExpression(target)) target = target.expression;
+            if (ts.isPropertyAccessExpression(target) || ts.isElementAccessExpression(target)) {
+              return isElementSymbol(rootSymbolAt(target.expression));
+            }
+            if (ts.isArrayLiteralExpression(target)) {
+              return target.elements.some((element) => !ts.isOmittedExpression(element)
+                && targetMutatesElement(ts.isSpreadElement(element) ? element.expression : element));
+            }
+            if (ts.isObjectLiteralExpression(target)) {
+              return target.properties.some((property) => (
+                ts.isPropertyAssignment(property) ? targetMutatesElement(property.initializer)
+                  : ts.isShorthandPropertyAssignment(property) ? false
+                    : ts.isSpreadAssignment(property) && targetMutatesElement(property.expression)
+              ));
+            }
+            if (ts.isBinaryExpression(target)
+              && target.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+              return targetMutatesElement(target.left);
+            }
+            return false;
+          };
+          const nodes: ts.Node[] = [callable.body];
+          while (nodes.length > 0 && !referencesReceiver && !referencesArguments && !mutatesElement) {
+            const current = nodes.pop()!;
+            if (ts.isBinaryExpression(current) && elementSymbol
+              && current.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+              && current.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+              && targetMutatesElement(current.left)) {
+              mutatesElement = true;
+            } else if (((ts.isPrefixUnaryExpression(current)
+              && (current.operator === ts.SyntaxKind.PlusPlusToken
+                || current.operator === ts.SyntaxKind.MinusMinusToken))
+              || ts.isPostfixUnaryExpression(current))
+              && targetMutatesElement(current.operand)) {
+              mutatesElement = true;
+            } else if (ts.isDeleteExpression(current)
+              && targetMutatesElement(current.expression)) {
+              mutatesElement = true;
+            } else if (ts.isCallExpression(current) && elementSymbol) {
+              const access = ts.isPropertyAccessExpression(current.expression)
+                || ts.isElementAccessExpression(current.expression) ? current.expression : undefined;
+              const calledMethod = access && (ts.isPropertyAccessExpression(access) ? access.name.text
+                : access.argumentExpression
+                  ? resolveStaticPropertyKey(access.argumentExpression, checker, check) : undefined);
+              if (access && isElementSymbol(rootSymbolAt(access.expression))
+                && (calledMethod === undefined || !READ_ONLY_ARRAY_METHODS.has(calledMethod))) {
+                mutatesElement = true;
+              } else if (current.arguments.some((argument) => containsElement(
+                ts.isSpreadElement(argument) ? argument.expression : argument,
+              ))) mutatesElement = true;
+            } else if (ts.isTaggedTemplateExpression(current) && elementSymbol
+              && ts.isTemplateExpression(current.template)
+              && current.template.templateSpans.some(({ expression }) => containsElement(expression))) {
+              mutatesElement = true;
+            } else if (ts.isIdentifier(current) && receiver
+              && resolvedSymbolAt(current, checker) === receiver) referencesReceiver = true;
+            else if (ts.isFunctionExpression(callable) && ts.isIdentifier(current)
+              && current.text === 'arguments') {
+              const parent = current.parent;
+              const declarationName = 'name' in parent && parent.name === current
+                && !ts.isShorthandPropertyAssignment(parent);
+              const bindingKey = ts.isBindingElement(parent) && parent.propertyName === current;
+              const accessName = ts.isPropertyAccessExpression(parent) && parent.name === current;
+              const label = (ts.isLabeledStatement(parent) || ts.isBreakStatement(parent)
+                || ts.isContinueStatement(parent)) && parent.label === current;
+              const qualifiedName = ts.isQualifiedName(parent);
+              let typeOnly = false;
+              let ancestor: ts.Node | undefined = parent;
+              while (ancestor && !ts.isStatement(ancestor) && !ts.isExpression(ancestor)) {
+                if (ts.isTypeNode(ancestor)) {
+                  typeOnly = true;
+                  break;
+                }
+                ancestor = ancestor.parent;
+              }
+              const argumentSymbol = checker.getSymbolAtLocation(current);
+              const shadowed = argumentSymbol?.declarations?.some((declaration) => (
+                declaration.getSourceFile() === callable.getSourceFile()
+                && declaration.pos >= callable.pos && declaration.end <= callable.end
+              )) ?? false;
+              referencesArguments = !declarationName && !bindingKey && !accessName && !label
+                && !qualifiedName && !typeOnly && !shadowed;
+            }
+            else if (current !== callable && ts.isFunctionLike(current)
+              && !ts.isArrowFunction(current)) continue;
+            else ts.forEachChild(current, (child) => { nodes.push(child); });
+          }
+          callbackReadOnly = !referencesReceiver && !referencesArguments && !mutatesElement;
+        }
+      }
+      if (access && (method === undefined || (!READ_ONLY_ARRAY_METHODS.has(method)
+        && !callbackReadOnly))
+        && localCallMayMutateReceiver) {
+        markMutatedReceiver(access.expression);
+      }
+    }
+    ts.forEachChild(node, (child) => { indexNodes.push(child); });
+  }
+  let previousEscapedCount = -1;
+  let escapeRounds = 0;
+  while (escapedSymbols.size !== previousEscapedCount) {
+    check();
+    if (escapeRounds++ >= MAX_PROVIDER_SPREAD_ELEMENTS
+      || escapeSteps >= MAX_PROVIDER_SPREAD_ELEMENTS) {
+      escapeIndexIncomplete = true;
+      break;
+    }
+    previousEscapedCount = escapedSymbols.size;
+    for (const value of pendingEscapes) {
+      markEscapedValue(value);
+      if (escapeSteps >= MAX_PROVIDER_SPREAD_ELEMENTS) {
+        escapeIndexIncomplete = true;
+        break;
+      }
+    }
+  }
+  const unstableSymbols = new Set([...reassignedSymbols, ...escapedSymbols]);
+  const pendingUnstable = [...unstableSymbols];
+  while (pendingUnstable.length > 0) {
+    const symbol = pendingUnstable.pop()!;
+    for (const alias of aliases.get(symbol) ?? []) {
+      if (!unstableSymbols.has(alias)) {
+        unstableSymbols.add(alias);
+        pendingUnstable.push(alias);
+      }
+    }
+  }
+  const unstableContainers = new Set(mutatedContainers);
+  const pendingContainers = [...unstableContainers];
+  while (pendingContainers.length > 0) {
+    const symbol = pendingContainers.pop()!;
+    for (const alias of aliases.get(symbol) ?? []) {
+      if (!unstableContainers.has(alias)) {
+        unstableContainers.add(alias);
+        pendingContainers.push(alias);
+      }
+    }
+  }
+  const isExternalProviderReference = (
+    input: ts.Expression,
+    seen = new Set<ts.Symbol>(),
+    depth = 0,
+    tokenPosition = false,
+  ): boolean => {
+    check();
+    if (depth > 64) return true;
+    let expression = input;
+    while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+      || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+      || ts.isNonNullExpression(expression)) expression = expression.expression;
+    if (ts.isArrayLiteralExpression(expression)) {
+      return expression.elements.some((element) => !ts.isOmittedExpression(element)
+        && isExternalProviderReference(
+          ts.isSpreadElement(element) ? element.expression : element,
+          new Set(seen), depth + 1, tokenPosition,
+        ));
+    }
+    if (ts.isObjectLiteralExpression(expression)) {
+      const provide = effectiveObjectProperty(
+        expression, 'provide', checker, projectSources, check,
+      );
+      return provide.candidates.some((candidate) => isExternalProviderReference(
+        candidate, new Set(seen), depth + 1, true,
+      ));
+    }
+    if (ts.isConditionalExpression(expression)) {
+      const condition = staticState(expression.condition);
+      return (condition.truthy !== false
+          && isExternalProviderReference(expression.whenTrue, new Set(seen), depth + 1, tokenPosition))
+        || (condition.truthy !== true
+          && isExternalProviderReference(expression.whenFalse, new Set(seen), depth + 1, tokenPosition));
+    }
+    if (ts.isBinaryExpression(expression)) {
+      const left = staticState(expression.left);
+      if (expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+        if (left.truthy === false) return false;
+        if (left.truthy === true) {
+          return isExternalProviderReference(expression.right, seen, depth + 1, tokenPosition);
+        }
+      } else if (expression.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        if (left.truthy === true) return false;
+        if (left.truthy === false) {
+          return isExternalProviderReference(expression.right, seen, depth + 1, tokenPosition);
+        }
+      } else if (expression.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
+        if (left.nullish === false) return false;
+        if (left.nullish === true) {
+          return isExternalProviderReference(expression.right, seen, depth + 1, tokenPosition);
+        }
+      }
+      return isExternalProviderReference(expression.left, new Set(seen), depth + 1, tokenPosition)
+        || isExternalProviderReference(expression.right, new Set(seen), depth + 1, tokenPosition);
+    }
+    if (ts.isCallExpression(expression)) {
+      if (expression.arguments.some((argument) => isExternalProviderReference(
+        ts.isSpreadElement(argument) ? argument.expression : argument,
+        new Set(seen), depth + 1, tokenPosition,
+      ))) return true;
+      let callee: ts.Expression = expression.expression;
+      while (ts.isParenthesizedExpression(callee)) callee = callee.expression;
+      if ((ts.isPropertyAccessExpression(callee) || ts.isElementAccessExpression(callee))) {
+        const invocation = ts.isPropertyAccessExpression(callee) ? callee.name.text
+          : callee.argumentExpression
+            ? resolveStaticPropertyKey(callee.argumentExpression, checker, check) : undefined;
+        if (invocation === 'call' || invocation === 'apply' || invocation === 'bind') {
+          callee = callee.expression;
+        }
+      }
+      const calleeAliases = new Set<ts.Symbol>();
+      while (ts.isIdentifier(callee)) {
+        let alias = checker.getSymbolAtLocation(callee);
+        if (alias?.flags && alias.flags & ts.SymbolFlags.Alias) alias = checker.getAliasedSymbol(alias);
+        if (!alias || calleeAliases.has(alias)) break;
+        calleeAliases.add(alias);
+        const declarations = alias.declarations?.filter(ts.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+          || !ts.isVariableDeclarationList(declaration.parent)
+          || !(declaration.parent.flags & ts.NodeFlags.Const)) break;
+        callee = declaration.initializer;
+        while (ts.isParenthesizedExpression(callee) || ts.isAsExpression(callee)
+          || ts.isTypeAssertionExpression(callee) || ts.isSatisfiesExpression(callee)
+          || ts.isNonNullExpression(callee)) callee = callee.expression;
+      }
+      if (ts.isArrowFunction(callee) || ts.isFunctionExpression(callee)) {
+        if (!tokenPosition && callee.parameters.length > 0) return true;
+        if (!ts.isBlock(callee.body)) {
+          return isExternalProviderReference(callee.body, new Set(seen), depth + 1, tokenPosition);
+        }
+        const nodes: ts.Node[] = [...callee.body.statements];
+        while (nodes.length > 0) {
+          check();
+          const node = nodes.pop()!;
+          if (ts.isReturnStatement(node) && node.expression
+            && isExternalProviderReference(
+              node.expression, new Set(seen), depth + 1, tokenPosition,
+            )) return true;
+          if (!ts.isFunctionLike(node)) ts.forEachChild(node, (child) => { nodes.push(child); });
+        }
+        return false;
+      }
+      if (isExternalProviderReference(callee, seen, depth + 1, tokenPosition)) return true;
+      let symbol = checker.getSymbolAtLocation(callee);
+      if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+      if (symbol?.declarations?.some((declaration) => (
+        declaration.getSourceFile().fileName.replaceAll('\\', '/').includes('/node_modules/')
+      ))) return true;
+      const functionReturnsExternal = (
+        callable: ts.FunctionDeclaration | ts.FunctionExpression | ts.ArrowFunction
+          | ts.MethodDeclaration,
+      ): boolean => {
+        if (!callable.body) return false;
+        if (!ts.isBlock(callable.body)) {
+          return isExternalProviderReference(callable.body, new Set(seen), depth + 1, tokenPosition);
+        }
+        const nodes: ts.Node[] = [...callable.body.statements];
+        while (nodes.length > 0) {
+          check();
+          const node = nodes.pop()!;
+          if (ts.isReturnStatement(node) && node.expression
+            && isExternalProviderReference(
+              node.expression, new Set(seen), depth + 1, tokenPosition,
+            )) return true;
+          if (!ts.isFunctionLike(node)) ts.forEachChild(node, (child) => { nodes.push(child); });
+        }
+        return false;
+      };
+      if (symbol && unstableSymbols.has(symbol)) return true;
+      let resolvedLocalCallable = false;
+      const localDeclarations = (symbol?.declarations ?? []).filter((declaration) => (
+        projectSources.has(declaration.getSourceFile())
+      ));
+      const functionDeclarations = localDeclarations.filter(ts.isFunctionDeclaration);
+      if (functionDeclarations.length > 0) {
+        const implementations = functionDeclarations.filter((declaration) => declaration.body);
+        if (implementations.length !== 1) return true;
+        if (!tokenPosition && implementations[0].parameters.length > 0) return true;
+        resolvedLocalCallable = true;
+        if (functionReturnsExternal(implementations[0])) return true;
+      }
+      const methodDeclarations = localDeclarations.filter(ts.isMethodDeclaration);
+      if (methodDeclarations.length > 0) {
+        if (!tokenPosition || methodDeclarations.length !== 1 || !methodDeclarations[0].body) return true;
+        resolvedLocalCallable = true;
+        if (functionReturnsExternal(methodDeclarations[0])) return true;
+      }
+      for (const declaration of localDeclarations) {
+        if (ts.isFunctionDeclaration(declaration) || ts.isMethodDeclaration(declaration)) continue;
+        if (ts.isVariableDeclaration(declaration) || ts.isPropertyAssignment(declaration)) {
+          if (!declaration.initializer) return true;
+          let initializer = declaration.initializer;
+          while (ts.isParenthesizedExpression(initializer) || ts.isAsExpression(initializer)
+            || ts.isTypeAssertionExpression(initializer) || ts.isSatisfiesExpression(initializer)
+            || ts.isNonNullExpression(initializer)) initializer = initializer.expression;
+          if (!ts.isArrowFunction(initializer) && !ts.isFunctionExpression(initializer)) return true;
+          if (!tokenPosition && initializer.parameters.length > 0) return true;
+          resolvedLocalCallable = true;
+          if (functionReturnsExternal(initializer)) return true;
+        } else return true;
+      }
+      return tokenPosition ? false : !resolvedLocalCallable;
+    }
+    if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
+      const propertyName = ts.isPropertyAccessExpression(expression) ? expression.name.text
+        : expression.argumentExpression
+          ? resolveStaticPropertyKey(expression.argumentExpression, checker, check) : undefined;
+      const receiver = resolveConstObject(expression.expression, checker, projectSources, check);
+      const memberSymbol = symbolAt(ts.isPropertyAccessExpression(expression)
+        ? expression.name : expression);
+      let receiverExpression: ts.Expression = expression.expression;
+      while (ts.isParenthesizedExpression(receiverExpression) || ts.isAsExpression(receiverExpression)
+        || ts.isTypeAssertionExpression(receiverExpression) || ts.isSatisfiesExpression(receiverExpression)
+        || ts.isNonNullExpression(receiverExpression)) receiverExpression = receiverExpression.expression;
+      const receiverSymbol = rootSymbolAt(receiverExpression);
+      if (tokenPosition && (escapeIndexIncomplete
+        || (memberSymbol && unresolvedAssignments.has(memberSymbol))
+        || (receiverSymbol && (unstableSymbols.has(receiverSymbol)
+          || unstableContainers.has(receiverSymbol))))) return true;
+      if (tokenPosition && memberSymbol && (assignedValues.get(memberSymbol) ?? []).some((value) => (
+        isExternalProviderReference(value, new Set(seen), depth + 1, true)
+      ))) return true;
+      if (propertyName !== undefined && receiver) {
+        const effective = effectiveObjectProperty(
+          receiver, propertyName, checker, projectSources, check,
+        );
+        if (effective.present) {
+          return effective.candidates.some((candidate) => (
+            isExternalProviderReference(candidate, new Set(seen), depth + 1, tokenPosition)
+          ));
+        }
+      }
+      let symbol = checker.getSymbolAtLocation(ts.isPropertyAccessExpression(expression)
+        ? expression.name : expression);
+      if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+      if (symbol?.declarations?.some((declaration) => (
+        ts.isClassLike(declaration) || ts.isFunctionDeclaration(declaration)
+      ))) return false;
+      if (symbol?.declarations?.some((declaration) => (
+        declaration.getSourceFile().fileName.replaceAll('\\', '/').includes('/node_modules/')
+      ))) return true;
+      const property = symbol?.declarations?.find((declaration): declaration is (
+        ts.PropertyAssignment | ts.ShorthandPropertyAssignment
+      ) => ts.isPropertyAssignment(declaration) || ts.isShorthandPropertyAssignment(declaration));
+      if (property && projectSources.has(property.getSourceFile())) {
+        let initializer: ts.Expression | undefined = ts.isPropertyAssignment(property)
+          ? property.initializer : undefined;
+        if (ts.isShorthandPropertyAssignment(property)) {
+          let value = checker.getShorthandAssignmentValueSymbol(property);
+          if (value?.flags && value.flags & ts.SymbolFlags.Alias) value = checker.getAliasedSymbol(value);
+          const declaration = value?.declarations?.find((entry): entry is ts.VariableDeclaration => (
+            ts.isVariableDeclaration(entry) && entry.initializer !== undefined
+          ));
+          initializer = declaration?.initializer;
+        }
+        if (!initializer) return false;
+        return isExternalProviderReference(initializer, seen, depth + 1, tokenPosition);
+      }
+      return !symbol && isExternalProviderReference(
+        expression.expression, seen, depth + 1, tokenPosition,
+      );
+    }
+    if (!ts.isIdentifier(expression)) return false;
+    const symbol = resolvedSymbolAt(expression, checker);
+    if (symbol?.getName() === 'APP_GUARD' && symbol.declarations?.some((declaration) => (
+      declaration.getSourceFile().fileName.replaceAll('\\', '/').includes('/node_modules/@nestjs/core/')
+    ))) return false;
+    if (symbol?.declarations?.some(ts.isClassLike)) return false;
+    if (symbol?.declarations?.some(ts.isFunctionDeclaration)) {
+      const local = symbol.declarations.some((declaration) => (
+        projectSources.has(declaration.getSourceFile())
+      ));
+      if (!local) return false;
+      return reassignedSymbols.has(symbol) || unresolvedAssignments.has(symbol)
+        || assignedValues.has(symbol) || aliasSetHas(escapedSymbols, symbol);
+    }
+    if (symbol?.declarations?.some((declaration) => (
+      declaration.getSourceFile().fileName.replaceAll('\\', '/').includes('/node_modules/')
+    ))) return true;
+    if (!symbol || seen.has(symbol)) return false;
+    seen.add(symbol);
+    const bindings = symbol.declarations?.filter(ts.isBindingElement) ?? [];
+    if (bindings.length > 0) {
+      if (bindings.length !== 1) return true;
+      const steps: ({ key: string } | { index: number })[] = [];
+      let binding = bindings[0];
+      let variable: ts.VariableDeclaration | undefined;
+      while (true) {
+        if (binding.dotDotDotToken || binding.initializer) return true;
+        const pattern = binding.parent;
+        if (ts.isObjectBindingPattern(pattern)) {
+          const key = binding.propertyName && (ts.isIdentifier(binding.propertyName)
+            || ts.isStringLiteral(binding.propertyName) || ts.isNumericLiteral(binding.propertyName))
+            ? binding.propertyName.text : ts.isIdentifier(binding.name) ? binding.name.text : undefined;
+          if (key === undefined) return true;
+          steps.push({ key });
+        } else if (ts.isArrayBindingPattern(pattern)) {
+          const index = pattern.elements.indexOf(binding);
+          if (index < 0) return true;
+          steps.push({ index });
+        } else return true;
+        if (ts.isVariableDeclaration(pattern.parent)) {
+          variable = pattern.parent;
+          break;
+        }
+        if (ts.isParameter(pattern.parent)) return false;
+        if (!ts.isBindingElement(pattern.parent)) return true;
+        binding = pattern.parent;
+      }
+      if (!variable.initializer || !projectSources.has(variable.getSourceFile())
+        || !ts.isVariableDeclarationList(variable.parent)
+        || !(variable.parent.flags & ts.NodeFlags.Const)) return true;
+      if (unresolvedAssignments.has(symbol) || reassignedSymbols.has(symbol)
+        || aliasSetHas(escapedSymbols, symbol) || aliasSetHas(unstableContainers, symbol)) return true;
+      let values: readonly ts.Expression[] = [variable.initializer];
+      for (const step of steps.reverse()) {
+        const next: ts.Expression[] = [];
+        for (const value of values) {
+          if ('key' in step) {
+            const object = resolveConstObject(value, checker, projectSources, check);
+            if (!object) return true;
+            const effective = effectiveObjectProperty(
+              object, step.key, checker, projectSources, check,
+            );
+            if (!effective.present || effective.accessor) return true;
+            next.push(...effective.candidates);
+          } else {
+            let array = value;
+            while (ts.isParenthesizedExpression(array) || ts.isAsExpression(array)
+              || ts.isTypeAssertionExpression(array) || ts.isSatisfiesExpression(array)
+              || ts.isNonNullExpression(array)) array = array.expression;
+            if (!ts.isArrayLiteralExpression(array) || array.elements.some(ts.isSpreadElement)) return true;
+            const element = array.elements[step.index];
+            if (!element || ts.isOmittedExpression(element) || ts.isSpreadElement(element)) return true;
+            next.push(element);
+          }
+        }
+        values = next;
+      }
+      return [...values, ...(assignedValues.get(symbol) ?? [])].some((value) => isExternalProviderReference(
+        value, new Set(seen), depth + 1, tokenPosition,
+      ));
+    }
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration) {
+      return !tokenPosition && (symbol.declarations?.some((entry) => (
+        ts.isParameter(entry) && projectSources.has(entry.getSourceFile())
+      )) ?? false);
+    }
+    if (!projectSources.has(declaration.getSourceFile())) return false;
+    const candidates: ts.Expression[] = [
+      ...(declaration.initializer ? [declaration.initializer] : []),
+      ...(assignedValues.get(symbol) ?? []),
+    ];
+    const unresolvedWrite = unresolvedAssignments.has(symbol)
+      || unstableContainers.has(symbol) || escapedSymbols.has(symbol)
+      || (reassignedSymbols.has(symbol) && !assignedValues.has(symbol));
+    return unresolvedWrite || candidates.some((candidate) => (
+      isExternalProviderReference(candidate, new Set(seen), depth + 1, tokenPosition)
+    ));
+  };
+  let unresolvedProvider: ts.Expression | undefined;
   let externalModuleImport: ts.Expression | undefined;
   for (const sourceFile of projectSources) {
     const nodes: ts.Node[] = [sourceFile];
@@ -552,8 +1749,9 @@ function registeredProviderObjects(
             metadata, 'providers', checker, projectSources, check,
           );
           for (const providerExpression of effectiveProviders.candidates) {
-            if (!collect(providerExpression, new Set(), 0)) {
-              candidates.push(providerExpression);
+            if (!collect(providerExpression, new Set(), 0)) candidates.push(providerExpression);
+            if (!unresolvedProvider && isExternalProviderReference(providerExpression)) {
+              unresolvedProvider = providerExpression;
             }
           }
           const effectiveImports = effectiveObjectProperty(
@@ -567,7 +1765,7 @@ function registeredProviderObjects(
       ts.forEachChild(node, (child) => { nodes.push(child); });
     }
   }
-  return { providers, candidates, externalModuleImport };
+  return { providers, candidates, unresolvedProvider, externalModuleImport };
 }
 
 function isProviderRegistration(
@@ -611,12 +1809,6 @@ function containsCanonicalProviderToken(
   maxSteps: number,
   referencesBySymbol: ReadonlyMap<ts.Symbol, readonly ts.Identifier[]>,
 ): boolean {
-  const READ_ONLY_ARRAY_METHODS = new Set([
-    'at', 'concat', 'entries', 'every', 'filter', 'find', 'findIndex', 'findLast',
-    'findLastIndex', 'flat', 'flatMap', 'forEach', 'includes', 'indexOf', 'join', 'keys',
-    'lastIndexOf', 'map', 'reduce', 'reduceRight', 'slice', 'some', 'toLocaleString',
-    'toReversed', 'toSorted', 'toSpliced', 'toString', 'values', 'with',
-  ]);
   const expressions: ts.Expression[] = [input];
   const seenExpressions = new Set<ts.Expression>();
   const seenSymbols = new Set<ts.Symbol>();
@@ -947,6 +2139,397 @@ function emptyAuthMetadata(): AuthDecoratorMetadata {
   };
 }
 
+function isUnresolvedStoredGuardDecorator(
+  decorator: ts.Decorator,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+): boolean {
+  const seen = new Set<ts.Symbol>();
+  const unwrap = (input: ts.Expression): ts.Expression => {
+    let current = input;
+    while (ts.isParenthesizedExpression(current) || ts.isAsExpression(current)
+      || ts.isTypeAssertionExpression(current) || ts.isSatisfiesExpression(current)
+      || ts.isNonNullExpression(current)) current = current.expression;
+    return current;
+  };
+  const expressionUsesGuardDecorator = (
+    input: ts.Expression,
+  ): boolean => {
+    const expressions: ts.Expression[] = [input];
+    const visited = new Set<ts.Symbol>();
+    const assignments = new Map<ts.Symbol, readonly ts.Expression[] | null>();
+    const assignmentValues = (symbol: ts.Symbol): readonly ts.Expression[] | undefined => {
+      const cached = assignments.get(symbol);
+      if (cached !== undefined) return cached ?? undefined;
+      const values: ts.Expression[] = [];
+      let unresolved = false;
+      const nodes: ts.Node[] = [...projectSources];
+      while (nodes.length > 0) {
+        check();
+        const node = nodes.pop()!;
+        if (ts.isBinaryExpression(node) && !isNestedDestructuringDefault(node)
+          && assignmentTargetContainsSymbol(node.left, symbol, checker, check)) {
+          if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+            const assigned = assignmentValuesForSymbol(
+              node.left, node.right, symbol, checker, projectSources, check,
+            );
+            if (assigned) values.push(...assigned);
+            else unresolved = true;
+          }
+          else if (node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+            && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) unresolved = true;
+        } else if ((ts.isForOfStatement(node) || ts.isForInStatement(node))
+          && assignmentTargetContainsSymbol(node.initializer, symbol, checker, check)) {
+          if (ts.isVariableDeclarationList(node.initializer)) unresolved = true;
+          else {
+            const assigned = assignmentValuesForSymbol(
+              node.initializer, node.expression, symbol, checker, projectSources, check,
+            );
+            if (assigned) values.push(...assigned);
+            else unresolved = true;
+          }
+        }
+        ts.forEachChild(node, (child) => { nodes.push(child); });
+      }
+      assignments.set(symbol, unresolved ? null : values);
+      return unresolved ? undefined : values;
+    };
+    let steps = 0;
+    while (expressions.length > 0) {
+      check();
+      steps += 1;
+      if (steps > 64) return true;
+      const candidate = unwrap(expressions.pop()!);
+      if (ts.isCallExpression(candidate)) {
+        const resolved = resolveDecoratorCallSymbol(candidate, checker, check);
+        if (resolved?.nestJsCommon
+          && (resolved.name === 'UseGuards' || resolved.name === 'applyDecorators')) return true;
+        expressions.push(...candidate.arguments.map((argument) => (
+          ts.isSpreadElement(argument) ? argument.expression : argument
+        )));
+        let calleeExpression = unwrap(candidate.expression);
+        const calleeAliases = new Set<ts.Symbol>();
+        while (ts.isIdentifier(calleeExpression)) {
+          let alias = checker.getSymbolAtLocation(calleeExpression);
+          if (alias?.flags && alias.flags & ts.SymbolFlags.Alias) alias = checker.getAliasedSymbol(alias);
+          if (!alias || calleeAliases.has(alias)) break;
+          calleeAliases.add(alias);
+          const declarations = alias.declarations?.filter(ts.isVariableDeclaration) ?? [];
+          const declaration = declarations.length === 1 ? declarations[0] : undefined;
+          if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+            || !ts.isVariableDeclarationList(declaration.parent)
+            || !(declaration.parent.flags & ts.NodeFlags.Const)) break;
+          calleeExpression = unwrap(declaration.initializer);
+        }
+        if (ts.isArrowFunction(calleeExpression) || ts.isFunctionExpression(calleeExpression)) {
+          if (!ts.isBlock(calleeExpression.body)) expressions.push(calleeExpression.body);
+          else {
+            const nodes: ts.Node[] = [...calleeExpression.body.statements];
+            while (nodes.length > 0) {
+              check();
+              const node = nodes.pop()!;
+              if (ts.isReturnStatement(node) && node.expression) expressions.push(node.expression);
+              else if (!ts.isFunctionLike(node)) {
+                ts.forEachChild(node, (child) => { nodes.push(child); });
+              }
+            }
+          }
+          continue;
+        }
+        let calleeSymbol = checker.getSymbolAtLocation(calleeExpression);
+        if (calleeSymbol?.flags && calleeSymbol.flags & ts.SymbolFlags.Alias) {
+          calleeSymbol = checker.getAliasedSymbol(calleeSymbol);
+        }
+        if (calleeSymbol?.declarations?.some(ts.isMethodDeclaration)) return true;
+        if (calleeSymbol?.declarations?.some((declaration) => (
+          projectSources.has(declaration.getSourceFile())
+        ))) {
+          const values = assignmentValues(calleeSymbol);
+          if (!values) return true;
+          expressions.push(...values);
+        }
+        for (const declaration of calleeSymbol?.declarations ?? []) {
+          if (!projectSources.has(declaration.getSourceFile())) continue;
+          const callable = ts.isFunctionDeclaration(declaration) && declaration.body
+            ? declaration
+            : ts.isVariableDeclaration(declaration) && declaration.initializer
+              && (ts.isArrowFunction(unwrap(declaration.initializer))
+                || ts.isFunctionExpression(unwrap(declaration.initializer)))
+              ? unwrap(declaration.initializer) as ts.ArrowFunction | ts.FunctionExpression
+              : undefined;
+          if (!callable) continue;
+          const body = callable.body;
+          if (!body) continue;
+          if (!ts.isBlock(body)) expressions.push(body);
+          else {
+            const nodes: ts.Node[] = [...body.statements];
+            while (nodes.length > 0) {
+              check();
+              const node = nodes.pop()!;
+              if (ts.isReturnStatement(node) && node.expression) expressions.push(node.expression);
+              else if (node !== callable && !ts.isFunctionLike(node)) {
+                ts.forEachChild(node, (child) => { nodes.push(child); });
+              }
+            }
+          }
+        }
+        continue;
+      }
+      if (ts.isArrowFunction(candidate) || ts.isFunctionExpression(candidate)) {
+        if (!ts.isBlock(candidate.body)) expressions.push(candidate.body);
+        else {
+          const nodes: ts.Node[] = [...candidate.body.statements];
+          while (nodes.length > 0) {
+            check();
+            const node = nodes.pop()!;
+            if (ts.isReturnStatement(node) && node.expression) expressions.push(node.expression);
+            else if (!ts.isFunctionLike(node)) {
+              ts.forEachChild(node, (child) => { nodes.push(child); });
+            }
+          }
+        }
+        continue;
+      }
+      if (ts.isIdentifier(candidate)) {
+        let symbol = checker.getSymbolAtLocation(candidate);
+        if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+        if (!symbol || visited.has(symbol)) continue;
+        visited.add(symbol);
+        if (symbol.declarations?.some((entry) => (
+          ts.isParameter(entry) && projectSources.has(entry.getSourceFile())
+        ))) return true;
+        const declaration = symbol.declarations?.find((entry): entry is ts.VariableDeclaration => (
+          ts.isVariableDeclaration(entry) && entry.initializer !== undefined
+          && projectSources.has(entry.getSourceFile())
+        ));
+        if (declaration?.initializer) expressions.push(declaration.initializer);
+        if (symbol.declarations?.some((entry) => projectSources.has(entry.getSourceFile()))) {
+          const values = assignmentValues(symbol);
+          if (!values) return true;
+          expressions.push(...values);
+        }
+        continue;
+      }
+      if (ts.isConditionalExpression(candidate)) {
+        expressions.push(candidate.whenTrue, candidate.whenFalse);
+      } else if (ts.isBinaryExpression(candidate)) {
+        expressions.push(candidate.left, candidate.right);
+      } else if (ts.isArrayLiteralExpression(candidate)) {
+        for (const element of candidate.elements) {
+          if (!ts.isOmittedExpression(element)) {
+            expressions.push(ts.isSpreadElement(element) ? element.expression : element);
+          }
+        }
+      } else if (ts.isObjectLiteralExpression(candidate)) {
+        for (const property of candidate.properties) {
+          if (ts.isPropertyAssignment(property)) expressions.push(property.initializer);
+          else if (ts.isSpreadAssignment(property)) expressions.push(property.expression);
+          else if (ts.isShorthandPropertyAssignment(property)) expressions.push(property.name);
+        }
+      }
+    }
+    return false;
+  };
+  const mutableBindingUsesGuardDecorator = (
+    symbol: ts.Symbol,
+    declaration: ts.VariableDeclaration,
+  ): boolean => {
+    let projectCache = MUTABLE_STORED_GUARD_CACHE.get(projectSources);
+    if (!projectCache) {
+      projectCache = new WeakMap();
+      MUTABLE_STORED_GUARD_CACHE.set(projectSources, projectCache);
+    }
+    const cached = projectCache.get(symbol);
+    if (cached !== undefined) return cached;
+    let found = Boolean(declaration.initializer
+      && expressionUsesGuardDecorator(declaration.initializer));
+    const nodes: ts.Node[] = found ? [] : [...projectSources];
+    while (nodes.length > 0 && !found) {
+      const node = nodes.pop()!;
+      check();
+      if (ts.isBinaryExpression(node) && !isNestedDestructuringDefault(node)
+        && assignmentTargetContainsSymbol(node.left, symbol, checker, check)) {
+        if (node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+          && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) {
+          if (node.operatorToken.kind !== ts.SyntaxKind.EqualsToken) found = true;
+          else {
+            const assigned = assignmentValuesForSymbol(
+              node.left, node.right, symbol, checker, projectSources, check,
+            );
+            found = !assigned || assigned.some(expressionUsesGuardDecorator);
+          }
+        }
+      } else if ((ts.isForOfStatement(node) || ts.isForInStatement(node))
+        && assignmentTargetContainsSymbol(node.initializer, symbol, checker, check)) {
+        if (ts.isVariableDeclarationList(node.initializer)) found = true;
+        else {
+          const assigned = assignmentValuesForSymbol(
+            node.initializer, node.expression, symbol, checker, projectSources, check,
+          );
+          found = !assigned || assigned.some(expressionUsesGuardDecorator);
+        }
+      }
+      ts.forEachChild(node, (child) => { nodes.push(child); });
+    }
+    projectCache.set(symbol, found);
+    return found;
+  };
+  let expression: ts.Expression = decorator.expression;
+  expression = unwrap(expression);
+  if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
+    const receiver = unwrap(expression.expression);
+    const namespace = ts.isIdentifier(receiver)
+      ? checker.getSymbolAtLocation(receiver)?.declarations?.some(ts.isNamespaceImport) : false;
+    let member = checker.getSymbolAtLocation(
+      ts.isPropertyAccessExpression(expression) ? expression.name : expression,
+    );
+    if (member?.flags && member.flags & ts.SymbolFlags.Alias) member = checker.getAliasedSymbol(member);
+    const declarations = member?.declarations?.filter((declaration) => (
+      projectSources.has(declaration.getSourceFile())
+    )) ?? [];
+    if (namespace && declarations.length > 0) {
+      for (const declaration of declarations) {
+        if (ts.isVariableDeclaration(declaration)) {
+          if (!ts.isVariableDeclarationList(declaration.parent)
+            || !(declaration.parent.flags & ts.NodeFlags.Const)) return true;
+          if (declaration.initializer && expressionUsesGuardDecorator(declaration.initializer)) return true;
+        } else if (ts.isFunctionDeclaration(declaration) && declaration.body) {
+          const writes: ts.Node[] = [...projectSources];
+          while (writes.length > 0) {
+            check();
+            const node = writes.pop()!;
+            if (ts.isBinaryExpression(node) && !isNestedDestructuringDefault(node)
+              && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+              && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+              && member && assignmentTargetContainsSymbol(node.left, member, checker, check)) return true;
+            if ((ts.isForOfStatement(node) || ts.isForInStatement(node)) && member
+              && assignmentTargetContainsSymbol(node.initializer, member, checker, check)) return true;
+            ts.forEachChild(node, (child) => { writes.push(child); });
+          }
+          const returns: ts.Expression[] = [];
+          const staticTruth = (input: ts.Expression): boolean | undefined => {
+            let value = input;
+            while (ts.isParenthesizedExpression(value) || ts.isAsExpression(value)
+              || ts.isTypeAssertionExpression(value) || ts.isSatisfiesExpression(value)
+              || ts.isNonNullExpression(value)) value = value.expression;
+            if (value.kind === ts.SyntaxKind.TrueKeyword) return true;
+            if (value.kind === ts.SyntaxKind.FalseKeyword || value.kind === ts.SyntaxKind.NullKeyword
+              || ts.isVoidExpression(value)) return false;
+            if (ts.isNumericLiteral(value)) return Number(value.text) !== 0;
+            if (ts.isStringLiteral(value) || ts.isNoSubstitutionTemplateLiteral(value)) {
+              return value.text.length > 0;
+            }
+            if (ts.isIdentifier(value) && value.text === 'undefined'
+              && !checker.getSymbolAtLocation(value)?.declarations?.length) return false;
+            return undefined;
+          };
+          const NORMAL = 1;
+          const RETURN = 2;
+          const BREAK = 4;
+          const CONTINUE = 8;
+          let flowDepth = 0;
+          let flowOverflow = false;
+          const collect = (statement: ts.Statement): number => {
+            check();
+            if (flowDepth >= 32) {
+              flowOverflow = true;
+              return NORMAL;
+            }
+            flowDepth += 1;
+            try {
+              if (ts.isReturnStatement(statement)) {
+                if (statement.expression) returns.push(statement.expression);
+                return RETURN;
+              }
+              if (ts.isBreakStatement(statement)) return BREAK;
+              if (ts.isContinueStatement(statement)) return CONTINUE;
+              if (ts.isBlock(statement)) {
+                let flow = NORMAL;
+                for (const child of statement.statements) {
+                  if (!(flow & NORMAL)) break;
+                  flow = (flow & ~NORMAL) | collect(child);
+                }
+                return flow;
+              } else if (ts.isIfStatement(statement)) {
+                const condition = staticTruth(statement.expression);
+                if (condition === false) {
+                  return statement.elseStatement ? collect(statement.elseStatement) : NORMAL;
+                }
+                if (condition === true) return collect(statement.thenStatement);
+                return collect(statement.thenStatement)
+                  | (statement.elseStatement ? collect(statement.elseStatement) : NORMAL);
+              } else if (ts.isTryStatement(statement)) {
+                const start = returns.length;
+                const tryFlow = collect(statement.tryBlock);
+                const bodyFlow = statement.catchClause
+                  ? tryFlow | collect(statement.catchClause.block) : tryFlow;
+                const beforeFinally = returns.length;
+                const finallyFlow = statement.finallyBlock ? collect(statement.finallyBlock) : NORMAL;
+                if (!(finallyFlow & NORMAL)) returns.splice(start, beforeFinally - start);
+                return (finallyFlow & ~NORMAL)
+                  | ((finallyFlow & NORMAL) ? bodyFlow : 0);
+              } else if (ts.isSwitchStatement(statement)) {
+                let flow = NORMAL;
+                for (const clause of statement.caseBlock.clauses) {
+                  let clauseFlow = NORMAL;
+                  for (const child of clause.statements) {
+                    if (!(clauseFlow & NORMAL)) break;
+                    clauseFlow = (clauseFlow & ~NORMAL) | collect(child);
+                  }
+                  flow |= clauseFlow;
+                }
+                return flow;
+              } else if (ts.isWhileStatement(statement)) {
+                if (staticTruth(statement.expression) === false) return NORMAL;
+                return NORMAL | (collect(statement.statement) & RETURN);
+              } else if (ts.isForStatement(statement)) {
+                if (statement.condition && staticTruth(statement.condition) === false) return NORMAL;
+                return NORMAL | (collect(statement.statement) & RETURN);
+              } else if (ts.isDoStatement(statement)) {
+                const bodyFlow = collect(statement.statement);
+                return (bodyFlow & RETURN) | (bodyFlow === RETURN ? 0 : NORMAL);
+              } else if (ts.isForInStatement(statement) || ts.isForOfStatement(statement)) {
+                return NORMAL | (collect(statement.statement) & RETURN);
+              }
+              return NORMAL;
+            } finally {
+              flowDepth -= 1;
+            }
+          };
+          collect(declaration.body);
+          if (flowOverflow || returns.some(expressionUsesGuardDecorator)) return true;
+        } else return true;
+      }
+      return false;
+    }
+    return true;
+  }
+  while (ts.isIdentifier(expression)) {
+    check();
+    let symbol = checker.getSymbolAtLocation(expression);
+    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (!symbol || seen.has(symbol)) return false;
+    seen.add(symbol);
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration || !projectSources.has(declaration.getSourceFile())) return false;
+    if (!ts.isVariableDeclarationList(declaration.parent)
+      || !(declaration.parent.flags & ts.NodeFlags.Const)) {
+      return mutableBindingUsesGuardDecorator(symbol, declaration);
+    }
+    if (!declaration.initializer) return false;
+    expression = unwrap(declaration.initializer);
+  }
+  if (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
+    return true;
+  }
+  if (!ts.isCallExpression(expression)) return false;
+  const resolved = resolveDecoratorCallSymbol(expression, checker, check);
+  return Boolean(resolved?.nestJsCommon
+    && (resolved.name === 'UseGuards' || resolved.name === 'applyDecorators'));
+}
+
 function ownAuthMetadata(
   node: ts.Node,
   checker: ts.TypeChecker,
@@ -1065,6 +2648,8 @@ function ownAuthMetadata(
     const resolved = resolveDecoratorSymbol(decorator, checker, check, projectSources);
     if (resolved) {
       applyResolved(resolved, decorator, 0);
+    } else if (isUnresolvedStoredGuardDecorator(decorator, checker, projectSources, check)) {
+      result.guardDynamic = true;
     }
   }
   result.dynamic = result.guardDynamic || result.publicDynamic || result.rolesDynamic;
@@ -1521,7 +3106,9 @@ async function analyze(
       ...sourceLocation(node, context.workspaceRoot),
     });
   };
-  const unsupportedGlobalGuard = potentialGlobalProvider ?? providerRegistrations.externalModuleImport;
+  const unsupportedGlobalGuard = potentialGlobalProvider
+    ?? providerRegistrations.externalModuleImport
+    ?? providerRegistrations.unresolvedProvider;
   if (unsupportedGlobalGuard) {
     addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', unsupportedGlobalGuard);
     globalGuardFound = true;

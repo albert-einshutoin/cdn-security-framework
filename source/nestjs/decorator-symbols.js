@@ -2974,6 +2974,14 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
             expression = unwrapExpression(bind.expression);
         }
     }
+    const invocation = typescript_1.default.isPropertyAccessExpression(expression)
+        ? expression.name.text
+        : typescript_1.default.isElementAccessExpression(expression) && expression.argumentExpression
+            ? resolveStaticPropertyKey(expression.argumentExpression, checker, check) : undefined;
+    if ((invocation === 'call' || invocation === 'apply')
+        && (typescript_1.default.isPropertyAccessExpression(expression) || typescript_1.default.isElementAccessExpression(expression))) {
+        expression = resolveConstInitializer(expression.expression, checker, check, projectSources);
+    }
     const property = typescript_1.default.isPropertyAccessExpression(expression)
         ? expression.name.text
         : typescript_1.default.isElementAccessExpression(expression) && expression.argumentExpression
@@ -2985,6 +2993,6 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
     const symbol = typescript_1.default.isPropertyAccessExpression(expression)
         ? checker.getSymbolAtLocation(expression.name)
         : checker.getNonNullableType(checker.getTypeAtLocation(expression.expression)).getProperty(property);
-    return matchesConsumerModule(call.expression, symbol, '@nestjs/common')
-        || matchesConsumerModule(call.expression, symbol, '@nestjs/core');
+    return matchesConsumerModule(expression, symbol, '@nestjs/common')
+        || matchesConsumerModule(expression, symbol, '@nestjs/core');
 }
