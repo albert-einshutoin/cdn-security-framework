@@ -3228,13 +3228,108 @@ function containsCanonicalProviderToken(
   const seenSymbols = new Set<ts.Symbol>();
   let steps = 0;
   const symbolAt = (node: ts.Identifier) => resolvedSymbolAt(node, checker);
-  const staticBoolean = (input: ts.Expression): boolean | undefined => {
+  const staticState = (
+    input: ts.Expression,
+    seen = new Set<ts.Symbol>(),
+    depth = 0,
+  ): { truthy?: boolean; nullish?: boolean } => {
+    check();
+    if (depth > 64) return {};
     let expression = input;
     while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
       || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
       || ts.isNonNullExpression(expression)) expression = expression.expression;
-    return expression.kind === ts.SyntaxKind.TrueKeyword
-      ? true : expression.kind === ts.SyntaxKind.FalseKeyword ? false : undefined;
+    if (ts.isBinaryExpression(expression) && (
+      expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+      || expression.operatorToken.kind === ts.SyntaxKind.BarBarToken
+      || expression.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+    )) {
+      const left = staticState(expression.left, new Set(seen), depth + 1);
+      if (expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+        if (left.truthy === false) return left;
+        if (left.truthy === true) return staticState(expression.right, seen, depth + 1);
+      } else if (expression.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        if (left.truthy === true) return left;
+        if (left.truthy === false) return staticState(expression.right, seen, depth + 1);
+      } else {
+        if (left.nullish === false) return left;
+        if (left.nullish === true) return staticState(expression.right, seen, depth + 1);
+      }
+      return {};
+    }
+    if (expression.kind === ts.SyntaxKind.NullKeyword || ts.isVoidExpression(expression)) {
+      return { truthy: false, nullish: true };
+    }
+    if (expression.kind === ts.SyntaxKind.TrueKeyword) return { truthy: true, nullish: false };
+    if (expression.kind === ts.SyntaxKind.FalseKeyword) return { truthy: false, nullish: false };
+    if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+      return { truthy: expression.text.length > 0, nullish: false };
+    }
+    if (ts.isNumericLiteral(expression)) {
+      return { truthy: Number(expression.text) !== 0, nullish: false };
+    }
+    if (ts.isBigIntLiteral(expression)) {
+      return { truthy: BigInt(expression.text.slice(0, -1)) !== 0n, nullish: false };
+    }
+    if (ts.isObjectLiteralExpression(expression) || ts.isArrayLiteralExpression(expression)
+      || ts.isFunctionExpression(expression) || ts.isArrowFunction(expression)
+      || ts.isClassExpression(expression) || ts.isRegularExpressionLiteral(expression)
+      || ts.isNewExpression(expression)) return { truthy: true, nullish: false };
+    if (!ts.isIdentifier(expression)) return {};
+    let symbol = checker.getSymbolAtLocation(expression);
+    if (expression.text === 'undefined' && !symbol?.declarations?.length) {
+      return { truthy: false, nullish: true };
+    }
+    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (!symbol || seen.has(symbol)) return {};
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+      || !ts.isVariableDeclarationList(declaration.parent)
+      || !(declaration.parent.flags & ts.NodeFlags.Const)) return {};
+    seen.add(symbol);
+    return staticState(declaration.initializer, seen, depth + 1);
+  };
+  const staticBoolean = (input: ts.Expression): boolean | undefined => staticState(input).truthy;
+  const containsLiteralProviderToken = (input: ts.Expression): boolean => {
+    const pending = [input];
+    const seen = new Set<ts.Expression>();
+    while (pending.length > 0) {
+      check();
+      steps += 1;
+      if (steps > maxSteps) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+      let expression = pending.pop()!;
+      while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+        || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+        || ts.isNonNullExpression(expression)) expression = expression.expression;
+      if (seen.has(expression)) continue;
+      seen.add(expression);
+      if (resolveStaticStrings(
+        expression, checker, projectSources, { check, maxSteps },
+      )?.includes('APP_GUARD') === true) return true;
+      if (ts.isConditionalExpression(expression)) {
+        const condition = staticState(expression.condition);
+        if (condition.truthy !== false) pending.push(expression.whenTrue);
+        if (condition.truthy !== true) pending.push(expression.whenFalse);
+      } else if (ts.isBinaryExpression(expression) && (
+        expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+        || expression.operatorToken.kind === ts.SyntaxKind.BarBarToken
+        || expression.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+      )) {
+        const left = staticState(expression.left);
+        if (expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+          if (left.truthy !== true) pending.push(expression.left);
+          if (left.truthy !== false) pending.push(expression.right);
+        } else if (expression.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+          if (left.truthy !== false) pending.push(expression.left);
+          if (left.truthy !== true) pending.push(expression.right);
+        } else {
+          if (left.nullish !== true) pending.push(expression.left);
+          if (left.nullish !== false) pending.push(expression.right);
+        }
+      }
+    }
+    return false;
   };
   type ReturnFlow = { candidates: ts.Expression[]; definitelyReturns: boolean; mayThrow: boolean };
   const identifierMayThrow = (node: ts.Identifier): boolean => {
@@ -3469,7 +3564,7 @@ function containsCanonicalProviderToken(
         for (const initializer of property.candidates) {
           if (containsStaticSymbolFrom(
             initializer, checker, check, '@nestjs/core', 'APP_GUARD', projectSources,
-          )) return true;
+          ) || (name === 'provide' && containsLiteralProviderToken(initializer))) return true;
           if (name === 'providers') expressions.push(initializer);
         }
       }

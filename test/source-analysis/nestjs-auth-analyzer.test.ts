@@ -1178,6 +1178,52 @@ describe('NestJS auth metadata analyzer', () => {
         expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
       ]));
     }
+
+    const conditionalRoot = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard } from './auth';
+      declare const enabled: boolean;
+      @Module({
+        providers: enabled ? [{ provide: 'APP_GUARD', useClass: JwtAuthGuard }] : [],
+      }) class AppModule {}
+      @Controller('conditional-literal-global') class GlobalController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+    const conditional = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(conditionalRoot),
+    );
+
+    expect(conditional.status).toBe('success');
+    if (conditional.status !== 'success') return;
+    expect(conditional.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(conditional.result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+
+    for (const [token, expected] of [
+      ["enabled ? 'APP_GUARD' : 'OTHER_TOKEN'", 'unknown'],
+      ["true ? 'OTHER_TOKEN' : 'APP_GUARD'", 'alternatives'],
+      ["enabled && 'APP_GUARD'", 'unknown'],
+      ["({}) || 'APP_GUARD'", 'alternatives'],
+      ["[] ?? 'APP_GUARD'", 'alternatives'],
+    ] as const) {
+      const root = workspace(`
+        import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+        import { JwtAuthGuard } from './auth';
+        declare const enabled: boolean;
+        @Module({ providers: [{ provide: ${token}, useClass: JwtAuthGuard }] })
+        class AppModule {}
+        @Controller('branch-literal-global') class GlobalController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+      const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+      expect(execution.status).toBe('success');
+      if (execution.status !== 'success') continue;
+      expect(execution.result.contract.operations[0].auth.mode).toBe(expected);
+    }
   });
 
   test('ignores APP_GUARD-shaped objects outside provider registration', async () => {
