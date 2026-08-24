@@ -176,13 +176,20 @@ function staticallyUnreachable(node: ts.Node): boolean {
         || (parent.operatorToken.kind === ts.SyntaxKind.BarBarToken && truth === true)
         || (parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
           && staticNullish(parent.left) === false)) return true;
-    } else if (ts.isCaseBlock(parent) && ts.isCaseClause(current)) {
+    } else if (ts.isCaseBlock(parent)
+      && (ts.isCaseClause(current) || ts.isDefaultClause(current))) {
       const selected = staticSwitchValue(parent.parent.expression);
-      if (selected !== undefined && !parent.clauses.some(ts.isDefaultClause)
-        && parent.clauses.every((clause) => ts.isCaseClause(clause)
-          && staticSwitchValue(clause.expression) !== undefined)
-        && !parent.clauses.some((clause) => ts.isCaseClause(clause)
-          && staticSwitchValue(clause.expression) === selected)) return true;
+      if (selected !== undefined && parent.clauses.every((clause) => (
+        ts.isDefaultClause(clause) || staticSwitchValue(clause.expression) !== undefined
+      ))) {
+        const matchingIndex = parent.clauses.findIndex((clause) => (
+          ts.isCaseClause(clause) && staticSwitchValue(clause.expression) === selected
+        ));
+        const selectedIndex = matchingIndex >= 0 ? matchingIndex
+          : parent.clauses.findIndex(ts.isDefaultClause);
+        const currentIndex = parent.clauses.indexOf(current);
+        if (selectedIndex < 0 || currentIndex < selectedIndex) return true;
+      }
     } else if ((ts.isBlock(parent) || ts.isCaseClause(parent) || ts.isDefaultClause(parent))
       && ts.isStatement(current)) {
       const index = parent.statements.indexOf(current);
@@ -4525,6 +4532,8 @@ async function analyze(
   const localFunctionSymbols = new WeakMap<LocalFunction, ts.Symbol>();
   const localClasses = new Map<ts.Symbol, { declaration: ts.ClassDeclaration; binding: ts.Identifier }>();
   const localClassSymbols = new WeakMap<ts.ClassDeclaration, ts.Symbol>();
+  const localObjects = new Map<ts.Symbol, { object: ts.ObjectLiteralExpression; binding: ts.Identifier }>();
+  const localObjectSymbols = new WeakMap<ts.ObjectLiteralExpression, ts.Symbol>();
   for (const sourceFile of projectSources) {
     if (!ts.isExternalModule(sourceFile)) continue;
     const nodes: ts.Node[] = [sourceFile];
@@ -4579,6 +4588,13 @@ async function analyze(
             localFunctions.set(symbol, { callable: initializer, binding: node.name });
             localFunctionSymbols.set(initializer, symbol);
           }
+        } else if (ts.isObjectLiteralExpression(initializer)) {
+          const symbol = resolvedSymbolAt(node.name, checker);
+          const declarations = symbol?.declarations?.filter(ts.isVariableDeclaration) ?? [];
+          if (symbol && declarations.length === 1) {
+            localObjects.set(symbol, { object: initializer, binding: node.name });
+            localObjectSymbols.set(initializer, symbol);
+          }
         }
       }
       ts.forEachChild(node, (child) => { nodes.push(child); });
@@ -4586,7 +4602,8 @@ async function analyze(
   }
   const referencedLocalFunctions = new Set<ts.Symbol>();
   const referencedLocalClasses = new Set<ts.Symbol>();
-  if (localFunctions.size > 0 || localClasses.size > 0) {
+  const referencedLocalObjects = new Set<ts.Symbol>();
+  if (localFunctions.size > 0 || localClasses.size > 0 || localObjects.size > 0) {
     for (const sourceFile of projectSources) {
       const nodes: ts.Node[] = [sourceFile];
       while (nodes.length > 0) {
@@ -4618,6 +4635,18 @@ async function analyze(
             }
             if (node !== localClass.binding && !insideDeclaration) referencedLocalClasses.add(symbol);
           }
+          const localObject = symbol ? localObjects.get(symbol) : undefined;
+          if (symbol && localObject) {
+            let insideDeclaration = false;
+            for (let parent: ts.Node | undefined = node; parent; parent = parent.parent) {
+              if (parent === localObject.object) {
+                insideDeclaration = true;
+                break;
+              }
+              if (ts.isSourceFile(parent)) break;
+            }
+            if (node !== localObject.binding && !insideDeclaration) referencedLocalObjects.add(symbol);
+          }
         }
         ts.forEachChild(node, (child) => { nodes.push(child); });
       }
@@ -4628,6 +4657,9 @@ async function analyze(
   )));
   const provablyUnusedLocalClasses = new Set([...localClasses.keys()].filter((symbol) => (
     !referencedLocalClasses.has(symbol)
+  )));
+  const provablyUnusedLocalObjects = new Set([...localObjects.keys()].filter((symbol) => (
+    !referencedLocalObjects.has(symbol)
   )));
   const isInsideProvablyUninvokedFunction = (node: ts.Node): boolean => {
     for (let parent = node.parent; !ts.isSourceFile(parent); parent = parent.parent) {
@@ -4647,6 +4679,22 @@ async function analyze(
         if (!modifiers?.some(({ kind }) => kind === ts.SyntaxKind.StaticKeyword)
           && insideBody && symbol && provablyUnusedLocalClasses.has(symbol)) return true;
       }
+      const objectMember = (ts.isMethodDeclaration(parent) || ts.isGetAccessorDeclaration(parent)
+        || ts.isSetAccessorDeclaration(parent)) && ts.isObjectLiteralExpression(parent.parent)
+        ? parent : undefined;
+      let insideObjectMemberBody = !objectMember;
+      if (objectMember) {
+        for (let current: ts.Node | undefined = node; current && current !== objectMember;
+          current = current.parent) insideObjectMemberBody ||= current === objectMember.body;
+      }
+      const object: ts.ObjectLiteralExpression | undefined = objectMember
+        && ts.isObjectLiteralExpression(objectMember.parent) ? objectMember.parent
+          : (ts.isArrowFunction(parent) || ts.isFunctionExpression(parent))
+            && ts.isPropertyAssignment(parent.parent)
+            && ts.isObjectLiteralExpression(parent.parent.parent) ? parent.parent.parent : undefined;
+      const objectSymbol = object ? localObjectSymbols.get(object) : undefined;
+      if (insideObjectMemberBody && objectSymbol
+        && provablyUnusedLocalObjects.has(objectSymbol)) return true;
     }
     return false;
   };

@@ -2580,7 +2580,7 @@ describe('NestJS auth metadata analyzer', () => {
       import { JwtAuthGuard } from './auth';
       declare class AppModule {}
       const app = NestFactory.create(AppModule);
-      app['useGlobalGuards'](new JwtAuthGuard());
+      const unused = { [app['useGlobalGuards'](new JwtAuthGuard()) as any]() {} };
       @Controller('bootstrap') class BootstrapController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }
@@ -3844,6 +3844,14 @@ describe('NestJS auth metadata analyzer', () => {
       class UnusedInstaller {
         constructor() { app.useGlobalGuards({}); }
         install() { app.useGlobalGuards({}); }
+      }
+      const unusedInstallers = {
+        install() { app.useGlobalGuards({}); },
+        callback: () => app.useGlobalGuards({}),
+      };
+      switch (1) {
+        case 2: app.useGlobalGuards({}); break;
+        case 1: break;
       }
       app.useGlobalGuards();
       app.useGlobalGuards(...[]);

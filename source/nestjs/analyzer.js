@@ -149,14 +149,17 @@ function staticallyUnreachable(node) {
                     && staticNullish(parent.left) === false))
                 return true;
         }
-        else if (typescript_1.default.isCaseBlock(parent) && typescript_1.default.isCaseClause(current)) {
+        else if (typescript_1.default.isCaseBlock(parent)
+            && (typescript_1.default.isCaseClause(current) || typescript_1.default.isDefaultClause(current))) {
             const selected = staticSwitchValue(parent.parent.expression);
-            if (selected !== undefined && !parent.clauses.some(typescript_1.default.isDefaultClause)
-                && parent.clauses.every((clause) => typescript_1.default.isCaseClause(clause)
-                    && staticSwitchValue(clause.expression) !== undefined)
-                && !parent.clauses.some((clause) => typescript_1.default.isCaseClause(clause)
-                    && staticSwitchValue(clause.expression) === selected))
-                return true;
+            if (selected !== undefined && parent.clauses.every((clause) => (typescript_1.default.isDefaultClause(clause) || staticSwitchValue(clause.expression) !== undefined))) {
+                const matchingIndex = parent.clauses.findIndex((clause) => (typescript_1.default.isCaseClause(clause) && staticSwitchValue(clause.expression) === selected));
+                const selectedIndex = matchingIndex >= 0 ? matchingIndex
+                    : parent.clauses.findIndex(typescript_1.default.isDefaultClause);
+                const currentIndex = parent.clauses.indexOf(current);
+                if (selectedIndex < 0 || currentIndex < selectedIndex)
+                    return true;
+            }
         }
         else if ((typescript_1.default.isBlock(parent) || typescript_1.default.isCaseClause(parent) || typescript_1.default.isDefaultClause(parent))
             && typescript_1.default.isStatement(current)) {
@@ -4727,6 +4730,8 @@ async function analyze(context, authConfig) {
     const localFunctionSymbols = new WeakMap();
     const localClasses = new Map();
     const localClassSymbols = new WeakMap();
+    const localObjects = new Map();
+    const localObjectSymbols = new WeakMap();
     for (const sourceFile of projectSources) {
         if (!typescript_1.default.isExternalModule(sourceFile))
             continue;
@@ -4778,13 +4783,22 @@ async function analyze(context, authConfig) {
                         localFunctionSymbols.set(initializer, symbol);
                     }
                 }
+                else if (typescript_1.default.isObjectLiteralExpression(initializer)) {
+                    const symbol = resolvedSymbolAt(node.name, checker);
+                    const declarations = symbol?.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+                    if (symbol && declarations.length === 1) {
+                        localObjects.set(symbol, { object: initializer, binding: node.name });
+                        localObjectSymbols.set(initializer, symbol);
+                    }
+                }
             }
             typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
         }
     }
     const referencedLocalFunctions = new Set();
     const referencedLocalClasses = new Set();
-    if (localFunctions.size > 0 || localClasses.size > 0) {
+    const referencedLocalObjects = new Set();
+    if (localFunctions.size > 0 || localClasses.size > 0 || localObjects.size > 0) {
         for (const sourceFile of projectSources) {
             const nodes = [sourceFile];
             while (nodes.length > 0) {
@@ -4820,6 +4834,20 @@ async function analyze(context, authConfig) {
                         if (node !== localClass.binding && !insideDeclaration)
                             referencedLocalClasses.add(symbol);
                     }
+                    const localObject = symbol ? localObjects.get(symbol) : undefined;
+                    if (symbol && localObject) {
+                        let insideDeclaration = false;
+                        for (let parent = node; parent; parent = parent.parent) {
+                            if (parent === localObject.object) {
+                                insideDeclaration = true;
+                                break;
+                            }
+                            if (typescript_1.default.isSourceFile(parent))
+                                break;
+                        }
+                        if (node !== localObject.binding && !insideDeclaration)
+                            referencedLocalObjects.add(symbol);
+                    }
                 }
                 typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
             }
@@ -4827,6 +4855,7 @@ async function analyze(context, authConfig) {
     }
     const provablyUninvokedLocalFunctions = new Set([...localFunctions.keys()].filter((symbol) => (!referencedLocalFunctions.has(symbol))));
     const provablyUnusedLocalClasses = new Set([...localClasses.keys()].filter((symbol) => (!referencedLocalClasses.has(symbol))));
+    const provablyUnusedLocalObjects = new Set([...localObjects.keys()].filter((symbol) => (!referencedLocalObjects.has(symbol))));
     const isInsideProvablyUninvokedFunction = (node) => {
         for (let parent = node.parent; !typescript_1.default.isSourceFile(parent); parent = parent.parent) {
             if (typescript_1.default.isFunctionDeclaration(parent) || typescript_1.default.isArrowFunction(parent)
@@ -4847,6 +4876,23 @@ async function analyze(context, authConfig) {
                     && insideBody && symbol && provablyUnusedLocalClasses.has(symbol))
                     return true;
             }
+            const objectMember = (typescript_1.default.isMethodDeclaration(parent) || typescript_1.default.isGetAccessorDeclaration(parent)
+                || typescript_1.default.isSetAccessorDeclaration(parent)) && typescript_1.default.isObjectLiteralExpression(parent.parent)
+                ? parent : undefined;
+            let insideObjectMemberBody = !objectMember;
+            if (objectMember) {
+                for (let current = node; current && current !== objectMember; current = current.parent)
+                    insideObjectMemberBody ||= current === objectMember.body;
+            }
+            const object = objectMember
+                && typescript_1.default.isObjectLiteralExpression(objectMember.parent) ? objectMember.parent
+                : (typescript_1.default.isArrowFunction(parent) || typescript_1.default.isFunctionExpression(parent))
+                    && typescript_1.default.isPropertyAssignment(parent.parent)
+                    && typescript_1.default.isObjectLiteralExpression(parent.parent.parent) ? parent.parent.parent : undefined;
+            const objectSymbol = object ? localObjectSymbols.get(object) : undefined;
+            if (insideObjectMemberBody && objectSymbol
+                && provablyUnusedLocalObjects.has(objectSymbol))
+                return true;
         }
         return false;
     };
