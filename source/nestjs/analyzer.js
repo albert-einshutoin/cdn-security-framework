@@ -3716,7 +3716,57 @@ function isUnresolvedStoredGuardDecorator(decorator, checker, projectSources, ch
         const expressions = [input];
         const visited = new Set();
         const assignments = new Map();
-        const assignmentValues = (symbol) => {
+        const stateCache = new Map();
+        const staticExpressionState = (inputExpression) => {
+            let value = unwrap(inputExpression);
+            const aliases = new Set();
+            const traversed = [];
+            const finish = (state) => {
+                for (const symbol of traversed)
+                    stateCache.set(symbol, state);
+                return state;
+            };
+            while (typescript_1.default.isIdentifier(value)) {
+                check();
+                let symbol = checker.getSymbolAtLocation(value);
+                if (!symbol && value.text === 'undefined')
+                    return finish({ truth: false, nullish: true });
+                if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+                    symbol = checker.getAliasedSymbol(symbol);
+                if (!symbol || aliases.has(symbol) || aliases.size >= 64) {
+                    return finish({ truth: undefined, nullish: undefined });
+                }
+                const cached = stateCache.get(symbol);
+                if (cached)
+                    return finish(cached);
+                aliases.add(symbol);
+                traversed.push(symbol);
+                if (symbol.declarations?.some((declaration) => (typescript_1.default.isFunctionDeclaration(declaration) || typescript_1.default.isClassDeclaration(declaration)))) {
+                    const writes = assignmentValues(symbol);
+                    return finish(writes && writes.length === 0
+                        ? { truth: true, nullish: false }
+                        : { truth: undefined, nullish: undefined });
+                }
+                const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+                const declaration = declarations.length === 1 ? declarations[0] : undefined;
+                if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+                    || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+                    || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const)) {
+                    return finish({ truth: undefined, nullish: undefined });
+                }
+                value = unwrap(declaration.initializer);
+            }
+            const truth = staticTruth(value);
+            if (truth !== undefined)
+                return finish({ truth, nullish: staticNullish(value) });
+            if (typescript_1.default.isArrowFunction(value) || typescript_1.default.isFunctionExpression(value)
+                || typescript_1.default.isClassExpression(value) || typescript_1.default.isObjectLiteralExpression(value)
+                || typescript_1.default.isArrayLiteralExpression(value) || typescript_1.default.isNewExpression(value)) {
+                return finish({ truth: true, nullish: false });
+            }
+            return finish({ truth: undefined, nullish: staticNullish(value) });
+        };
+        function assignmentValues(symbol) {
             const cached = assignments.get(symbol);
             if (cached !== undefined)
                 return cached ?? undefined;
@@ -3755,7 +3805,7 @@ function isUnresolvedStoredGuardDecorator(decorator, checker, projectSources, ch
             }
             assignments.set(symbol, unresolved ? null : values);
             return unresolved ? undefined : values;
-        };
+        }
         let steps = 0;
         while (expressions.length > 0) {
             check();
@@ -3886,10 +3936,35 @@ function isUnresolvedStoredGuardDecorator(decorator, checker, projectSources, ch
                 continue;
             }
             if (typescript_1.default.isConditionalExpression(candidate)) {
-                expressions.push(candidate.whenTrue, candidate.whenFalse);
+                const { truth } = staticExpressionState(candidate.condition);
+                if (truth !== false)
+                    expressions.push(candidate.whenTrue);
+                if (truth !== true)
+                    expressions.push(candidate.whenFalse);
             }
             else if (typescript_1.default.isBinaryExpression(candidate)) {
-                expressions.push(candidate.left, candidate.right);
+                const operator = candidate.operatorToken.kind;
+                const state = staticExpressionState(candidate.left);
+                if (operator === typescript_1.default.SyntaxKind.AmpersandAmpersandToken) {
+                    if (state.truth !== true)
+                        expressions.push(candidate.left);
+                    if (state.truth !== false)
+                        expressions.push(candidate.right);
+                }
+                else if (operator === typescript_1.default.SyntaxKind.BarBarToken) {
+                    if (state.truth !== false)
+                        expressions.push(candidate.left);
+                    if (state.truth !== true)
+                        expressions.push(candidate.right);
+                }
+                else if (operator === typescript_1.default.SyntaxKind.QuestionQuestionToken) {
+                    if (state.nullish !== true)
+                        expressions.push(candidate.left);
+                    if (state.nullish !== false)
+                        expressions.push(candidate.right);
+                }
+                else
+                    expressions.push(candidate.left, candidate.right);
             }
             else if (typescript_1.default.isArrayLiteralExpression(candidate)) {
                 for (const element of candidate.elements) {
@@ -4132,11 +4207,7 @@ function isUnresolvedStoredGuardDecorator(decorator, checker, projectSources, ch
     if (typescript_1.default.isPropertyAccessExpression(expression) || typescript_1.default.isElementAccessExpression(expression)) {
         return true;
     }
-    if (!typescript_1.default.isCallExpression(expression))
-        return false;
-    const resolved = (0, decorator_symbols_1.resolveDecoratorCallSymbol)(expression, checker, check);
-    return Boolean(resolved?.nestJsCommon
-        && (resolved.name === 'UseGuards' || resolved.name === 'applyDecorators'));
+    return expressionUsesGuardDecorator(expression);
 }
 function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps, maxDepth) {
     const result = emptyAuthMetadata();

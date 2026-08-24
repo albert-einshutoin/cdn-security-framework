@@ -496,10 +496,26 @@ describe('NestJS auth metadata analyzer', () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
       import { ApiKeyGuard, JwtAuthGuard } from './auth';
+      declare const enabled: boolean;
+      const Audit: MethodDecorator = () => {};
       const Authenticated = UseGuards(ApiKeyGuard);
       const AuthenticatedAlias = Authenticated;
+      const ConditionalAuthenticated = enabled ? UseGuards(ApiKeyGuard) : Audit;
+      const StaticAudit = true ? Audit : UseGuards(ApiKeyGuard);
+      const LogicalAudit = Audit || UseGuards(ApiKeyGuard);
+      const ConditionOnlyAudit = UseGuards(ApiKeyGuard) ? Audit : Audit;
+      function MutableAudit(): MethodDecorator { return () => {}; }
+      MutableAudit = undefined as any;
+      const ReassignedLogical = MutableAudit || UseGuards(ApiKeyGuard);
       @Controller('precomputed') @UseGuards(JwtAuthGuard)
-      class PrecomputedController { @Get() @AuthenticatedAlias read() {} }
+      class PrecomputedController {
+        @Get() @AuthenticatedAlias read() {}
+        @Get('conditional') @ConditionalAuthenticated conditional() {}
+        @Get('static-audit') @StaticAudit staticAudit() {}
+        @Get('logical-audit') @LogicalAudit logicalAudit() {}
+        @Get('condition-only-audit') @ConditionOnlyAudit conditionOnlyAudit() {}
+        @Get('reassigned-logical') @ReassignedLogical reassignedLogical() {}
+      }
     `, {
       'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
     });
@@ -507,10 +523,28 @@ describe('NestJS auth metadata analyzer', () => {
 
     expect(execution.status).toBe('success');
     if (execution.status !== 'success') return;
-    expect(execution.result.contract.operations[0].auth.analysis?.guards).toEqual([
+    const operations = Object.fromEntries(execution.result.contract.operations.map((operation) => (
+      [operation.routeKey, operation]
+    )));
+    expect(operations['GET /precomputed'].auth.analysis?.guards).toEqual([
       { symbol: 'JwtAuthGuard', authKind: 'bearer' },
       { symbol: 'ApiKeyGuard', authKind: 'api-key' },
     ]);
+    expect(operations['GET /precomputed/conditional'].auth).toMatchObject({
+      mode: 'unknown', analysis: { enforcementConfidence: 'unknown' },
+    });
+    expect(operations['GET /precomputed/reassigned-logical'].auth).toMatchObject({
+      mode: 'unknown', analysis: { enforcementConfidence: 'unknown' },
+    });
+    for (const route of [
+      'GET /precomputed/static-audit',
+      'GET /precomputed/logical-audit',
+      'GET /precomputed/condition-only-audit',
+    ]) {
+      expect(operations[route].auth).toMatchObject({
+        mode: 'alternatives', analysis: { enforcementConfidence: 'high' },
+      });
+    }
   });
 
   test('fails closed on a mutable precomputed guard decorator', async () => {
