@@ -178,6 +178,58 @@
           "if": { "properties": { "mode": { "const": "alternatives" } } },
           "then": { "properties": { "alternatives": { "type": "array", "minItems": 1 } } },
           "else": { "properties": { "alternatives": { "type": "array", "maxItems": 0 } } }
+        },
+        {
+          "if": {
+            "required": ["analysis"],
+            "properties": {
+              "analysis": {
+                "type": "object",
+                "required": ["enforcementConfidence"],
+                "properties": { "enforcementConfidence": { "const": "high" } }
+              }
+            }
+          },
+          "then": {
+            "anyOf": [
+              {
+                "properties": {
+                  "mode": { "const": "none" },
+                  "analysis": {
+                    "type": "object",
+                    "properties": { "explicitPublic": { "const": true } }
+                  }
+                }
+              },
+              {
+                "properties": {
+                  "mode": { "const": "alternatives" },
+                  "alternatives": {
+                    "type": "array",
+                    "minItems": 1,
+                    "not": {
+                      "contains": {
+                        "type": "object",
+                        "required": ["anonymous"],
+                        "properties": { "anonymous": { "const": true } }
+                      }
+                    }
+                  },
+                  "analysis": {
+                    "type": "object",
+                    "properties": {
+                      "explicitPublic": { "const": false },
+                      "guards": {
+                        "type": "array",
+                        "minItems": 1,
+                        "items": { "type": "object", "required": ["authKind"] }
+                      }
+                    }
+                  }
+                }
+              }
+            ]
+          }
         }
       ]
     },
