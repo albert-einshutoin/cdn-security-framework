@@ -854,6 +854,37 @@ function isStandardReflectReceiver(
     && globalReceiver.text === 'globalThis' && !hasRuntimeBinding(globalReceiver, checker);
 }
 
+function standardFunctionPrototypeMethod(
+  input: ts.Expression,
+  checker: ts.TypeChecker,
+  check: () => void,
+): 'call' | 'apply' | undefined {
+  const member = unwrapExpression(input);
+  if (!ts.isPropertyAccessExpression(member) && !ts.isElementAccessExpression(member)) return undefined;
+  const method = ts.isPropertyAccessExpression(member) ? member.name.text
+    : member.argumentExpression
+      ? resolveStaticPropertyKey(member.argumentExpression, checker, check) : undefined;
+  if (method !== 'call' && method !== 'apply') return undefined;
+  const prototype = unwrapExpression(member.expression);
+  if (!ts.isPropertyAccessExpression(prototype) && !ts.isElementAccessExpression(prototype)) return undefined;
+  const prototypeName = ts.isPropertyAccessExpression(prototype) ? prototype.name.text
+    : prototype.argumentExpression
+      ? resolveStaticPropertyKey(prototype.argumentExpression, checker, check) : undefined;
+  const constructor = unwrapExpression(prototype.expression);
+  if (prototypeName !== 'prototype') return undefined;
+  if (ts.isIdentifier(constructor)) {
+    return constructor.text === 'Function' && !hasRuntimeBinding(constructor, checker) ? method : undefined;
+  }
+  if (!ts.isPropertyAccessExpression(constructor) && !ts.isElementAccessExpression(constructor)) return undefined;
+  const constructorName = ts.isPropertyAccessExpression(constructor) ? constructor.name.text
+    : constructor.argumentExpression
+      ? resolveStaticPropertyKey(constructor.argumentExpression, checker, check) : undefined;
+  const globalReceiver = unwrapExpression(constructor.expression);
+  return constructorName === 'Function' && ts.isIdentifier(globalReceiver)
+    && globalReceiver.text === 'globalThis' && !hasRuntimeBinding(globalReceiver, checker)
+    ? method : undefined;
+}
+
 export function resolveDecoratorCallSymbol(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -3470,6 +3501,39 @@ export function isNestJsUseGlobalGuardsCall(
         : flattenArguments(guards.elements.filter((element): element is ts.Expression => (
           !ts.isOmittedExpression(element)
         ))) : guards ? undefined : [];
+  }
+  const outerCallable = unwrapExpression(expression);
+  const outerInvocation = ts.isPropertyAccessExpression(outerCallable) ? outerCallable.name.text
+    : ts.isElementAccessExpression(outerCallable) && outerCallable.argumentExpression
+      ? staticPropertyName(outerCallable.argumentExpression) : undefined;
+  const prototypeMethod = (outerInvocation === 'call' || outerInvocation === 'apply')
+    && (ts.isPropertyAccessExpression(outerCallable) || ts.isElementAccessExpression(outerCallable))
+    ? standardFunctionPrototypeMethod(outerCallable.expression, checker, check) : undefined;
+  if (prototypeMethod && effectiveArguments?.[0]) {
+    let forwarded: ts.Expression[] | undefined = effectiveArguments;
+    if (outerInvocation === 'apply') {
+      const argumentList = effectiveArguments[1] ? unwrapExpression(effectiveArguments[1]) : undefined;
+      const argumentsArray = !argumentList || isDefinitelyNullish(argumentList) ? []
+        : ts.isArrayLiteralExpression(argumentList)
+        && !argumentList.elements.some(ts.isOmittedExpression)
+        ? flattenArguments(argumentList.elements.filter((element): element is ts.Expression => (
+          !ts.isOmittedExpression(element)
+        ))) : undefined;
+      forwarded = argumentsArray ? [effectiveArguments[0], ...argumentsArray] : undefined;
+    }
+    expression = resolveStableInitializer(effectiveArguments[0]);
+    if (forwarded) {
+      if (prototypeMethod === 'call') effectiveArguments = forwarded.slice(2);
+      else {
+        const guards = forwarded[2] ? unwrapExpression(forwarded[2]) : undefined;
+        effectiveArguments = !guards || isDefinitelyNullish(guards) ? []
+          : ts.isArrayLiteralExpression(guards)
+          && !guards.elements.some(ts.isOmittedExpression)
+          ? flattenArguments(guards.elements.filter((element): element is ts.Expression => (
+            !ts.isOmittedExpression(element)
+          ))) : guards ? undefined : [];
+      }
+    } else effectiveArguments = undefined;
   }
   let depthLimitReached = false;
   for (let depth = 0; depth <= 64; depth += 1) {

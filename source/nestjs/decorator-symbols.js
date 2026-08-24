@@ -793,6 +793,37 @@ function isStandardReflectReceiver(input, checker, check) {
     return name === 'Reflect' && typescript_1.default.isIdentifier(globalReceiver)
         && globalReceiver.text === 'globalThis' && !hasRuntimeBinding(globalReceiver, checker);
 }
+function standardFunctionPrototypeMethod(input, checker, check) {
+    const member = unwrapExpression(input);
+    if (!typescript_1.default.isPropertyAccessExpression(member) && !typescript_1.default.isElementAccessExpression(member))
+        return undefined;
+    const method = typescript_1.default.isPropertyAccessExpression(member) ? member.name.text
+        : member.argumentExpression
+            ? resolveStaticPropertyKey(member.argumentExpression, checker, check) : undefined;
+    if (method !== 'call' && method !== 'apply')
+        return undefined;
+    const prototype = unwrapExpression(member.expression);
+    if (!typescript_1.default.isPropertyAccessExpression(prototype) && !typescript_1.default.isElementAccessExpression(prototype))
+        return undefined;
+    const prototypeName = typescript_1.default.isPropertyAccessExpression(prototype) ? prototype.name.text
+        : prototype.argumentExpression
+            ? resolveStaticPropertyKey(prototype.argumentExpression, checker, check) : undefined;
+    const constructor = unwrapExpression(prototype.expression);
+    if (prototypeName !== 'prototype')
+        return undefined;
+    if (typescript_1.default.isIdentifier(constructor)) {
+        return constructor.text === 'Function' && !hasRuntimeBinding(constructor, checker) ? method : undefined;
+    }
+    if (!typescript_1.default.isPropertyAccessExpression(constructor) && !typescript_1.default.isElementAccessExpression(constructor))
+        return undefined;
+    const constructorName = typescript_1.default.isPropertyAccessExpression(constructor) ? constructor.name.text
+        : constructor.argumentExpression
+            ? resolveStaticPropertyKey(constructor.argumentExpression, checker, check) : undefined;
+    const globalReceiver = unwrapExpression(constructor.expression);
+    return constructorName === 'Function' && typescript_1.default.isIdentifier(globalReceiver)
+        && globalReceiver.text === 'globalThis' && !hasRuntimeBinding(globalReceiver, checker)
+        ? method : undefined;
+}
 function resolveDecoratorCallSymbol(call, checker, check) {
     let expression = call.expression;
     let indirectInvocation = false;
@@ -3445,6 +3476,38 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
         effectiveArguments = guards && typescript_1.default.isArrayLiteralExpression(guards)
             ? guards.elements.some(typescript_1.default.isOmittedExpression) ? undefined
                 : flattenArguments(guards.elements.filter((element) => (!typescript_1.default.isOmittedExpression(element)))) : guards ? undefined : [];
+    }
+    const outerCallable = unwrapExpression(expression);
+    const outerInvocation = typescript_1.default.isPropertyAccessExpression(outerCallable) ? outerCallable.name.text
+        : typescript_1.default.isElementAccessExpression(outerCallable) && outerCallable.argumentExpression
+            ? staticPropertyName(outerCallable.argumentExpression) : undefined;
+    const prototypeMethod = (outerInvocation === 'call' || outerInvocation === 'apply')
+        && (typescript_1.default.isPropertyAccessExpression(outerCallable) || typescript_1.default.isElementAccessExpression(outerCallable))
+        ? standardFunctionPrototypeMethod(outerCallable.expression, checker, check) : undefined;
+    if (prototypeMethod && effectiveArguments?.[0]) {
+        let forwarded = effectiveArguments;
+        if (outerInvocation === 'apply') {
+            const argumentList = effectiveArguments[1] ? unwrapExpression(effectiveArguments[1]) : undefined;
+            const argumentsArray = !argumentList || isDefinitelyNullish(argumentList) ? []
+                : typescript_1.default.isArrayLiteralExpression(argumentList)
+                    && !argumentList.elements.some(typescript_1.default.isOmittedExpression)
+                    ? flattenArguments(argumentList.elements.filter((element) => (!typescript_1.default.isOmittedExpression(element)))) : undefined;
+            forwarded = argumentsArray ? [effectiveArguments[0], ...argumentsArray] : undefined;
+        }
+        expression = resolveStableInitializer(effectiveArguments[0]);
+        if (forwarded) {
+            if (prototypeMethod === 'call')
+                effectiveArguments = forwarded.slice(2);
+            else {
+                const guards = forwarded[2] ? unwrapExpression(forwarded[2]) : undefined;
+                effectiveArguments = !guards || isDefinitelyNullish(guards) ? []
+                    : typescript_1.default.isArrayLiteralExpression(guards)
+                        && !guards.elements.some(typescript_1.default.isOmittedExpression)
+                        ? flattenArguments(guards.elements.filter((element) => (!typescript_1.default.isOmittedExpression(element)))) : guards ? undefined : [];
+            }
+        }
+        else
+            effectiveArguments = undefined;
     }
     let depthLimitReached = false;
     for (let depth = 0; depth <= 64; depth += 1) {

@@ -4278,6 +4278,40 @@ describe('NestJS auth metadata analyzer', () => {
     ]));
   });
 
+  test('handles Function.prototype useGlobalGuards invocations', async () => {
+    for (const [registration, expected] of [
+      ['Function.prototype.apply.call(app.useGlobalGuards, app, [guard]);', 'unknown'],
+      ['Function.prototype.apply.call(app.useGlobalGuards, app, null);', 'alternatives'],
+    ] as const) {
+      const root = workspace(`
+        import { Controller, Get, UseGuards } from '@nestjs/common';
+        import type { INestApplication } from '@nestjs/core';
+        import { JwtAuthGuard } from './auth';
+        declare const app: INestApplication;
+        declare const guard: unknown;
+        ${registration}
+        @Controller('function-prototype') class FunctionPrototypeController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, {
+        'src/auth.ts': 'export class JwtAuthGuard {}\n',
+        'node_modules/@nestjs/core/index.d.ts': `
+          export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+        `,
+        'node_modules/@nestjs/core/package.json': JSON.stringify({
+          name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+        }),
+        'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+      });
+      const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+      expect(execution.status).toBe('success');
+      if (execution.status === 'success') {
+        expect(execution.result.contract.operations[0].auth.mode).toBe(expected);
+      }
+    }
+  });
+
   test('fails closed on Reflect.apply useGlobalGuards registrations', async () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
