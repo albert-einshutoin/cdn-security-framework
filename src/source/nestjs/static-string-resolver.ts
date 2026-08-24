@@ -66,7 +66,9 @@ export function resolveStaticStrings(
       return { values: [`${left.values[0]}${right.values[0]}`], array: false };
     }
     if (!ts.isIdentifier(node)) return undefined;
-    let symbol = checker.getSymbolAtLocation(node);
+    let symbol = ts.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
+      ? checker.getShorthandAssignmentValueSymbol(node.parent)
+      : checker.getSymbolAtLocation(node);
     if (!symbol) return undefined;
     if (symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
     if (memo.has(symbol)) return memo.get(symbol) ?? undefined;

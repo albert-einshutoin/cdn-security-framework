@@ -4794,13 +4794,17 @@ async function analyze(
       );
       const globalGuardProvider = (ts.isPropertyAssignment(node) && providerKeyPossible
         && isProviderRegistration(node, registeredProviders)
-        && containsStaticSymbolFrom(
+        && (containsStaticSymbolFrom(
           node.initializer, checker, check, '@nestjs/core', 'APP_GUARD', projectSources,
-        )) || (ts.isShorthandPropertyAssignment(node) && node.name.text === 'provide'
+        ) || resolveStaticStrings(node.initializer, checker, projectSources, {
+          check, maxSteps: context.limits.maxAstNodes,
+        })?.includes('APP_GUARD') === true)) || (ts.isShorthandPropertyAssignment(node) && node.name.text === 'provide'
         && isProviderRegistration(node, registeredProviders)
-        && isStaticShorthandSymbolFrom(
+        && (isStaticShorthandSymbolFrom(
           node, checker, check, '@nestjs/core', 'APP_GUARD', projectSources,
-        ));
+        ) || resolveStaticStrings(node.name, checker, projectSources, {
+          check, maxSteps: context.limits.maxAstNodes,
+        })?.includes('APP_GUARD') === true));
       if (globalGuardProvider) {
         if (!globalGuardFound) addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node);
         globalGuardFound = true;

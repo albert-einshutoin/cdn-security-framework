@@ -1135,6 +1135,31 @@ describe('NestJS auth metadata analyzer', () => {
     });
   });
 
+  test('recognizes a literal APP_GUARD provider token', async () => {
+    for (const provider of [
+      "{ provide: 'APP_GUARD', useClass: JwtAuthGuard }",
+      "{ provide, useClass: JwtAuthGuard }",
+    ]) {
+      const root = workspace(`
+        import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+        import { JwtAuthGuard } from './auth';
+        const provide = 'APP_GUARD';
+        @Module({ providers: [${provider}] }) class AppModule {}
+        @Controller('literal-global') class GlobalController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, { 'src/auth.ts': 'export class JwtAuthGuard {}\n' });
+      const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+      expect(execution.status).toBe('success');
+      if (execution.status !== 'success') continue;
+      expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+      expect(execution.result.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+      ]));
+    }
+  });
+
   test('ignores APP_GUARD-shaped objects outside provider registration', async () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';

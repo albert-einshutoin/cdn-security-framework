@@ -4983,9 +4983,13 @@ async function analyze(context, authConfig) {
                     || (propertyNames.length === 1 && propertyNames[0] === 'provide')));
             const globalGuardProvider = (typescript_1.default.isPropertyAssignment(node) && providerKeyPossible
                 && isProviderRegistration(node, registeredProviders)
-                && (0, decorator_symbols_1.containsStaticSymbolFrom)(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD', projectSources)) || (typescript_1.default.isShorthandPropertyAssignment(node) && node.name.text === 'provide'
+                && ((0, decorator_symbols_1.containsStaticSymbolFrom)(node.initializer, checker, check, '@nestjs/core', 'APP_GUARD', projectSources) || (0, static_string_resolver_1.resolveStaticStrings)(node.initializer, checker, projectSources, {
+                    check, maxSteps: context.limits.maxAstNodes,
+                })?.includes('APP_GUARD') === true)) || (typescript_1.default.isShorthandPropertyAssignment(node) && node.name.text === 'provide'
                 && isProviderRegistration(node, registeredProviders)
-                && (0, decorator_symbols_1.isStaticShorthandSymbolFrom)(node, checker, check, '@nestjs/core', 'APP_GUARD', projectSources));
+                && ((0, decorator_symbols_1.isStaticShorthandSymbolFrom)(node, checker, check, '@nestjs/core', 'APP_GUARD', projectSources) || (0, static_string_resolver_1.resolveStaticStrings)(node.name, checker, projectSources, {
+                    check, maxSteps: context.limits.maxAstNodes,
+                })?.includes('APP_GUARD') === true));
             if (globalGuardProvider) {
                 if (!globalGuardFound)
                     addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node);
