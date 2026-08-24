@@ -241,6 +241,55 @@ function effectiveObjectProperty(object, propertyName, checker, projectSources, 
 function registeredProviderObjects(checker, projectSources, check) {
     const providers = new Set();
     const candidates = [];
+    const staticState = (input, seen = new Set(), depth = 0) => {
+        check();
+        if (depth > 64)
+            return {};
+        let expression = input;
+        while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+            || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+            || typescript_1.default.isNonNullExpression(expression))
+            expression = expression.expression;
+        if (expression.kind === typescript_1.default.SyntaxKind.NullKeyword || typescript_1.default.isVoidExpression(expression)) {
+            return { truthy: false, nullish: true };
+        }
+        if (expression.kind === typescript_1.default.SyntaxKind.TrueKeyword)
+            return { truthy: true, nullish: false };
+        if (expression.kind === typescript_1.default.SyntaxKind.FalseKeyword)
+            return { truthy: false, nullish: false };
+        if (typescript_1.default.isStringLiteral(expression) || typescript_1.default.isNoSubstitutionTemplateLiteral(expression)) {
+            return { truthy: expression.text.length > 0, nullish: false };
+        }
+        if (typescript_1.default.isNumericLiteral(expression)) {
+            return { truthy: Number(expression.text) !== 0, nullish: false };
+        }
+        if (typescript_1.default.isBigIntLiteral(expression)) {
+            return { truthy: BigInt(expression.text.slice(0, -1)) !== 0n, nullish: false };
+        }
+        if (typescript_1.default.isObjectLiteralExpression(expression) || typescript_1.default.isArrayLiteralExpression(expression)
+            || typescript_1.default.isFunctionExpression(expression) || typescript_1.default.isArrowFunction(expression)
+            || typescript_1.default.isClassExpression(expression) || typescript_1.default.isRegularExpressionLiteral(expression)
+            || typescript_1.default.isNewExpression(expression))
+            return { truthy: true, nullish: false };
+        if (!typescript_1.default.isIdentifier(expression))
+            return {};
+        let symbol = checker.getSymbolAtLocation(expression);
+        if (expression.text === 'undefined' && !symbol?.declarations?.length) {
+            return { truthy: false, nullish: true };
+        }
+        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        if (!symbol || seen.has(symbol))
+            return {};
+        const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+            || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+            return {};
+        seen.add(symbol);
+        return staticState(declaration.initializer, seen, depth + 1);
+    };
     const collect = (input, seen, depth) => {
         check();
         if (depth > 64)
@@ -260,6 +309,32 @@ function registeredProviderObjects(checker, projectSources, check) {
                 complete = collect(typescript_1.default.isSpreadElement(element) ? element.expression : element, new Set(seen), depth + 1) && complete;
             }
             return complete;
+        }
+        if (typescript_1.default.isBinaryExpression(expression) && (expression.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+            || expression.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken
+            || expression.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken)) {
+            const state = staticState(expression.left);
+            if (expression.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken) {
+                if (state.truthy === true)
+                    return collect(expression.right, seen, depth + 1);
+                if (state.truthy === false)
+                    return collect(expression.left, seen, depth + 1);
+            }
+            else if (expression.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken) {
+                if (state.truthy === true)
+                    return collect(expression.left, seen, depth + 1);
+                if (state.truthy === false)
+                    return collect(expression.right, seen, depth + 1);
+            }
+            else {
+                if (state.nullish === true)
+                    return collect(expression.right, seen, depth + 1);
+                if (state.nullish === false)
+                    return collect(expression.left, seen, depth + 1);
+            }
+            const left = collect(expression.left, new Set(seen), depth + 1);
+            const right = collect(expression.right, new Set(seen), depth + 1);
+            return left && right;
         }
         if (typescript_1.default.isCallExpression(expression) && expression.arguments.length === 0
             && typescript_1.default.isIdentifier(expression.expression)) {

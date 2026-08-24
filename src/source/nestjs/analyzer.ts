@@ -280,6 +280,50 @@ function registeredProviderObjects(
 } {
   const providers = new Set<ts.ObjectLiteralExpression>();
   const candidates: ts.Expression[] = [];
+  const staticState = (
+    input: ts.Expression,
+    seen = new Set<ts.Symbol>(),
+    depth = 0,
+  ): { truthy?: boolean; nullish?: boolean } => {
+    check();
+    if (depth > 64) return {};
+    let expression = input;
+    while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+      || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+      || ts.isNonNullExpression(expression)) expression = expression.expression;
+    if (expression.kind === ts.SyntaxKind.NullKeyword || ts.isVoidExpression(expression)) {
+      return { truthy: false, nullish: true };
+    }
+    if (expression.kind === ts.SyntaxKind.TrueKeyword) return { truthy: true, nullish: false };
+    if (expression.kind === ts.SyntaxKind.FalseKeyword) return { truthy: false, nullish: false };
+    if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+      return { truthy: expression.text.length > 0, nullish: false };
+    }
+    if (ts.isNumericLiteral(expression)) {
+      return { truthy: Number(expression.text) !== 0, nullish: false };
+    }
+    if (ts.isBigIntLiteral(expression)) {
+      return { truthy: BigInt(expression.text.slice(0, -1)) !== 0n, nullish: false };
+    }
+    if (ts.isObjectLiteralExpression(expression) || ts.isArrayLiteralExpression(expression)
+      || ts.isFunctionExpression(expression) || ts.isArrowFunction(expression)
+      || ts.isClassExpression(expression) || ts.isRegularExpressionLiteral(expression)
+      || ts.isNewExpression(expression)) return { truthy: true, nullish: false };
+    if (!ts.isIdentifier(expression)) return {};
+    let symbol = checker.getSymbolAtLocation(expression);
+    if (expression.text === 'undefined' && !symbol?.declarations?.length) {
+      return { truthy: false, nullish: true };
+    }
+    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    if (!symbol || seen.has(symbol)) return {};
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+      || !ts.isVariableDeclarationList(declaration.parent)
+      || !(declaration.parent.flags & ts.NodeFlags.Const)) return {};
+    seen.add(symbol);
+    return staticState(declaration.initializer, seen, depth + 1);
+  };
   const collect = (input: ts.Expression, seen: Set<ts.Symbol>, depth: number): boolean => {
     check();
     if (depth > 64) return false;
@@ -299,6 +343,26 @@ function registeredProviderObjects(
         ) && complete;
       }
       return complete;
+    }
+    if (ts.isBinaryExpression(expression) && (
+      expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+      || expression.operatorToken.kind === ts.SyntaxKind.BarBarToken
+      || expression.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+    )) {
+      const state = staticState(expression.left);
+      if (expression.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken) {
+        if (state.truthy === true) return collect(expression.right, seen, depth + 1);
+        if (state.truthy === false) return collect(expression.left, seen, depth + 1);
+      } else if (expression.operatorToken.kind === ts.SyntaxKind.BarBarToken) {
+        if (state.truthy === true) return collect(expression.left, seen, depth + 1);
+        if (state.truthy === false) return collect(expression.right, seen, depth + 1);
+      } else {
+        if (state.nullish === true) return collect(expression.right, seen, depth + 1);
+        if (state.nullish === false) return collect(expression.left, seen, depth + 1);
+      }
+      const left = collect(expression.left, new Set(seen), depth + 1);
+      const right = collect(expression.right, new Set(seen), depth + 1);
+      return left && right;
     }
     if (ts.isCallExpression(expression) && expression.arguments.length === 0
       && ts.isIdentifier(expression.expression)) {

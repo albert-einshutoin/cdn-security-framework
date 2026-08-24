@@ -718,6 +718,10 @@ describe('NestJS auth metadata analyzer', () => {
       `declare const enabled: boolean;
        const providers = enabled ? [{ provide: APP_GUARD, useClass: JwtAuthGuard }] : [];
        @Module({ providers }) class AppModule {}`,
+      `declare const configured: unknown[] | undefined;
+       @Module({
+         providers: configured ?? [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
+       }) class AppModule {}`,
       `function make() {
          const provider = { provide: APP_GUARD, useClass: JwtAuthGuard };
          return [provider];
@@ -807,10 +811,17 @@ describe('NestJS auth metadata analyzer', () => {
       import { APP_GUARD } from '@nestjs/core';
       import { JwtAuthGuard } from './auth';
       const providers: unknown[] = [];
+      const configured: unknown[] = [];
       providers.includes(APP_GUARD);
       providers.with(0, { provide: APP_GUARD, useClass: JwtAuthGuard });
       providers.toSpliced(0, 0, { provide: APP_GUARD, useClass: JwtAuthGuard });
       @Module({ providers }) class AppModule {}
+      @Module({
+        providers: configured || [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
+      }) class ConfiguredModule {}
+      @Module({
+        providers: undefined && [{ provide: APP_GUARD, useClass: JwtAuthGuard }],
+      }) class UndefinedModule {}
       @Controller('read-only') class ReadOnlyController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }
