@@ -1035,7 +1035,7 @@ function registeredProviderObjects(checker, projectSources, check) {
         if (!symbol || seen.has(symbol))
             return {};
         if (symbol.declarations?.some((declaration) => ((typescript_1.default.isClassLike(declaration) || typescript_1.default.isFunctionDeclaration(declaration))
-            && projectSources.has(declaration.getSourceFile()))))
+            && projectSources.has(declaration.getSourceFile()))) && !reassignedSymbols.has(symbol))
             return { truthy: true, nullish: false };
         const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
         const declaration = declarations.length === 1 ? declarations[0] : undefined;
@@ -1857,6 +1857,11 @@ function registeredProviderObjects(checker, projectSources, check) {
                     }
                 }
             }
+        }
+        else if ((typescript_1.default.isPrefixUnaryExpression(node) || typescript_1.default.isPostfixUnaryExpression(node))
+            && (node.operator === typescript_1.default.SyntaxKind.PlusPlusToken
+                || node.operator === typescript_1.default.SyntaxKind.MinusMinusToken)) {
+            markAssignmentTarget(node.operand);
         }
         else if (typescript_1.default.isForOfStatement(node) || typescript_1.default.isForInStatement(node)) {
             markAssignmentTarget(node.initializer);
@@ -3706,7 +3711,11 @@ function registeredProviderObjects(checker, projectSources, check) {
                     continue;
                 }
                 if (typescript_1.default.isConditionalExpression(unwrapped)) {
-                    expressions.push(unwrapped.whenTrue, unwrapped.whenFalse);
+                    const state = staticState(unwrapped.condition);
+                    if (state.truthy !== false)
+                        expressions.push(unwrapped.whenTrue);
+                    if (state.truthy !== true)
+                        expressions.push(unwrapped.whenFalse);
                     continue;
                 }
                 const symbol = moduleSymbol(unwrapped);

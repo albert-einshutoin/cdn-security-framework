@@ -1035,7 +1035,7 @@ function registeredProviderObjects(
     if (symbol.declarations?.some((declaration) => (
       (ts.isClassLike(declaration) || ts.isFunctionDeclaration(declaration))
       && projectSources.has(declaration.getSourceFile())
-    ))) return { truthy: true, nullish: false };
+    )) && !reassignedSymbols.has(symbol)) return { truthy: true, nullish: false };
     const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
     const declaration = declarations.length === 1 ? declarations[0] : undefined;
     if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
@@ -1752,7 +1752,11 @@ function registeredProviderObjects(
         }
       }
     }
-    else if (ts.isForOfStatement(node) || ts.isForInStatement(node)) {
+    else if ((ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
+      && (node.operator === ts.SyntaxKind.PlusPlusToken
+        || node.operator === ts.SyntaxKind.MinusMinusToken)) {
+      markAssignmentTarget(node.operand);
+    } else if (ts.isForOfStatement(node) || ts.isForInStatement(node)) {
       markAssignmentTarget(node.initializer);
       if (ts.isExpression(node.initializer)) {
         const symbol = directAssignmentSymbol(node.initializer);
@@ -3495,7 +3499,9 @@ function registeredProviderObjects(
           continue;
         }
         if (ts.isConditionalExpression(unwrapped)) {
-          expressions.push(unwrapped.whenTrue, unwrapped.whenFalse);
+          const state = staticState(unwrapped.condition);
+          if (state.truthy !== false) expressions.push(unwrapped.whenTrue);
+          if (state.truthy !== true) expressions.push(unwrapped.whenFalse);
           continue;
         }
         const symbol = moduleSymbol(unwrapped);

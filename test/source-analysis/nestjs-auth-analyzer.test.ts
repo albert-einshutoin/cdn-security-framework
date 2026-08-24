@@ -5528,6 +5528,55 @@ describe('NestJS auth metadata analyzer', () => {
     expect(execution.result.contract.operations[0].auth.mode).toBe('alternatives');
   });
 
+  test('follows only reachable conditional module imports', async () => {
+    for (const { preamble, condition, expected } of [
+      { preamble: '', condition: 'true ? SafeModule : GuardModule', expected: 'alternatives' },
+      { preamble: '', condition: 'false ? GuardModule : SafeModule', expected: 'alternatives' },
+      { preamble: '', condition: 'flag ? SafeModule : GuardModule', expected: 'unknown' },
+      {
+        preamble: 'function enabled() {} enabled = false as any;',
+        condition: 'enabled ? SafeModule : GuardModule',
+        expected: 'unknown',
+      },
+      {
+        preamble: 'function enabled() {} enabled++;',
+        condition: 'enabled ? SafeModule : GuardModule',
+        expected: 'unknown',
+      },
+    ]) {
+      const root = workspace(`
+        import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+        import { APP_GUARD, NestFactory } from '@nestjs/core';
+        import { JwtAuthGuard } from './auth';
+        declare const flag: boolean;
+        ${preamble}
+        @Module({}) class SafeModule {}
+        @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+        class GuardModule {}
+        @Module({ imports: [${condition}] }) class AppModule {}
+        void NestFactory.create(AppModule);
+        @Controller('conditional-import') class ConditionalImportController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, {
+        'src/auth.ts': 'export class JwtAuthGuard {}\n',
+        'node_modules/@nestjs/core/index.d.ts': `
+          export declare const APP_GUARD: unique symbol;
+          export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+        `,
+        'node_modules/@nestjs/core/package.json': JSON.stringify({
+          name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+        }),
+        'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+      });
+      const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+      expect(execution.status).toBe('success');
+      if (execution.status !== 'success') continue;
+      expect(execution.result.contract.operations[0].auth.mode).toBe(expected);
+    }
+  });
+
   test('fails closed for excessively deep local module inheritance', async () => {
     const bases = Array.from({ length: 300 }, (_, index) => (
       `class Base${index} extends ${index === 0 ? 'Object' : `Base${index - 1}`} {}`
