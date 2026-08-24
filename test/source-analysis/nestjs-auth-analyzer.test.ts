@@ -95,6 +95,7 @@ describe('NestJS auth metadata analyzer', () => {
         @Get('reflect-apply') @Reflect.apply(Guards, undefined, [ApiKeyGuard]) reflectApplyGuard() {}
         @Get('global-reflect-apply')
         @globalThis.Reflect.apply(Guards, undefined, [ApiKeyGuard]) globalReflectApplyGuard() {}
+        @Get('reflect-construct') @Reflect.construct(Guards, [ApiKeyGuard]) reflectConstructGuard() {}
         @Get('public') @Open() @Open('overwritten') publicRoute() {}
         @Get('unknown') @Guards(UnknownGuard) unknown() {}
       }
@@ -144,7 +145,7 @@ describe('NestJS auth metadata analyzer', () => {
     });
     for (const route of [
       'GET /users/call', 'GET /users/apply', 'GET /users/reflect-apply',
-      'GET /users/global-reflect-apply',
+      'GET /users/global-reflect-apply', 'GET /users/reflect-construct',
     ]) {
       expect(operations[route]).toMatchObject({
         exposure: 'unknown',

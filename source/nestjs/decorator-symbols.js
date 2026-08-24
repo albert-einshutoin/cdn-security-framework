@@ -802,7 +802,7 @@ function resolveDecoratorCallSymbol(call, checker, check) {
             ? resolveStaticPropertyKey(outer.argumentExpression, checker, check) : undefined;
     const outerReceiver = (typescript_1.default.isPropertyAccessExpression(outer)
         || typescript_1.default.isElementAccessExpression(outer)) ? unwrapExpression(outer.expression) : undefined;
-    if (outerInvocation === 'apply' && outerReceiver
+    if ((outerInvocation === 'apply' || outerInvocation === 'construct') && outerReceiver
         && isStandardReflectReceiver(outerReceiver, checker, check) && call.arguments[0]) {
         indirectInvocation = true;
         expression = call.arguments[0];
