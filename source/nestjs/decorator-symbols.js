@@ -21,6 +21,7 @@ const node_module_1 = require("node:module");
 const node_fs_1 = __importDefault(require("node:fs"));
 const node_path_1 = __importDefault(require("node:path"));
 const typescript_1 = __importDefault(require("typescript"));
+const static_string_resolver_js_1 = require("./static-string-resolver.js");
 exports.NESTJS_ROUTE_DECORATORS = [
     'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'RequestMapping', 'Search', 'Sse', 'Version',
 ];
@@ -768,6 +769,30 @@ function isBareDecoratorBindingStable(decorator, checker, projectSources, check)
         return false;
     return !callableBindingMayBeWritten(symbol, symbol.declarations ?? [], checker, projectSources, check);
 }
+function hasRuntimeBinding(identifier, checker) {
+    return checker.getSymbolAtLocation(identifier)?.declarations?.some((declaration) => {
+        if (declaration.getSourceFile().isDeclarationFile)
+            return false;
+        const variableStatement = typescript_1.default.isVariableDeclaration(declaration)
+            && typescript_1.default.isVariableStatement(declaration.parent.parent) ? declaration.parent.parent : undefined;
+        return !variableStatement?.modifiers?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.DeclareKeyword);
+    }) === true;
+}
+function isStandardReflectReceiver(input, checker, check) {
+    const receiver = unwrapExpression(input);
+    if (typescript_1.default.isIdentifier(receiver)) {
+        return receiver.text === 'Reflect' && !hasRuntimeBinding(receiver, checker);
+    }
+    if (!typescript_1.default.isPropertyAccessExpression(receiver) && !typescript_1.default.isElementAccessExpression(receiver)) {
+        return false;
+    }
+    const name = typescript_1.default.isPropertyAccessExpression(receiver) ? receiver.name.text
+        : receiver.argumentExpression
+            ? resolveStaticPropertyKey(receiver.argumentExpression, checker, check) : undefined;
+    const globalReceiver = unwrapExpression(receiver.expression);
+    return name === 'Reflect' && typescript_1.default.isIdentifier(globalReceiver)
+        && globalReceiver.text === 'globalThis' && !hasRuntimeBinding(globalReceiver, checker);
+}
 function resolveDecoratorCallSymbol(call, checker, check) {
     let expression = call.expression;
     let indirectInvocation = false;
@@ -777,26 +802,8 @@ function resolveDecoratorCallSymbol(call, checker, check) {
             ? resolveStaticPropertyKey(outer.argumentExpression, checker, check) : undefined;
     const outerReceiver = (typescript_1.default.isPropertyAccessExpression(outer)
         || typescript_1.default.isElementAccessExpression(outer)) ? unwrapExpression(outer.expression) : undefined;
-    const hasRuntimeBinding = (identifier) => checker
-        .getSymbolAtLocation(identifier)?.declarations?.some((declaration) => {
-        if (declaration.getSourceFile().isDeclarationFile)
-            return false;
-        const variableStatement = typescript_1.default.isVariableDeclaration(declaration)
-            && typescript_1.default.isVariableStatement(declaration.parent.parent) ? declaration.parent.parent : undefined;
-        return !variableStatement?.modifiers?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.DeclareKeyword);
-    }) === true;
-    const bareReflect = outerReceiver && typescript_1.default.isIdentifier(outerReceiver)
-        && outerReceiver.text === 'Reflect' && !hasRuntimeBinding(outerReceiver);
-    const reflectMember = outerReceiver && (typescript_1.default.isPropertyAccessExpression(outerReceiver)
-        || typescript_1.default.isElementAccessExpression(outerReceiver)) ? outerReceiver : undefined;
-    const reflectMemberName = reflectMember && (typescript_1.default.isPropertyAccessExpression(reflectMember)
-        ? reflectMember.name.text : reflectMember.argumentExpression
-        ? resolveStaticPropertyKey(reflectMember.argumentExpression, checker, check) : undefined);
-    const globalReceiver = reflectMember && unwrapExpression(reflectMember.expression);
-    const globalReflect = reflectMemberName === 'Reflect' && globalReceiver
-        && typescript_1.default.isIdentifier(globalReceiver) && globalReceiver.text === 'globalThis'
-        && !hasRuntimeBinding(globalReceiver);
-    if (outerInvocation === 'apply' && (bareReflect || globalReflect) && call.arguments[0]) {
+    if (outerInvocation === 'apply' && outerReceiver
+        && isStandardReflectReceiver(outerReceiver, checker, check) && call.arguments[0]) {
         indirectInvocation = true;
         expression = call.arguments[0];
     }
@@ -3239,6 +3246,13 @@ function isStaticShorthandSymbolFrom(shorthand, checker, check, moduleName, impo
 function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
     const writeIndex = projectSources
         ? callableWriteIndex(projectSources, checker, check) : new Map();
+    const staticPropertyName = (input) => {
+        const direct = resolveStaticPropertyKey(input, checker, check);
+        if (direct !== undefined || !projectSources)
+            return direct;
+        const values = (0, static_string_resolver_js_1.resolveStaticStrings)(input, checker, projectSources, { check, maxSteps: 4096 });
+        return values?.length === 1 ? values[0] : undefined;
+    };
     const resolveUnmodifiedAlias = (input) => {
         const seen = new Set();
         let value = unwrapExpression(input);
@@ -3266,7 +3280,7 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
         const value = resolveUnmodifiedAlias(input);
         const property = typescript_1.default.isPropertyAccessExpression(value) ? value.name.text
             : typescript_1.default.isElementAccessExpression(value) && value.argumentExpression
-                ? resolveStaticPropertyKey(value.argumentExpression, checker, check) : undefined;
+                ? staticPropertyName(value.argumentExpression) : undefined;
         if (property !== 'useGlobalGuards'
             || (!typescript_1.default.isPropertyAccessExpression(value) && !typescript_1.default.isElementAccessExpression(value)))
             return false;
@@ -3419,15 +3433,12 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
     const reflectCall = unwrapExpression(call.expression);
     const reflectMethod = typescript_1.default.isPropertyAccessExpression(reflectCall) ? reflectCall.name.text
         : typescript_1.default.isElementAccessExpression(reflectCall) && reflectCall.argumentExpression
-            ? resolveStaticPropertyKey(reflectCall.argumentExpression, checker, check) : undefined;
+            ? staticPropertyName(reflectCall.argumentExpression) : undefined;
     const reflectReceiver = (typescript_1.default.isPropertyAccessExpression(reflectCall)
         || typescript_1.default.isElementAccessExpression(reflectCall))
         ? unwrapExpression(reflectCall.expression) : undefined;
-    const reflectSymbol = reflectReceiver && typescript_1.default.isIdentifier(reflectReceiver)
-        ? checker.getSymbolAtLocation(reflectReceiver) : undefined;
     const standardReflectApply = reflectMethod === 'apply' && reflectReceiver
-        && typescript_1.default.isIdentifier(reflectReceiver) && reflectReceiver.text === 'Reflect'
-        && !reflectSymbol?.declarations?.some((declaration) => (projectSources?.has(declaration.getSourceFile())));
+        && isStandardReflectReceiver(reflectReceiver, checker, check);
     if (standardReflectApply && call.arguments[0]) {
         expression = resolveStableInitializer(call.arguments[0]);
         const guards = call.arguments[2] ? unwrapExpression(call.arguments[2]) : undefined;
@@ -3451,7 +3462,7 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
             const bind = unwrapExpression(expression.expression);
             const bindName = typescript_1.default.isPropertyAccessExpression(bind) ? bind.name.text
                 : typescript_1.default.isElementAccessExpression(bind) && bind.argumentExpression
-                    ? resolveStaticPropertyKey(bind.argumentExpression, checker, check) : undefined;
+                    ? staticPropertyName(bind.argumentExpression) : undefined;
             if (bindName === 'bind'
                 && (typescript_1.default.isPropertyAccessExpression(bind) || typescript_1.default.isElementAccessExpression(bind))) {
                 const bound = flattenArguments(expression.arguments.slice(1));
@@ -3463,7 +3474,7 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
         }
         const invocation = typescript_1.default.isPropertyAccessExpression(expression) ? expression.name.text
             : typescript_1.default.isElementAccessExpression(expression) && expression.argumentExpression
-                ? resolveStaticPropertyKey(expression.argumentExpression, checker, check) : undefined;
+                ? staticPropertyName(expression.argumentExpression) : undefined;
         if ((invocation === 'call' || invocation === 'apply')
             && (typescript_1.default.isPropertyAccessExpression(expression) || typescript_1.default.isElementAccessExpression(expression))) {
             if (invocation === 'call') {
@@ -3503,7 +3514,7 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
             if (typescript_1.default.isPropertyAccessExpression(node) || typescript_1.default.isElementAccessExpression(node)) {
                 const key = typescript_1.default.isPropertyAccessExpression(node) ? node.name.text
                     : node.argumentExpression
-                        ? resolveStaticPropertyKey(node.argumentExpression, checker, check) : undefined;
+                        ? staticPropertyName(node.argumentExpression) : undefined;
                 if (key === 'useGlobalGuards') {
                     const symbol = checker.getNonNullableType(checker.getTypeAtLocation(node.expression)).getProperty(key);
                     if (matchesConsumerModule(node, symbol, '@nestjs/common')
@@ -3543,7 +3554,7 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
     let property = typescript_1.default.isPropertyAccessExpression(expression)
         ? expression.name.text
         : typescript_1.default.isElementAccessExpression(expression) && expression.argumentExpression
-            ? resolveStaticPropertyKey(expression.argumentExpression, checker, check)
+            ? staticPropertyName(expression.argumentExpression)
             : undefined;
     let receiver = (typescript_1.default.isPropertyAccessExpression(expression)
         || typescript_1.default.isElementAccessExpression(expression))

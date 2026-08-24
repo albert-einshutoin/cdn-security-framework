@@ -4,6 +4,8 @@ import path from 'node:path';
 
 import ts from 'typescript';
 
+import { resolveStaticStrings } from './static-string-resolver.js';
+
 export const NESTJS_ROUTE_DECORATORS = [
   'All', 'Controller', 'Delete', 'Get', 'Head', 'Options', 'Patch', 'Post', 'Put', 'RequestMapping', 'Search', 'Sse', 'Version',
 ] as const;
@@ -823,6 +825,35 @@ export function isBareDecoratorBindingStable(
   );
 }
 
+function hasRuntimeBinding(identifier: ts.Identifier, checker: ts.TypeChecker): boolean {
+  return checker.getSymbolAtLocation(identifier)?.declarations?.some((declaration) => {
+    if (declaration.getSourceFile().isDeclarationFile) return false;
+    const variableStatement = ts.isVariableDeclaration(declaration)
+      && ts.isVariableStatement(declaration.parent.parent) ? declaration.parent.parent : undefined;
+    return !variableStatement?.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.DeclareKeyword);
+  }) === true;
+}
+
+function isStandardReflectReceiver(
+  input: ts.Expression,
+  checker: ts.TypeChecker,
+  check: () => void,
+): boolean {
+  const receiver = unwrapExpression(input);
+  if (ts.isIdentifier(receiver)) {
+    return receiver.text === 'Reflect' && !hasRuntimeBinding(receiver, checker);
+  }
+  if (!ts.isPropertyAccessExpression(receiver) && !ts.isElementAccessExpression(receiver)) {
+    return false;
+  }
+  const name = ts.isPropertyAccessExpression(receiver) ? receiver.name.text
+    : receiver.argumentExpression
+      ? resolveStaticPropertyKey(receiver.argumentExpression, checker, check) : undefined;
+  const globalReceiver = unwrapExpression(receiver.expression);
+  return name === 'Reflect' && ts.isIdentifier(globalReceiver)
+    && globalReceiver.text === 'globalThis' && !hasRuntimeBinding(globalReceiver, checker);
+}
+
 export function resolveDecoratorCallSymbol(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
@@ -842,25 +873,8 @@ export function resolveDecoratorCallSymbol(
       ? resolveStaticPropertyKey(outer.argumentExpression, checker, check) : undefined;
   const outerReceiver = (ts.isPropertyAccessExpression(outer)
     || ts.isElementAccessExpression(outer)) ? unwrapExpression(outer.expression) : undefined;
-  const hasRuntimeBinding = (identifier: ts.Identifier): boolean => checker
-    .getSymbolAtLocation(identifier)?.declarations?.some((declaration) => {
-      if (declaration.getSourceFile().isDeclarationFile) return false;
-      const variableStatement = ts.isVariableDeclaration(declaration)
-        && ts.isVariableStatement(declaration.parent.parent) ? declaration.parent.parent : undefined;
-      return !variableStatement?.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.DeclareKeyword);
-    }) === true;
-  const bareReflect = outerReceiver && ts.isIdentifier(outerReceiver)
-    && outerReceiver.text === 'Reflect' && !hasRuntimeBinding(outerReceiver);
-  const reflectMember = outerReceiver && (ts.isPropertyAccessExpression(outerReceiver)
-    || ts.isElementAccessExpression(outerReceiver)) ? outerReceiver : undefined;
-  const reflectMemberName = reflectMember && (ts.isPropertyAccessExpression(reflectMember)
-    ? reflectMember.name.text : reflectMember.argumentExpression
-      ? resolveStaticPropertyKey(reflectMember.argumentExpression, checker, check) : undefined);
-  const globalReceiver = reflectMember && unwrapExpression(reflectMember.expression);
-  const globalReflect = reflectMemberName === 'Reflect' && globalReceiver
-    && ts.isIdentifier(globalReceiver) && globalReceiver.text === 'globalThis'
-    && !hasRuntimeBinding(globalReceiver);
-  if (outerInvocation === 'apply' && (bareReflect || globalReflect) && call.arguments[0]) {
+  if (outerInvocation === 'apply' && outerReceiver
+    && isStandardReflectReceiver(outerReceiver, checker, check) && call.arguments[0]) {
     indirectInvocation = true;
     expression = call.arguments[0];
   }
@@ -3265,6 +3279,12 @@ export function isNestJsUseGlobalGuardsCall(
 ): boolean {
   const writeIndex = projectSources
     ? callableWriteIndex(projectSources, checker, check) : new Map<ts.Symbol, readonly CallableWriteRecord[]>();
+  const staticPropertyName = (input: ts.Expression): string | undefined => {
+    const direct = resolveStaticPropertyKey(input, checker, check);
+    if (direct !== undefined || !projectSources) return direct;
+    const values = resolveStaticStrings(input, checker, projectSources, { check, maxSteps: 4096 });
+    return values?.length === 1 ? values[0] : undefined;
+  };
   const resolveUnmodifiedAlias = (input: ts.Expression): ts.Expression => {
     const seen = new Set<ts.Symbol>();
     let value = unwrapExpression(input);
@@ -3289,7 +3309,7 @@ export function isNestJsUseGlobalGuardsCall(
     const value = resolveUnmodifiedAlias(input);
     const property = ts.isPropertyAccessExpression(value) ? value.name.text
       : ts.isElementAccessExpression(value) && value.argumentExpression
-        ? resolveStaticPropertyKey(value.argumentExpression, checker, check) : undefined;
+        ? staticPropertyName(value.argumentExpression) : undefined;
     if (property !== 'useGlobalGuards'
       || (!ts.isPropertyAccessExpression(value) && !ts.isElementAccessExpression(value))) return false;
     const symbol = checker.getNonNullableType(checker.getTypeAtLocation(value.expression)).getProperty(property);
@@ -3436,17 +3456,12 @@ export function isNestJsUseGlobalGuardsCall(
   const reflectCall = unwrapExpression(call.expression);
   const reflectMethod = ts.isPropertyAccessExpression(reflectCall) ? reflectCall.name.text
     : ts.isElementAccessExpression(reflectCall) && reflectCall.argumentExpression
-      ? resolveStaticPropertyKey(reflectCall.argumentExpression, checker, check) : undefined;
+      ? staticPropertyName(reflectCall.argumentExpression) : undefined;
   const reflectReceiver = (ts.isPropertyAccessExpression(reflectCall)
     || ts.isElementAccessExpression(reflectCall))
     ? unwrapExpression(reflectCall.expression) : undefined;
-  const reflectSymbol = reflectReceiver && ts.isIdentifier(reflectReceiver)
-    ? checker.getSymbolAtLocation(reflectReceiver) : undefined;
   const standardReflectApply = reflectMethod === 'apply' && reflectReceiver
-    && ts.isIdentifier(reflectReceiver) && reflectReceiver.text === 'Reflect'
-    && !reflectSymbol?.declarations?.some((declaration) => (
-      projectSources?.has(declaration.getSourceFile())
-    ));
+    && isStandardReflectReceiver(reflectReceiver, checker, check);
   if (standardReflectApply && call.arguments[0]) {
     expression = resolveStableInitializer(call.arguments[0]);
     const guards = call.arguments[2] ? unwrapExpression(call.arguments[2]) : undefined;
@@ -3472,7 +3487,7 @@ export function isNestJsUseGlobalGuardsCall(
       const bind = unwrapExpression(expression.expression);
       const bindName = ts.isPropertyAccessExpression(bind) ? bind.name.text
         : ts.isElementAccessExpression(bind) && bind.argumentExpression
-          ? resolveStaticPropertyKey(bind.argumentExpression, checker, check) : undefined;
+          ? staticPropertyName(bind.argumentExpression) : undefined;
       if (bindName === 'bind'
         && (ts.isPropertyAccessExpression(bind) || ts.isElementAccessExpression(bind))) {
         const bound = flattenArguments(expression.arguments.slice(1));
@@ -3484,7 +3499,7 @@ export function isNestJsUseGlobalGuardsCall(
     }
     const invocation = ts.isPropertyAccessExpression(expression) ? expression.name.text
       : ts.isElementAccessExpression(expression) && expression.argumentExpression
-        ? resolveStaticPropertyKey(expression.argumentExpression, checker, check) : undefined;
+        ? staticPropertyName(expression.argumentExpression) : undefined;
     if ((invocation === 'call' || invocation === 'apply')
       && (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression))) {
       if (invocation === 'call') {
@@ -3524,7 +3539,7 @@ export function isNestJsUseGlobalGuardsCall(
       if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)) {
         const key = ts.isPropertyAccessExpression(node) ? node.name.text
           : node.argumentExpression
-            ? resolveStaticPropertyKey(node.argumentExpression, checker, check) : undefined;
+            ? staticPropertyName(node.argumentExpression) : undefined;
         if (key === 'useGlobalGuards') {
           const symbol = checker.getNonNullableType(
             checker.getTypeAtLocation(node.expression),
@@ -3565,7 +3580,7 @@ export function isNestJsUseGlobalGuardsCall(
   let property = ts.isPropertyAccessExpression(expression)
     ? expression.name.text
     : ts.isElementAccessExpression(expression) && expression.argumentExpression
-      ? resolveStaticPropertyKey(expression.argumentExpression, checker, check)
+      ? staticPropertyName(expression.argumentExpression)
       : undefined;
   let receiver: ts.Expression | undefined = (ts.isPropertyAccessExpression(expression)
     || ts.isElementAccessExpression(expression))

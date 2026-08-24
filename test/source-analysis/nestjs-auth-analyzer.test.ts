@@ -1328,6 +1328,45 @@ describe('NestJS auth metadata analyzer', () => {
            finally {}
          },
        }) class AppModule {}`,
+      `@Module({
+         get providers() {
+           try { return [...(null as any)]; }
+           catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+         },
+       }) class AppModule {}`,
+      `@Module({
+         get providers() {
+           try { return 'provider' in (null as any) ? [] : []; }
+           catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+         },
+       }) class AppModule {}`,
+      `@Module({
+         get providers() {
+           try { return 1n / (0n); }
+           catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+         },
+       }) class AppModule {}`,
+      `declare function explode(): never;
+       @Module({
+         get providers() {
+           try { do {} while (explode()); return []; }
+           catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+         },
+       }) class AppModule {}`,
+      `declare function explode(): never;
+       @Module({
+         get providers() {
+           try { for (const value = explode(); true;) { break; } return []; }
+           catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+         },
+       }) class AppModule {}`,
+      `declare function explode(): never;
+       @Module({
+         get providers() {
+           try { switch (0) { case explode(): break; } return []; }
+           catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+         },
+       }) class AppModule {}`,
     ].entries()) {
       const aliasRoot = workspace(`
         import { Controller, Get, Module, UseGuards } from '@nestjs/common';
@@ -1426,6 +1465,117 @@ describe('NestJS auth metadata analyzer', () => {
           get providers() {
             if (false) return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
             return [];
+          },
+        }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `@Module({
+          get providers() {
+            try { return []; }
+            catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+          },
+        }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `@Module({
+          get providers() {
+            const providers: unknown[] = [];
+            try { return providers; }
+            catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+          },
+        }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `@Module({
+          get providers() {
+            try {
+              // @ts-ignore: intentionally model an undeclared runtime identifier.
+              return typeof (missing as any) ? [] : [];
+            }
+            catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+          },
+        }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `declare function explode(): never;
+          @Module({
+            get providers() {
+              try { return []; explode(); }
+              catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+            },
+          }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `declare function explode(): never;
+          @Module({
+            get providers() {
+              try { while (false as const) explode(); return []; }
+              catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+            },
+          }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `declare function explode(): never;
+          @Module({
+            get providers() {
+              try { for (; false;) explode(); return []; }
+              catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+            },
+        }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `declare function explode(): never;
+          @Module({
+            get providers() {
+              try { do { break; } while (explode()); return []; }
+              catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+            },
+          }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `declare function explode(): never;
+          @Module({
+            get providers() {
+              try { for (; true; explode()) { break; } return []; }
+              catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+            },
+          }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `declare function explode(): never;
+          @Module({
+            get providers() {
+              try { switch (0) { case 0: break; case explode(): break; } return []; }
+              catch { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+            },
+        }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `@Module({
+          get providers() {
+            switch (0) {
+              case 0: return [];
+              case 1: return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
+            }
+          },
+        }) class AppModule {}`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `@Module({
+          get providers() {
+            do {} while (true);
+            return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
           },
         }) class AppModule {}`,
         expected: 'alternatives',
@@ -4070,6 +4220,7 @@ describe('NestJS auth metadata analyzer', () => {
       app.useGlobalGuards.apply(app, [,] as never);
       app.useGlobalGuards.call.call(app.useGlobalGuards, app, guard);
       (0, app.useGlobalGuards).call(app, guard);
+      app[('useGlobal' + 'Guards') as 'useGlobalGuards'](guard);
       @Controller('call-apply') class CallApplyController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }
@@ -4101,6 +4252,7 @@ describe('NestJS auth metadata analyzer', () => {
       declare const app: INestApplication;
       declare const guard: unknown;
       Reflect.apply(app.useGlobalGuards, app, [guard]);
+      globalThis.Reflect.apply(app.useGlobalGuards, app, [guard]);
       @Controller('reflect-apply') class ReflectApplyController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }

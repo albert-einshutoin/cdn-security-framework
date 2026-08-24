@@ -215,6 +215,173 @@ function resolvedSymbolAt(node: ts.Identifier, checker: ts.TypeChecker): ts.Symb
   return symbol;
 }
 
+function nodeMayThrow(
+  input: ts.Node,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+): boolean {
+  const unwrapTransparent = (input: ts.Expression): ts.Expression => {
+    let expression = input;
+    while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+      || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+      || ts.isNonNullExpression(expression)) expression = expression.expression;
+    return expression;
+  };
+  const primitiveKind = (input: ts.Expression): 'number' | 'bigint' | 'other' | undefined => {
+    const expression = unwrapTransparent(input);
+    if (ts.isNumericLiteral(expression)) return 'number';
+    if (ts.isBigIntLiteral(expression)) return 'bigint';
+    if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)
+      || expression.kind === ts.SyntaxKind.TrueKeyword
+      || expression.kind === ts.SyntaxKind.FalseKeyword
+      || expression.kind === ts.SyntaxKind.NullKeyword) return 'other';
+    return undefined;
+  };
+  const staticTruth = (input: ts.Expression): boolean | undefined => {
+    const expression = unwrapTransparent(input);
+    if (expression.kind === ts.SyntaxKind.TrueKeyword) return true;
+    if (expression.kind === ts.SyntaxKind.FalseKeyword
+      || expression.kind === ts.SyntaxKind.NullKeyword) return false;
+    if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+      return expression.text.length > 0;
+    }
+    if (ts.isNumericLiteral(expression)) return Number(expression.text) !== 0;
+    if (ts.isBigIntLiteral(expression)) return BigInt(expression.text.slice(0, -1)) !== 0n;
+    if (ts.isObjectLiteralExpression(expression) || ts.isArrayLiteralExpression(expression)
+      || ts.isFunctionExpression(expression) || ts.isArrowFunction(expression)
+      || ts.isClassExpression(expression) || ts.isRegularExpressionLiteral(expression)
+      || ts.isNewExpression(expression)) return true;
+    return undefined;
+  };
+  const staticNullish = (input: ts.Expression): boolean | undefined => {
+    const expression = unwrapTransparent(input);
+    if (expression.kind === ts.SyntaxKind.NullKeyword || ts.isVoidExpression(expression)) return true;
+    if (ts.isIdentifier(expression) && expression.text === 'undefined'
+      && !checker.getSymbolAtLocation(expression)?.declarations?.length) return true;
+    return primitiveKind(expression) || ts.isObjectLiteralExpression(expression)
+      || ts.isArrayLiteralExpression(expression) || ts.isFunctionExpression(expression)
+      || ts.isArrowFunction(expression) || ts.isClassExpression(expression)
+      || ts.isRegularExpressionLiteral(expression) || ts.isNewExpression(expression)
+      ? false : undefined;
+  };
+  const operatorMayThrow = (node: ts.Node): boolean => {
+    if (ts.isSpreadElement(node) || ts.isDeleteExpression(node)
+      || ts.isPostfixUnaryExpression(node)) return true;
+    if (ts.isPrefixUnaryExpression(node)) {
+      if (node.operator === ts.SyntaxKind.ExclamationToken) return false;
+      const kind = primitiveKind(node.operand);
+      return kind === undefined || (kind === 'bigint' && node.operator === ts.SyntaxKind.PlusToken);
+    }
+    if (!ts.isBinaryExpression(node)) return false;
+    const operator = node.operatorToken.kind;
+    if (operator >= ts.SyntaxKind.FirstAssignment && operator <= ts.SyntaxKind.LastAssignment) {
+      return true;
+    }
+    if (operator === ts.SyntaxKind.AmpersandAmpersandToken
+      || operator === ts.SyntaxKind.BarBarToken || operator === ts.SyntaxKind.QuestionQuestionToken
+      || operator === ts.SyntaxKind.CommaToken || operator === ts.SyntaxKind.EqualsEqualsEqualsToken
+      || operator === ts.SyntaxKind.ExclamationEqualsEqualsToken) return false;
+    if (operator === ts.SyntaxKind.InKeyword || operator === ts.SyntaxKind.InstanceOfKeyword) {
+      return true;
+    }
+    const left = primitiveKind(node.left);
+    const right = primitiveKind(node.right);
+    if (!left || !right) return true;
+    if (left !== 'bigint' && right !== 'bigint') return false;
+    if (left !== right || operator === ts.SyntaxKind.GreaterThanGreaterThanGreaterThanToken) return true;
+    const rightExpression = unwrapTransparent(node.right);
+    return (operator === ts.SyntaxKind.SlashToken || operator === ts.SyntaxKind.PercentToken)
+      && ts.isBigIntLiteral(rightExpression)
+      && BigInt(rightExpression.text.slice(0, -1)) === 0n;
+  };
+  const containingFunction = (node: ts.Node): ts.SignatureDeclaration | undefined => {
+    for (let parent = node.parent; parent && !ts.isSourceFile(parent); parent = parent.parent) {
+      if (ts.isFunctionLike(parent)) return parent;
+    }
+    return undefined;
+  };
+  const identifierMayThrow = (node: ts.Identifier): boolean => {
+    if ((ts.isVariableDeclaration(node.parent) || ts.isParameter(node.parent))
+      && node.parent.name === node) return false;
+    if ((ts.isPropertyAssignment(node.parent) || ts.isMethodDeclaration(node.parent)
+      || ts.isPropertyDeclaration(node.parent) || ts.isGetAccessorDeclaration(node.parent)
+      || ts.isSetAccessorDeclaration(node.parent)) && node.parent.name === node
+      && !ts.isComputedPropertyName(node.parent.name)) return false;
+    const symbol = resolvedSymbolAt(node, checker);
+    if (!symbol?.declarations?.length) return true;
+    if (symbol.declarations.every((declaration) => !projectSources.has(declaration.getSourceFile()))) {
+      return false;
+    }
+    const readFunction = containingFunction(node);
+    return symbol.declarations.some((declaration) => {
+      if (ts.isParameter(declaration) || ts.isFunctionDeclaration(declaration)
+        || ts.isImportSpecifier(declaration) || ts.isImportClause(declaration)
+        || ts.isNamespaceImport(declaration)) return false;
+      if (ts.isVariableDeclaration(declaration)) {
+        const lexical = Boolean((declaration.parent.flags & ts.NodeFlags.Let)
+          || (declaration.parent.flags & ts.NodeFlags.Const));
+        if (!lexical) return false;
+        const variableStatement = ts.isVariableStatement(declaration.parent.parent)
+          ? declaration.parent.parent : undefined;
+        const ambient = declaration.getSourceFile().isDeclarationFile
+          || Boolean(variableStatement?.modifiers?.some(({ kind }) => (
+            kind === ts.SyntaxKind.DeclareKeyword
+          )));
+        if (!declaration.initializer && (ambient
+          || Boolean(declaration.parent.flags & ts.NodeFlags.Const))) return true;
+        if (readFunction && containingFunction(declaration) !== readFunction) return true;
+      }
+      return declaration.getSourceFile() !== node.getSourceFile()
+        || declaration.end > node.getStart();
+    });
+  };
+  const nodes: ts.Node[] = [input];
+  while (nodes.length > 0) {
+    const node = nodes.pop()!;
+    check();
+    if (ts.isFunctionLike(node)) continue;
+    if (ts.isTypeOfExpression(node)) {
+      const operand = unwrapTransparent(node.expression);
+      if (ts.isIdentifier(operand) && !checker.getSymbolAtLocation(operand)?.declarations?.length) {
+        continue;
+      }
+    }
+    if (ts.isConditionalExpression(node)) {
+      const condition = staticTruth(node.condition);
+      nodes.push(node.condition);
+      if (condition !== false) nodes.push(node.whenTrue);
+      if (condition !== true) nodes.push(node.whenFalse);
+      continue;
+    }
+    if (ts.isBinaryExpression(node) && (
+      node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+      || node.operatorToken.kind === ts.SyntaxKind.BarBarToken
+      || node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+    )) {
+      const truth = staticTruth(node.left);
+      const nullish = staticNullish(node.left);
+      nodes.push(node.left);
+      if ((node.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken && truth !== false)
+        || (node.operatorToken.kind === ts.SyntaxKind.BarBarToken && truth !== true)
+        || (node.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken && nullish !== false)) {
+        nodes.push(node.right);
+      }
+      continue;
+    }
+    if (ts.isIdentifier(node) && identifierMayThrow(node)) return true;
+    if (ts.isTypeNode(node)) continue;
+    if (node !== input && ts.isClassLike(node)) continue;
+    if (operatorMayThrow(node)) return true;
+    if (ts.isThrowStatement(node) || ts.isCallExpression(node) || ts.isNewExpression(node)
+      || ts.isAwaitExpression(node) || ts.isYieldExpression(node)
+      || ts.isTaggedTemplateExpression(node) || ts.isPropertyAccessExpression(node)
+      || ts.isElementAccessExpression(node)) return true;
+    ts.forEachChild(node, (child) => { nodes.push(child); });
+  }
+  return false;
+}
+
 function resolveConstObject(
   input: ts.Expression,
   checker: ts.TypeChecker,
@@ -257,58 +424,196 @@ function effectiveObjectProperty(
   seen.add(object);
   const returnedExpressions = (body: ts.Block): ts.Expression[] => {
     const result: ts.Expression[] = [];
-    const collectReturns = (statement: ts.Statement): boolean => {
+    const NORMAL = 1;
+    const RETURN = 2;
+    const BREAK = 4;
+    const CONTINUE = 8;
+    type ReturnFlow = { mask: number; mayThrow: boolean };
+    const unwrap = (input: ts.Expression): ts.Expression => {
+      let expression = input;
+      while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+        || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+        || ts.isNonNullExpression(expression)) expression = expression.expression;
+      return expression;
+    };
+    const staticBoolean = (input: ts.Expression): boolean | undefined => {
+      const expression = unwrap(input);
+      return expression.kind === ts.SyntaxKind.TrueKeyword
+        ? true : expression.kind === ts.SyntaxKind.FalseKeyword ? false : undefined;
+    };
+    const staticCaseValue = (input: ts.Expression): string | number | bigint | boolean | null | undefined => {
+      const expression = unwrap(input);
+      if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+        return expression.text;
+      }
+      if (ts.isNumericLiteral(expression)) return Number(expression.text);
+      if (ts.isBigIntLiteral(expression)) return BigInt(expression.text.slice(0, -1));
+      if (expression.kind === ts.SyntaxKind.TrueKeyword) return true;
+      if (expression.kind === ts.SyntaxKind.FalseKeyword) return false;
+      if (expression.kind === ts.SyntaxKind.NullKeyword) return null;
+      return undefined;
+    };
+    const collectReturns = (statement: ts.Statement): ReturnFlow => {
       check();
       if (ts.isReturnStatement(statement)) {
         if (statement.expression) result.push(statement.expression);
-        return true;
+        return {
+          mask: RETURN,
+          mayThrow: Boolean(statement.expression && nodeMayThrow(
+            statement.expression, checker, projectSources, check,
+          )),
+        };
       }
+      if (ts.isThrowStatement(statement)) return { mask: 0, mayThrow: true };
+      if (ts.isBreakStatement(statement)) return { mask: BREAK, mayThrow: false };
+      if (ts.isContinueStatement(statement)) return { mask: CONTINUE, mayThrow: false };
       if (ts.isBlock(statement)) {
+        const flow: ReturnFlow = { mask: NORMAL, mayThrow: false };
         for (const child of statement.statements) {
-          if (collectReturns(child)) return true;
+          if (!(flow.mask & NORMAL)) break;
+          const childFlow = collectReturns(child);
+          flow.mayThrow ||= childFlow.mayThrow;
+          flow.mask = (flow.mask & ~NORMAL) | childFlow.mask;
         }
+        return flow;
       } else if (ts.isIfStatement(statement)) {
-        const condition = statement.expression.kind === ts.SyntaxKind.TrueKeyword
-          ? true : statement.expression.kind === ts.SyntaxKind.FalseKeyword ? false : undefined;
-        const thenReturns = condition !== false && collectReturns(statement.thenStatement);
-        const elseReturns = condition !== true && Boolean(statement.elseStatement
-          && collectReturns(statement.elseStatement));
-        return condition === true ? thenReturns : condition === false ? elseReturns
-          : thenReturns && elseReturns;
+        const condition = staticBoolean(statement.expression);
+        const conditionMayThrow = nodeMayThrow(statement.expression, checker, projectSources, check);
+        if (condition === true) {
+          const flow = collectReturns(statement.thenStatement);
+          return { ...flow, mayThrow: conditionMayThrow || flow.mayThrow };
+        }
+        if (condition === false) {
+          const flow = statement.elseStatement
+            ? collectReturns(statement.elseStatement)
+            : { mask: NORMAL, mayThrow: false };
+          return { ...flow, mayThrow: conditionMayThrow || flow.mayThrow };
+        }
+        const whenTrue = collectReturns(statement.thenStatement);
+        const whenFalse = statement.elseStatement
+          ? collectReturns(statement.elseStatement)
+          : { mask: NORMAL, mayThrow: false };
+        return {
+          mask: whenTrue.mask | whenFalse.mask,
+          mayThrow: conditionMayThrow || whenTrue.mayThrow || whenFalse.mayThrow,
+        };
       } else if (ts.isTryStatement(statement)) {
         const start = result.length;
-        const tryReturns = collectReturns(statement.tryBlock);
-        const catchReturns = Boolean(statement.catchClause
-          && collectReturns(statement.catchClause.block));
-        if (!statement.finallyBlock) return tryReturns && (!statement.catchClause || catchReturns);
+        const tryFlow = collectReturns(statement.tryBlock);
+        const catchFlow = statement.catchClause && tryFlow.mayThrow
+          ? collectReturns(statement.catchClause.block) : undefined;
+        let flow: ReturnFlow = {
+          mask: tryFlow.mask | (catchFlow?.mask ?? 0),
+          mayThrow: catchFlow ? catchFlow.mayThrow : tryFlow.mayThrow,
+        };
+        if (!statement.finallyBlock) return flow;
         const finallyStart = result.length;
-        const finallyReturns = collectReturns(statement.finallyBlock);
-        if (finallyReturns) result.splice(start, finallyStart - start);
-        return finallyReturns || (tryReturns && (!statement.catchClause || catchReturns));
+        const finallyFlow = collectReturns(statement.finallyBlock);
+        if (!(finallyFlow.mask & NORMAL)) result.splice(start, finallyStart - start);
+        flow = !(finallyFlow.mask & NORMAL) ? finallyFlow : {
+          mask: (finallyFlow.mask & ~NORMAL) | flow.mask,
+          mayThrow: flow.mayThrow || finallyFlow.mayThrow,
+        };
+        return flow;
       } else if (ts.isSwitchStatement(statement)) {
-        let allReturn = statement.caseBlock.clauses.length > 0;
-        for (const clause of statement.caseBlock.clauses) {
-          let clauseReturns = false;
-          for (const child of clause.statements) {
-            if (collectReturns(child)) { clauseReturns = true; break; }
+        let mayThrow = nodeMayThrow(statement.expression, checker, projectSources, check);
+        const discriminant = staticCaseValue(statement.expression);
+        let dynamic = discriminant === undefined;
+        let start = -1;
+        let fallback = -1;
+        for (const [index, clause] of statement.caseBlock.clauses.entries()) {
+          if (ts.isDefaultClause(clause)) {
+            fallback = index;
+            continue;
           }
-          allReturn &&= clauseReturns;
+          mayThrow ||= nodeMayThrow(clause.expression, checker, projectSources, check);
+          const value = staticCaseValue(clause.expression);
+          if (value === undefined) dynamic = true;
+          if (!dynamic && Object.is(discriminant, value)) { start = index; break; }
         }
-        return allReturn && statement.caseBlock.clauses.some(ts.isDefaultClause);
+        const indexes = dynamic
+          ? statement.caseBlock.clauses.map((_, index) => index)
+          : start >= 0 ? statement.caseBlock.clauses.map((_, index) => index).slice(start)
+            : fallback >= 0 ? statement.caseBlock.clauses.map((_, index) => index).slice(fallback) : [];
+        let mask = NORMAL;
+        for (const index of indexes) {
+          if (!dynamic && !(mask & NORMAL)) break;
+          const clause = statement.caseBlock.clauses[index];
+          let clauseMask = NORMAL;
+          for (const child of clause.statements) {
+            if (!(clauseMask & NORMAL)) break;
+            const childFlow = collectReturns(child);
+            mayThrow ||= childFlow.mayThrow;
+            clauseMask = (clauseMask & ~NORMAL) | childFlow.mask;
+          }
+          mask = dynamic ? mask | clauseMask : (mask & ~NORMAL) | clauseMask;
+          if (clauseMask & BREAK) {
+            mask = (mask & ~BREAK) | NORMAL;
+            if (!dynamic) break;
+          }
+        }
+        return { mask, mayThrow };
       } else if (ts.isWhileStatement(statement)) {
-        if (statement.expression.kind !== ts.SyntaxKind.FalseKeyword) {
-          collectReturns(statement.statement);
+        const condition = staticBoolean(statement.expression);
+        const conditionMayThrow = nodeMayThrow(
+          statement.expression, checker, projectSources, check,
+        );
+        if (condition === false) {
+          return { mask: NORMAL, mayThrow: conditionMayThrow };
         }
+        const flow = collectReturns(statement.statement);
+        return {
+          mask: (flow.mask & RETURN)
+            | ((condition !== true || (flow.mask & BREAK)) ? NORMAL : 0),
+          mayThrow: conditionMayThrow || flow.mayThrow,
+        };
       } else if (ts.isDoStatement(statement)) {
-        collectReturns(statement.statement);
+        const flow = collectReturns(statement.statement);
+        const reachesCondition = Boolean(flow.mask & (NORMAL | CONTINUE));
+        const condition = staticBoolean(statement.expression);
+        return {
+          mask: (flow.mask & RETURN) | ((flow.mask & BREAK) ? NORMAL : 0)
+            | (reachesCondition && condition !== true ? NORMAL : 0),
+          mayThrow: flow.mayThrow || (reachesCondition && nodeMayThrow(
+            statement.expression, checker, projectSources, check,
+          )),
+        };
       } else if (ts.isForStatement(statement)) {
-        if (statement.condition?.kind !== ts.SyntaxKind.FalseKeyword) {
-          collectReturns(statement.statement);
+        const initializerMayThrow = Boolean(statement.initializer && nodeMayThrow(
+          statement.initializer, checker, projectSources, check,
+        ));
+        const condition = statement.condition ? staticBoolean(statement.condition) : true;
+        const conditionMayThrow = Boolean(statement.condition && nodeMayThrow(
+          statement.condition, checker, projectSources, check,
+        ));
+        if (condition === false) {
+          return {
+            mask: NORMAL,
+            mayThrow: initializerMayThrow || conditionMayThrow,
+          };
         }
+        const flow = collectReturns(statement.statement);
+        const reachesIncrement = Boolean(flow.mask & (NORMAL | CONTINUE));
+        const incrementMayThrow = reachesIncrement && Boolean(statement.incrementor
+          && nodeMayThrow(statement.incrementor, checker, projectSources, check));
+        return {
+          mask: (flow.mask & RETURN)
+            | ((condition !== true || (flow.mask & BREAK)) ? NORMAL : 0),
+          mayThrow: initializerMayThrow || conditionMayThrow || flow.mayThrow || incrementMayThrow,
+        };
       } else if (ts.isForInStatement(statement) || ts.isForOfStatement(statement)) {
-        collectReturns(statement.statement);
+        const flow = collectReturns(statement.statement);
+        return {
+          mask: (flow.mask & RETURN) | NORMAL,
+          mayThrow: nodeMayThrow(statement.initializer, checker, projectSources, check)
+            || nodeMayThrow(statement.expression, checker, projectSources, check)
+            || flow.mayThrow,
+        };
       }
-      return false;
+      return {
+        mask: NORMAL,
+        mayThrow: nodeMayThrow(statement, checker, projectSources, check),
+      };
     };
     collectReturns(body);
     return result;
@@ -3332,70 +3637,15 @@ function containsCanonicalProviderToken(
     return false;
   };
   type ReturnFlow = { candidates: ts.Expression[]; definitelyReturns: boolean; mayThrow: boolean };
-  const identifierMayThrow = (node: ts.Identifier): boolean => {
-    if ((ts.isPropertyAssignment(node.parent) || ts.isMethodDeclaration(node.parent)
-      || ts.isPropertyDeclaration(node.parent) || ts.isGetAccessorDeclaration(node.parent)
-      || ts.isSetAccessorDeclaration(node.parent)) && node.parent.name === node
-      && !ts.isComputedPropertyName(node.parent.name)) return false;
-    const symbol = resolvedSymbolAt(node, checker);
-    if (!symbol?.declarations?.length) return true;
-    if (symbol.declarations.every((declaration) => !projectSources.has(declaration.getSourceFile()))) {
-      return false;
-    }
-    const containingFunction = (input: ts.Node): ts.SignatureDeclaration | undefined => {
-      for (let parent = input.parent; parent && !ts.isSourceFile(parent); parent = parent.parent) {
-        if (ts.isFunctionLike(parent)) return parent;
-      }
-      return undefined;
-    };
-    const readFunction = containingFunction(node);
-    return symbol.declarations.some((declaration) => {
-      if (ts.isParameter(declaration) || ts.isFunctionDeclaration(declaration)
-        || ts.isImportSpecifier(declaration) || ts.isImportClause(declaration)
-        || ts.isNamespaceImport(declaration)) return false;
-      if (ts.isVariableDeclaration(declaration)) {
-        const lexical = Boolean((declaration.parent.flags & ts.NodeFlags.Let)
-          || (declaration.parent.flags & ts.NodeFlags.Const));
-        if (!lexical) return false;
-        const variableStatement = ts.isVariableStatement(declaration.parent.parent)
-          ? declaration.parent.parent : undefined;
-        const ambient = declaration.getSourceFile().isDeclarationFile
-          || Boolean(variableStatement?.modifiers?.some(({ kind }) => (
-            kind === ts.SyntaxKind.DeclareKeyword
-          )));
-        if (!declaration.initializer && (ambient
-          || Boolean(declaration.parent.flags & ts.NodeFlags.Const))) return true;
-        if (readFunction && containingFunction(declaration) !== readFunction
-          && lexical) return true;
-      }
-      return declaration.getSourceFile() !== node.getSourceFile()
-        || declaration.end > node.getStart();
-    });
-  };
-  const mayThrow = (input: ts.Node): boolean => {
-    const nodes: ts.Node[] = [input];
-    while (nodes.length > 0) {
-      const node = nodes.pop()!;
-      check();
-      if (ts.isFunctionLike(node)) continue;
-      if (ts.isIdentifier(node) && identifierMayThrow(node)) return true;
-      if (ts.isTypeNode(node)) continue;
-      if (node !== input && ts.isClassLike(node)) continue;
-      if (ts.isThrowStatement(node) || ts.isCallExpression(node) || ts.isNewExpression(node)
-        || ts.isAwaitExpression(node) || ts.isYieldExpression(node)
-        || ts.isTaggedTemplateExpression(node) || ts.isPropertyAccessExpression(node)
-        || ts.isElementAccessExpression(node)) return true;
-      ts.forEachChild(node, (child) => { nodes.push(child); });
-    }
-    return false;
-  };
   const collectReturns = (statement: ts.Statement): ReturnFlow => {
     check();
     if (ts.isReturnStatement(statement)) {
       return {
         candidates: statement.expression ? [statement.expression] : [],
         definitelyReturns: true,
-        mayThrow: Boolean(statement.expression && mayThrow(statement.expression)),
+        mayThrow: Boolean(statement.expression && nodeMayThrow(
+          statement.expression, checker, projectSources, check,
+        )),
       };
     }
     if (ts.isThrowStatement(statement)) {
@@ -3426,7 +3676,8 @@ function containsCanonicalProviderToken(
       return {
         candidates: [...whenTrue.candidates, ...whenFalse.candidates],
         definitelyReturns: whenTrue.definitelyReturns && whenFalse.definitelyReturns,
-        mayThrow: mayThrow(statement.expression) || whenTrue.mayThrow || whenFalse.mayThrow,
+        mayThrow: nodeMayThrow(statement.expression, checker, projectSources, check)
+          || whenTrue.mayThrow || whenFalse.mayThrow,
       };
     }
     if (ts.isTryStatement(statement)) {
@@ -3449,7 +3700,11 @@ function containsCanonicalProviderToken(
       }
       return flow;
     }
-    return { candidates: [], definitelyReturns: false, mayThrow: mayThrow(statement) };
+    return {
+      candidates: [],
+      definitelyReturns: false,
+      mayThrow: nodeMayThrow(statement, checker, projectSources, check),
+    };
   };
   const staticallyUnreachable = (node: ts.Node): boolean => {
     let child = node;

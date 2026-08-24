@@ -183,6 +183,197 @@ function resolvedSymbolAt(node, checker) {
         symbol = checker.getAliasedSymbol(symbol);
     return symbol;
 }
+function nodeMayThrow(input, checker, projectSources, check) {
+    const unwrapTransparent = (input) => {
+        let expression = input;
+        while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+            || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+            || typescript_1.default.isNonNullExpression(expression))
+            expression = expression.expression;
+        return expression;
+    };
+    const primitiveKind = (input) => {
+        const expression = unwrapTransparent(input);
+        if (typescript_1.default.isNumericLiteral(expression))
+            return 'number';
+        if (typescript_1.default.isBigIntLiteral(expression))
+            return 'bigint';
+        if (typescript_1.default.isStringLiteral(expression) || typescript_1.default.isNoSubstitutionTemplateLiteral(expression)
+            || expression.kind === typescript_1.default.SyntaxKind.TrueKeyword
+            || expression.kind === typescript_1.default.SyntaxKind.FalseKeyword
+            || expression.kind === typescript_1.default.SyntaxKind.NullKeyword)
+            return 'other';
+        return undefined;
+    };
+    const staticTruth = (input) => {
+        const expression = unwrapTransparent(input);
+        if (expression.kind === typescript_1.default.SyntaxKind.TrueKeyword)
+            return true;
+        if (expression.kind === typescript_1.default.SyntaxKind.FalseKeyword
+            || expression.kind === typescript_1.default.SyntaxKind.NullKeyword)
+            return false;
+        if (typescript_1.default.isStringLiteral(expression) || typescript_1.default.isNoSubstitutionTemplateLiteral(expression)) {
+            return expression.text.length > 0;
+        }
+        if (typescript_1.default.isNumericLiteral(expression))
+            return Number(expression.text) !== 0;
+        if (typescript_1.default.isBigIntLiteral(expression))
+            return BigInt(expression.text.slice(0, -1)) !== 0n;
+        if (typescript_1.default.isObjectLiteralExpression(expression) || typescript_1.default.isArrayLiteralExpression(expression)
+            || typescript_1.default.isFunctionExpression(expression) || typescript_1.default.isArrowFunction(expression)
+            || typescript_1.default.isClassExpression(expression) || typescript_1.default.isRegularExpressionLiteral(expression)
+            || typescript_1.default.isNewExpression(expression))
+            return true;
+        return undefined;
+    };
+    const staticNullish = (input) => {
+        const expression = unwrapTransparent(input);
+        if (expression.kind === typescript_1.default.SyntaxKind.NullKeyword || typescript_1.default.isVoidExpression(expression))
+            return true;
+        if (typescript_1.default.isIdentifier(expression) && expression.text === 'undefined'
+            && !checker.getSymbolAtLocation(expression)?.declarations?.length)
+            return true;
+        return primitiveKind(expression) || typescript_1.default.isObjectLiteralExpression(expression)
+            || typescript_1.default.isArrayLiteralExpression(expression) || typescript_1.default.isFunctionExpression(expression)
+            || typescript_1.default.isArrowFunction(expression) || typescript_1.default.isClassExpression(expression)
+            || typescript_1.default.isRegularExpressionLiteral(expression) || typescript_1.default.isNewExpression(expression)
+            ? false : undefined;
+    };
+    const operatorMayThrow = (node) => {
+        if (typescript_1.default.isSpreadElement(node) || typescript_1.default.isDeleteExpression(node)
+            || typescript_1.default.isPostfixUnaryExpression(node))
+            return true;
+        if (typescript_1.default.isPrefixUnaryExpression(node)) {
+            if (node.operator === typescript_1.default.SyntaxKind.ExclamationToken)
+                return false;
+            const kind = primitiveKind(node.operand);
+            return kind === undefined || (kind === 'bigint' && node.operator === typescript_1.default.SyntaxKind.PlusToken);
+        }
+        if (!typescript_1.default.isBinaryExpression(node))
+            return false;
+        const operator = node.operatorToken.kind;
+        if (operator >= typescript_1.default.SyntaxKind.FirstAssignment && operator <= typescript_1.default.SyntaxKind.LastAssignment) {
+            return true;
+        }
+        if (operator === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+            || operator === typescript_1.default.SyntaxKind.BarBarToken || operator === typescript_1.default.SyntaxKind.QuestionQuestionToken
+            || operator === typescript_1.default.SyntaxKind.CommaToken || operator === typescript_1.default.SyntaxKind.EqualsEqualsEqualsToken
+            || operator === typescript_1.default.SyntaxKind.ExclamationEqualsEqualsToken)
+            return false;
+        if (operator === typescript_1.default.SyntaxKind.InKeyword || operator === typescript_1.default.SyntaxKind.InstanceOfKeyword) {
+            return true;
+        }
+        const left = primitiveKind(node.left);
+        const right = primitiveKind(node.right);
+        if (!left || !right)
+            return true;
+        if (left !== 'bigint' && right !== 'bigint')
+            return false;
+        if (left !== right || operator === typescript_1.default.SyntaxKind.GreaterThanGreaterThanGreaterThanToken)
+            return true;
+        const rightExpression = unwrapTransparent(node.right);
+        return (operator === typescript_1.default.SyntaxKind.SlashToken || operator === typescript_1.default.SyntaxKind.PercentToken)
+            && typescript_1.default.isBigIntLiteral(rightExpression)
+            && BigInt(rightExpression.text.slice(0, -1)) === 0n;
+    };
+    const containingFunction = (node) => {
+        for (let parent = node.parent; parent && !typescript_1.default.isSourceFile(parent); parent = parent.parent) {
+            if (typescript_1.default.isFunctionLike(parent))
+                return parent;
+        }
+        return undefined;
+    };
+    const identifierMayThrow = (node) => {
+        if ((typescript_1.default.isVariableDeclaration(node.parent) || typescript_1.default.isParameter(node.parent))
+            && node.parent.name === node)
+            return false;
+        if ((typescript_1.default.isPropertyAssignment(node.parent) || typescript_1.default.isMethodDeclaration(node.parent)
+            || typescript_1.default.isPropertyDeclaration(node.parent) || typescript_1.default.isGetAccessorDeclaration(node.parent)
+            || typescript_1.default.isSetAccessorDeclaration(node.parent)) && node.parent.name === node
+            && !typescript_1.default.isComputedPropertyName(node.parent.name))
+            return false;
+        const symbol = resolvedSymbolAt(node, checker);
+        if (!symbol?.declarations?.length)
+            return true;
+        if (symbol.declarations.every((declaration) => !projectSources.has(declaration.getSourceFile()))) {
+            return false;
+        }
+        const readFunction = containingFunction(node);
+        return symbol.declarations.some((declaration) => {
+            if (typescript_1.default.isParameter(declaration) || typescript_1.default.isFunctionDeclaration(declaration)
+                || typescript_1.default.isImportSpecifier(declaration) || typescript_1.default.isImportClause(declaration)
+                || typescript_1.default.isNamespaceImport(declaration))
+                return false;
+            if (typescript_1.default.isVariableDeclaration(declaration)) {
+                const lexical = Boolean((declaration.parent.flags & typescript_1.default.NodeFlags.Let)
+                    || (declaration.parent.flags & typescript_1.default.NodeFlags.Const));
+                if (!lexical)
+                    return false;
+                const variableStatement = typescript_1.default.isVariableStatement(declaration.parent.parent)
+                    ? declaration.parent.parent : undefined;
+                const ambient = declaration.getSourceFile().isDeclarationFile
+                    || Boolean(variableStatement?.modifiers?.some(({ kind }) => (kind === typescript_1.default.SyntaxKind.DeclareKeyword)));
+                if (!declaration.initializer && (ambient
+                    || Boolean(declaration.parent.flags & typescript_1.default.NodeFlags.Const)))
+                    return true;
+                if (readFunction && containingFunction(declaration) !== readFunction)
+                    return true;
+            }
+            return declaration.getSourceFile() !== node.getSourceFile()
+                || declaration.end > node.getStart();
+        });
+    };
+    const nodes = [input];
+    while (nodes.length > 0) {
+        const node = nodes.pop();
+        check();
+        if (typescript_1.default.isFunctionLike(node))
+            continue;
+        if (typescript_1.default.isTypeOfExpression(node)) {
+            const operand = unwrapTransparent(node.expression);
+            if (typescript_1.default.isIdentifier(operand) && !checker.getSymbolAtLocation(operand)?.declarations?.length) {
+                continue;
+            }
+        }
+        if (typescript_1.default.isConditionalExpression(node)) {
+            const condition = staticTruth(node.condition);
+            nodes.push(node.condition);
+            if (condition !== false)
+                nodes.push(node.whenTrue);
+            if (condition !== true)
+                nodes.push(node.whenFalse);
+            continue;
+        }
+        if (typescript_1.default.isBinaryExpression(node) && (node.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+            || node.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken
+            || node.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken)) {
+            const truth = staticTruth(node.left);
+            const nullish = staticNullish(node.left);
+            nodes.push(node.left);
+            if ((node.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken && truth !== false)
+                || (node.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken && truth !== true)
+                || (node.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken && nullish !== false)) {
+                nodes.push(node.right);
+            }
+            continue;
+        }
+        if (typescript_1.default.isIdentifier(node) && identifierMayThrow(node))
+            return true;
+        if (typescript_1.default.isTypeNode(node))
+            continue;
+        if (node !== input && typescript_1.default.isClassLike(node))
+            continue;
+        if (operatorMayThrow(node))
+            return true;
+        if (typescript_1.default.isThrowStatement(node) || typescript_1.default.isCallExpression(node) || typescript_1.default.isNewExpression(node)
+            || typescript_1.default.isAwaitExpression(node) || typescript_1.default.isYieldExpression(node)
+            || typescript_1.default.isTaggedTemplateExpression(node) || typescript_1.default.isPropertyAccessExpression(node)
+            || typescript_1.default.isElementAccessExpression(node))
+            return true;
+        typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+    }
+    return false;
+}
 function resolveConstObject(input, checker, projectSources, check, seen = new Set(), depth = 0) {
     check();
     if (depth > 64)
@@ -215,72 +406,212 @@ function effectiveObjectProperty(object, propertyName, checker, projectSources, 
     seen.add(object);
     const returnedExpressions = (body) => {
         const result = [];
+        const NORMAL = 1;
+        const RETURN = 2;
+        const BREAK = 4;
+        const CONTINUE = 8;
+        const unwrap = (input) => {
+            let expression = input;
+            while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+                || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+                || typescript_1.default.isNonNullExpression(expression))
+                expression = expression.expression;
+            return expression;
+        };
+        const staticBoolean = (input) => {
+            const expression = unwrap(input);
+            return expression.kind === typescript_1.default.SyntaxKind.TrueKeyword
+                ? true : expression.kind === typescript_1.default.SyntaxKind.FalseKeyword ? false : undefined;
+        };
+        const staticCaseValue = (input) => {
+            const expression = unwrap(input);
+            if (typescript_1.default.isStringLiteral(expression) || typescript_1.default.isNoSubstitutionTemplateLiteral(expression)) {
+                return expression.text;
+            }
+            if (typescript_1.default.isNumericLiteral(expression))
+                return Number(expression.text);
+            if (typescript_1.default.isBigIntLiteral(expression))
+                return BigInt(expression.text.slice(0, -1));
+            if (expression.kind === typescript_1.default.SyntaxKind.TrueKeyword)
+                return true;
+            if (expression.kind === typescript_1.default.SyntaxKind.FalseKeyword)
+                return false;
+            if (expression.kind === typescript_1.default.SyntaxKind.NullKeyword)
+                return null;
+            return undefined;
+        };
         const collectReturns = (statement) => {
             check();
             if (typescript_1.default.isReturnStatement(statement)) {
                 if (statement.expression)
                     result.push(statement.expression);
-                return true;
+                return {
+                    mask: RETURN,
+                    mayThrow: Boolean(statement.expression && nodeMayThrow(statement.expression, checker, projectSources, check)),
+                };
             }
+            if (typescript_1.default.isThrowStatement(statement))
+                return { mask: 0, mayThrow: true };
+            if (typescript_1.default.isBreakStatement(statement))
+                return { mask: BREAK, mayThrow: false };
+            if (typescript_1.default.isContinueStatement(statement))
+                return { mask: CONTINUE, mayThrow: false };
             if (typescript_1.default.isBlock(statement)) {
+                const flow = { mask: NORMAL, mayThrow: false };
                 for (const child of statement.statements) {
-                    if (collectReturns(child))
-                        return true;
+                    if (!(flow.mask & NORMAL))
+                        break;
+                    const childFlow = collectReturns(child);
+                    flow.mayThrow ||= childFlow.mayThrow;
+                    flow.mask = (flow.mask & ~NORMAL) | childFlow.mask;
                 }
+                return flow;
             }
             else if (typescript_1.default.isIfStatement(statement)) {
-                const condition = statement.expression.kind === typescript_1.default.SyntaxKind.TrueKeyword
-                    ? true : statement.expression.kind === typescript_1.default.SyntaxKind.FalseKeyword ? false : undefined;
-                const thenReturns = condition !== false && collectReturns(statement.thenStatement);
-                const elseReturns = condition !== true && Boolean(statement.elseStatement
-                    && collectReturns(statement.elseStatement));
-                return condition === true ? thenReturns : condition === false ? elseReturns
-                    : thenReturns && elseReturns;
+                const condition = staticBoolean(statement.expression);
+                const conditionMayThrow = nodeMayThrow(statement.expression, checker, projectSources, check);
+                if (condition === true) {
+                    const flow = collectReturns(statement.thenStatement);
+                    return { ...flow, mayThrow: conditionMayThrow || flow.mayThrow };
+                }
+                if (condition === false) {
+                    const flow = statement.elseStatement
+                        ? collectReturns(statement.elseStatement)
+                        : { mask: NORMAL, mayThrow: false };
+                    return { ...flow, mayThrow: conditionMayThrow || flow.mayThrow };
+                }
+                const whenTrue = collectReturns(statement.thenStatement);
+                const whenFalse = statement.elseStatement
+                    ? collectReturns(statement.elseStatement)
+                    : { mask: NORMAL, mayThrow: false };
+                return {
+                    mask: whenTrue.mask | whenFalse.mask,
+                    mayThrow: conditionMayThrow || whenTrue.mayThrow || whenFalse.mayThrow,
+                };
             }
             else if (typescript_1.default.isTryStatement(statement)) {
                 const start = result.length;
-                const tryReturns = collectReturns(statement.tryBlock);
-                const catchReturns = Boolean(statement.catchClause
-                    && collectReturns(statement.catchClause.block));
+                const tryFlow = collectReturns(statement.tryBlock);
+                const catchFlow = statement.catchClause && tryFlow.mayThrow
+                    ? collectReturns(statement.catchClause.block) : undefined;
+                let flow = {
+                    mask: tryFlow.mask | (catchFlow?.mask ?? 0),
+                    mayThrow: catchFlow ? catchFlow.mayThrow : tryFlow.mayThrow,
+                };
                 if (!statement.finallyBlock)
-                    return tryReturns && (!statement.catchClause || catchReturns);
+                    return flow;
                 const finallyStart = result.length;
-                const finallyReturns = collectReturns(statement.finallyBlock);
-                if (finallyReturns)
+                const finallyFlow = collectReturns(statement.finallyBlock);
+                if (!(finallyFlow.mask & NORMAL))
                     result.splice(start, finallyStart - start);
-                return finallyReturns || (tryReturns && (!statement.catchClause || catchReturns));
+                flow = !(finallyFlow.mask & NORMAL) ? finallyFlow : {
+                    mask: (finallyFlow.mask & ~NORMAL) | flow.mask,
+                    mayThrow: flow.mayThrow || finallyFlow.mayThrow,
+                };
+                return flow;
             }
             else if (typescript_1.default.isSwitchStatement(statement)) {
-                let allReturn = statement.caseBlock.clauses.length > 0;
-                for (const clause of statement.caseBlock.clauses) {
-                    let clauseReturns = false;
-                    for (const child of clause.statements) {
-                        if (collectReturns(child)) {
-                            clauseReturns = true;
-                            break;
-                        }
+                let mayThrow = nodeMayThrow(statement.expression, checker, projectSources, check);
+                const discriminant = staticCaseValue(statement.expression);
+                let dynamic = discriminant === undefined;
+                let start = -1;
+                let fallback = -1;
+                for (const [index, clause] of statement.caseBlock.clauses.entries()) {
+                    if (typescript_1.default.isDefaultClause(clause)) {
+                        fallback = index;
+                        continue;
                     }
-                    allReturn &&= clauseReturns;
+                    mayThrow ||= nodeMayThrow(clause.expression, checker, projectSources, check);
+                    const value = staticCaseValue(clause.expression);
+                    if (value === undefined)
+                        dynamic = true;
+                    if (!dynamic && Object.is(discriminant, value)) {
+                        start = index;
+                        break;
+                    }
                 }
-                return allReturn && statement.caseBlock.clauses.some(typescript_1.default.isDefaultClause);
+                const indexes = dynamic
+                    ? statement.caseBlock.clauses.map((_, index) => index)
+                    : start >= 0 ? statement.caseBlock.clauses.map((_, index) => index).slice(start)
+                        : fallback >= 0 ? statement.caseBlock.clauses.map((_, index) => index).slice(fallback) : [];
+                let mask = NORMAL;
+                for (const index of indexes) {
+                    if (!dynamic && !(mask & NORMAL))
+                        break;
+                    const clause = statement.caseBlock.clauses[index];
+                    let clauseMask = NORMAL;
+                    for (const child of clause.statements) {
+                        if (!(clauseMask & NORMAL))
+                            break;
+                        const childFlow = collectReturns(child);
+                        mayThrow ||= childFlow.mayThrow;
+                        clauseMask = (clauseMask & ~NORMAL) | childFlow.mask;
+                    }
+                    mask = dynamic ? mask | clauseMask : (mask & ~NORMAL) | clauseMask;
+                    if (clauseMask & BREAK) {
+                        mask = (mask & ~BREAK) | NORMAL;
+                        if (!dynamic)
+                            break;
+                    }
+                }
+                return { mask, mayThrow };
             }
             else if (typescript_1.default.isWhileStatement(statement)) {
-                if (statement.expression.kind !== typescript_1.default.SyntaxKind.FalseKeyword) {
-                    collectReturns(statement.statement);
+                const condition = staticBoolean(statement.expression);
+                const conditionMayThrow = nodeMayThrow(statement.expression, checker, projectSources, check);
+                if (condition === false) {
+                    return { mask: NORMAL, mayThrow: conditionMayThrow };
                 }
+                const flow = collectReturns(statement.statement);
+                return {
+                    mask: (flow.mask & RETURN)
+                        | ((condition !== true || (flow.mask & BREAK)) ? NORMAL : 0),
+                    mayThrow: conditionMayThrow || flow.mayThrow,
+                };
             }
             else if (typescript_1.default.isDoStatement(statement)) {
-                collectReturns(statement.statement);
+                const flow = collectReturns(statement.statement);
+                const reachesCondition = Boolean(flow.mask & (NORMAL | CONTINUE));
+                const condition = staticBoolean(statement.expression);
+                return {
+                    mask: (flow.mask & RETURN) | ((flow.mask & BREAK) ? NORMAL : 0)
+                        | (reachesCondition && condition !== true ? NORMAL : 0),
+                    mayThrow: flow.mayThrow || (reachesCondition && nodeMayThrow(statement.expression, checker, projectSources, check)),
+                };
             }
             else if (typescript_1.default.isForStatement(statement)) {
-                if (statement.condition?.kind !== typescript_1.default.SyntaxKind.FalseKeyword) {
-                    collectReturns(statement.statement);
+                const initializerMayThrow = Boolean(statement.initializer && nodeMayThrow(statement.initializer, checker, projectSources, check));
+                const condition = statement.condition ? staticBoolean(statement.condition) : true;
+                const conditionMayThrow = Boolean(statement.condition && nodeMayThrow(statement.condition, checker, projectSources, check));
+                if (condition === false) {
+                    return {
+                        mask: NORMAL,
+                        mayThrow: initializerMayThrow || conditionMayThrow,
+                    };
                 }
+                const flow = collectReturns(statement.statement);
+                const reachesIncrement = Boolean(flow.mask & (NORMAL | CONTINUE));
+                const incrementMayThrow = reachesIncrement && Boolean(statement.incrementor
+                    && nodeMayThrow(statement.incrementor, checker, projectSources, check));
+                return {
+                    mask: (flow.mask & RETURN)
+                        | ((condition !== true || (flow.mask & BREAK)) ? NORMAL : 0),
+                    mayThrow: initializerMayThrow || conditionMayThrow || flow.mayThrow || incrementMayThrow,
+                };
             }
             else if (typescript_1.default.isForInStatement(statement) || typescript_1.default.isForOfStatement(statement)) {
-                collectReturns(statement.statement);
+                const flow = collectReturns(statement.statement);
+                return {
+                    mask: (flow.mask & RETURN) | NORMAL,
+                    mayThrow: nodeMayThrow(statement.initializer, checker, projectSources, check)
+                        || nodeMayThrow(statement.expression, checker, projectSources, check)
+                        || flow.mayThrow,
+                };
             }
-            return false;
+            return {
+                mask: NORMAL,
+                mayThrow: nodeMayThrow(statement, checker, projectSources, check),
+            };
         };
         collectReturns(body);
         return result;
@@ -3523,80 +3854,13 @@ function containsCanonicalProviderToken(input, checker, projectSources, check, m
         }
         return false;
     };
-    const identifierMayThrow = (node) => {
-        if ((typescript_1.default.isPropertyAssignment(node.parent) || typescript_1.default.isMethodDeclaration(node.parent)
-            || typescript_1.default.isPropertyDeclaration(node.parent) || typescript_1.default.isGetAccessorDeclaration(node.parent)
-            || typescript_1.default.isSetAccessorDeclaration(node.parent)) && node.parent.name === node
-            && !typescript_1.default.isComputedPropertyName(node.parent.name))
-            return false;
-        const symbol = resolvedSymbolAt(node, checker);
-        if (!symbol?.declarations?.length)
-            return true;
-        if (symbol.declarations.every((declaration) => !projectSources.has(declaration.getSourceFile()))) {
-            return false;
-        }
-        const containingFunction = (input) => {
-            for (let parent = input.parent; parent && !typescript_1.default.isSourceFile(parent); parent = parent.parent) {
-                if (typescript_1.default.isFunctionLike(parent))
-                    return parent;
-            }
-            return undefined;
-        };
-        const readFunction = containingFunction(node);
-        return symbol.declarations.some((declaration) => {
-            if (typescript_1.default.isParameter(declaration) || typescript_1.default.isFunctionDeclaration(declaration)
-                || typescript_1.default.isImportSpecifier(declaration) || typescript_1.default.isImportClause(declaration)
-                || typescript_1.default.isNamespaceImport(declaration))
-                return false;
-            if (typescript_1.default.isVariableDeclaration(declaration)) {
-                const lexical = Boolean((declaration.parent.flags & typescript_1.default.NodeFlags.Let)
-                    || (declaration.parent.flags & typescript_1.default.NodeFlags.Const));
-                if (!lexical)
-                    return false;
-                const variableStatement = typescript_1.default.isVariableStatement(declaration.parent.parent)
-                    ? declaration.parent.parent : undefined;
-                const ambient = declaration.getSourceFile().isDeclarationFile
-                    || Boolean(variableStatement?.modifiers?.some(({ kind }) => (kind === typescript_1.default.SyntaxKind.DeclareKeyword)));
-                if (!declaration.initializer && (ambient
-                    || Boolean(declaration.parent.flags & typescript_1.default.NodeFlags.Const)))
-                    return true;
-                if (readFunction && containingFunction(declaration) !== readFunction
-                    && lexical)
-                    return true;
-            }
-            return declaration.getSourceFile() !== node.getSourceFile()
-                || declaration.end > node.getStart();
-        });
-    };
-    const mayThrow = (input) => {
-        const nodes = [input];
-        while (nodes.length > 0) {
-            const node = nodes.pop();
-            check();
-            if (typescript_1.default.isFunctionLike(node))
-                continue;
-            if (typescript_1.default.isIdentifier(node) && identifierMayThrow(node))
-                return true;
-            if (typescript_1.default.isTypeNode(node))
-                continue;
-            if (node !== input && typescript_1.default.isClassLike(node))
-                continue;
-            if (typescript_1.default.isThrowStatement(node) || typescript_1.default.isCallExpression(node) || typescript_1.default.isNewExpression(node)
-                || typescript_1.default.isAwaitExpression(node) || typescript_1.default.isYieldExpression(node)
-                || typescript_1.default.isTaggedTemplateExpression(node) || typescript_1.default.isPropertyAccessExpression(node)
-                || typescript_1.default.isElementAccessExpression(node))
-                return true;
-            typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
-        }
-        return false;
-    };
     const collectReturns = (statement) => {
         check();
         if (typescript_1.default.isReturnStatement(statement)) {
             return {
                 candidates: statement.expression ? [statement.expression] : [],
                 definitelyReturns: true,
-                mayThrow: Boolean(statement.expression && mayThrow(statement.expression)),
+                mayThrow: Boolean(statement.expression && nodeMayThrow(statement.expression, checker, projectSources, check)),
             };
         }
         if (typescript_1.default.isThrowStatement(statement)) {
@@ -3629,7 +3893,8 @@ function containsCanonicalProviderToken(input, checker, projectSources, check, m
             return {
                 candidates: [...whenTrue.candidates, ...whenFalse.candidates],
                 definitelyReturns: whenTrue.definitelyReturns && whenFalse.definitelyReturns,
-                mayThrow: mayThrow(statement.expression) || whenTrue.mayThrow || whenFalse.mayThrow,
+                mayThrow: nodeMayThrow(statement.expression, checker, projectSources, check)
+                    || whenTrue.mayThrow || whenFalse.mayThrow,
             };
         }
         if (typescript_1.default.isTryStatement(statement)) {
@@ -3652,7 +3917,11 @@ function containsCanonicalProviderToken(input, checker, projectSources, check, m
             }
             return flow;
         }
-        return { candidates: [], definitelyReturns: false, mayThrow: mayThrow(statement) };
+        return {
+            candidates: [],
+            definitelyReturns: false,
+            mayThrow: nodeMayThrow(statement, checker, projectSources, check),
+        };
     };
     const staticallyUnreachable = (node) => {
         let child = node;
