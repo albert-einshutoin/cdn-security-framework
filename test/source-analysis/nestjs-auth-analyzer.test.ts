@@ -5994,6 +5994,8 @@ describe('NestJS auth metadata analyzer', () => {
       class Unused {
         static register() { app.useGlobalGuards(guard); }
       }
+      type UnusedType = Unused;
+      type UnusedValueType = typeof Unused;
       @Controller('unused-static') class UnusedStaticController {
         @Get() @UseGuards(JwtAuthGuard) read() {}
       }

@@ -5117,6 +5117,18 @@ async function analyze(
         if (ts.isIdentifier(node)) {
           const symbol = resolvedSymbolAt(node, checker);
           const local = symbol ? localFunctions.get(symbol) : undefined;
+          const localClass = symbol ? localClasses.get(symbol) : undefined;
+          const localObject = symbol ? localObjects.get(symbol) : undefined;
+          let runtimeReference = !ts.isPartOfTypeNode(node);
+          if (runtimeReference && (local || localClass || localObject)) {
+            for (let parent: ts.Node | undefined = node.parent; parent && !ts.isSourceFile(parent);
+              parent = parent.parent) {
+              if (ts.isTypeQueryNode(parent)) {
+                runtimeReference = false;
+                break;
+              }
+            }
+          }
           if (symbol && local) {
             let insideDeclaration = false;
             for (let parent: ts.Node | undefined = node; parent; parent = parent.parent) {
@@ -5126,9 +5138,10 @@ async function analyze(
               }
               if (ts.isSourceFile(parent)) break;
             }
-            if (node !== local.binding && !insideDeclaration) referencedLocalFunctions.add(symbol);
+            if (node !== local.binding && !insideDeclaration && runtimeReference) {
+              referencedLocalFunctions.add(symbol);
+            }
           }
-          const localClass = symbol ? localClasses.get(symbol) : undefined;
           if (symbol && localClass) {
             let insideDeclaration = false;
             for (let parent: ts.Node | undefined = node; parent; parent = parent.parent) {
@@ -5138,9 +5151,10 @@ async function analyze(
               }
               if (ts.isSourceFile(parent)) break;
             }
-            if (node !== localClass.binding && !insideDeclaration) referencedLocalClasses.add(symbol);
+            if (node !== localClass.binding && !insideDeclaration && runtimeReference) {
+              referencedLocalClasses.add(symbol);
+            }
           }
-          const localObject = symbol ? localObjects.get(symbol) : undefined;
           if (symbol && localObject) {
             let insideDeclaration = false;
             for (let parent: ts.Node | undefined = node; parent; parent = parent.parent) {
@@ -5150,7 +5164,9 @@ async function analyze(
               }
               if (ts.isSourceFile(parent)) break;
             }
-            if (node !== localObject.binding && !insideDeclaration) referencedLocalObjects.add(symbol);
+            if (node !== localObject.binding && !insideDeclaration && runtimeReference) {
+              referencedLocalObjects.add(symbol);
+            }
           }
         }
         ts.forEachChild(node, (child) => { nodes.push(child); });

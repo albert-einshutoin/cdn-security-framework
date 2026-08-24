@@ -5352,6 +5352,17 @@ async function analyze(context, authConfig) {
                 if (typescript_1.default.isIdentifier(node)) {
                     const symbol = resolvedSymbolAt(node, checker);
                     const local = symbol ? localFunctions.get(symbol) : undefined;
+                    const localClass = symbol ? localClasses.get(symbol) : undefined;
+                    const localObject = symbol ? localObjects.get(symbol) : undefined;
+                    let runtimeReference = !typescript_1.default.isPartOfTypeNode(node);
+                    if (runtimeReference && (local || localClass || localObject)) {
+                        for (let parent = node.parent; parent && !typescript_1.default.isSourceFile(parent); parent = parent.parent) {
+                            if (typescript_1.default.isTypeQueryNode(parent)) {
+                                runtimeReference = false;
+                                break;
+                            }
+                        }
+                    }
                     if (symbol && local) {
                         let insideDeclaration = false;
                         for (let parent = node; parent; parent = parent.parent) {
@@ -5362,10 +5373,10 @@ async function analyze(context, authConfig) {
                             if (typescript_1.default.isSourceFile(parent))
                                 break;
                         }
-                        if (node !== local.binding && !insideDeclaration)
+                        if (node !== local.binding && !insideDeclaration && runtimeReference) {
                             referencedLocalFunctions.add(symbol);
+                        }
                     }
-                    const localClass = symbol ? localClasses.get(symbol) : undefined;
                     if (symbol && localClass) {
                         let insideDeclaration = false;
                         for (let parent = node; parent; parent = parent.parent) {
@@ -5376,10 +5387,10 @@ async function analyze(context, authConfig) {
                             if (typescript_1.default.isSourceFile(parent))
                                 break;
                         }
-                        if (node !== localClass.binding && !insideDeclaration)
+                        if (node !== localClass.binding && !insideDeclaration && runtimeReference) {
                             referencedLocalClasses.add(symbol);
+                        }
                     }
-                    const localObject = symbol ? localObjects.get(symbol) : undefined;
                     if (symbol && localObject) {
                         let insideDeclaration = false;
                         for (let parent = node; parent; parent = parent.parent) {
@@ -5390,8 +5401,9 @@ async function analyze(context, authConfig) {
                             if (typescript_1.default.isSourceFile(parent))
                                 break;
                         }
-                        if (node !== localObject.binding && !insideDeclaration)
+                        if (node !== localObject.binding && !insideDeclaration && runtimeReference) {
                             referencedLocalObjects.add(symbol);
+                        }
                     }
                 }
                 typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
