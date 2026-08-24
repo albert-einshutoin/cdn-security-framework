@@ -210,6 +210,22 @@ function staticallyUnreachable(node: ts.Node): boolean {
   return false;
 }
 
+function isInsideNonThrowingCatch(
+  node: ts.Node,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+): boolean {
+  let current = node;
+  while (!ts.isSourceFile(current)) {
+    const parent = current.parent;
+    if (ts.isCatchClause(parent) && current === parent.block
+      && !nodeMayThrow(parent.parent.tryBlock, checker, projectSources, check)) return true;
+    current = parent;
+  }
+  return false;
+}
+
 function isProvidersName(node: ts.BindingName | ts.PropertyName): boolean {
   return (ts.isIdentifier(node) || ts.isStringLiteral(node)) && node.text === 'providers';
 }
@@ -378,7 +394,32 @@ function nodeMayThrow(
     }
     if (ts.isIdentifier(node) && identifierMayThrow(node)) return true;
     if (ts.isTypeNode(node)) continue;
-    if (node !== input && ts.isClassLike(node)) continue;
+    if (node !== input && ts.isClassLike(node)) {
+      for (const decorator of ts.getDecorators(node) ?? []) nodes.push(decorator.expression);
+      for (const clause of node.heritageClauses ?? []) {
+        for (const type of clause.types) nodes.push(type.expression);
+      }
+      for (const member of node.members) {
+        if (ts.canHaveDecorators(member)) {
+          for (const decorator of ts.getDecorators(member) ?? []) nodes.push(decorator.expression);
+        }
+        if (ts.isFunctionLike(member)) {
+          for (const parameter of member.parameters) {
+            if (ts.canHaveDecorators(parameter)) {
+              for (const decorator of ts.getDecorators(parameter) ?? []) {
+                nodes.push(decorator.expression);
+              }
+            }
+          }
+        }
+        if (member.name && ts.isComputedPropertyName(member.name)) nodes.push(member.name.expression);
+        if (ts.isPropertyDeclaration(member) && member.initializer
+          && member.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.StaticKeyword)) {
+          nodes.push(member.initializer);
+        } else if (ts.isClassStaticBlockDeclaration(member)) nodes.push(member.body);
+      }
+      continue;
+    }
     if (operatorMayThrow(node)) return true;
     if (ts.isThrowStatement(node) || ts.isCallExpression(node) || ts.isNewExpression(node)
       || ts.isAwaitExpression(node) || ts.isYieldExpression(node)
@@ -5232,6 +5273,7 @@ async function analyze(
       await checkpoint();
       if (ts.isCallExpression(node)
         && !staticallyUnreachable(node)
+        && !isInsideNonThrowingCatch(node, checker, projectSources, check)
         && !isInsideProvablyUninvokedFunction(node)
         && isNestJsUseGlobalGuardsCall(node, checker, check, projectSources)) {
         if (!globalGuardFound) addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.expression);

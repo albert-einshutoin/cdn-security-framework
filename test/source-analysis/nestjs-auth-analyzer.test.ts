@@ -1028,6 +1028,27 @@ describe('NestJS auth metadata analyzer', () => {
     });
   });
 
+  test('fails closed when namespace guard members are reassigned', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import Auth = require('./auth');
+      import { OtherGuard } from './other';
+      (Auth as any).JwtAuthGuard = OtherGuard;
+      @Controller('namespace-write') class NamespaceWriteController {
+        @Get() @UseGuards(Auth.JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'src/other.ts': 'export class OtherGuard {}\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status === 'success') {
+      expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+    }
+  });
+
   test('fails closed on branching and deeply nested namespace guard wrappers', async () => {
     const deepBody = `${'if (flag) {'.repeat(40)}return UseGuards(ApiKeyGuard);${'}'.repeat(40)} return () => {};`;
     const root = workspace(`
@@ -3105,6 +3126,42 @@ describe('NestJS auth metadata analyzer', () => {
       expect.objectContaining({ code: 'SOURCE_ANALYZER_DYNAMIC_ROUTE' }),
       expect.objectContaining({ code: 'SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA' }),
     ]));
+  });
+
+  test('ignores global guard calls in provably unreachable catch clauses', async () => {
+    for (const [tryBody, expected] of [
+      ['', 'alternatives'],
+      ["throw new Error('reachable');", 'unknown'],
+      ["class Exploding { static value = (() => { throw new Error('reachable'); })(); }", 'unknown'],
+      ['declare function explode(): ParameterDecorator; class Exploding { constructor(@explode() value: unknown) {} }', 'unknown'],
+    ] as const) {
+      const root = workspace(`
+        import { Controller, Get, UseGuards } from '@nestjs/common';
+        import type { INestApplication } from '@nestjs/core';
+        import { JwtAuthGuard } from './auth';
+        declare const app: INestApplication;
+        declare const guard: unknown;
+        try { ${tryBody} } catch { app.useGlobalGuards(guard); }
+        @Controller('catch-guard') class CatchGuardController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, {
+        'src/auth.ts': 'export class JwtAuthGuard {}\n',
+        'node_modules/@nestjs/core/index.d.ts': `
+          export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+        `,
+        'node_modules/@nestjs/core/package.json': JSON.stringify({
+          name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+        }),
+        'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+      });
+      const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+      expect(execution.status).toBe('success');
+      if (execution.status === 'success') {
+        expect(execution.result.contract.operations[0].auth.mode, tryBody).toBe(expected);
+      }
+    }
   });
 
   test('fails closed on global guards registered through an any-typed Nest application', async () => {

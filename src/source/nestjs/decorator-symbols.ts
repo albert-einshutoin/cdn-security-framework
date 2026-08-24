@@ -53,6 +53,10 @@ const MEMBER_WRITE_INDEX_CACHE = new WeakMap<
 const STABLE_RECEIVER_SYMBOL_CACHE = new WeakMap<
   ReadonlyMap<ts.Symbol, readonly CallableWriteRecord[]>, Map<ts.Symbol, ts.Symbol | false>
 >();
+type StaticMemberMutation = { escaped: boolean; dynamic: boolean; keys: ReadonlySet<string> };
+const STATIC_MEMBER_WRITE_CACHE = new WeakMap<
+  ReadonlySet<ts.SourceFile>, WeakMap<ts.Symbol, StaticMemberMutation>
+>();
 
 function callableWriteIndex(
   projectSources: ReadonlySet<ts.SourceFile>,
@@ -1366,6 +1370,90 @@ export function resolveStaticSymbolName(
     if (binding && callableBindingMayBeWritten(
       binding, binding.declarations ?? [], checker, projectSources, check,
     )) return undefined;
+  }
+  if (projectSources && (ts.isPropertyAccessExpression(reference)
+    || ts.isElementAccessExpression(reference))) {
+    const key = ts.isPropertyAccessExpression(reference) ? reference.name.text
+      : reference.argumentExpression
+        ? resolveStaticPropertyKey(reference.argumentExpression, checker, check) : undefined;
+    const receiver = unwrapExpression(reference.expression);
+    let receiverSymbol = ts.isIdentifier(receiver) ? checker.getSymbolAtLocation(receiver) : undefined;
+    if (receiverSymbol?.flags && receiverSymbol.flags & ts.SymbolFlags.Alias) {
+      receiverSymbol = checker.getAliasedSymbol(receiverSymbol);
+    }
+    if (!key || !receiverSymbol) return undefined;
+    let projectCache = STATIC_MEMBER_WRITE_CACHE.get(projectSources);
+    if (!projectCache) {
+      projectCache = new WeakMap();
+      STATIC_MEMBER_WRITE_CACHE.set(projectSources, projectCache);
+    }
+    let mutation = projectCache.get(receiverSymbol);
+    if (!mutation) {
+      let escaped = false;
+      let dynamic = false;
+      const keys = new Set<string>();
+      const nodes: ts.Node[] = [...projectSources];
+      while (nodes.length > 0 && !escaped && !dynamic) {
+        const node = nodes.pop()!;
+        check();
+        if (ts.isIdentifier(node)) {
+          let symbol = checker.getSymbolAtLocation(node);
+          if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+          if (symbol === receiverSymbol) {
+            const declarationName = (ts.isImportEqualsDeclaration(node.parent)
+              || ts.isNamespaceImport(node.parent)) && node.parent.name === node;
+            let usage: ts.Expression = node;
+            while (ts.isParenthesizedExpression(usage.parent) || ts.isAsExpression(usage.parent)
+              || ts.isTypeAssertionExpression(usage.parent) || ts.isSatisfiesExpression(usage.parent)
+              || ts.isNonNullExpression(usage.parent)) usage = usage.parent;
+            const member = (ts.isPropertyAccessExpression(usage.parent)
+              || ts.isElementAccessExpression(usage.parent))
+              && usage.parent.expression === usage ? usage.parent : undefined;
+            if (!declarationName && !member) {
+              const parent = usage.parent;
+              const readOnly = (ts.isIfStatement(parent) || ts.isWhileStatement(parent)
+                || ts.isDoStatement(parent) || ts.isSwitchStatement(parent))
+                && parent.expression === usage
+                || ts.isPrefixUnaryExpression(parent)
+                && parent.operator === ts.SyntaxKind.ExclamationToken
+                || (ts.isTypeOfExpression(parent) || ts.isVoidExpression(parent))
+                && parent.expression === usage
+                || ts.isExpressionStatement(parent)
+                || ts.isBinaryExpression(parent)
+                && (parent.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
+                  || parent.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken);
+              escaped = !readOnly;
+            } else if (member) {
+              const memberKey = ts.isPropertyAccessExpression(member) ? member.name.text
+                : member.argumentExpression
+                  ? resolveStaticPropertyKey(member.argumentExpression, checker, check) : undefined;
+              let target: ts.Node = member;
+              while (target.parent && !ts.isStatement(target)) {
+                const parent = target.parent;
+                const mutates = ts.isBinaryExpression(parent) && parent.left === target
+                  && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+                  && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+                  || ts.isDeleteExpression(parent) && parent.expression === target
+                  || (ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent))
+                  && parent.operand === target
+                  || ts.isCallExpression(parent) && parent.expression === target
+                  || ts.isTaggedTemplateExpression(parent) && parent.tag === target;
+                if (mutates) {
+                  if (memberKey === undefined) dynamic = true;
+                  else keys.add(memberKey);
+                  break;
+                }
+                target = parent;
+              }
+            }
+          }
+        }
+        ts.forEachChild(node, (child) => { nodes.push(child); });
+      }
+      mutation = { escaped, dynamic, keys };
+      projectCache.set(receiverSymbol, mutation);
+    }
+    if (mutation.escaped || mutation.dynamic || mutation.keys.has(key)) return undefined;
   }
   const symbol = targetSymbol(expression, checker, check);
   return !symbol || symbol === UNKNOWN_NESTJS_ROUTE

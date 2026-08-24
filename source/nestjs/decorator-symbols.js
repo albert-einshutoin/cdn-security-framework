@@ -37,6 +37,7 @@ const WRAPPED_RECEIVER_CACHE = new WeakMap();
 const CALLABLE_WRITE_INDEX_CACHE = new WeakMap();
 const MEMBER_WRITE_INDEX_CACHE = new WeakMap();
 const STABLE_RECEIVER_SYMBOL_CACHE = new WeakMap();
+const STATIC_MEMBER_WRITE_CACHE = new WeakMap();
 function callableWriteIndex(projectSources, checker, check) {
     const cached = CALLABLE_WRITE_INDEX_CACHE.get(projectSources);
     if (cached)
@@ -1277,6 +1278,97 @@ function resolveStaticSymbolName(expression, checker, check, projectSources) {
         if (binding?.flags && binding.flags & typescript_1.default.SymbolFlags.Alias)
             binding = checker.getAliasedSymbol(binding);
         if (binding && callableBindingMayBeWritten(binding, binding.declarations ?? [], checker, projectSources, check))
+            return undefined;
+    }
+    if (projectSources && (typescript_1.default.isPropertyAccessExpression(reference)
+        || typescript_1.default.isElementAccessExpression(reference))) {
+        const key = typescript_1.default.isPropertyAccessExpression(reference) ? reference.name.text
+            : reference.argumentExpression
+                ? resolveStaticPropertyKey(reference.argumentExpression, checker, check) : undefined;
+        const receiver = unwrapExpression(reference.expression);
+        let receiverSymbol = typescript_1.default.isIdentifier(receiver) ? checker.getSymbolAtLocation(receiver) : undefined;
+        if (receiverSymbol?.flags && receiverSymbol.flags & typescript_1.default.SymbolFlags.Alias) {
+            receiverSymbol = checker.getAliasedSymbol(receiverSymbol);
+        }
+        if (!key || !receiverSymbol)
+            return undefined;
+        let projectCache = STATIC_MEMBER_WRITE_CACHE.get(projectSources);
+        if (!projectCache) {
+            projectCache = new WeakMap();
+            STATIC_MEMBER_WRITE_CACHE.set(projectSources, projectCache);
+        }
+        let mutation = projectCache.get(receiverSymbol);
+        if (!mutation) {
+            let escaped = false;
+            let dynamic = false;
+            const keys = new Set();
+            const nodes = [...projectSources];
+            while (nodes.length > 0 && !escaped && !dynamic) {
+                const node = nodes.pop();
+                check();
+                if (typescript_1.default.isIdentifier(node)) {
+                    let symbol = checker.getSymbolAtLocation(node);
+                    if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+                        symbol = checker.getAliasedSymbol(symbol);
+                    if (symbol === receiverSymbol) {
+                        const declarationName = (typescript_1.default.isImportEqualsDeclaration(node.parent)
+                            || typescript_1.default.isNamespaceImport(node.parent)) && node.parent.name === node;
+                        let usage = node;
+                        while (typescript_1.default.isParenthesizedExpression(usage.parent) || typescript_1.default.isAsExpression(usage.parent)
+                            || typescript_1.default.isTypeAssertionExpression(usage.parent) || typescript_1.default.isSatisfiesExpression(usage.parent)
+                            || typescript_1.default.isNonNullExpression(usage.parent))
+                            usage = usage.parent;
+                        const member = (typescript_1.default.isPropertyAccessExpression(usage.parent)
+                            || typescript_1.default.isElementAccessExpression(usage.parent))
+                            && usage.parent.expression === usage ? usage.parent : undefined;
+                        if (!declarationName && !member) {
+                            const parent = usage.parent;
+                            const readOnly = (typescript_1.default.isIfStatement(parent) || typescript_1.default.isWhileStatement(parent)
+                                || typescript_1.default.isDoStatement(parent) || typescript_1.default.isSwitchStatement(parent))
+                                && parent.expression === usage
+                                || typescript_1.default.isPrefixUnaryExpression(parent)
+                                    && parent.operator === typescript_1.default.SyntaxKind.ExclamationToken
+                                || (typescript_1.default.isTypeOfExpression(parent) || typescript_1.default.isVoidExpression(parent))
+                                    && parent.expression === usage
+                                || typescript_1.default.isExpressionStatement(parent)
+                                || typescript_1.default.isBinaryExpression(parent)
+                                    && (parent.operatorToken.kind === typescript_1.default.SyntaxKind.EqualsEqualsEqualsToken
+                                        || parent.operatorToken.kind === typescript_1.default.SyntaxKind.ExclamationEqualsEqualsToken);
+                            escaped = !readOnly;
+                        }
+                        else if (member) {
+                            const memberKey = typescript_1.default.isPropertyAccessExpression(member) ? member.name.text
+                                : member.argumentExpression
+                                    ? resolveStaticPropertyKey(member.argumentExpression, checker, check) : undefined;
+                            let target = member;
+                            while (target.parent && !typescript_1.default.isStatement(target)) {
+                                const parent = target.parent;
+                                const mutates = typescript_1.default.isBinaryExpression(parent) && parent.left === target
+                                    && parent.operatorToken.kind >= typescript_1.default.SyntaxKind.FirstAssignment
+                                    && parent.operatorToken.kind <= typescript_1.default.SyntaxKind.LastAssignment
+                                    || typescript_1.default.isDeleteExpression(parent) && parent.expression === target
+                                    || (typescript_1.default.isPrefixUnaryExpression(parent) || typescript_1.default.isPostfixUnaryExpression(parent))
+                                        && parent.operand === target
+                                    || typescript_1.default.isCallExpression(parent) && parent.expression === target
+                                    || typescript_1.default.isTaggedTemplateExpression(parent) && parent.tag === target;
+                                if (mutates) {
+                                    if (memberKey === undefined)
+                                        dynamic = true;
+                                    else
+                                        keys.add(memberKey);
+                                    break;
+                                }
+                                target = parent;
+                            }
+                        }
+                    }
+                }
+                typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+            }
+            mutation = { escaped, dynamic, keys };
+            projectCache.set(receiverSymbol, mutation);
+        }
+        if (mutation.escaped || mutation.dynamic || mutation.keys.has(key))
             return undefined;
     }
     const symbol = targetSymbol(expression, checker, check);

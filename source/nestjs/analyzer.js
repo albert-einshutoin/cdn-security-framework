@@ -177,6 +177,17 @@ function staticallyUnreachable(node) {
     }
     return false;
 }
+function isInsideNonThrowingCatch(node, checker, projectSources, check) {
+    let current = node;
+    while (!typescript_1.default.isSourceFile(current)) {
+        const parent = current.parent;
+        if (typescript_1.default.isCatchClause(parent) && current === parent.block
+            && !nodeMayThrow(parent.parent.tryBlock, checker, projectSources, check))
+            return true;
+        current = parent;
+    }
+    return false;
+}
 function isProvidersName(node) {
     return (typescript_1.default.isIdentifier(node) || typescript_1.default.isStringLiteral(node)) && node.text === 'providers';
 }
@@ -366,8 +377,38 @@ function nodeMayThrow(input, checker, projectSources, check) {
             return true;
         if (typescript_1.default.isTypeNode(node))
             continue;
-        if (node !== input && typescript_1.default.isClassLike(node))
+        if (node !== input && typescript_1.default.isClassLike(node)) {
+            for (const decorator of typescript_1.default.getDecorators(node) ?? [])
+                nodes.push(decorator.expression);
+            for (const clause of node.heritageClauses ?? []) {
+                for (const type of clause.types)
+                    nodes.push(type.expression);
+            }
+            for (const member of node.members) {
+                if (typescript_1.default.canHaveDecorators(member)) {
+                    for (const decorator of typescript_1.default.getDecorators(member) ?? [])
+                        nodes.push(decorator.expression);
+                }
+                if (typescript_1.default.isFunctionLike(member)) {
+                    for (const parameter of member.parameters) {
+                        if (typescript_1.default.canHaveDecorators(parameter)) {
+                            for (const decorator of typescript_1.default.getDecorators(parameter) ?? []) {
+                                nodes.push(decorator.expression);
+                            }
+                        }
+                    }
+                }
+                if (member.name && typescript_1.default.isComputedPropertyName(member.name))
+                    nodes.push(member.name.expression);
+                if (typescript_1.default.isPropertyDeclaration(member) && member.initializer
+                    && member.modifiers?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.StaticKeyword)) {
+                    nodes.push(member.initializer);
+                }
+                else if (typescript_1.default.isClassStaticBlockDeclaration(member))
+                    nodes.push(member.body);
+            }
             continue;
+        }
         if (operatorMayThrow(node))
             return true;
         if (typescript_1.default.isThrowStatement(node) || typescript_1.default.isCallExpression(node) || typescript_1.default.isNewExpression(node)
@@ -5461,6 +5502,7 @@ async function analyze(context, authConfig) {
             await checkpoint();
             if (typescript_1.default.isCallExpression(node)
                 && !staticallyUnreachable(node)
+                && !isInsideNonThrowingCatch(node, checker, projectSources, check)
                 && !isInsideProvablyUninvokedFunction(node)
                 && (0, decorator_symbols_1.isNestJsUseGlobalGuardsCall)(node, checker, check, projectSources)) {
                 if (!globalGuardFound)
