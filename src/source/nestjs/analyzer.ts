@@ -584,6 +584,7 @@ function effectiveObjectProperty(
           : start >= 0 ? statement.caseBlock.clauses.map((_, index) => index).slice(start)
             : fallback >= 0 ? statement.caseBlock.clauses.map((_, index) => index).slice(fallback) : [];
         let mask = NORMAL;
+        let completedMask = 0;
         for (const index of indexes) {
           if (!dynamic && !(mask & NORMAL)) break;
           const clause = statement.caseBlock.clauses[index];
@@ -594,13 +595,17 @@ function effectiveObjectProperty(
             mayThrow ||= childFlow.mayThrow;
             clauseMask = (clauseMask & ~NORMAL) | childFlow.mask;
           }
-          mask = dynamic ? mask | clauseMask : (mask & ~NORMAL) | clauseMask;
-          if (clauseMask & BREAK) {
+          if (dynamic) mask |= clauseMask;
+          else {
+            completedMask |= clauseMask & (RETURN | CONTINUE);
+            if (clauseMask & BREAK) completedMask |= NORMAL;
+            mask = clauseMask & NORMAL;
+          }
+          if (dynamic && (clauseMask & BREAK)) {
             mask = (mask & ~BREAK) | NORMAL;
-            if (!dynamic) break;
           }
         }
-        return { mask, mayThrow };
+        return { mask: mask | completedMask, mayThrow };
       } else if (ts.isWhileStatement(statement)) {
         const condition = staticBoolean(statement.expression);
         const conditionMayThrow = nodeMayThrow(
@@ -3650,6 +3655,38 @@ function containsCanonicalProviderToken(
     return staticState(declaration.initializer, seen, depth + 1);
   };
   const staticBoolean = (input: ts.Expression): boolean | undefined => staticState(input).truthy;
+  const staticCaseValue = (
+    input: ts.Expression,
+    seen = new Set<ts.Symbol>(),
+    depth = 0,
+  ): string | number | bigint | boolean | null | undefined => {
+    check();
+    if (depth > 64) return undefined;
+    let expression = input;
+    while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
+      || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
+      || ts.isNonNullExpression(expression)) expression = expression.expression;
+    if (ts.isStringLiteral(expression) || ts.isNoSubstitutionTemplateLiteral(expression)) {
+      return expression.text;
+    }
+    if (ts.isNumericLiteral(expression)) return Number(expression.text);
+    if (ts.isBigIntLiteral(expression)) return BigInt(expression.text.slice(0, -1));
+    if (expression.kind === ts.SyntaxKind.TrueKeyword) return true;
+    if (expression.kind === ts.SyntaxKind.FalseKeyword) return false;
+    if (expression.kind === ts.SyntaxKind.NullKeyword) return null;
+    if (ts.isIdentifier(expression)) {
+      const symbol = resolvedSymbolAt(expression, checker);
+      if (!symbol || seen.has(symbol)) return undefined;
+      const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+      const declaration = declarations.length === 1 ? declarations[0] : undefined;
+      if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+        || !ts.isVariableDeclarationList(declaration.parent)
+        || !(declaration.parent.flags & ts.NodeFlags.Const)) return undefined;
+      seen.add(symbol);
+      return staticCaseValue(declaration.initializer, seen, depth + 1);
+    }
+    return undefined;
+  };
   const containsLiteralProviderToken = (input: ts.Expression): boolean => {
     const pending = [input];
     const seen = new Set<ts.Expression>();
@@ -3690,31 +3727,37 @@ function containsCanonicalProviderToken(
     }
     return false;
   };
-  type ReturnFlow = { candidates: ts.Expression[]; definitelyReturns: boolean; mayThrow: boolean };
+  const NORMAL = 1;
+  const RETURN = 2;
+  const BREAK = 4;
+  const CONTINUE = 8;
+  type ReturnFlow = { candidates: ts.Expression[]; mask: number; mayThrow: boolean };
   const collectReturns = (statement: ts.Statement): ReturnFlow => {
     check();
     if (ts.isReturnStatement(statement)) {
       return {
         candidates: statement.expression ? [statement.expression] : [],
-        definitelyReturns: true,
+        mask: RETURN,
         mayThrow: Boolean(statement.expression && nodeMayThrow(
           statement.expression, checker, projectSources, check,
         )),
       };
     }
     if (ts.isThrowStatement(statement)) {
-      return { candidates: [], definitelyReturns: true, mayThrow: true };
+      return { candidates: [], mask: 0, mayThrow: true };
+    }
+    if (ts.isBreakStatement(statement)) return { candidates: [], mask: BREAK, mayThrow: false };
+    if (ts.isContinueStatement(statement)) {
+      return { candidates: [], mask: CONTINUE, mayThrow: false };
     }
     if (ts.isBlock(statement)) {
-      const flow: ReturnFlow = { candidates: [], definitelyReturns: false, mayThrow: false };
+      const flow: ReturnFlow = { candidates: [], mask: NORMAL, mayThrow: false };
       for (const child of statement.statements) {
+        if (!(flow.mask & NORMAL)) break;
         const childFlow = collectReturns(child);
         flow.candidates.push(...childFlow.candidates);
         flow.mayThrow ||= childFlow.mayThrow;
-        if (childFlow.definitelyReturns) {
-          flow.definitelyReturns = true;
-          break;
-        }
+        flow.mask = (flow.mask & ~NORMAL) | childFlow.mask;
       }
       return flow;
     }
@@ -3723,13 +3766,13 @@ function containsCanonicalProviderToken(
       if (condition === true) return collectReturns(statement.thenStatement);
       if (condition === false) return statement.elseStatement
         ? collectReturns(statement.elseStatement)
-        : { candidates: [], definitelyReturns: false, mayThrow: false };
+        : { candidates: [], mask: NORMAL, mayThrow: false };
       const whenTrue = collectReturns(statement.thenStatement);
       const whenFalse = statement.elseStatement ? collectReturns(statement.elseStatement)
-        : { candidates: [], definitelyReturns: false, mayThrow: false };
+        : { candidates: [], mask: NORMAL, mayThrow: false };
       return {
         candidates: [...whenTrue.candidates, ...whenFalse.candidates],
-        definitelyReturns: whenTrue.definitelyReturns && whenFalse.definitelyReturns,
+        mask: whenTrue.mask | whenFalse.mask,
         mayThrow: nodeMayThrow(statement.expression, checker, projectSources, check)
           || whenTrue.mayThrow || whenFalse.mayThrow,
       };
@@ -3740,23 +3783,131 @@ function containsCanonicalProviderToken(
         ? collectReturns(statement.catchClause.block) : undefined;
       let flow: ReturnFlow = {
         candidates: [...tryFlow.candidates, ...(catchFlow?.candidates ?? [])],
-        definitelyReturns: tryFlow.definitelyReturns
-          && (!tryFlow.mayThrow || Boolean(catchFlow?.definitelyReturns)),
+        mask: tryFlow.mask | (catchFlow?.mask ?? 0),
         mayThrow: catchFlow ? catchFlow.mayThrow : tryFlow.mayThrow,
       };
       if (statement.finallyBlock) {
         const finallyFlow = collectReturns(statement.finallyBlock);
-        flow = finallyFlow.definitelyReturns ? finallyFlow : {
+        flow = !(finallyFlow.mask & NORMAL) ? finallyFlow : {
           candidates: [...flow.candidates, ...finallyFlow.candidates],
-          definitelyReturns: flow.definitelyReturns,
+          mask: (finallyFlow.mask & ~NORMAL) | flow.mask,
           mayThrow: flow.mayThrow || finallyFlow.mayThrow,
         };
       }
       return flow;
     }
+    if (ts.isSwitchStatement(statement)) {
+      const discriminant = staticCaseValue(statement.expression);
+      let dynamic = discriminant === undefined;
+      let start = -1;
+      let fallback = -1;
+      let mayThrow = nodeMayThrow(statement.expression, checker, projectSources, check);
+      for (const [index, clause] of statement.caseBlock.clauses.entries()) {
+        if (ts.isDefaultClause(clause)) {
+          fallback = index;
+          continue;
+        }
+        mayThrow ||= nodeMayThrow(clause.expression, checker, projectSources, check);
+        const value = staticCaseValue(clause.expression);
+        if (value === undefined) dynamic = true;
+        if (!dynamic && Object.is(discriminant, value)) { start = index; break; }
+      }
+      const indexes = dynamic
+        ? statement.caseBlock.clauses.map((_, index) => index)
+        : start >= 0 ? statement.caseBlock.clauses.map((_, index) => index).slice(start)
+          : fallback >= 0 ? statement.caseBlock.clauses.map((_, index) => index).slice(fallback) : [];
+      const candidates: ts.Expression[] = [];
+      let mask = NORMAL;
+      let completedMask = 0;
+      for (const index of indexes) {
+        if (!dynamic && !(mask & NORMAL)) break;
+        const clause = statement.caseBlock.clauses[index];
+        let clauseMask = NORMAL;
+        for (const child of clause.statements) {
+          if (!(clauseMask & NORMAL)) break;
+          const flow = collectReturns(child);
+          candidates.push(...flow.candidates);
+          mayThrow ||= flow.mayThrow;
+          clauseMask = (clauseMask & ~NORMAL) | flow.mask;
+        }
+        if (dynamic) mask |= clauseMask;
+        else {
+          completedMask |= clauseMask & (RETURN | CONTINUE);
+          if (clauseMask & BREAK) completedMask |= NORMAL;
+          mask = clauseMask & NORMAL;
+        }
+        if (dynamic && (clauseMask & BREAK)) {
+          mask = (mask & ~BREAK) | NORMAL;
+        }
+      }
+      return { candidates, mask: mask | completedMask, mayThrow };
+    }
+    if (ts.isWhileStatement(statement)) {
+      const condition = staticBoolean(statement.expression);
+      const conditionMayThrow = nodeMayThrow(
+        statement.expression, checker, projectSources, check,
+      );
+      if (condition === false) {
+        return { candidates: [], mask: NORMAL, mayThrow: conditionMayThrow };
+      }
+      const flow = collectReturns(statement.statement);
+      return {
+        candidates: flow.candidates,
+        mask: (flow.mask & RETURN)
+          | ((condition !== true || (flow.mask & BREAK)) ? NORMAL : 0),
+        mayThrow: conditionMayThrow || flow.mayThrow,
+      };
+    }
+    if (ts.isDoStatement(statement)) {
+      const flow = collectReturns(statement.statement);
+      const reachesCondition = Boolean(flow.mask & (NORMAL | CONTINUE));
+      const condition = staticBoolean(statement.expression);
+      return {
+        candidates: flow.candidates,
+        mask: (flow.mask & RETURN) | ((flow.mask & BREAK) ? NORMAL : 0)
+          | (reachesCondition && condition !== true ? NORMAL : 0),
+        mayThrow: flow.mayThrow || (reachesCondition && nodeMayThrow(
+          statement.expression, checker, projectSources, check,
+        )),
+      };
+    }
+    if (ts.isForStatement(statement)) {
+      const initializerMayThrow = Boolean(statement.initializer && nodeMayThrow(
+        statement.initializer, checker, projectSources, check,
+      ));
+      const condition = statement.condition ? staticBoolean(statement.condition) : true;
+      const conditionMayThrow = Boolean(statement.condition && nodeMayThrow(
+        statement.condition, checker, projectSources, check,
+      ));
+      if (condition === false) {
+        return {
+          candidates: [], mask: NORMAL, mayThrow: initializerMayThrow || conditionMayThrow,
+        };
+      }
+      const flow = collectReturns(statement.statement);
+      const reachesIncrement = Boolean(flow.mask & (NORMAL | CONTINUE));
+      const incrementMayThrow = reachesIncrement && Boolean(statement.incrementor
+        && nodeMayThrow(statement.incrementor, checker, projectSources, check));
+      return {
+        candidates: flow.candidates,
+        mask: (flow.mask & RETURN)
+          | ((condition !== true || (flow.mask & BREAK)) ? NORMAL : 0),
+        mayThrow: initializerMayThrow || conditionMayThrow || flow.mayThrow || incrementMayThrow,
+      };
+    }
+    if (ts.isForInStatement(statement) || ts.isForOfStatement(statement)) {
+      const flow = collectReturns(statement.statement);
+      return {
+        candidates: flow.candidates,
+        mask: (flow.mask & RETURN) | NORMAL,
+        mayThrow: nodeMayThrow(statement.initializer, checker, projectSources, check)
+          || nodeMayThrow(statement.expression, checker, projectSources, check)
+          || flow.mayThrow,
+      };
+    }
     return {
       candidates: [],
-      definitelyReturns: false,
+      mask: NORMAL,
       mayThrow: nodeMayThrow(statement, checker, projectSources, check),
     };
   };

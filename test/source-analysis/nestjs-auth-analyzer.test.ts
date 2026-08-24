@@ -4262,6 +4262,75 @@ describe('NestJS auth metadata analyzer', () => {
     }
   });
 
+  test('resolves reachable switch returns in provider factories', async () => {
+    for (const { setup, expected } of [
+      {
+        setup: `switch (1) {
+          case 0: return [];
+          case 1: return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
+        }`,
+        expected: 'unknown',
+      },
+      {
+        setup: `switch (1) {
+          case 1: while (true) { return [{ provide: APP_GUARD, useClass: JwtAuthGuard }]; }
+        }`,
+        expected: 'unknown',
+      },
+      {
+        setup: `switch (1) {
+          case 1: { break; }
+          case 2: return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
+        }
+        return [];`,
+        expected: 'alternatives',
+      },
+      {
+        setup: `declare const enabled: boolean;
+        switch (1) {
+          case 1: if (enabled) break;
+          case 2: return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
+        }
+        return [];`,
+        expected: 'unknown',
+      },
+      {
+        setup: `const selected = 1;
+        switch (selected) {
+          case 0: return [{ provide: APP_GUARD, useClass: JwtAuthGuard }];
+          case 1: return [];
+        }`,
+        expected: 'alternatives',
+      },
+    ]) {
+      const root = workspace(`
+        import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+        import { APP_GUARD } from '@nestjs/core';
+        import { JwtAuthGuard } from './auth';
+        function createProviders() { ${setup} }
+        @Module({ providers: createProviders() }) class AppModule {}
+        @Controller('switch-factory') class SwitchFactoryController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, {
+        'src/auth.ts': 'export class JwtAuthGuard {}\n',
+        'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
+        'node_modules/@nestjs/core/package.json': JSON.stringify({
+          name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+        }),
+        'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+      });
+      const execution = await runSourceAnalyzer(
+        createNestJsSourceAnalyzer(authConfig), context(root),
+      );
+
+      expect(execution.status).toBe('success');
+      if (execution.status === 'success') {
+        expect(execution.result.contract.operations[0].auth.mode).toBe(expected);
+      }
+    }
+  });
+
   test('fails closed on a bound useGlobalGuards alias', async () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';

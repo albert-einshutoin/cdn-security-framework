@@ -581,6 +581,7 @@ function effectiveObjectProperty(object, propertyName, checker, projectSources, 
                     : start >= 0 ? statement.caseBlock.clauses.map((_, index) => index).slice(start)
                         : fallback >= 0 ? statement.caseBlock.clauses.map((_, index) => index).slice(fallback) : [];
                 let mask = NORMAL;
+                let completedMask = 0;
                 for (const index of indexes) {
                     if (!dynamic && !(mask & NORMAL))
                         break;
@@ -593,14 +594,19 @@ function effectiveObjectProperty(object, propertyName, checker, projectSources, 
                         mayThrow ||= childFlow.mayThrow;
                         clauseMask = (clauseMask & ~NORMAL) | childFlow.mask;
                     }
-                    mask = dynamic ? mask | clauseMask : (mask & ~NORMAL) | clauseMask;
-                    if (clauseMask & BREAK) {
+                    if (dynamic)
+                        mask |= clauseMask;
+                    else {
+                        completedMask |= clauseMask & (RETURN | CONTINUE);
+                        if (clauseMask & BREAK)
+                            completedMask |= NORMAL;
+                        mask = clauseMask & NORMAL;
+                    }
+                    if (dynamic && (clauseMask & BREAK)) {
                         mask = (mask & ~BREAK) | NORMAL;
-                        if (!dynamic)
-                            break;
                     }
                 }
-                return { mask, mayThrow };
+                return { mask: mask | completedMask, mayThrow };
             }
             else if (typescript_1.default.isWhileStatement(statement)) {
                 const condition = staticBoolean(statement.expression);
@@ -3858,6 +3864,43 @@ function containsCanonicalProviderToken(input, checker, projectSources, check, m
         return staticState(declaration.initializer, seen, depth + 1);
     };
     const staticBoolean = (input) => staticState(input).truthy;
+    const staticCaseValue = (input, seen = new Set(), depth = 0) => {
+        check();
+        if (depth > 64)
+            return undefined;
+        let expression = input;
+        while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+            || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+            || typescript_1.default.isNonNullExpression(expression))
+            expression = expression.expression;
+        if (typescript_1.default.isStringLiteral(expression) || typescript_1.default.isNoSubstitutionTemplateLiteral(expression)) {
+            return expression.text;
+        }
+        if (typescript_1.default.isNumericLiteral(expression))
+            return Number(expression.text);
+        if (typescript_1.default.isBigIntLiteral(expression))
+            return BigInt(expression.text.slice(0, -1));
+        if (expression.kind === typescript_1.default.SyntaxKind.TrueKeyword)
+            return true;
+        if (expression.kind === typescript_1.default.SyntaxKind.FalseKeyword)
+            return false;
+        if (expression.kind === typescript_1.default.SyntaxKind.NullKeyword)
+            return null;
+        if (typescript_1.default.isIdentifier(expression)) {
+            const symbol = resolvedSymbolAt(expression, checker);
+            if (!symbol || seen.has(symbol))
+                return undefined;
+            const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+            const declaration = declarations.length === 1 ? declarations[0] : undefined;
+            if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+                || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+                || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+                return undefined;
+            seen.add(symbol);
+            return staticCaseValue(declaration.initializer, seen, depth + 1);
+        }
+        return undefined;
+    };
     const containsLiteralProviderToken = (input) => {
         const pending = [input];
         const seen = new Set();
@@ -3909,28 +3952,36 @@ function containsCanonicalProviderToken(input, checker, projectSources, check, m
         }
         return false;
     };
+    const NORMAL = 1;
+    const RETURN = 2;
+    const BREAK = 4;
+    const CONTINUE = 8;
     const collectReturns = (statement) => {
         check();
         if (typescript_1.default.isReturnStatement(statement)) {
             return {
                 candidates: statement.expression ? [statement.expression] : [],
-                definitelyReturns: true,
+                mask: RETURN,
                 mayThrow: Boolean(statement.expression && nodeMayThrow(statement.expression, checker, projectSources, check)),
             };
         }
         if (typescript_1.default.isThrowStatement(statement)) {
-            return { candidates: [], definitelyReturns: true, mayThrow: true };
+            return { candidates: [], mask: 0, mayThrow: true };
+        }
+        if (typescript_1.default.isBreakStatement(statement))
+            return { candidates: [], mask: BREAK, mayThrow: false };
+        if (typescript_1.default.isContinueStatement(statement)) {
+            return { candidates: [], mask: CONTINUE, mayThrow: false };
         }
         if (typescript_1.default.isBlock(statement)) {
-            const flow = { candidates: [], definitelyReturns: false, mayThrow: false };
+            const flow = { candidates: [], mask: NORMAL, mayThrow: false };
             for (const child of statement.statements) {
+                if (!(flow.mask & NORMAL))
+                    break;
                 const childFlow = collectReturns(child);
                 flow.candidates.push(...childFlow.candidates);
                 flow.mayThrow ||= childFlow.mayThrow;
-                if (childFlow.definitelyReturns) {
-                    flow.definitelyReturns = true;
-                    break;
-                }
+                flow.mask = (flow.mask & ~NORMAL) | childFlow.mask;
             }
             return flow;
         }
@@ -3941,13 +3992,13 @@ function containsCanonicalProviderToken(input, checker, projectSources, check, m
             if (condition === false)
                 return statement.elseStatement
                     ? collectReturns(statement.elseStatement)
-                    : { candidates: [], definitelyReturns: false, mayThrow: false };
+                    : { candidates: [], mask: NORMAL, mayThrow: false };
             const whenTrue = collectReturns(statement.thenStatement);
             const whenFalse = statement.elseStatement ? collectReturns(statement.elseStatement)
-                : { candidates: [], definitelyReturns: false, mayThrow: false };
+                : { candidates: [], mask: NORMAL, mayThrow: false };
             return {
                 candidates: [...whenTrue.candidates, ...whenFalse.candidates],
-                definitelyReturns: whenTrue.definitelyReturns && whenFalse.definitelyReturns,
+                mask: whenTrue.mask | whenFalse.mask,
                 mayThrow: nodeMayThrow(statement.expression, checker, projectSources, check)
                     || whenTrue.mayThrow || whenFalse.mayThrow,
             };
@@ -3958,23 +4009,131 @@ function containsCanonicalProviderToken(input, checker, projectSources, check, m
                 ? collectReturns(statement.catchClause.block) : undefined;
             let flow = {
                 candidates: [...tryFlow.candidates, ...(catchFlow?.candidates ?? [])],
-                definitelyReturns: tryFlow.definitelyReturns
-                    && (!tryFlow.mayThrow || Boolean(catchFlow?.definitelyReturns)),
+                mask: tryFlow.mask | (catchFlow?.mask ?? 0),
                 mayThrow: catchFlow ? catchFlow.mayThrow : tryFlow.mayThrow,
             };
             if (statement.finallyBlock) {
                 const finallyFlow = collectReturns(statement.finallyBlock);
-                flow = finallyFlow.definitelyReturns ? finallyFlow : {
+                flow = !(finallyFlow.mask & NORMAL) ? finallyFlow : {
                     candidates: [...flow.candidates, ...finallyFlow.candidates],
-                    definitelyReturns: flow.definitelyReturns,
+                    mask: (finallyFlow.mask & ~NORMAL) | flow.mask,
                     mayThrow: flow.mayThrow || finallyFlow.mayThrow,
                 };
             }
             return flow;
         }
+        if (typescript_1.default.isSwitchStatement(statement)) {
+            const discriminant = staticCaseValue(statement.expression);
+            let dynamic = discriminant === undefined;
+            let start = -1;
+            let fallback = -1;
+            let mayThrow = nodeMayThrow(statement.expression, checker, projectSources, check);
+            for (const [index, clause] of statement.caseBlock.clauses.entries()) {
+                if (typescript_1.default.isDefaultClause(clause)) {
+                    fallback = index;
+                    continue;
+                }
+                mayThrow ||= nodeMayThrow(clause.expression, checker, projectSources, check);
+                const value = staticCaseValue(clause.expression);
+                if (value === undefined)
+                    dynamic = true;
+                if (!dynamic && Object.is(discriminant, value)) {
+                    start = index;
+                    break;
+                }
+            }
+            const indexes = dynamic
+                ? statement.caseBlock.clauses.map((_, index) => index)
+                : start >= 0 ? statement.caseBlock.clauses.map((_, index) => index).slice(start)
+                    : fallback >= 0 ? statement.caseBlock.clauses.map((_, index) => index).slice(fallback) : [];
+            const candidates = [];
+            let mask = NORMAL;
+            let completedMask = 0;
+            for (const index of indexes) {
+                if (!dynamic && !(mask & NORMAL))
+                    break;
+                const clause = statement.caseBlock.clauses[index];
+                let clauseMask = NORMAL;
+                for (const child of clause.statements) {
+                    if (!(clauseMask & NORMAL))
+                        break;
+                    const flow = collectReturns(child);
+                    candidates.push(...flow.candidates);
+                    mayThrow ||= flow.mayThrow;
+                    clauseMask = (clauseMask & ~NORMAL) | flow.mask;
+                }
+                if (dynamic)
+                    mask |= clauseMask;
+                else {
+                    completedMask |= clauseMask & (RETURN | CONTINUE);
+                    if (clauseMask & BREAK)
+                        completedMask |= NORMAL;
+                    mask = clauseMask & NORMAL;
+                }
+                if (dynamic && (clauseMask & BREAK)) {
+                    mask = (mask & ~BREAK) | NORMAL;
+                }
+            }
+            return { candidates, mask: mask | completedMask, mayThrow };
+        }
+        if (typescript_1.default.isWhileStatement(statement)) {
+            const condition = staticBoolean(statement.expression);
+            const conditionMayThrow = nodeMayThrow(statement.expression, checker, projectSources, check);
+            if (condition === false) {
+                return { candidates: [], mask: NORMAL, mayThrow: conditionMayThrow };
+            }
+            const flow = collectReturns(statement.statement);
+            return {
+                candidates: flow.candidates,
+                mask: (flow.mask & RETURN)
+                    | ((condition !== true || (flow.mask & BREAK)) ? NORMAL : 0),
+                mayThrow: conditionMayThrow || flow.mayThrow,
+            };
+        }
+        if (typescript_1.default.isDoStatement(statement)) {
+            const flow = collectReturns(statement.statement);
+            const reachesCondition = Boolean(flow.mask & (NORMAL | CONTINUE));
+            const condition = staticBoolean(statement.expression);
+            return {
+                candidates: flow.candidates,
+                mask: (flow.mask & RETURN) | ((flow.mask & BREAK) ? NORMAL : 0)
+                    | (reachesCondition && condition !== true ? NORMAL : 0),
+                mayThrow: flow.mayThrow || (reachesCondition && nodeMayThrow(statement.expression, checker, projectSources, check)),
+            };
+        }
+        if (typescript_1.default.isForStatement(statement)) {
+            const initializerMayThrow = Boolean(statement.initializer && nodeMayThrow(statement.initializer, checker, projectSources, check));
+            const condition = statement.condition ? staticBoolean(statement.condition) : true;
+            const conditionMayThrow = Boolean(statement.condition && nodeMayThrow(statement.condition, checker, projectSources, check));
+            if (condition === false) {
+                return {
+                    candidates: [], mask: NORMAL, mayThrow: initializerMayThrow || conditionMayThrow,
+                };
+            }
+            const flow = collectReturns(statement.statement);
+            const reachesIncrement = Boolean(flow.mask & (NORMAL | CONTINUE));
+            const incrementMayThrow = reachesIncrement && Boolean(statement.incrementor
+                && nodeMayThrow(statement.incrementor, checker, projectSources, check));
+            return {
+                candidates: flow.candidates,
+                mask: (flow.mask & RETURN)
+                    | ((condition !== true || (flow.mask & BREAK)) ? NORMAL : 0),
+                mayThrow: initializerMayThrow || conditionMayThrow || flow.mayThrow || incrementMayThrow,
+            };
+        }
+        if (typescript_1.default.isForInStatement(statement) || typescript_1.default.isForOfStatement(statement)) {
+            const flow = collectReturns(statement.statement);
+            return {
+                candidates: flow.candidates,
+                mask: (flow.mask & RETURN) | NORMAL,
+                mayThrow: nodeMayThrow(statement.initializer, checker, projectSources, check)
+                    || nodeMayThrow(statement.expression, checker, projectSources, check)
+                    || flow.mayThrow,
+            };
+        }
         return {
             candidates: [],
-            definitelyReturns: false,
+            mask: NORMAL,
             mayThrow: nodeMayThrow(statement, checker, projectSources, check),
         };
     };
