@@ -771,6 +771,35 @@ function isBareDecoratorBindingStable(decorator, checker, projectSources, check)
 function resolveDecoratorCallSymbol(call, checker, check) {
     let expression = call.expression;
     let indirectInvocation = false;
+    const outer = unwrapExpression(expression);
+    const outerInvocation = typescript_1.default.isPropertyAccessExpression(outer) ? outer.name.text
+        : typescript_1.default.isElementAccessExpression(outer) && outer.argumentExpression
+            ? resolveStaticPropertyKey(outer.argumentExpression, checker, check) : undefined;
+    const outerReceiver = (typescript_1.default.isPropertyAccessExpression(outer)
+        || typescript_1.default.isElementAccessExpression(outer)) ? unwrapExpression(outer.expression) : undefined;
+    const hasRuntimeBinding = (identifier) => checker
+        .getSymbolAtLocation(identifier)?.declarations?.some((declaration) => {
+        if (declaration.getSourceFile().isDeclarationFile)
+            return false;
+        const variableStatement = typescript_1.default.isVariableDeclaration(declaration)
+            && typescript_1.default.isVariableStatement(declaration.parent.parent) ? declaration.parent.parent : undefined;
+        return !variableStatement?.modifiers?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.DeclareKeyword);
+    }) === true;
+    const bareReflect = outerReceiver && typescript_1.default.isIdentifier(outerReceiver)
+        && outerReceiver.text === 'Reflect' && !hasRuntimeBinding(outerReceiver);
+    const reflectMember = outerReceiver && (typescript_1.default.isPropertyAccessExpression(outerReceiver)
+        || typescript_1.default.isElementAccessExpression(outerReceiver)) ? outerReceiver : undefined;
+    const reflectMemberName = reflectMember && (typescript_1.default.isPropertyAccessExpression(reflectMember)
+        ? reflectMember.name.text : reflectMember.argumentExpression
+        ? resolveStaticPropertyKey(reflectMember.argumentExpression, checker, check) : undefined);
+    const globalReceiver = reflectMember && unwrapExpression(reflectMember.expression);
+    const globalReflect = reflectMemberName === 'Reflect' && globalReceiver
+        && typescript_1.default.isIdentifier(globalReceiver) && globalReceiver.text === 'globalThis'
+        && !hasRuntimeBinding(globalReceiver);
+    if (outerInvocation === 'apply' && (bareReflect || globalReflect) && call.arguments[0]) {
+        indirectInvocation = true;
+        expression = call.arguments[0];
+    }
     while (true) {
         check();
         const callee = unwrapExpression(expression);

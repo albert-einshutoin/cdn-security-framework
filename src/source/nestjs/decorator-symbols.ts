@@ -834,8 +834,36 @@ export function resolveDecoratorCallSymbol(
   trustedNestJsCommon: boolean;
   indirectInvocation: boolean;
 } | undefined {
-  let expression = call.expression;
+  let expression: ts.Expression = call.expression;
   let indirectInvocation = false;
+  const outer = unwrapExpression(expression);
+  const outerInvocation = ts.isPropertyAccessExpression(outer) ? outer.name.text
+    : ts.isElementAccessExpression(outer) && outer.argumentExpression
+      ? resolveStaticPropertyKey(outer.argumentExpression, checker, check) : undefined;
+  const outerReceiver = (ts.isPropertyAccessExpression(outer)
+    || ts.isElementAccessExpression(outer)) ? unwrapExpression(outer.expression) : undefined;
+  const hasRuntimeBinding = (identifier: ts.Identifier): boolean => checker
+    .getSymbolAtLocation(identifier)?.declarations?.some((declaration) => {
+      if (declaration.getSourceFile().isDeclarationFile) return false;
+      const variableStatement = ts.isVariableDeclaration(declaration)
+        && ts.isVariableStatement(declaration.parent.parent) ? declaration.parent.parent : undefined;
+      return !variableStatement?.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.DeclareKeyword);
+    }) === true;
+  const bareReflect = outerReceiver && ts.isIdentifier(outerReceiver)
+    && outerReceiver.text === 'Reflect' && !hasRuntimeBinding(outerReceiver);
+  const reflectMember = outerReceiver && (ts.isPropertyAccessExpression(outerReceiver)
+    || ts.isElementAccessExpression(outerReceiver)) ? outerReceiver : undefined;
+  const reflectMemberName = reflectMember && (ts.isPropertyAccessExpression(reflectMember)
+    ? reflectMember.name.text : reflectMember.argumentExpression
+      ? resolveStaticPropertyKey(reflectMember.argumentExpression, checker, check) : undefined);
+  const globalReceiver = reflectMember && unwrapExpression(reflectMember.expression);
+  const globalReflect = reflectMemberName === 'Reflect' && globalReceiver
+    && ts.isIdentifier(globalReceiver) && globalReceiver.text === 'globalThis'
+    && !hasRuntimeBinding(globalReceiver);
+  if (outerInvocation === 'apply' && (bareReflect || globalReflect) && call.arguments[0]) {
+    indirectInvocation = true;
+    expression = call.arguments[0];
+  }
   while (true) {
     check();
     const callee = unwrapExpression(expression);
