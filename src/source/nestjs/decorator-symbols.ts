@@ -417,13 +417,26 @@ export function resolveDecoratorSymbol(
   decorator: ts.Decorator,
   checker: ts.TypeChecker,
   check: () => void,
+  projectSources?: ReadonlySet<ts.SourceFile>,
 ): {
   name: string;
   call: ts.CallExpression;
   nestJsCommon: boolean;
   trustedNestJsCommon: boolean;
 } | undefined {
-  const expression = unwrapExpression(decorator.expression);
+  let expression = unwrapExpression(decorator.expression);
+  if (!ts.isCallExpression(expression) && ts.isIdentifier(expression)) {
+    let symbol = checker.getSymbolAtLocation(expression);
+    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    const declarations = symbol?.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (declaration?.initializer && (!projectSources
+      || projectSources.has(declaration.getSourceFile()))
+      && ts.isVariableDeclarationList(declaration.parent)
+      && declaration.parent.flags & ts.NodeFlags.Const) {
+      expression = unwrapExpression(declaration.initializer);
+    }
+  }
   const call = ts.isCallExpression(expression) ? expression : undefined;
   if (!call) return undefined;
   return resolveDecoratorCallSymbol(call, checker, check);
@@ -2809,7 +2822,26 @@ export function isNestJsUseGlobalGuardsCall(
   checker: ts.TypeChecker,
   check: () => void,
 ): boolean {
-  const expression = unwrapExpression(call.expression);
+  let expression = unwrapExpression(call.expression);
+  if (ts.isIdentifier(expression)) {
+    let symbol = checker.getSymbolAtLocation(expression);
+    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    const declarations = symbol?.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    const initializer = declaration?.initializer && ts.isVariableDeclarationList(declaration.parent)
+      && declaration.parent.flags & ts.NodeFlags.Const
+      ? unwrapExpression(declaration.initializer) : undefined;
+    const bind = initializer && ts.isCallExpression(initializer)
+      ? unwrapExpression(initializer.expression) : undefined;
+    const bindName = bind && (ts.isPropertyAccessExpression(bind)
+      ? bind.name.text
+      : ts.isElementAccessExpression(bind) && bind.argumentExpression
+        ? resolveStaticPropertyKey(bind.argumentExpression, checker, check) : undefined);
+    if (bindName === 'bind' && bind
+      && (ts.isPropertyAccessExpression(bind) || ts.isElementAccessExpression(bind))) {
+      expression = unwrapExpression(bind.expression);
+    }
+  }
   const property = ts.isPropertyAccessExpression(expression)
     ? expression.name.text
     : ts.isElementAccessExpression(expression) && expression.argumentExpression

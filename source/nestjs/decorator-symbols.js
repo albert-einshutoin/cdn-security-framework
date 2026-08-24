@@ -378,8 +378,21 @@ function classifyNestJsRouteDecorator(decorator, checker, check) {
             || result.name === 'RequestMapping' || result.name === 'Search' || result.name === 'Version')),
     };
 }
-function resolveDecoratorSymbol(decorator, checker, check) {
-    const expression = unwrapExpression(decorator.expression);
+function resolveDecoratorSymbol(decorator, checker, check, projectSources) {
+    let expression = unwrapExpression(decorator.expression);
+    if (!typescript_1.default.isCallExpression(expression) && typescript_1.default.isIdentifier(expression)) {
+        let symbol = checker.getSymbolAtLocation(expression);
+        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        const declarations = symbol?.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (declaration?.initializer && (!projectSources
+            || projectSources.has(declaration.getSourceFile()))
+            && typescript_1.default.isVariableDeclarationList(declaration.parent)
+            && declaration.parent.flags & typescript_1.default.NodeFlags.Const) {
+            expression = unwrapExpression(declaration.initializer);
+        }
+    }
     const call = typescript_1.default.isCallExpression(expression) ? expression : undefined;
     if (!call)
         return undefined;
@@ -2787,7 +2800,27 @@ function isStaticShorthandSymbolFrom(shorthand, checker, check, moduleName, impo
     return containsStaticSymbolFrom(expression, checker, check, moduleName, importedName, projectSources);
 }
 function isNestJsUseGlobalGuardsCall(call, checker, check) {
-    const expression = unwrapExpression(call.expression);
+    let expression = unwrapExpression(call.expression);
+    if (typescript_1.default.isIdentifier(expression)) {
+        let symbol = checker.getSymbolAtLocation(expression);
+        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        const declarations = symbol?.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        const initializer = declaration?.initializer && typescript_1.default.isVariableDeclarationList(declaration.parent)
+            && declaration.parent.flags & typescript_1.default.NodeFlags.Const
+            ? unwrapExpression(declaration.initializer) : undefined;
+        const bind = initializer && typescript_1.default.isCallExpression(initializer)
+            ? unwrapExpression(initializer.expression) : undefined;
+        const bindName = bind && (typescript_1.default.isPropertyAccessExpression(bind)
+            ? bind.name.text
+            : typescript_1.default.isElementAccessExpression(bind) && bind.argumentExpression
+                ? resolveStaticPropertyKey(bind.argumentExpression, checker, check) : undefined);
+        if (bindName === 'bind' && bind
+            && (typescript_1.default.isPropertyAccessExpression(bind) || typescript_1.default.isElementAccessExpression(bind))) {
+            expression = unwrapExpression(bind.expression);
+        }
+    }
     const property = typescript_1.default.isPropertyAccessExpression(expression)
         ? expression.name.text
         : typescript_1.default.isElementAccessExpression(expression) && expression.argumentExpression

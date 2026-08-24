@@ -836,17 +836,17 @@ function ownAuthMetadata(
     }
   };
   for (const decorator of [...decorators(node)].reverse()) {
-    const resolved = resolveDecoratorSymbol(decorator, checker, check);
-    if (resolved) {
-      applyResolved(resolved, decorator, 0);
-      continue;
-    }
     const bareName = resolveBareDecoratorName(decorator, checker, check);
     if (bareName && config.public_decorators.includes(bareName)) {
       result.publicPresent = true;
       result.explicitPublic = true;
       result.publicDynamic = false;
       result.publicEvidence = [decorator];
+      continue;
+    }
+    const resolved = resolveDecoratorSymbol(decorator, checker, check, projectSources);
+    if (resolved) {
+      applyResolved(resolved, decorator, 0);
     }
   }
   result.dynamic = result.guardDynamic || result.publicDynamic || result.rolesDynamic;

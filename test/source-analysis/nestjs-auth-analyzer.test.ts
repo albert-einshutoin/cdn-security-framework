@@ -274,22 +274,59 @@ describe('NestJS auth metadata analyzer', () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
       import { JwtAuthGuard, Public } from './auth';
+      const Open = Public();
       @Controller('bare') @UseGuards(JwtAuthGuard)
-      class BareController { @Get() @Public read() {} }
+      class BareController {
+        @Get() @Public read() {}
+        @Get('precomputed') @Open precomputed() {}
+      }
     `, {
       'src/auth.ts': `
         export class JwtAuthGuard {}
         export const Public: MethodDecorator = () => {};
       `,
     });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer({
+      ...authConfig, public_decorators: ['Public', 'Open'],
+    }), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        exposure: 'public',
+        auth: expect.objectContaining({
+          mode: 'none', analysis: expect.objectContaining({ explicitPublic: true }),
+        }),
+      }),
+      expect.objectContaining({
+        routeKey: 'GET /bare/precomputed',
+        exposure: 'public',
+        auth: expect.objectContaining({
+          mode: 'none', analysis: expect.objectContaining({ explicitPublic: true }),
+        }),
+      }),
+    ]));
+  });
+
+  test('resolves a precomputed guard decorator used without a call', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard, JwtAuthGuard } from './auth';
+      const Authenticated = UseGuards(ApiKeyGuard);
+      @Controller('precomputed') @UseGuards(JwtAuthGuard)
+      class PrecomputedController { @Get() @Authenticated read() {} }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
+    });
     const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
 
     expect(execution.status).toBe('success');
     if (execution.status !== 'success') return;
-    expect(execution.result.contract.operations[0]).toMatchObject({
-      exposure: 'public',
-      auth: { mode: 'none', analysis: { explicitPublic: true } },
-    });
+    expect(execution.result.contract.operations[0].auth.analysis?.guards).toEqual([
+      { symbol: 'JwtAuthGuard', authKind: 'bearer' },
+      { symbol: 'ApiKeyGuard', authKind: 'api-key' },
+    ]);
   });
 
   test('accumulates inherited class guards and treats empty method UseGuards as a no-op', async () => {
@@ -2348,6 +2385,38 @@ describe('NestJS auth metadata analyzer', () => {
     expect(inheritedDynamicAuthOverride.result.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_DYNAMIC_ROUTE' }),
       expect.objectContaining({ code: 'SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA' }),
+    ]));
+  });
+
+  test('fails closed on a bound useGlobalGuards alias', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import type { INestApplication } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const app: INestApplication;
+      declare const guard: unknown;
+      const register = app.useGlobalGuards.bind(app);
+      register(guard);
+      @Controller('bound') class BoundController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+    expect(execution.result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
   });
 

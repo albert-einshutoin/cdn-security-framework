@@ -16,7 +16,7 @@ export declare function classifyNestJsRouteDecorator(decorator: ts.Decorator, ch
     };
     unsupported: boolean;
 };
-export declare function resolveDecoratorSymbol(decorator: ts.Decorator, checker: ts.TypeChecker, check: () => void): {
+export declare function resolveDecoratorSymbol(decorator: ts.Decorator, checker: ts.TypeChecker, check: () => void, projectSources?: ReadonlySet<ts.SourceFile>): {
     name: string;
     call: ts.CallExpression;
     nestJsCommon: boolean;
