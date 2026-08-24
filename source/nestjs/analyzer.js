@@ -4621,6 +4621,7 @@ async function analyze(context, authConfig) {
         ?? (compilerOptions.target ?? typescript_1.default.ScriptTarget.ES5) >= typescript_1.default.ScriptTarget.ES2022;
     const projectSources = new Set(loaded.sourceFiles.filter((sourceFile) => (!sourceFile.isDeclarationFile && !sourceFile.fileName.replaceAll('\\', '/').includes('/node_modules/'))));
     const localFunctions = new Map();
+    const localFunctionSymbols = new WeakMap();
     for (const sourceFile of projectSources) {
         if (!typescript_1.default.isExternalModule(sourceFile))
             continue;
@@ -4632,8 +4633,29 @@ async function analyze(context, authConfig) {
                 && !node.modifiers?.some(({ kind }) => (kind === typescript_1.default.SyntaxKind.ExportKeyword || kind === typescript_1.default.SyntaxKind.DefaultKeyword))) {
                 const symbol = resolvedSymbolAt(node.name, checker);
                 const bodies = symbol?.declarations?.filter((declaration) => (typescript_1.default.isFunctionDeclaration(declaration) && declaration.body)) ?? [];
-                if (symbol && bodies.length === 1)
-                    localFunctions.set(symbol, node);
+                if (symbol && bodies.length === 1) {
+                    localFunctions.set(symbol, { callable: node, binding: node.name });
+                    localFunctionSymbols.set(node, symbol);
+                }
+            }
+            else if (typescript_1.default.isVariableDeclaration(node) && typescript_1.default.isIdentifier(node.name) && node.initializer
+                && typescript_1.default.isVariableDeclarationList(node.parent)
+                && node.parent.flags & typescript_1.default.NodeFlags.Const
+                && !(typescript_1.default.isVariableStatement(node.parent.parent)
+                    && node.parent.parent.modifiers?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.ExportKeyword))) {
+                let initializer = node.initializer;
+                while (typescript_1.default.isParenthesizedExpression(initializer) || typescript_1.default.isAsExpression(initializer)
+                    || typescript_1.default.isTypeAssertionExpression(initializer) || typescript_1.default.isSatisfiesExpression(initializer)
+                    || typescript_1.default.isNonNullExpression(initializer))
+                    initializer = initializer.expression;
+                if (typescript_1.default.isArrowFunction(initializer) || typescript_1.default.isFunctionExpression(initializer)) {
+                    const symbol = resolvedSymbolAt(node.name, checker);
+                    const declarations = symbol?.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+                    if (symbol && declarations.length === 1) {
+                        localFunctions.set(symbol, { callable: initializer, binding: node.name });
+                        localFunctionSymbols.set(initializer, symbol);
+                    }
+                }
             }
             typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
         }
@@ -4647,18 +4669,18 @@ async function analyze(context, authConfig) {
                 check();
                 if (typescript_1.default.isIdentifier(node)) {
                     const symbol = resolvedSymbolAt(node, checker);
-                    const declaration = symbol ? localFunctions.get(symbol) : undefined;
-                    if (symbol && declaration) {
+                    const local = symbol ? localFunctions.get(symbol) : undefined;
+                    if (symbol && local) {
                         let insideDeclaration = false;
                         for (let parent = node; parent; parent = parent.parent) {
-                            if (parent === declaration) {
+                            if (parent === local.callable) {
                                 insideDeclaration = true;
                                 break;
                             }
                             if (typescript_1.default.isSourceFile(parent))
                                 break;
                         }
-                        if (!insideDeclaration)
+                        if (node !== local.binding && !insideDeclaration)
                             referencedLocalFunctions.add(symbol);
                     }
                 }
@@ -4669,8 +4691,9 @@ async function analyze(context, authConfig) {
     const provablyUninvokedLocalFunctions = new Set([...localFunctions.keys()].filter((symbol) => (!referencedLocalFunctions.has(symbol))));
     const isInsideProvablyUninvokedFunction = (node) => {
         for (let parent = node.parent; !typescript_1.default.isSourceFile(parent); parent = parent.parent) {
-            if (typescript_1.default.isFunctionDeclaration(parent) && parent.name) {
-                const symbol = resolvedSymbolAt(parent.name, checker);
+            if (typescript_1.default.isFunctionDeclaration(parent) || typescript_1.default.isArrowFunction(parent)
+                || typescript_1.default.isFunctionExpression(parent)) {
+                const symbol = localFunctionSymbols.get(parent);
                 if (symbol && provablyUninvokedLocalFunctions.has(symbol))
                     return true;
             }

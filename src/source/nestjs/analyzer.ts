@@ -4431,7 +4431,9 @@ async function analyze(
   const projectSources = new Set(loaded.sourceFiles.filter((sourceFile) => (
     !sourceFile.isDeclarationFile && !sourceFile.fileName.replaceAll('\\', '/').includes('/node_modules/')
   )));
-  const localFunctions = new Map<ts.Symbol, ts.FunctionDeclaration>();
+  type LocalFunction = ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression;
+  const localFunctions = new Map<ts.Symbol, { callable: LocalFunction; binding: ts.Identifier }>();
+  const localFunctionSymbols = new WeakMap<LocalFunction, ts.Symbol>();
   for (const sourceFile of projectSources) {
     if (!ts.isExternalModule(sourceFile)) continue;
     const nodes: ts.Node[] = [sourceFile];
@@ -4446,7 +4448,27 @@ async function analyze(
         const bodies = symbol?.declarations?.filter((declaration) => (
           ts.isFunctionDeclaration(declaration) && declaration.body
         )) ?? [];
-        if (symbol && bodies.length === 1) localFunctions.set(symbol, node);
+        if (symbol && bodies.length === 1) {
+          localFunctions.set(symbol, { callable: node, binding: node.name });
+          localFunctionSymbols.set(node, symbol);
+        }
+      } else if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer
+        && ts.isVariableDeclarationList(node.parent)
+        && node.parent.flags & ts.NodeFlags.Const
+        && !(ts.isVariableStatement(node.parent.parent)
+          && node.parent.parent.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.ExportKeyword))) {
+        let initializer = node.initializer;
+        while (ts.isParenthesizedExpression(initializer) || ts.isAsExpression(initializer)
+          || ts.isTypeAssertionExpression(initializer) || ts.isSatisfiesExpression(initializer)
+          || ts.isNonNullExpression(initializer)) initializer = initializer.expression;
+        if (ts.isArrowFunction(initializer) || ts.isFunctionExpression(initializer)) {
+          const symbol = resolvedSymbolAt(node.name, checker);
+          const declarations = symbol?.declarations?.filter(ts.isVariableDeclaration) ?? [];
+          if (symbol && declarations.length === 1) {
+            localFunctions.set(symbol, { callable: initializer, binding: node.name });
+            localFunctionSymbols.set(initializer, symbol);
+          }
+        }
       }
       ts.forEachChild(node, (child) => { nodes.push(child); });
     }
@@ -4460,17 +4482,17 @@ async function analyze(
         check();
         if (ts.isIdentifier(node)) {
           const symbol = resolvedSymbolAt(node, checker);
-          const declaration = symbol ? localFunctions.get(symbol) : undefined;
-          if (symbol && declaration) {
+          const local = symbol ? localFunctions.get(symbol) : undefined;
+          if (symbol && local) {
             let insideDeclaration = false;
             for (let parent: ts.Node | undefined = node; parent; parent = parent.parent) {
-              if (parent === declaration) {
+              if (parent === local.callable) {
                 insideDeclaration = true;
                 break;
               }
               if (ts.isSourceFile(parent)) break;
             }
-            if (!insideDeclaration) referencedLocalFunctions.add(symbol);
+            if (node !== local.binding && !insideDeclaration) referencedLocalFunctions.add(symbol);
           }
         }
         ts.forEachChild(node, (child) => { nodes.push(child); });
@@ -4482,8 +4504,9 @@ async function analyze(
   )));
   const isInsideProvablyUninvokedFunction = (node: ts.Node): boolean => {
     for (let parent = node.parent; !ts.isSourceFile(parent); parent = parent.parent) {
-      if (ts.isFunctionDeclaration(parent) && parent.name) {
-        const symbol = resolvedSymbolAt(parent.name, checker);
+      if (ts.isFunctionDeclaration(parent) || ts.isArrowFunction(parent)
+        || ts.isFunctionExpression(parent)) {
+        const symbol = localFunctionSymbols.get(parent);
         if (symbol && provablyUninvokedLocalFunctions.has(symbol)) return true;
       }
     }

@@ -3797,6 +3797,7 @@ describe('NestJS auth metadata analyzer', () => {
         app.useGlobalGuards({});
       }
       function unused() { app.useGlobalGuards({}); }
+      const unusedCallback = () => app.useGlobalGuards({});
       app.useGlobalGuards();
       app.useGlobalGuards(...[]);
       app.useGlobalGuards.call(app);
