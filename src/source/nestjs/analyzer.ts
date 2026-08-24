@@ -106,14 +106,66 @@ function routePath(controllerPath: string, methodPath: string): { path: string; 
   };
 }
 
-function directBaseClass(node: ts.ClassLikeDeclaration, checker: ts.TypeChecker): ts.ClassLikeDeclaration | undefined {
-  const expression = node.heritageClauses?.find(({ token }) => token === ts.SyntaxKind.ExtendsKeyword)
+function directBaseClass(
+  node: ts.ClassLikeDeclaration,
+  checker: ts.TypeChecker,
+  check: () => void,
+  maxSteps: number,
+): ts.ClassLikeDeclaration | undefined {
+  let expression: ts.Expression | undefined = node.heritageClauses
+    ?.find(({ token }) => token === ts.SyntaxKind.ExtendsKeyword)
     ?.types[0]?.expression;
   if (!expression) return undefined;
-  let symbol = checker.getSymbolAtLocation(expression);
-  if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-  return symbol?.declarations?.find(ts.isClassLike)
-    ?? checker.getTypeAtLocation(expression).getSymbol()?.declarations?.find(ts.isClassLike);
+  const seen = new Set<ts.Symbol>();
+  let steps = 0;
+  while (expression) {
+    check();
+    steps += 1;
+    if (steps > maxSteps) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+    while (ts.isParenthesizedExpression(expression)) expression = expression.expression;
+    let symbol = checker.getSymbolAtLocation(expression);
+    if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+    const declaration = symbol?.declarations?.find(ts.isClassLike)
+      ?? (ts.isClassExpression(expression)
+        ? checker.getTypeAtLocation(expression).getSymbol()?.declarations?.find(ts.isClassLike)
+        : undefined);
+    if (declaration) return declaration;
+    if (!symbol || seen.has(symbol)) return undefined;
+    seen.add(symbol);
+    const aliases = symbol.declarations?.filter((candidate): candidate is ts.VariableDeclaration => (
+      ts.isVariableDeclaration(candidate) && candidate.initializer !== undefined
+      && ts.isVariableDeclarationList(candidate.parent)
+      && Boolean(candidate.parent.flags & ts.NodeFlags.Const)
+    )) ?? [];
+    if (aliases.length !== 1) return undefined;
+    expression = aliases[0].initializer;
+  }
+  return undefined;
+}
+
+function unresolvedBaseExpression(
+  node: ts.ClassLikeDeclaration,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+  maxSteps: number,
+): ts.Expression | undefined {
+  const seen = new Set<ts.ClassLikeDeclaration>();
+  let current: ts.ClassLikeDeclaration | undefined = node;
+  let steps = 0;
+  while (current && projectSources.has(current.getSourceFile()) && !seen.has(current)) {
+    check();
+    steps += 1;
+    if (steps > maxSteps) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_AST_NODE_LIMIT');
+    seen.add(current);
+    const expression = current.heritageClauses
+      ?.find(({ token }) => token === ts.SyntaxKind.ExtendsKeyword)?.types[0]?.expression;
+    if (!expression) return undefined;
+    const base = directBaseClass(current, checker, check, maxSteps);
+    if (!base || !projectSources.has(base.getSourceFile())) return expression;
+    current = base;
+  }
+  return undefined;
 }
 
 function hasInheritedClassVersion(
@@ -124,7 +176,7 @@ function hasInheritedClassVersion(
   maxSteps: number,
 ): boolean {
   const seen = new Set<ts.ClassLikeDeclaration>();
-  let current = directBaseClass(node, checker);
+  let current = directBaseClass(node, checker, check, maxSteps);
   let steps = 0;
   while (current && projectSources.has(current.getSourceFile()) && !seen.has(current)) {
     check();
@@ -135,7 +187,7 @@ function hasInheritedClassVersion(
       const name = classifyNestJsRouteDecorator(decorator, checker, check).candidate?.name;
       return name === 'Version' || name === 'Unknown';
     })) return true;
-    current = directBaseClass(current, checker);
+    current = directBaseClass(current, checker, check, maxSteps);
   }
   return false;
 }
@@ -163,7 +215,7 @@ function effectiveControllerInChain(
       if (classification.candidate?.name === 'Controller'
         || classification.candidate?.name === 'Unknown') return { decorator, classification };
     }
-    current = directBaseClass(current, checker);
+    current = directBaseClass(current, checker, check, maxSteps);
   }
   return undefined;
 }
@@ -367,7 +419,14 @@ function effectiveClassAuthMetadata(
       result.dynamic ||= own.rolesDynamic;
       result.authorizationEvidence.push(...own.authorizationEvidence);
     }
-    const base = directBaseClass(current, checker);
+    const baseExpression = current.heritageClauses
+      ?.find(({ token }) => token === ts.SyntaxKind.ExtendsKeyword)?.types[0]?.expression;
+    const base = directBaseClass(current, checker, check, maxSteps);
+    if (baseExpression && !base) {
+      result.guardDynamic = true;
+      result.dynamic = true;
+      break;
+    }
     if (base && !projectSources.has(base.getSourceFile())) {
       result.guardDynamic = true;
       result.dynamic = true;
@@ -651,7 +710,7 @@ function methodsIncludingBaseChain(
       const key = propertyKey(member);
       if (typeof key === 'string') shadowed.add(key);
     }
-    current = directBaseClass(current, checker);
+    current = directBaseClass(current, checker, check, maxSteps);
   }
   return methods;
 }
@@ -833,7 +892,37 @@ async function analyze(
       const effectiveController = effectiveControllerInChain(
         statement, checker, projectSources, check, context.limits.maxAstNodes,
       );
-      if (!effectiveController) continue;
+      const unresolvedBase = unresolvedBaseExpression(
+        statement, checker, projectSources, check, context.limits.maxAstNodes,
+      );
+      if (!effectiveController) {
+        if (unresolvedBase) {
+          let foundRoute = false;
+          for (const method of statement.members.filter(ts.isMethodDeclaration)) {
+            for (const decorator of decorators(method)) {
+              const candidate = classifyNestJsRouteDecorator(decorator, checker, check).candidate;
+              const methods = candidate && routeMethods(candidate.name);
+              if (methods?.length) {
+                addUnresolved(methods, decorator, 'SOURCE_ANALYZER_DYNAMIC_ROUTE');
+                foundRoute = true;
+                break;
+              }
+            }
+          }
+          const ownAuth = ownAuthMetadata(
+            statement, checker, projectSources, authConfig, check,
+            context.limits.maxAstNodes, context.limits.maxAnalysisDepth,
+          );
+          const hasAuthEvidence = ownAuth.guardsPresent || ownAuth.publicPresent
+            || ownAuth.rolesPresent || ownAuth.dynamic;
+          if (foundRoute || hasAuthEvidence) {
+            addUnresolved(HTTP_METHODS, unresolvedBase, 'SOURCE_ANALYZER_DYNAMIC_ROUTE');
+            addDiagnostic('SOURCE_ANALYZER_DYNAMIC_ROUTE', unresolvedBase);
+            if (hasAuthEvidence) addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', statement);
+          }
+        }
+        continue;
+      }
       const trustedController = effectiveController.classification.route?.name === 'Controller';
       const classAuthMetadata = trustedController
         ? effectiveClassAuthMetadata(
@@ -847,6 +936,10 @@ async function analyze(
       const controllers = trustedController
         ? [{ decorator: effectiveController.decorator, match: effectiveController.classification.route }]
         : [];
+      if (unresolvedBase) {
+        addUnresolved(HTTP_METHODS, unresolvedBase, 'SOURCE_ANALYZER_DYNAMIC_ROUTE');
+        addDiagnostic('SOURCE_ANALYZER_DYNAMIC_ROUTE', unresolvedBase);
+      }
       for (const method of methodsIncludingBaseChain(
         statement, checker, projectSources, useDefineForClassFields, check, context.limits.maxAstNodes,
       )) {

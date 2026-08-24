@@ -1879,17 +1879,159 @@ describe('NestJS auth metadata analyzer', () => {
       }),
       'node_modules/external-base/index.d.ts': 'export declare class ExternalController {}\n',
     });
+    const dynamicBaseRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard, JwtAuthGuard } from './auth';
+      declare const enabled: boolean;
+      @UseGuards(ApiKeyGuard) class GuardedBase {}
+      class PlainBase {}
+      @Controller('dynamic-base') @UseGuards(JwtAuthGuard)
+      class LocalController extends (enabled ? GuardedBase : PlainBase) { @Get() read() {} }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
+    });
+    const mutablePropertyBaseRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard } from './auth';
+      @UseGuards(ApiKeyGuard) class GuardedBase {}
+      class PlainBase {}
+      let holder: { Base: typeof GuardedBase } = { Base: GuardedBase };
+      holder.Base = PlainBase;
+      @Controller('mutable-base')
+      class LocalController extends holder.Base { @Get() read() {} }
+    `, { 'src/auth.ts': 'export class ApiKeyGuard {}\n' });
+    const mutableIdentifierBaseRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard } from './auth';
+      @UseGuards(ApiKeyGuard) class GuardedBase {}
+      class PlainBase {}
+      let Base: typeof GuardedBase = GuardedBase;
+      Base = PlainBase;
+      @Controller('mutable-identifier-base')
+      class LocalController extends Base { @Get() read() {} }
+    `, { 'src/auth.ts': 'export class ApiKeyGuard {}\n' });
+    const staticClassBaseRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard } from './auth';
+      @UseGuards(ApiKeyGuard) class GuardedBase {}
+      @Controller('static-base')
+      class LocalController extends (class extends GuardedBase {}) { @Get() read() {} }
+    `, { 'src/auth.ts': 'export class ApiKeyGuard {}\n' });
+    const namespaceBaseRoot = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      import * as bases from './bases';
+      @Controller('namespace-base')
+      class LocalController extends bases.GuardedBase { @Get() read() {} }
+    `, {
+      'src/auth.ts': 'export class ApiKeyGuard {}\n',
+      'src/bases.ts': `
+        import { UseGuards } from '@nestjs/common';
+        import { ApiKeyGuard } from './auth';
+        @UseGuards(ApiKeyGuard) export class GuardedBase {}
+      `,
+    });
+    const constClassAliasBaseRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard } from './auth';
+      @UseGuards(ApiKeyGuard) class GuardedBase {}
+      const Base = class extends GuardedBase { @Get('inherited') read() {} };
+      @Controller('const-base') class LocalController extends Base {}
+    `, { 'src/auth.ts': 'export class ApiKeyGuard {}\n' });
+    const inheritedDynamicControllerRoot = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      declare const enabled: boolean;
+      @Controller('guarded') class ControllerBase {}
+      class PlainBase {}
+      class LocalController extends (enabled ? ControllerBase : PlainBase) {
+        @Get() read() {}
+      }
+    `);
+    const inheritedDynamicMethodRoot = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      declare const enabled: boolean;
+      class RouteBase { @Get('inherited') read() {} }
+      class PlainBase {}
+      @Controller('dynamic-method')
+      class LocalController extends (enabled ? RouteBase : PlainBase) {}
+    `);
+    const nonNestDynamicBaseRoot = workspace(`
+      declare const enabled: boolean;
+      class FirstBase {}
+      class SecondBase {}
+      class DataTransferObject extends (enabled ? FirstBase : SecondBase) {}
+    `);
+    const inheritedDynamicAuthOverrideRoot = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard, Public } from './auth';
+      declare const enabled: boolean;
+      @Controller('auth-override') @UseGuards(ApiKeyGuard)
+      class SecuredBase { @Get() read() {} }
+      class PlainBase {}
+      @Public() class LocalController extends (enabled ? SecuredBase : PlainBase) {}
+    `, {
+      'src/auth.ts': `
+        export class ApiKeyGuard {}
+        export const Public = (): ClassDecorator => () => {};
+      `,
+    });
 
     const global = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(globalRoot));
     const unrelated = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(unrelatedRoot));
     const optional = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(optionalRoot));
     const external = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(externalRoot));
+    const dynamicBase = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(dynamicBaseRoot),
+    );
+    const mutablePropertyBase = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(mutablePropertyBaseRoot),
+    );
+    const mutableIdentifierBase = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(mutableIdentifierBaseRoot),
+    );
+    const staticClassBase = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(staticClassBaseRoot),
+    );
+    const namespaceBase = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(namespaceBaseRoot),
+    );
+    const constClassAliasBase = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(constClassAliasBaseRoot),
+    );
+    const inheritedDynamicController = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(inheritedDynamicControllerRoot),
+    );
+    const inheritedDynamicMethod = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(inheritedDynamicMethodRoot),
+    );
+    const nonNestDynamicBase = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(nonNestDynamicBaseRoot),
+    );
+    const inheritedDynamicAuthOverride = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(inheritedDynamicAuthOverrideRoot),
+    );
     expect(global.status).toBe('success');
     expect(unrelated.status).toBe('success');
     expect(optional.status).toBe('success');
     expect(external.status).toBe('success');
+    expect(dynamicBase.status).toBe('success');
+    expect(mutablePropertyBase.status).toBe('success');
+    expect(mutableIdentifierBase.status).toBe('success');
+    expect(staticClassBase.status).toBe('success');
+    expect(namespaceBase.status).toBe('success');
+    expect(constClassAliasBase.status).toBe('success');
+    expect(inheritedDynamicController.status).toBe('success');
+    expect(inheritedDynamicMethod.status).toBe('success');
+    expect(nonNestDynamicBase.status).toBe('success');
+    expect(inheritedDynamicAuthOverride.status).toBe('success');
     if (global.status !== 'success' || unrelated.status !== 'success'
-      || optional.status !== 'success' || external.status !== 'success') return;
+      || optional.status !== 'success' || external.status !== 'success'
+      || dynamicBase.status !== 'success' || mutablePropertyBase.status !== 'success'
+      || mutableIdentifierBase.status !== 'success' || staticClassBase.status !== 'success'
+      || namespaceBase.status !== 'success' || constClassAliasBase.status !== 'success') return;
+    if (inheritedDynamicController.status !== 'success'
+      || inheritedDynamicMethod.status !== 'success'
+      || nonNestDynamicBase.status !== 'success'
+      || inheritedDynamicAuthOverride.status !== 'success') return;
     expect(global.result.contract.operations[0].auth.mode).toBe('unknown');
     expect(global.result.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
@@ -1903,6 +2045,58 @@ describe('NestJS auth metadata analyzer', () => {
       exposure: 'unknown',
       auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
     });
+    expect(dynamicBase.result.contract.operations[0]).toMatchObject({
+      exposure: 'unknown',
+      auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+    });
+    expect(mutablePropertyBase.result.contract.operations[0]).toMatchObject({
+      exposure: 'unknown',
+      auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+    });
+    expect(mutableIdentifierBase.result.contract.operations[0]).toMatchObject({
+      exposure: 'unknown',
+      auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } },
+    });
+    expect(staticClassBase.result.contract.operations[0]).toMatchObject({
+      exposure: 'authenticated',
+      auth: { mode: 'alternatives', analysis: { enforcementConfidence: 'high' } },
+    });
+    expect(namespaceBase.result.contract.operations[0]).toMatchObject({
+      exposure: 'authenticated',
+      auth: { mode: 'alternatives', analysis: { enforcementConfidence: 'high' } },
+    });
+    expect(constClassAliasBase.result.contract.operations[0]).toMatchObject({
+      routeKey: 'GET /const-base/inherited',
+      exposure: 'authenticated',
+      auth: { mode: 'alternatives', analysis: { enforcementConfidence: 'high' } },
+    });
+    expect(inheritedDynamicController.result.unresolvedOperations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ methods: ['GET'], reason: 'SOURCE_ANALYZER_DYNAMIC_ROUTE' }),
+      expect.objectContaining({
+        methods: expect.arrayContaining(['GET', 'POST']),
+        reason: 'SOURCE_ANALYZER_DYNAMIC_ROUTE',
+      }),
+    ]));
+    expect(inheritedDynamicMethod.result.unresolvedOperations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        methods: expect.arrayContaining(['GET', 'POST']),
+        reason: 'SOURCE_ANALYZER_DYNAMIC_ROUTE',
+      }),
+    ]));
+    expect(nonNestDynamicBase.result.unresolvedOperations).toEqual([]);
+    expect(nonNestDynamicBase.result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_DYNAMIC_ROUTE' }),
+    ]));
+    expect(inheritedDynamicAuthOverride.result.unresolvedOperations).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        methods: expect.arrayContaining(['GET', 'POST']),
+        reason: 'SOURCE_ANALYZER_DYNAMIC_ROUTE',
+      }),
+    ]));
+    expect(inheritedDynamicAuthOverride.result.diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_DYNAMIC_ROUTE' }),
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA' }),
+    ]));
   });
 
   test('fails closed when duplicate routes have conflicting auth metadata', async () => {
