@@ -4423,6 +4423,8 @@ describe('NestJS auth metadata analyzer', () => {
       app.useGlobalGuards(...[,]);
       app.useGlobalGuards.apply(app, [,] as never);
       app.useGlobalGuards.call.call(app.useGlobalGuards, app, guard);
+      const [register] = [app.useGlobalGuards];
+      register.call(app, guard);
       (0, app.useGlobalGuards).call(app, guard);
       app[('useGlobal' + 'Guards') as 'useGlobalGuards'](guard);
       @Controller('call-apply') class CallApplyController {
@@ -4446,6 +4448,60 @@ describe('NestJS auth metadata analyzer', () => {
     expect(execution.result.diagnostics).toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
+  });
+
+  test('resolves stable array-destructured global-guard aliases', async () => {
+    for (const { setup, expected } of [
+      { setup: 'const [register] = [app.useGlobalGuards];', expected: 'unknown' },
+      { setup: 'const [register] = [audit];', expected: 'alternatives' },
+      { setup: 'const [register = app.useGlobalGuards] = [];', expected: 'unknown' },
+      { setup: 'const [register = app.useGlobalGuards] = [undefined];', expected: 'unknown' },
+      { setup: 'const [register = app.useGlobalGuards] = [audit];', expected: 'alternatives' },
+      {
+        setup: 'declare const candidate: unknown; const [register = app.useGlobalGuards] = [candidate as any];',
+        expected: 'unknown',
+      },
+      {
+        setup: 'declare const holder: { register?: typeof app.useGlobalGuards }; const [register = app.useGlobalGuards] = [holder.register];',
+        expected: 'unknown',
+      },
+      {
+        setup: 'function candidate() {} candidate = undefined as any; const [register = app.useGlobalGuards] = [candidate];',
+        expected: 'unknown',
+      },
+      {
+        setup: 'const values = [app.useGlobalGuards]; const [register] = values;',
+        expected: 'unknown',
+      },
+    ]) {
+      const root = workspace(`
+        import { Controller, Get, UseGuards } from '@nestjs/common';
+        import type { INestApplication } from '@nestjs/core';
+        import { JwtAuthGuard } from './auth';
+        declare const app: INestApplication;
+        declare const guard: unknown;
+        function audit(..._values: unknown[]) {}
+        ${setup}
+        register.call(app, guard);
+        @Controller('array-alias') class ArrayAliasController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, {
+        'src/auth.ts': 'export class JwtAuthGuard {}\n',
+        'node_modules/@nestjs/core/index.d.ts': `
+          export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+        `,
+        'node_modules/@nestjs/core/package.json': JSON.stringify({
+          name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+        }),
+        'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+      });
+      const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+      expect(execution.status).toBe('success');
+      if (execution.status !== 'success') continue;
+      expect(execution.result.contract.operations[0].auth.mode, setup).toBe(expected);
+    }
   });
 
   test('handles Function.prototype useGlobalGuards invocations', async () => {

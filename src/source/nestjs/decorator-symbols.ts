@@ -4023,6 +4023,28 @@ export function isNestJsUseGlobalGuardsCall(
     return { ...(latest ? { latest } : {}), ambiguous, canonicalCandidate };
   };
   let uncertainCanonicalAlias = false;
+  const destructuringUndefinedState = (input: ts.Expression | undefined): boolean | undefined => {
+    if (!input) return true;
+    const value = resolveConstInitializer(input, checker, check, projectSources);
+    if (ts.isVoidExpression(value) || (ts.isIdentifier(value) && value.text === 'undefined'
+      && !checker.getSymbolAtLocation(value)?.declarations?.length)) return true;
+    if (ts.isIdentifier(value)) {
+      let symbol = checker.getSymbolAtLocation(value);
+      if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+      if (symbol?.declarations?.some((declaration) => (
+        ts.isFunctionDeclaration(declaration) || ts.isClassLike(declaration)
+      )) && (!projectSources || !callableBindingMayBeWritten(
+        symbol, symbol.declarations ?? [], checker, projectSources, check,
+      ))) return false;
+    }
+    if (value.kind === ts.SyntaxKind.NullKeyword || ts.isStringLiteralLike(value)
+      || ts.isNumericLiteral(value) || ts.isBigIntLiteral(value)
+      || value.kind === ts.SyntaxKind.TrueKeyword || value.kind === ts.SyntaxKind.FalseKeyword
+      || ts.isObjectLiteralExpression(value) || ts.isArrayLiteralExpression(value)
+      || ts.isFunctionExpression(value) || ts.isArrowFunction(value)
+      || ts.isClassExpression(value) || ts.isNewExpression(value)) return false;
+    return undefined;
+  };
   const resolveStableInitializer = (input: ts.Expression): ts.Expression => {
     const seen = new Set<ts.Symbol>();
     let value = unwrapExpression(input);
@@ -4034,7 +4056,62 @@ export function isNestJsUseGlobalGuardsCall(
       seen.add(symbol);
       const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
       const declaration = declarations.length === 1 ? declarations[0] : undefined;
-      if (!declaration?.initializer || (projectSources
+      if (!declaration) {
+        const binding = symbol.declarations?.find((candidate): candidate is ts.BindingElement => (
+          ts.isBindingElement(candidate) && !candidate.dotDotDotToken
+          && ts.isArrayBindingPattern(candidate.parent)
+          && ts.isVariableDeclaration(candidate.parent.parent)
+          && candidate.parent.parent.initializer !== undefined
+        ));
+        const owner = binding?.parent.parent;
+        const rawInitializer = owner?.initializer && unwrapExpression(owner.initializer);
+        const initializer = rawInitializer
+          && resolveConstInitializer(rawInitializer, checker, check, projectSources);
+        if (!binding || !owner || !rawInitializer || !initializer
+          || !ts.isArrayLiteralExpression(initializer)
+          || (projectSources && !projectSources.has(binding.getSourceFile()))
+          || (projectSources && callableBindingMayBeWritten(
+            symbol, symbol.declarations ?? [], checker, projectSources, check,
+          ))) break;
+        if (projectSources && ts.isIdentifier(rawInitializer)) {
+          const receiver = stableReceiverSymbol(rawInitializer, checker, writeIndex, check);
+          const unstable = receiver && (memberWriteIndex(projectSources, checker, check).get(receiver) ?? [])
+            .some(({ node }) => {
+              for (let current: ts.Node | undefined = node; current; current = current.parent) {
+                if (current === owner) return false;
+                if (ts.isSourceFile(current)) break;
+              }
+              return true;
+            });
+          if (unstable) {
+            uncertainCanonicalAlias ||= canonicalAliasEvidence(initializer);
+            break;
+          }
+        }
+        const index = binding.parent.elements.indexOf(binding);
+        if (initializer.elements.slice(0, index + 1).some(ts.isSpreadElement)) {
+          uncertainCanonicalAlias ||= canonicalAliasEvidence(initializer);
+          break;
+        }
+        const selected = initializer.elements[index];
+        const selectedValue = selected && !ts.isOmittedExpression(selected)
+          && !ts.isSpreadElement(selected) ? selected : undefined;
+        if (binding.initializer) {
+          const state = destructuringUndefinedState(selectedValue);
+          if (state === true) value = unwrapExpression(binding.initializer);
+          else if (state === false && selectedValue) value = unwrapExpression(selectedValue);
+          else {
+            uncertainCanonicalAlias ||= canonicalAliasEvidence(binding.initializer)
+              || Boolean(selectedValue && canonicalAliasEvidence(selectedValue));
+            break;
+          }
+        } else {
+          if (!selectedValue) break;
+          value = unwrapExpression(selectedValue);
+        }
+        continue;
+      }
+      if (!declaration.initializer || (projectSources
         && !projectSources.has(declaration.getSourceFile()))
         || !ts.isVariableDeclarationList(declaration.parent)) break;
       if (declaration.parent.flags & ts.NodeFlags.Const) {

@@ -4009,6 +4009,29 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
         return { ...(latest ? { latest } : {}), ambiguous, canonicalCandidate };
     };
     let uncertainCanonicalAlias = false;
+    const destructuringUndefinedState = (input) => {
+        if (!input)
+            return true;
+        const value = resolveConstInitializer(input, checker, check, projectSources);
+        if (typescript_1.default.isVoidExpression(value) || (typescript_1.default.isIdentifier(value) && value.text === 'undefined'
+            && !checker.getSymbolAtLocation(value)?.declarations?.length))
+            return true;
+        if (typescript_1.default.isIdentifier(value)) {
+            let symbol = checker.getSymbolAtLocation(value);
+            if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+                symbol = checker.getAliasedSymbol(symbol);
+            if (symbol?.declarations?.some((declaration) => (typescript_1.default.isFunctionDeclaration(declaration) || typescript_1.default.isClassLike(declaration))) && (!projectSources || !callableBindingMayBeWritten(symbol, symbol.declarations ?? [], checker, projectSources, check)))
+                return false;
+        }
+        if (value.kind === typescript_1.default.SyntaxKind.NullKeyword || typescript_1.default.isStringLiteralLike(value)
+            || typescript_1.default.isNumericLiteral(value) || typescript_1.default.isBigIntLiteral(value)
+            || value.kind === typescript_1.default.SyntaxKind.TrueKeyword || value.kind === typescript_1.default.SyntaxKind.FalseKeyword
+            || typescript_1.default.isObjectLiteralExpression(value) || typescript_1.default.isArrayLiteralExpression(value)
+            || typescript_1.default.isFunctionExpression(value) || typescript_1.default.isArrowFunction(value)
+            || typescript_1.default.isClassExpression(value) || typescript_1.default.isNewExpression(value))
+            return false;
+        return undefined;
+    };
     const resolveStableInitializer = (input) => {
         const seen = new Set();
         let value = unwrapExpression(input);
@@ -4022,7 +4045,65 @@ function isNestJsUseGlobalGuardsCall(call, checker, check, projectSources) {
             seen.add(symbol);
             const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
             const declaration = declarations.length === 1 ? declarations[0] : undefined;
-            if (!declaration?.initializer || (projectSources
+            if (!declaration) {
+                const binding = symbol.declarations?.find((candidate) => (typescript_1.default.isBindingElement(candidate) && !candidate.dotDotDotToken
+                    && typescript_1.default.isArrayBindingPattern(candidate.parent)
+                    && typescript_1.default.isVariableDeclaration(candidate.parent.parent)
+                    && candidate.parent.parent.initializer !== undefined));
+                const owner = binding?.parent.parent;
+                const rawInitializer = owner?.initializer && unwrapExpression(owner.initializer);
+                const initializer = rawInitializer
+                    && resolveConstInitializer(rawInitializer, checker, check, projectSources);
+                if (!binding || !owner || !rawInitializer || !initializer
+                    || !typescript_1.default.isArrayLiteralExpression(initializer)
+                    || (projectSources && !projectSources.has(binding.getSourceFile()))
+                    || (projectSources && callableBindingMayBeWritten(symbol, symbol.declarations ?? [], checker, projectSources, check)))
+                    break;
+                if (projectSources && typescript_1.default.isIdentifier(rawInitializer)) {
+                    const receiver = stableReceiverSymbol(rawInitializer, checker, writeIndex, check);
+                    const unstable = receiver && (memberWriteIndex(projectSources, checker, check).get(receiver) ?? [])
+                        .some(({ node }) => {
+                        for (let current = node; current; current = current.parent) {
+                            if (current === owner)
+                                return false;
+                            if (typescript_1.default.isSourceFile(current))
+                                break;
+                        }
+                        return true;
+                    });
+                    if (unstable) {
+                        uncertainCanonicalAlias ||= canonicalAliasEvidence(initializer);
+                        break;
+                    }
+                }
+                const index = binding.parent.elements.indexOf(binding);
+                if (initializer.elements.slice(0, index + 1).some(typescript_1.default.isSpreadElement)) {
+                    uncertainCanonicalAlias ||= canonicalAliasEvidence(initializer);
+                    break;
+                }
+                const selected = initializer.elements[index];
+                const selectedValue = selected && !typescript_1.default.isOmittedExpression(selected)
+                    && !typescript_1.default.isSpreadElement(selected) ? selected : undefined;
+                if (binding.initializer) {
+                    const state = destructuringUndefinedState(selectedValue);
+                    if (state === true)
+                        value = unwrapExpression(binding.initializer);
+                    else if (state === false && selectedValue)
+                        value = unwrapExpression(selectedValue);
+                    else {
+                        uncertainCanonicalAlias ||= canonicalAliasEvidence(binding.initializer)
+                            || Boolean(selectedValue && canonicalAliasEvidence(selectedValue));
+                        break;
+                    }
+                }
+                else {
+                    if (!selectedValue)
+                        break;
+                    value = unwrapExpression(selectedValue);
+                }
+                continue;
+            }
+            if (!declaration.initializer || (projectSources
                 && !projectSources.has(declaration.getSourceFile()))
                 || !typescript_1.default.isVariableDeclarationList(declaration.parent))
                 break;
