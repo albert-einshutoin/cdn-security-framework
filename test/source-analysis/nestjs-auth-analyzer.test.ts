@@ -3760,6 +3760,11 @@ describe('NestJS auth metadata analyzer', () => {
       import type { INestApplication } from '@nestjs/core';
       import { JwtAuthGuard } from './auth';
       declare const app: INestApplication;
+      if (false) app.useGlobalGuards({});
+      function unreachable() {
+        return;
+        app.useGlobalGuards({});
+      }
       app.useGlobalGuards();
       app.useGlobalGuards(...[]);
       app.useGlobalGuards.call(app);
@@ -3793,6 +3798,1392 @@ describe('NestJS auth metadata analyzer', () => {
     expect(execution.result.diagnostics).not.toEqual(expect.arrayContaining([
       expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
     ]));
+  });
+
+  test('ignores providers from modules outside the bootstrapped import graph', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class UnusedModule {}
+      void NestFactory.create(AppModule);
+      @Controller('active') class ActiveController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    expect(execution.result.diagnostics).not.toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+    ]));
+  });
+
+  test('falls back safely when the bootstrapped module graph is incomplete', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const flag: boolean;
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      void NestFactory.create(flag ? GuardModule : AppModule);
+      @Controller('conditional-root') class ConditionalRootController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('does not treat arbitrary callback factories as forwardRef', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      function selectModule(_callback: () => unknown) { return GuardModule; }
+      void NestFactory.create(selectModule(() => AppModule));
+      @Controller('callback-factory') class CallbackFactoryController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back for indirect NestFactory bootstrap calls', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      const boot = NestFactory.create;
+      const { create: destructuredBoot } = NestFactory;
+      const key = 'create' as const;
+      const { [key]: computedBoot } = NestFactory;
+      void boot.call(NestFactory, GuardModule);
+      void destructuredBoot.bind(NestFactory)(GuardModule);
+      void computedBoot.apply(NestFactory, [GuardModule]);
+      @Controller('indirect-bootstrap') class IndirectBootstrapController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back for directly invoked NestFactory aliases', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      const { create: boot } = NestFactory;
+      void boot(GuardModule);
+      class Bootstrap { static start = NestFactory.create; }
+      void Bootstrap.start(GuardModule);
+      @Controller('direct-bootstrap-alias') class DirectBootstrapAliasController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back for bootstrap functions returned by local factories', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      function getFactory(factory = NestFactory.create) { return factory; }
+      declare const externalConfig: object;
+      declare function thirdParty(config: object): void;
+      void NestFactory.create(AppModule);
+      void getFactory()(GuardModule);
+      @Controller('returned-bootstrap') class ReturnedBootstrapController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('fails closed for ambiguous local bootstrap factory control flow', async () => {
+    const cases = [
+      `function getFactory(factory = NestFactory.create) { return factory; }
+       const missing = undefined;
+       void getFactory(void 0)(GuardModule);
+       void getFactory(missing)(GuardModule);`,
+      `function getFactory(factory = audit) { factory = NestFactory.create; return factory; }
+       void getFactory()(GuardModule);`,
+      `async function getFactory() { return NestFactory.create; }
+       async function bootstrap() { void (await getFactory())(GuardModule); }
+       void bootstrap();`,
+      `async function getFactory() { return (() => NestFactory.create)(); }
+       async function bootstrap() { void (await getFactory())(GuardModule); }
+       void bootstrap();`,
+      `function select(factory = NestFactory.create) { return factory; }
+       async function getFactory() { return select(); }
+       async function bootstrap() { void (await getFactory())(GuardModule); }
+       void bootstrap();`,
+      `const helpers = { getFactory() { return NestFactory.create; } };
+       async function getFactory() { return helpers.getFactory(); }
+       async function bootstrap() { void (await getFactory())(GuardModule); }
+       void bootstrap();`,
+      `const helpers: any = { getFactory() { return NestFactory.create; } };
+       async function getFactory() { return helpers.getFactory(); }
+       async function bootstrap() { void (await getFactory())(GuardModule); }
+       void bootstrap();`,
+      `async function getFactory() {
+         return ({ getFactory() { return NestFactory.create; } } as any).getFactory();
+       }
+       async function bootstrap() { void (await getFactory())(GuardModule); }
+       void bootstrap();`,
+      `const base: any = { getFactory() { return NestFactory.create; } };
+       const helpers: any = { ...base };
+       async function getFactory() { return helpers.getFactory(); }
+       async function bootstrap() { void (await getFactory())(GuardModule); }
+       void bootstrap();`,
+      `declare const dynamic: any;
+       const helpers: any = { getFactory() { return audit; }, ...dynamic };
+       async function getFactory() { return helpers.getFactory(); }
+       async function bootstrap() { void (await getFactory())(GuardModule); }
+       void bootstrap();`,
+      `let helpers = { getFactory() { return audit; } };
+       helpers = { getFactory() { return NestFactory.create; } };
+       async function getFactory() { return helpers.getFactory(); }
+       async function bootstrap() { void (await getFactory())(GuardModule); }
+       void bootstrap();`,
+      `const helpers = { getFactory() { return audit; } };
+       helpers.getFactory = NestFactory.create;
+       async function getFactory() { return helpers.getFactory(); }
+       async function bootstrap() { void (await getFactory())(GuardModule); }
+       void bootstrap();`,
+      `declare function mutate(value: unknown): void;
+       const helpers = { getFactory() { return audit; } };
+       mutate(helpers);
+       async function getFactory() { return helpers.getFactory(); }
+       async function bootstrap() { void (await getFactory())(GuardModule); }
+       void bootstrap();`,
+      `function getFactory(factory = audit) {
+         const nested = () => NestFactory.create;
+         factory = nested();
+         return factory;
+       }
+       void getFactory()(GuardModule);`,
+      `function unused() { return NestFactory.create(GuardModule); }
+       void unused;`,
+    ];
+    for (const localFactory of cases) {
+      const root = workspace(`
+        import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+        import { APP_GUARD, NestFactory } from '@nestjs/core';
+        import { JwtAuthGuard } from './auth';
+        @Module({}) class AppModule {}
+        @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+        class GuardModule {}
+        const audit = () => undefined;
+        void NestFactory.create(AppModule);
+        ${localFactory}
+        @Controller('ambiguous-factory') class AmbiguousFactoryController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, {
+        'src/auth.ts': 'export class JwtAuthGuard {}\n',
+        'node_modules/@nestjs/core/index.d.ts': `
+          export declare const APP_GUARD: unique symbol;
+          export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+        `,
+        'node_modules/@nestjs/core/package.json': JSON.stringify({
+          name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+        }),
+        'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+      });
+      const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+      expect(execution.status, localFactory).toBe('success');
+      if (execution.status === 'success') {
+        expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+      }
+    }
+  });
+
+  test('does not widen the graph for unrelated local call ambiguity', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class UnusedModule {}
+      async function audit() { return 1; }
+      function normalize(value: number) { value++; return value; }
+      function getFactory(factory = NestFactory.create) { return factory; }
+      let helpers = { getFactory() { return audit; } };
+      helpers = { getFactory() { return audit; } };
+      async function useHelpers() { return helpers.getFactory(); }
+      const chosen = (NestFactory.create, audit);
+      void NestFactory.create(AppModule);
+      console.log(
+        audit(), normalize(1), chosen(), useHelpers(),
+        true ? audit : NestFactory.create,
+        true || NestFactory.create,
+        undefined && NestFactory.create,
+      );
+      thirdParty({ noop() {}, ...externalConfig });
+      const unrelatedBuild = { imports: [] as unknown[] };
+      let externalCall = (_value: unknown) => undefined;
+      externalCall = (_value: unknown) => undefined;
+      externalCall(unrelatedBuild.imports);
+      const nestedHolder = { holder: { inner: { boot: audit } } };
+      thirdParty({ get factory() { return (nestedHolder.holder as any).inner.boot; } });
+      try { getFactory(null as any)(UnusedModule); } catch {}
+      @Controller('unrelated-call') class UnrelatedCallController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status === 'success') {
+      expect(execution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
+  });
+
+  test('fails closed when module escape indexing reaches its bound', async () => {
+    const calls = Array.from({ length: 4_100 }, (_, index) => `observe(${index});`).join('\n');
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare function observe(value: unknown): void;
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      ${calls}
+      @Controller('bounded-escape') class BoundedEscapeController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status === 'success') {
+      expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+    }
+  });
+
+  test('falls back when NestFactory bootstrap functions are passed to higher-order calls', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare function start(factory: object, module: unknown): void;
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      start(NestFactory.create as unknown as object, GuardModule);
+      start({ factory: NestFactory.create, module: GuardModule } as unknown as object, GuardModule);
+      start({ get boot() { return () => NestFactory.create(GuardModule); } } as unknown as object, GuardModule);
+      start({ get boot() { return () => () => NestFactory.create(GuardModule); } } as unknown as object, GuardModule);
+      const returnedBoot = () => NestFactory.create(GuardModule);
+      start({ get boot() { return returnedBoot; } } as unknown as object, GuardModule);
+      let assignedBoot = () => undefined;
+      assignedBoot = NestFactory.create;
+      start({ get boot() { return assignedBoot; } } as unknown as object, GuardModule);
+      const { create: destructuredBoot } = NestFactory;
+      start({ get boot() { return destructuredBoot; } } as unknown as object, GuardModule);
+      class ReturnedBootstrap { static boot = NestFactory.create; }
+      start({ get boot() { return ReturnedBootstrap.boot; } } as unknown as object, GuardModule);
+      let returnedHolder = { boot: audit };
+      returnedHolder = { boot: NestFactory.create };
+      start({ get boot() { return returnedHolder.boot; } } as unknown as object, GuardModule);
+      function boot(module: unknown) { return NestFactory.create(module); }
+      start(boot as unknown as object, GuardModule);
+      void (0, NestFactory.create)(GuardModule);
+      function helper(factory = NestFactory.create) { return factory; }
+      start(helper as unknown as object, GuardModule);
+      start((() => NestFactory.create) as unknown as object, GuardModule);
+      @Controller('higher-order-bootstrap') class HigherOrderBootstrapController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back when bootstrap callbacks are passed through tuple spreads', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare function start(factory: (module: unknown) => unknown, module: unknown): void;
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      start(...([NestFactory.create, GuardModule] as const));
+      @Controller('spread-bootstrap') class SpreadBootstrapController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back for mutated higher-order argument spreads', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const other: (module: unknown) => unknown;
+      declare function start(factory: unknown, module: unknown): void;
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      const args: [unknown, unknown] = [other, GuardModule];
+      args[0] = NestFactory.create;
+      start(...args);
+      @Controller('mutated-spread-bootstrap') class MutatedSpreadBootstrapController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back for dynamic NestFactory bootstrap method selection', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const method: 'create' | 'createMicroservice';
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      void NestFactory[method](GuardModule);
+      @Controller('dynamic-bootstrap-method') class DynamicBootstrapMethodController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: {
+          create(module: unknown): Promise<unknown>;
+          createMicroservice(module: unknown): Promise<unknown>;
+        };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back for dynamic selection from local bootstrap alias objects', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const key: 'boot' | 'audit';
+      declare const audit: (module: unknown) => unknown;
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      const methods = { boot: NestFactory.create, audit };
+      void (methods[key] as any)(GuardModule);
+      @Controller('dynamic-bootstrap-object') class DynamicBootstrapObjectController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back for call on dynamically selected bootstrap aliases', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const key: 'boot' | 'other';
+      declare const other: (module: unknown) => unknown;
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      const methods = { boot: NestFactory.create, other };
+      void (methods[key] as any).call(NestFactory, GuardModule);
+      @Controller('dynamic-bootstrap-call') class DynamicBootstrapCallController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back for mutated local bootstrap alias objects', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const other: (module: unknown) => unknown;
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      const methods = { boot: other };
+      methods.boot = NestFactory.create;
+      void methods.boot(GuardModule);
+      @Controller('mutated-bootstrap-object') class MutatedBootstrapObjectController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back for mutable local bootstrap alias objects', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const flag: boolean;
+      declare const other: (module: unknown) => unknown;
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      const initial = { boot: NestFactory.create };
+      let methods = flag ? initial : { boot: other };
+      void methods.boot(GuardModule);
+      @Controller('mutable-bootstrap-object') class MutableBootstrapObjectController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('does not widen the graph for known non-bootstrap destructuring keys', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class UnusedModule {}
+      void NestFactory.create(AppModule);
+      const { 0: unrelated } = NestFactory;
+      // @ts-ignore -- the fixture target predates bigint, but the parser supports this property key.
+      const { 1n: bigintKey } = NestFactory;
+      unrelated?.call(null);
+      bigintKey?.call(null);
+      @Controller('numeric-bootstrap-key') class NumericBootstrapKeyController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('alternatives');
+  });
+
+  test('does not treat unused bootstrap references as invoked aliases', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class UnusedModule {}
+      void NestFactory.create(AppModule);
+      const helper = (_module: unknown) => NestFactory.create;
+      const helpers = { run() {}, unused: NestFactory.create };
+      let mutableHelper = (_module: unknown) => undefined;
+      let logger = { log(_message: string) {} };
+      helper(UnusedModule);
+      helpers.run();
+      mutableHelper.call(null, UnusedModule);
+      logger.log('ready');
+      @Controller('unused-bootstrap-reference') class UnusedBootstrapReferenceController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('alternatives');
+  });
+
+  test('fails closed for excessively nested forwardRef roots', async () => {
+    const nestedRoot = `${'forwardRef(() => '.repeat(80)}AppModule${')'.repeat(80)}`;
+    const root = workspace(`
+      import { Controller, forwardRef, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(${nestedRoot});
+      @Controller('deep-forward-ref') class DeepForwardRefController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), {
+      ...context(root),
+      limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxAnalysisDepth: 1_024 },
+    });
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('includes createMicroservice roots in conservative global guard analysis', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({}) class HttpModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class WorkerModule {}
+      void NestFactory.create(HttpModule);
+      void NestFactory.createMicroservice(WorkerModule);
+      @Controller('multi-app') class MultiAppController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: {
+          create(module: unknown): Promise<unknown>;
+          createMicroservice(module: unknown): Promise<unknown>;
+        };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('includes inherited module metadata in the active graph', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      @Module({}) class AppModule extends GuardModule {}
+      void NestFactory.create(AppModule);
+      @Controller('inherited-module') class InheritedModuleController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('does not widen the graph for resolved plain base classes', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      class PlainBase {}
+      @Module({}) class AppModule extends PlainBase {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class UnusedModule {}
+      void NestFactory.create(AppModule);
+      @Controller('plain-base') class PlainBaseController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('alternatives');
+  });
+
+  test('fails closed for excessively deep local module inheritance', async () => {
+    const bases = Array.from({ length: 300 }, (_, index) => (
+      `class Base${index} extends ${index === 0 ? 'Object' : `Base${index - 1}`} {}`
+    )).join('\n');
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      ${bases}
+      @Module({}) class AppModule extends Base299 {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      void NestFactory.create(AppModule);
+      @Controller('deep-module-inheritance') class DeepModuleInheritanceController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back safely when bootstrapped module metadata is unresolved', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const flag: boolean;
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      @Module(flag ? { imports: [GuardModule] } : {}) class AppModule {}
+      void NestFactory.create(AppModule);
+      @Controller('unresolved-metadata') class UnresolvedMetadataController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back safely when bootstrapped module metadata is mutated', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      const metadata: { imports: unknown[] } = { imports: [] };
+      metadata.imports.push(GuardModule);
+      @Module(metadata) class AppModule {}
+      void NestFactory.create(AppModule);
+      @Controller('mutated-metadata') class MutatedMetadataController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('falls back safely when module imports metadata is reassigned', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      const metadata: { imports: unknown[] } = { imports: [] };
+      metadata.imports = [GuardModule];
+      @Module(metadata) class AppModule {}
+      void NestFactory.create(AppModule);
+      @Controller('reassigned-imports') class ReassignedImportsController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('fails closed when module imports are mutated through a property alias', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      const metadata = { imports: [] as unknown[] };
+      const imports = metadata.imports;
+      imports.push(GuardModule);
+      @Module(metadata) class AppModule {}
+      void NestFactory.create(AppModule);
+      @Controller('aliased-imports') class AliasedImportsController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status === 'success') {
+      expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+    }
+  });
+
+  test('fails closed for destructured imports and duplicate Module metadata', async () => {
+    const modules = [
+      `const metadata = { imports: [] as unknown[] };
+       const { imports } = metadata;
+       imports.push(GuardModule);
+       @Module(metadata) class AppModule {}`,
+      `const key = 'imports' as const;
+       const metadata = { imports: [] as unknown[] };
+       const { [key]: imports } = metadata;
+       imports.push(GuardModule);
+       @Module(metadata) class AppModule {}`,
+      `const source = {} as { imports?: unknown[] };
+       const metadata = { imports: [] as unknown[] };
+       const { imports = metadata.imports } = source;
+       imports.push(GuardModule);
+       @Module(metadata) class AppModule {}`,
+      `const metadata = { imports: [] as unknown[] };
+       function add(values: unknown[]) { values.push(GuardModule); }
+       add(metadata.imports);
+       @Module(metadata) class AppModule {}`,
+      `const metadata = { imports: [] as unknown[] };
+       function add(values = metadata.imports) { values.push(GuardModule); }
+       add();
+       @Module(metadata) class AppModule {}`,
+      `const metadata = { imports: [] as unknown[] };
+       function add(values: unknown[]) { values.push(GuardModule); }
+       add(...[metadata.imports]);
+       @Module(metadata) class AppModule {}`,
+      `const metadata = { imports: [] as unknown[] };
+       function add(values: unknown[]): void;
+       function add(values: unknown[]) { values.push(GuardModule); }
+       add(metadata.imports);
+       @Module(metadata) class AppModule {}`,
+      `const metadata = { imports: [] as unknown[] };
+       function add(values: unknown[]) { values.push(GuardModule); }
+       const alias = add;
+       alias(metadata.imports);
+       @Module(metadata) class AppModule {}`,
+      `const metadata = { imports: [] as unknown[] };
+       function add(values: unknown[]) { values.push(GuardModule); }
+       const alias = add as typeof add;
+       alias(metadata.imports);
+       @Module(metadata) class AppModule {}`,
+      `declare const externalMutator: (values: unknown[]) => void;
+       const metadata = { imports: [] as unknown[] };
+       const values = metadata.imports;
+       let add = (_values: unknown[]) => undefined;
+       add = externalMutator;
+       add(values);
+       @Module(metadata) class AppModule {}`,
+      `const imports: unknown[] = [];
+       const metadata = { imports };
+       function add(values: unknown[]) { values.push(GuardModule); }
+       add(imports);
+       @Module(metadata) class AppModule {}`,
+      `const metadata = { imports: [] as unknown[] };
+       let imports: unknown[];
+       imports = (metadata.imports as unknown[]);
+       imports.push(GuardModule);
+       @Module(metadata) class AppModule {}`,
+      `const metadata = { imports: [] as unknown[] };
+       let imports = (metadata.imports as unknown[]);
+       imports.push(GuardModule);
+       @Module(metadata) class AppModule {}`,
+      `declare const key: string;
+       const metadata: Record<string, unknown[]> = { imports: [] };
+       const imports = metadata[key];
+       imports.push(GuardModule);
+       @Module(metadata) class AppModule {}`,
+      `declare const key: string;
+       const metadata = { imports: [] as unknown[] };
+       const holder: Record<string, unknown[]> = { x: metadata.imports };
+       const imports = holder[key];
+       imports.push(GuardModule);
+       @Module(metadata) class AppModule {}`,
+      `declare const flag: boolean;
+       const source = {} as { imports?: unknown[] };
+       const metadata = { imports: [] as unknown[] };
+       const { imports = flag ? metadata.imports : [] } = source;
+       imports.push(GuardModule);
+       @Module(metadata) class AppModule {}`,
+      `const source = {} as { imports?: unknown[] };
+       const metadata = { imports: [] as unknown[] };
+       const holder = { imports: metadata.imports };
+       const { imports = holder.imports } = source;
+       imports.push(GuardModule);
+       @Module(metadata) class AppModule {}`,
+      `declare const flag: boolean;
+       const source = {} as { imports?: unknown[] };
+       const metadata = { imports: [] as unknown[] };
+       const holder = flag ? { imports: metadata.imports } : { imports: [] as unknown[] };
+       const { imports = holder.imports } = source;
+       imports.push(GuardModule);
+       @Module(metadata) class AppModule {}`,
+      `@Module({ imports: [GuardModule] }) @Module({}) class AppModule {}`,
+    ];
+    for (const moduleSource of modules) {
+      const root = workspace(`
+        import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+        import { APP_GUARD, NestFactory } from '@nestjs/core';
+        import { JwtAuthGuard } from './auth';
+        @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+        class GuardModule {}
+        ${moduleSource}
+        void NestFactory.create(AppModule);
+        @Controller('conservative-modules') class ConservativeModulesController {
+          @Get() @UseGuards(JwtAuthGuard) read() {}
+        }
+      `, {
+        'src/auth.ts': 'export class JwtAuthGuard {}\n',
+        'node_modules/@nestjs/core/index.d.ts': `
+          export declare const APP_GUARD: unique symbol;
+          export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+        `,
+        'node_modules/@nestjs/core/package.json': JSON.stringify({
+          name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+        }),
+        'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+      });
+      const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+      expect(execution.status).toBe('success');
+      if (execution.status === 'success') {
+        expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+      }
+    }
+  });
+
+  test('does not activate graph-external guards for unrelated dynamic collection mutation', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      const metadata = { imports: [] as unknown[] };
+      @Module(metadata) class AppModule {}
+      declare const key: string;
+      const holder: Record<string, unknown[]> = {
+        x: metadata.imports,
+        ...{ x: [] as unknown[] },
+      };
+      const values = holder[key];
+      values.push('audit');
+      void NestFactory.create(AppModule);
+      @Controller('unrelated-dynamic') class UnrelatedDynamicController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '10.0.0', types: 'index.d.ts',
+      }),
+    });
+
+    const execution = await runSourceAnalyzer(
+      createNestJsSourceAnalyzer(authConfig), context(root),
+    );
+
+    expect(execution.status).toBe('success');
+    if (execution.status === 'success') {
+      expect(execution.result.contract.operations[0].auth.mode).toBe('alternatives');
+      expect(execution.result.diagnostics).not.toEqual(expect.arrayContaining([
+        expect.objectContaining({ code: 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' }),
+      ]));
+    }
+  });
+
+  test('does not link a used destructuring default back to absent imports metadata', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class UnusedModule {}
+      const metadata = {} as { imports?: unknown[] };
+      const { imports = [] } = metadata;
+      imports.push(UnusedModule);
+      @Module(metadata) class AppModule {}
+      void NestFactory.create(AppModule);
+      @Controller('default-imports') class DefaultImportsController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status === 'success') {
+      expect(execution.result.contract.operations[0].auth.mode).toBe('alternatives');
+    }
+  });
+
+  test('does not widen the graph for unrelated module metadata assignments', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      const metadata = { imports: [], label: 'a' };
+      let imports = metadata.imports;
+      imports = [];
+      metadata.label = 'b';
+      @Module(metadata) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class UnusedModule {}
+      void NestFactory.create(AppModule);
+      @Controller('metadata-label') class MetadataLabelController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('alternatives');
+  });
+
+  test('does not narrow the module graph from unreachable bootstrap calls', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD, NestFactory } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({}) class AppModule {}
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      class GuardModule {}
+      if (0) void NestFactory.create(AppModule);
+      false && NestFactory.create(AppModule);
+      true || NestFactory.create(AppModule);
+      false ? NestFactory.create(AppModule) : undefined;
+      if (false) {
+        const bootstrap = () => NestFactory.create(AppModule);
+        void bootstrap;
+      }
+      while (false) NestFactory.create(AppModule);
+      for (; false;) NestFactory.create(AppModule);
+      while (true) { break; NestFactory.create(AppModule); }
+      while (true) { continue; NestFactory.create(AppModule); }
+      switch (1) { case 1: break; NestFactory.create(AppModule); }
+      void ({} ?? NestFactory.create(AppModule));
+      @Controller('dead-bootstrap') class DeadBootstrapController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export declare const APP_GUARD: unique symbol;
+        export declare const NestFactory: { create(module: unknown): Promise<unknown> };
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('fails closed for APP_GUARD providers in anonymous modules', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module, UseGuards } from '@nestjs/common';
+      import { APP_GUARD } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      @Module({ providers: [{ provide: APP_GUARD, useClass: JwtAuthGuard }] })
+      export default class {}
+      @Controller('anonymous-module') class AnonymousModuleController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': 'export declare const APP_GUARD: unique symbol;\n',
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
+  });
+
+  test('keeps reachable nested global-guard calls inside their function boundary', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import type { INestApplication } from '@nestjs/core';
+      import { JwtAuthGuard } from './auth';
+      declare const app: INestApplication;
+      declare const guard: unknown;
+      declare function invoke(callback: () => void): void;
+      function outer() {
+        invoke(inner);
+        return;
+        function inner() { app.useGlobalGuards(guard); }
+      }
+      outer();
+      @Controller('nested-call') class NestedCallController {
+        @Get() @UseGuards(JwtAuthGuard) read() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\n',
+      'node_modules/@nestjs/core/index.d.ts': `
+        export interface INestApplication { useGlobalGuards(...guards: unknown[]): this; }
+      `,
+      'node_modules/@nestjs/core/package.json': JSON.stringify({
+        name: '@nestjs/core', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+      }),
+      'node_modules/@nestjs/core/index.js': 'throw new Error("must not load");\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0].auth.mode).toBe('unknown');
   });
 
   test('fails closed when duplicate routes have conflicting auth metadata', async () => {

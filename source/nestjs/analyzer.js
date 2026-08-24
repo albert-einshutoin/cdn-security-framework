@@ -66,6 +66,81 @@ function sourceLocation(node, workspaceRoot) {
 function digest(sourceFile) {
     return `sha256:${(0, node_crypto_1.createHash)('sha256').update(sourceFile.text).digest('hex')}`;
 }
+function staticTruth(input) {
+    let expression = input;
+    while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+        || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+        || typescript_1.default.isNonNullExpression(expression))
+        expression = expression.expression;
+    if (expression.kind === typescript_1.default.SyntaxKind.TrueKeyword)
+        return true;
+    if (expression.kind === typescript_1.default.SyntaxKind.FalseKeyword || expression.kind === typescript_1.default.SyntaxKind.NullKeyword
+        || typescript_1.default.isVoidExpression(expression))
+        return false;
+    if (typescript_1.default.isStringLiteral(expression) || typescript_1.default.isNoSubstitutionTemplateLiteral(expression)) {
+        return expression.text.length > 0;
+    }
+    if (typescript_1.default.isNumericLiteral(expression))
+        return Number(expression.text) !== 0;
+    return undefined;
+}
+function staticNullish(input) {
+    let expression = input;
+    while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+        || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+        || typescript_1.default.isNonNullExpression(expression))
+        expression = expression.expression;
+    if (expression.kind === typescript_1.default.SyntaxKind.NullKeyword || typescript_1.default.isVoidExpression(expression))
+        return true;
+    if (expression.kind === typescript_1.default.SyntaxKind.TrueKeyword || expression.kind === typescript_1.default.SyntaxKind.FalseKeyword
+        || typescript_1.default.isLiteralExpression(expression) || typescript_1.default.isObjectLiteralExpression(expression)
+        || typescript_1.default.isArrayLiteralExpression(expression) || typescript_1.default.isFunctionExpression(expression)
+        || typescript_1.default.isArrowFunction(expression) || typescript_1.default.isClassExpression(expression)
+        || typescript_1.default.isNewExpression(expression))
+        return false;
+    return undefined;
+}
+function staticallyUnreachable(node) {
+    let current = node;
+    while (!typescript_1.default.isSourceFile(current)) {
+        const parent = current.parent;
+        if (typescript_1.default.isIfStatement(parent)) {
+            const truth = staticTruth(parent.expression);
+            if ((current === parent.thenStatement && truth === false)
+                || (current === parent.elseStatement && truth === true))
+                return true;
+        }
+        else if ((typescript_1.default.isWhileStatement(parent) || typescript_1.default.isForStatement(parent))
+            && current === parent.statement) {
+            const condition = typescript_1.default.isWhileStatement(parent) ? parent.expression : parent.condition;
+            if (condition && staticTruth(condition) === false)
+                return true;
+        }
+        else if (typescript_1.default.isConditionalExpression(parent)) {
+            const truth = staticTruth(parent.condition);
+            if ((current === parent.whenTrue && truth === false)
+                || (current === parent.whenFalse && truth === true))
+                return true;
+        }
+        else if (typescript_1.default.isBinaryExpression(parent) && current === parent.right) {
+            const truth = staticTruth(parent.left);
+            if ((parent.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken && truth === false)
+                || (parent.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken && truth === true)
+                || (parent.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken
+                    && staticNullish(parent.left) === false))
+                return true;
+        }
+        else if ((typescript_1.default.isBlock(parent) || typescript_1.default.isCaseClause(parent) || typescript_1.default.isDefaultClause(parent))
+            && typescript_1.default.isStatement(current)) {
+            const index = parent.statements.indexOf(current);
+            if (!typescript_1.default.isFunctionDeclaration(current) && parent.statements.slice(0, index).some((statement) => (typescript_1.default.isReturnStatement(statement) || typescript_1.default.isThrowStatement(statement)
+                || typescript_1.default.isBreakStatement(statement) || typescript_1.default.isContinueStatement(statement))))
+                return true;
+        }
+        current = parent;
+    }
+    return false;
+}
 function isProvidersName(node) {
     return (typescript_1.default.isIdentifier(node) || typescript_1.default.isStringLiteral(node)) && node.text === 'providers';
 }
@@ -663,12 +738,20 @@ function registeredProviderObjects(checker, projectSources, check) {
     const reassignedSymbols = new Set();
     const escapedSymbols = new Set();
     const mutatedContainers = new Set();
+    const propertyAssignedContainers = new Map();
+    const mutatedContainerExpressions = new Set();
     const assignedValues = new Map();
     const unresolvedAssignments = new Set();
     const aliases = new Map();
     const memberMutationCache = new Map();
     const pendingEscapes = [];
+    const unresolvedImportDefaultAliases = new Set();
+    const unresolvedSpreadParameters = new Set();
+    const incompleteDynamicAliases = new Set();
+    const dynamicAliasExpressions = new Map();
     let escapeIndexIncomplete = false;
+    let escapeIndexLimitExceeded = false;
+    const incompleteLocalCallImportSymbols = new Set();
     let escapeSteps = 0;
     const isExternalModuleReference = (input, seen = new Set(), depth = 0) => {
         check();
@@ -826,6 +909,93 @@ function registeredProviderObjects(checker, projectSources, check) {
         (aliases.get(left) ?? aliases.set(left, new Set()).get(left)).add(right);
         (aliases.get(right) ?? aliases.set(right, new Set()).get(right)).add(left);
     };
+    const dynamicObjectIndexes = new WeakMap();
+    const indexingDynamicObjects = new Set();
+    let dynamicObjectIndexSteps = 0;
+    const indexDynamicObject = (object) => {
+        const cached = dynamicObjectIndexes.get(object);
+        if (cached)
+            return cached;
+        if (indexingDynamicObjects.has(object))
+            return { entries: new Map(), complete: false };
+        indexingDynamicObjects.add(object);
+        const result = { entries: new Map(), complete: true };
+        for (const property of object.properties) {
+            check();
+            if (dynamicObjectIndexSteps++ >= MAX_PROVIDER_SPREAD_ELEMENTS) {
+                result.complete = false;
+                break;
+            }
+            if (typescript_1.default.isSpreadAssignment(property)) {
+                const spread = resolveConstObject(property.expression, checker, projectSources, check);
+                if (!spread)
+                    result.complete = false;
+                else {
+                    const nested = indexDynamicObject(spread);
+                    result.complete &&= nested.complete;
+                    for (const [name, entry] of nested.entries)
+                        result.entries.set(name, entry);
+                }
+                continue;
+            }
+            const name = typescript_1.default.isComputedPropertyName(property.name)
+                ? (0, decorator_symbols_1.resolveStaticPropertyKey)(property.name.expression, checker, check)
+                : typescript_1.default.isIdentifier(property.name) || typescript_1.default.isStringLiteral(property.name)
+                    || typescript_1.default.isNumericLiteral(property.name) ? property.name.text : undefined;
+            if (name === undefined) {
+                result.complete = false;
+            }
+            else if (typescript_1.default.isPropertyAssignment(property)) {
+                result.entries.set(name, { candidates: [property.initializer], accessor: false });
+            }
+            else if (typescript_1.default.isShorthandPropertyAssignment(property)) {
+                result.entries.set(name, { candidates: [property.name], accessor: false });
+            }
+            else if (typescript_1.default.isGetAccessorDeclaration(property) || typescript_1.default.isSetAccessorDeclaration(property)) {
+                result.entries.set(name, { candidates: [], accessor: true });
+            }
+            else {
+                result.entries.set(name, { candidates: [], accessor: false });
+            }
+        }
+        indexingDynamicObjects.delete(object);
+        dynamicObjectIndexes.set(object, result);
+        return result;
+    };
+    const linkDynamicElementCandidates = (alias, receiver) => {
+        if (!alias)
+            return;
+        const object = resolveConstObject(receiver, checker, projectSources, check);
+        if (!object) {
+            incompleteDynamicAliases.add(alias);
+            return;
+        }
+        const indexed = indexDynamicObject(object);
+        if (!indexed.complete)
+            incompleteDynamicAliases.add(alias);
+        const expressions = dynamicAliasExpressions.get(alias) ?? new Set();
+        dynamicAliasExpressions.set(alias, expressions);
+        for (const effective of indexed.entries.values()) {
+            if (effective.accessor || effective.candidates.length === 0) {
+                incompleteDynamicAliases.add(alias);
+            }
+            for (const candidate of effective.candidates) {
+                let value = candidate;
+                while (typescript_1.default.isParenthesizedExpression(value) || typescript_1.default.isAsExpression(value)
+                    || typescript_1.default.isTypeAssertionExpression(value) || typescript_1.default.isSatisfiesExpression(value)
+                    || typescript_1.default.isNonNullExpression(value))
+                    value = value.expression;
+                expressions.add(value);
+                const member = typescript_1.default.isIdentifier(value) ? symbolAt(value)
+                    : typescript_1.default.isPropertyAccessExpression(value) || typescript_1.default.isElementAccessExpression(value)
+                        ? symbolAt(typescript_1.default.isPropertyAccessExpression(value) ? value.name : value) : undefined;
+                const root = typescript_1.default.isPropertyAccessExpression(value) || typescript_1.default.isElementAccessExpression(value)
+                    ? rootSymbolAt(value.expression) : undefined;
+                linkAliases(alias, member);
+                linkAliases(alias, root);
+            }
+        }
+    };
     const aliasSetHas = (values, symbol) => {
         const seen = new Set();
         const pending = [symbol];
@@ -843,6 +1013,26 @@ function registeredProviderObjects(checker, projectSources, check) {
         }
         return false;
     };
+    const recordAssignedContainer = (input) => {
+        const receiver = rootSymbolAt(input.expression);
+        if (!receiver)
+            return;
+        let access = input;
+        let key = '*';
+        while (typescript_1.default.isPropertyAccessExpression(access) || typescript_1.default.isElementAccessExpression(access)) {
+            key = typescript_1.default.isPropertyAccessExpression(access) ? access.name.text
+                : access.argumentExpression
+                    ? (0, decorator_symbols_1.resolveStaticPropertyKey)(access.argumentExpression, checker, check) ?? '*' : '*';
+            access = access.expression;
+            while (typescript_1.default.isParenthesizedExpression(access) || typescript_1.default.isAsExpression(access)
+                || typescript_1.default.isTypeAssertionExpression(access) || typescript_1.default.isSatisfiesExpression(access)
+                || typescript_1.default.isNonNullExpression(access))
+                access = access.expression;
+        }
+        const keys = propertyAssignedContainers.get(receiver) ?? new Set();
+        keys.add(key);
+        propertyAssignedContainers.set(receiver, keys);
+    };
     const markAssignmentTarget = (input) => {
         let target = input;
         while (typescript_1.default.isParenthesizedExpression(target) || typescript_1.default.isAsExpression(target)
@@ -858,6 +1048,7 @@ function registeredProviderObjects(checker, projectSources, check) {
             const symbol = symbolAt(target.name);
             if (symbol)
                 reassignedSymbols.add(symbol);
+            recordAssignedContainer(target);
         }
         else if (typescript_1.default.isElementAccessExpression(target)) {
             const key = target.argumentExpression
@@ -866,10 +1057,14 @@ function registeredProviderObjects(checker, projectSources, check) {
                 : checker.getNonNullableType(checker.getTypeAtLocation(target.expression)).getProperty(key);
             if (symbol)
                 reassignedSymbols.add(symbol);
-            else if (typescript_1.default.isIdentifier(target.expression)) {
-                const receiver = symbolAt(target.expression);
-                if (receiver)
-                    escapedSymbols.add(receiver);
+            const receiver = rootSymbolAt(target.expression);
+            recordAssignedContainer(target);
+            if (!symbol && receiver)
+                escapedSymbols.add(receiver);
+            else if (!symbol && typescript_1.default.isIdentifier(target.expression)) {
+                const expressionSymbol = symbolAt(target.expression);
+                if (expressionSymbol)
+                    escapedSymbols.add(expressionSymbol);
             }
         }
         else if (typescript_1.default.isArrayLiteralExpression(target)) {
@@ -922,10 +1117,12 @@ function registeredProviderObjects(checker, projectSources, check) {
         check();
         if (escapeSteps++ >= MAX_PROVIDER_SPREAD_ELEMENTS) {
             escapeIndexIncomplete = true;
+            escapeIndexLimitExceeded = true;
             return;
         }
         if (depth > 64) {
             escapeIndexIncomplete = true;
+            escapeIndexLimitExceeded = true;
             return;
         }
         let value = input;
@@ -1185,6 +1382,10 @@ function registeredProviderObjects(checker, projectSources, check) {
             || typescript_1.default.isTypeAssertionExpression(receiver) || typescript_1.default.isSatisfiesExpression(receiver)
             || typescript_1.default.isNonNullExpression(receiver))
             receiver = receiver.expression;
+        if (typescript_1.default.isArrayLiteralExpression(receiver) || typescript_1.default.isObjectLiteralExpression(receiver)) {
+            mutatedContainerExpressions.add(receiver);
+            return;
+        }
         if (typescript_1.default.isIdentifier(receiver)) {
             const symbol = resolvedSymbolAt(receiver, checker);
             if (symbol)
@@ -1219,9 +1420,34 @@ function registeredProviderObjects(checker, projectSources, check) {
                 else
                     unresolvedAssignments.add(symbol);
             }
-            if (node.operatorToken.kind === typescript_1.default.SyntaxKind.EqualsToken
-                && typescript_1.default.isIdentifier(node.left) && typescript_1.default.isIdentifier(node.right)) {
-                linkAliases(symbolAt(node.left), symbolAt(node.right));
+            if (node.operatorToken.kind === typescript_1.default.SyntaxKind.EqualsToken) {
+                let target = node.left;
+                while (typescript_1.default.isParenthesizedExpression(target) || typescript_1.default.isAsExpression(target)
+                    || typescript_1.default.isTypeAssertionExpression(target) || typescript_1.default.isSatisfiesExpression(target)
+                    || typescript_1.default.isNonNullExpression(target))
+                    target = target.expression;
+                if (typescript_1.default.isIdentifier(target)) {
+                    const alias = symbolAt(target);
+                    let value = node.right;
+                    while (typescript_1.default.isParenthesizedExpression(value) || typescript_1.default.isAsExpression(value)
+                        || typescript_1.default.isTypeAssertionExpression(value) || typescript_1.default.isSatisfiesExpression(value)
+                        || typescript_1.default.isNonNullExpression(value))
+                        value = value.expression;
+                    if (typescript_1.default.isIdentifier(value))
+                        linkAliases(alias, symbolAt(value));
+                    else if (typescript_1.default.isPropertyAccessExpression(value) || typescript_1.default.isElementAccessExpression(value)) {
+                        linkAliases(alias, symbolAt(typescript_1.default.isPropertyAccessExpression(value) ? value.name : value));
+                        const key = typescript_1.default.isPropertyAccessExpression(value) ? value.name.text
+                            : value.argumentExpression
+                                ? (0, decorator_symbols_1.resolveStaticPropertyKey)(value.argumentExpression, checker, check) : undefined;
+                        if (key === 'imports' || (key === undefined && typescript_1.default.isElementAccessExpression(value))) {
+                            linkAliases(alias, rootSymbolAt(value.expression));
+                        }
+                        if (key === undefined && typescript_1.default.isElementAccessExpression(value)) {
+                            linkDynamicElementCandidates(alias, value.expression);
+                        }
+                    }
+                }
             }
         }
         else if (typescript_1.default.isForOfStatement(node) || typescript_1.default.isForInStatement(node)) {
@@ -1232,11 +1458,321 @@ function registeredProviderObjects(checker, projectSources, check) {
                     unresolvedAssignments.add(symbol);
             }
         }
-        else if (typescript_1.default.isVariableDeclaration(node) && typescript_1.default.isIdentifier(node.name)
-            && node.initializer && typescript_1.default.isIdentifier(node.initializer)) {
-            linkAliases(symbolAt(node.name), symbolAt(node.initializer));
+        else if (typescript_1.default.isVariableDeclaration(node) && typescript_1.default.isIdentifier(node.name) && node.initializer) {
+            const alias = symbolAt(node.name);
+            let value = node.initializer;
+            while (typescript_1.default.isParenthesizedExpression(value) || typescript_1.default.isAsExpression(value)
+                || typescript_1.default.isTypeAssertionExpression(value) || typescript_1.default.isSatisfiesExpression(value)
+                || typescript_1.default.isNonNullExpression(value))
+                value = value.expression;
+            if (typescript_1.default.isIdentifier(value))
+                linkAliases(alias, symbolAt(value));
+            else if (typescript_1.default.isPropertyAccessExpression(value) || typescript_1.default.isElementAccessExpression(value)) {
+                linkAliases(alias, symbolAt(typescript_1.default.isPropertyAccessExpression(value) ? value.name : value));
+                const key = typescript_1.default.isPropertyAccessExpression(value) ? value.name.text
+                    : value.argumentExpression
+                        ? (0, decorator_symbols_1.resolveStaticPropertyKey)(value.argumentExpression, checker, check) : undefined;
+                if (key === 'imports' || (key === undefined && typescript_1.default.isElementAccessExpression(value))) {
+                    linkAliases(alias, rootSymbolAt(value.expression));
+                }
+                if (key === undefined && typescript_1.default.isElementAccessExpression(value)) {
+                    linkDynamicElementCandidates(alias, value.expression);
+                }
+            }
+        }
+        else if (typescript_1.default.isVariableDeclaration(node) && typescript_1.default.isObjectBindingPattern(node.name)
+            && node.initializer) {
+            for (const element of node.name.elements) {
+                if (!typescript_1.default.isIdentifier(element.name))
+                    continue;
+                const key = element.propertyName
+                    ? typescript_1.default.isIdentifier(element.propertyName) || typescript_1.default.isStringLiteral(element.propertyName)
+                        ? element.propertyName.text
+                        : typescript_1.default.isComputedPropertyName(element.propertyName)
+                            ? (0, decorator_symbols_1.resolveStaticPropertyKey)(element.propertyName.expression, checker, check) : undefined
+                    : element.name.text;
+                const alias = symbolAt(element.name);
+                if (key === undefined) {
+                    linkAliases(alias, rootSymbolAt(node.initializer));
+                    continue;
+                }
+                if (key !== 'imports')
+                    continue;
+                let propertyMayBeSelected = true;
+                let defaultMayBeSelected = Boolean(element.initializer);
+                if (element.initializer) {
+                    const object = resolveConstObject(node.initializer, checker, projectSources, check);
+                    if (object) {
+                        const property = effectiveObjectProperty(object, 'imports', checker, projectSources, check);
+                        propertyMayBeSelected = property.present && (property.accessor
+                            || property.candidates.length === 0 || property.candidates.some((candidate) => (staticUndefinedState(candidate, checker, projectSources, check) !== true)));
+                        defaultMayBeSelected = !property.present || property.accessor
+                            || property.candidates.length === 0 || property.candidates.some((candidate) => (staticUndefinedState(candidate, checker, projectSources, check) !== false));
+                    }
+                }
+                if (propertyMayBeSelected) {
+                    linkAliases(alias, checker.getNonNullableType(checker.getTypeAtLocation(node.initializer)).getProperty('imports'));
+                    linkAliases(alias, rootSymbolAt(node.initializer));
+                }
+                if (defaultMayBeSelected && element.initializer) {
+                    const fallbacks = [element.initializer];
+                    const seenFallbacks = new Set();
+                    let fallbackSteps = 0;
+                    while (fallbacks.length > 0) {
+                        if (fallbackSteps++ >= 64) {
+                            if (alias)
+                                unresolvedImportDefaultAliases.add(alias);
+                            break;
+                        }
+                        let fallback = fallbacks.pop();
+                        while (typescript_1.default.isParenthesizedExpression(fallback) || typescript_1.default.isAsExpression(fallback)
+                            || typescript_1.default.isTypeAssertionExpression(fallback) || typescript_1.default.isSatisfiesExpression(fallback)
+                            || typescript_1.default.isNonNullExpression(fallback))
+                            fallback = fallback.expression;
+                        if (typescript_1.default.isIdentifier(fallback)) {
+                            const symbol = symbolAt(fallback);
+                            linkAliases(alias, symbol);
+                            if (!symbol || seenFallbacks.has(symbol))
+                                continue;
+                            seenFallbacks.add(symbol);
+                            const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+                            const declaration = declarations.length === 1 ? declarations[0] : undefined;
+                            if (declaration?.initializer && projectSources.has(declaration.getSourceFile())
+                                && typescript_1.default.isVariableDeclarationList(declaration.parent)
+                                && declaration.parent.flags & typescript_1.default.NodeFlags.Const) {
+                                fallbacks.push(declaration.initializer);
+                            }
+                            continue;
+                        }
+                        if (typescript_1.default.isPropertyAccessExpression(fallback) || typescript_1.default.isElementAccessExpression(fallback)) {
+                            const fallbackKey = typescript_1.default.isPropertyAccessExpression(fallback) ? fallback.name.text
+                                : fallback.argumentExpression
+                                    ? (0, decorator_symbols_1.resolveStaticPropertyKey)(fallback.argumentExpression, checker, check) : undefined;
+                            if (fallbackKey === 'imports') {
+                                linkAliases(alias, symbolAt(typescript_1.default.isPropertyAccessExpression(fallback) ? fallback.name : fallback));
+                                linkAliases(alias, rootSymbolAt(fallback.expression));
+                                const object = resolveConstObject(fallback.expression, checker, projectSources, check);
+                                if (object) {
+                                    const property = effectiveObjectProperty(object, 'imports', checker, projectSources, check);
+                                    fallbacks.push(...property.candidates);
+                                    if ((!property.present || property.accessor
+                                        || property.candidates.length === 0) && alias) {
+                                        unresolvedImportDefaultAliases.add(alias);
+                                    }
+                                }
+                                else if (alias) {
+                                    unresolvedImportDefaultAliases.add(alias);
+                                }
+                            }
+                            else if (fallbackKey === undefined && alias)
+                                unresolvedImportDefaultAliases.add(alias);
+                            continue;
+                        }
+                        if (typescript_1.default.isConditionalExpression(fallback)) {
+                            const state = staticState(fallback.condition);
+                            if (state.truthy !== false)
+                                fallbacks.push(fallback.whenTrue);
+                            if (state.truthy !== true)
+                                fallbacks.push(fallback.whenFalse);
+                            continue;
+                        }
+                        if (typescript_1.default.isBinaryExpression(fallback)) {
+                            const operator = fallback.operatorToken.kind;
+                            if (operator === typescript_1.default.SyntaxKind.CommaToken) {
+                                fallbacks.push(fallback.right);
+                                continue;
+                            }
+                            const state = staticState(fallback.left);
+                            if (operator === typescript_1.default.SyntaxKind.AmpersandAmpersandToken) {
+                                if (state.truthy !== true)
+                                    fallbacks.push(fallback.left);
+                                if (state.truthy !== false)
+                                    fallbacks.push(fallback.right);
+                                continue;
+                            }
+                            if (operator === typescript_1.default.SyntaxKind.BarBarToken) {
+                                if (state.truthy !== false)
+                                    fallbacks.push(fallback.left);
+                                if (state.truthy !== true)
+                                    fallbacks.push(fallback.right);
+                                continue;
+                            }
+                            if (operator === typescript_1.default.SyntaxKind.QuestionQuestionToken) {
+                                if (state.nullish !== true)
+                                    fallbacks.push(fallback.left);
+                                if (state.nullish !== false)
+                                    fallbacks.push(fallback.right);
+                                continue;
+                            }
+                        }
+                        if (!typescript_1.default.isArrayLiteralExpression(fallback) && alias) {
+                            unresolvedImportDefaultAliases.add(alias);
+                        }
+                    }
+                }
+            }
         }
         else if (typescript_1.default.isCallExpression(node)) {
+            let localCallee = node.expression;
+            while (typescript_1.default.isParenthesizedExpression(localCallee) || typescript_1.default.isAsExpression(localCallee)
+                || typescript_1.default.isTypeAssertionExpression(localCallee) || typescript_1.default.isSatisfiesExpression(localCallee)
+                || typescript_1.default.isNonNullExpression(localCallee))
+                localCallee = localCallee.expression;
+            if (typescript_1.default.isIdentifier(localCallee)) {
+                const symbol = symbolAt(localCallee);
+                const callables = [];
+                const callableSymbols = new Set();
+                let callableResolutionComplete = true;
+                const collectCallables = (candidate, depth = 0) => {
+                    if (!candidate || depth >= 64) {
+                        callableResolutionComplete = false;
+                        return;
+                    }
+                    if (callableSymbols.has(candidate))
+                        return;
+                    callableSymbols.add(candidate);
+                    if (reassignedSymbols.has(candidate) || unresolvedAssignments.has(candidate)
+                        || assignedValues.has(candidate))
+                        callableResolutionComplete = false;
+                    for (const declaration of candidate.declarations ?? []) {
+                        if (!projectSources.has(declaration.getSourceFile()))
+                            continue;
+                        if (typescript_1.default.isFunctionDeclaration(declaration) && declaration.body)
+                            callables.push(declaration);
+                        if (!typescript_1.default.isVariableDeclaration(declaration) || !declaration.initializer)
+                            continue;
+                        if (!typescript_1.default.isVariableDeclarationList(declaration.parent)
+                            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+                            callableResolutionComplete = false;
+                        let initializer = declaration.initializer;
+                        while (typescript_1.default.isParenthesizedExpression(initializer) || typescript_1.default.isAsExpression(initializer)
+                            || typescript_1.default.isTypeAssertionExpression(initializer) || typescript_1.default.isSatisfiesExpression(initializer)
+                            || typescript_1.default.isNonNullExpression(initializer))
+                            initializer = initializer.expression;
+                        if (typescript_1.default.isArrowFunction(initializer)
+                            || typescript_1.default.isFunctionExpression(initializer))
+                            callables.push(initializer);
+                        else if (typescript_1.default.isIdentifier(initializer)
+                            && typescript_1.default.isVariableDeclarationList(declaration.parent)
+                            && declaration.parent.flags & typescript_1.default.NodeFlags.Const) {
+                            collectCallables(symbolAt(initializer), depth + 1);
+                        }
+                        else
+                            callableResolutionComplete = false;
+                    }
+                };
+                collectCallables(symbol);
+                if (!callableResolutionComplete) {
+                    for (const argument of node.arguments) {
+                        const nodes = [argument];
+                        const seenSymbols = new Set();
+                        while (nodes.length > 0) {
+                            const candidate = nodes.pop();
+                            const importsAccess = (typescript_1.default.isPropertyAccessExpression(candidate)
+                                && candidate.name.text === 'imports') || (typescript_1.default.isElementAccessExpression(candidate)
+                                && candidate.argumentExpression
+                                && (0, decorator_symbols_1.resolveStaticPropertyKey)(candidate.argumentExpression, checker, check) === 'imports');
+                            if (importsAccess && (typescript_1.default.isPropertyAccessExpression(candidate)
+                                || typescript_1.default.isElementAccessExpression(candidate))) {
+                                const member = symbolAt(typescript_1.default.isPropertyAccessExpression(candidate)
+                                    ? candidate.name : candidate);
+                                const root = rootSymbolAt(candidate.expression);
+                                if (member)
+                                    incompleteLocalCallImportSymbols.add(member);
+                                if (root)
+                                    incompleteLocalCallImportSymbols.add(root);
+                                continue;
+                            }
+                            if (typescript_1.default.isIdentifier(candidate)) {
+                                const candidateSymbol = symbolAt(candidate);
+                                if (candidateSymbol && !seenSymbols.has(candidateSymbol)) {
+                                    seenSymbols.add(candidateSymbol);
+                                    for (const declaration of candidateSymbol.declarations ?? []) {
+                                        if (typescript_1.default.isVariableDeclaration(declaration) && declaration.initializer
+                                            && projectSources.has(declaration.getSourceFile()))
+                                            nodes.push(declaration.initializer);
+                                    }
+                                }
+                            }
+                            typescript_1.default.forEachChild(candidate, (child) => { nodes.push(child); });
+                        }
+                    }
+                }
+                if (callables.length === 1) {
+                    const actualArguments = [];
+                    let argumentsComplete = true;
+                    const flattenSpread = (input, depth = 0) => {
+                        if (depth >= 64)
+                            return false;
+                        let expression = input;
+                        while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+                            || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+                            || typescript_1.default.isNonNullExpression(expression))
+                            expression = expression.expression;
+                        if (typescript_1.default.isIdentifier(expression)) {
+                            const symbol = symbolAt(expression);
+                            const declarations = symbol?.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+                            const declaration = declarations.length === 1 ? declarations[0] : undefined;
+                            if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+                                || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+                                || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+                                return false;
+                            return flattenSpread(declaration.initializer, depth + 1);
+                        }
+                        if (!typescript_1.default.isArrayLiteralExpression(expression))
+                            return false;
+                        for (const element of expression.elements) {
+                            if (typescript_1.default.isOmittedExpression(element))
+                                actualArguments.push(element);
+                            else if (typescript_1.default.isSpreadElement(element)) {
+                                if (!flattenSpread(element.expression, depth + 1))
+                                    return false;
+                            }
+                            else
+                                actualArguments.push(element);
+                        }
+                        return true;
+                    };
+                    for (const argument of node.arguments) {
+                        if (typescript_1.default.isSpreadElement(argument)) {
+                            if (!flattenSpread(argument.expression))
+                                argumentsComplete = false;
+                        }
+                        else
+                            actualArguments.push(argument);
+                    }
+                    for (const [index, parameter] of callables[0].parameters.entries()) {
+                        if (!typescript_1.default.isIdentifier(parameter.name))
+                            continue;
+                        const parameterSymbol = symbolAt(parameter.name);
+                        if (!argumentsComplete && parameterSymbol)
+                            unresolvedSpreadParameters.add(parameterSymbol);
+                        const actual = actualArguments[index];
+                        const undefinedState = actual
+                            ? staticUndefinedState(actual, checker, projectSources, check) : true;
+                        const values = [
+                            ...(actual && undefinedState !== true ? [actual] : []),
+                            ...(parameter.initializer && undefinedState !== false ? [parameter.initializer] : []),
+                        ];
+                        for (let value of values) {
+                            while (typescript_1.default.isParenthesizedExpression(value) || typescript_1.default.isAsExpression(value)
+                                || typescript_1.default.isTypeAssertionExpression(value) || typescript_1.default.isSatisfiesExpression(value)
+                                || typescript_1.default.isNonNullExpression(value))
+                                value = value.expression;
+                            if (typescript_1.default.isIdentifier(value))
+                                linkAliases(parameterSymbol, symbolAt(value));
+                            else if (typescript_1.default.isPropertyAccessExpression(value) || typescript_1.default.isElementAccessExpression(value)) {
+                                linkAliases(parameterSymbol, symbolAt(typescript_1.default.isPropertyAccessExpression(value) ? value.name : value));
+                                const key = typescript_1.default.isPropertyAccessExpression(value) ? value.name.text
+                                    : value.argumentExpression
+                                        ? (0, decorator_symbols_1.resolveStaticPropertyKey)(value.argumentExpression, checker, check) : undefined;
+                                if (key === 'imports')
+                                    linkAliases(parameterSymbol, rootSymbolAt(value.expression));
+                            }
+                        }
+                    }
+                }
+            }
             const decorator = typescript_1.default.isDecorator(node.parent)
                 ? (0, decorator_symbols_1.resolveDecoratorSymbol)(node.parent, checker, check) : undefined;
             if (decorator?.name !== 'Module' || !decorator.nestJsCommon) {
@@ -1440,6 +1976,7 @@ function registeredProviderObjects(checker, projectSources, check) {
         if (escapeRounds++ >= MAX_PROVIDER_SPREAD_ELEMENTS
             || escapeSteps >= MAX_PROVIDER_SPREAD_ELEMENTS) {
             escapeIndexIncomplete = true;
+            escapeIndexLimitExceeded = true;
             break;
         }
         previousEscapedCount = escapedSymbols.size;
@@ -1447,6 +1984,7 @@ function registeredProviderObjects(checker, projectSources, check) {
             markEscapedValue(value);
             if (escapeSteps >= MAX_PROVIDER_SPREAD_ELEMENTS) {
                 escapeIndexIncomplete = true;
+                escapeIndexLimitExceeded = true;
                 break;
             }
         }
@@ -1471,6 +2009,19 @@ function registeredProviderObjects(checker, projectSources, check) {
                 unstableContainers.add(alias);
                 pendingContainers.push(alias);
             }
+        }
+    }
+    const containersWithAssignedImports = new Set([...propertyAssignedContainers]
+        .filter(([, keys]) => keys.has('imports') || keys.has('*'))
+        .map(([symbol]) => symbol));
+    const unresolvedImportDefaultMutation = [...unresolvedImportDefaultAliases].some((symbol) => (aliasSetHas(unstableContainers, symbol) || aliasSetHas(escapedSymbols, symbol)));
+    const unresolvedParameterSpreadMutation = [...unresolvedSpreadParameters].some((symbol) => (aliasSetHas(unstableContainers, symbol) || aliasSetHas(escapedSymbols, symbol)));
+    const unresolvedDynamicAliasMutation = [...incompleteDynamicAliases].some((symbol) => (aliasSetHas(unstableContainers, symbol) || aliasSetHas(escapedSymbols, symbol)));
+    const mutatedDynamicExpressions = new Set();
+    for (const [symbol, expressions] of dynamicAliasExpressions) {
+        if (aliasSetHas(unstableContainers, symbol) || aliasSetHas(escapedSymbols, symbol)) {
+            for (const expression of expressions)
+                mutatedDynamicExpressions.add(expression);
         }
     }
     const isExternalProviderReference = (input, seen = new Set(), depth = 0, tokenPosition = false) => {
@@ -1810,37 +2361,916 @@ function registeredProviderObjects(checker, projectSources, check) {
     };
     let unresolvedProvider;
     let externalModuleImport;
+    const moduleEntries = [];
+    const localClassesBySymbol = new Map();
     for (const sourceFile of projectSources) {
         const nodes = [sourceFile];
         while (nodes.length > 0) {
             const node = nodes.pop();
             check();
             if (typescript_1.default.isClassLike(node)) {
+                const classSymbol = node.name ? checker.getSymbolAtLocation(node.name) : undefined;
+                if (classSymbol)
+                    localClassesBySymbol.set(classSymbol, node);
                 for (const decorator of decorators(node)) {
                     const module = (0, decorator_symbols_1.resolveDecoratorSymbol)(decorator, checker, check);
-                    const metadataArgument = module?.name === 'Module' && module.nestJsCommon
-                        ? module.call.arguments[0] : undefined;
-                    const metadata = metadataArgument
-                        ? resolveConstObject(metadataArgument, checker, projectSources, check) : undefined;
-                    if (!metadata) {
-                        if (metadataArgument)
-                            candidates.push(metadataArgument);
+                    if (module?.name !== 'Module' || !module.nestJsCommon)
                         continue;
-                    }
-                    const effectiveProviders = effectiveObjectProperty(metadata, 'providers', checker, projectSources, check);
-                    for (const providerExpression of effectiveProviders.candidates) {
-                        if (!collect(providerExpression, new Set(), 0))
-                            candidates.push(providerExpression);
-                        if (!unresolvedProvider && isExternalProviderReference(providerExpression)) {
-                            unresolvedProvider = providerExpression;
-                        }
-                    }
-                    const effectiveImports = effectiveObjectProperty(metadata, 'imports', checker, projectSources, check);
-                    externalModuleImport ??= effectiveImports.candidates.find((candidate) => (isExternalModuleReference(candidate)));
+                    const symbol = classSymbol;
+                    const metadataArgument = module.call.arguments[0];
+                    moduleEntries.push({
+                        node,
+                        symbol,
+                        ...(metadataArgument ? {
+                            metadataArgument,
+                            metadata: resolveConstObject(metadataArgument, checker, projectSources, check),
+                        } : {}),
+                    });
                 }
             }
             typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
         }
+    }
+    const modulesBySymbol = new Map();
+    const duplicateModuleSymbols = new Set();
+    for (const entry of moduleEntries) {
+        if (entry.symbol) {
+            if (modulesBySymbol.has(entry.symbol))
+                duplicateModuleSymbols.add(entry.symbol);
+            modulesBySymbol.set(entry.symbol, entry);
+        }
+    }
+    const unwrapModuleExpression = (input) => {
+        let expression = input;
+        while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+            || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+            || typescript_1.default.isNonNullExpression(expression))
+            expression = expression.expression;
+        return expression;
+    };
+    const moduleSymbol = (input) => {
+        let expression = unwrapModuleExpression(input);
+        for (let depth = 0; depth < 64; depth += 1) {
+            check();
+            if (!(typescript_1.default.isCallExpression(expression) && expression.arguments.length === 1
+                && (0, decorator_symbols_1.containsStaticSymbolFrom)(expression.expression, checker, check, '@nestjs/common', 'forwardRef', projectSources)))
+                break;
+            const callback = expression.arguments[0];
+            if (!((typescript_1.default.isArrowFunction(callback) || typescript_1.default.isFunctionExpression(callback))
+                && !typescript_1.default.isBlock(callback.body)))
+                return undefined;
+            expression = unwrapModuleExpression(callback.body);
+        }
+        if (typescript_1.default.isCallExpression(expression))
+            return undefined;
+        let symbol = checker.getSymbolAtLocation(typescript_1.default.isPropertyAccessExpression(expression)
+            ? expression.name : expression);
+        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+            symbol = checker.getAliasedSymbol(symbol);
+        return symbol && modulesBySymbol.has(symbol) ? symbol : undefined;
+    };
+    const roots = new Set();
+    let moduleGraphComplete = !escapeIndexLimitExceeded && !unresolvedImportDefaultMutation
+        && !unresolvedParameterSpreadMutation
+        && !unresolvedDynamicAliasMutation
+        && duplicateModuleSymbols.size === 0;
+    const indirectBootstrapTarget = (input, includeContainers = true, asValue = false) => {
+        const expressions = [input];
+        const seen = new Set();
+        const parameterBindings = new Map();
+        const candidateContainsBootstrapAccess = (input) => {
+            const nodes = [input];
+            const candidateSymbols = new Set();
+            let candidateSteps = 0;
+            while (nodes.length > 0) {
+                check();
+                if (candidateSteps >= 256)
+                    return true;
+                candidateSteps += 1;
+                const candidate = nodes.pop();
+                if (candidate !== input && (typescript_1.default.isFunctionLike(candidate) || typescript_1.default.isClassLike(candidate)))
+                    continue;
+                if (candidate !== input && staticallyUnreachable(candidate))
+                    continue;
+                if (typescript_1.default.isCallExpression(candidate)) {
+                    let callee = candidate.expression;
+                    while (typescript_1.default.isParenthesizedExpression(callee) || typescript_1.default.isAsExpression(callee)
+                        || typescript_1.default.isTypeAssertionExpression(callee) || typescript_1.default.isSatisfiesExpression(callee)
+                        || typescript_1.default.isNonNullExpression(callee))
+                        callee = callee.expression;
+                    const pushCallable = (callable) => {
+                        if (!callable.body || callable.modifiers?.some(({ kind }) => (kind === typescript_1.default.SyntaxKind.AsyncKeyword)) || ('asteriskToken' in callable && callable.asteriskToken))
+                            return false;
+                        for (const [index, parameter] of callable.parameters.entries()) {
+                            if (!typescript_1.default.isIdentifier(parameter.name) || parameter.dotDotDotToken)
+                                return true;
+                            const argument = candidate.arguments[index];
+                            const actual = argument && !typescript_1.default.isSpreadElement(argument) ? argument : undefined;
+                            const isUndefined = actual ? staticUndefined(actual) : true;
+                            if (parameter.initializer && isUndefined !== false)
+                                nodes.push(parameter.initializer);
+                        }
+                        nodes.push(callable.body);
+                        return false;
+                    };
+                    if (typescript_1.default.isArrowFunction(callee) || typescript_1.default.isFunctionExpression(callee)) {
+                        if (pushCallable(callee))
+                            return true;
+                    }
+                    else if (typescript_1.default.isIdentifier(callee)) {
+                        let symbol = checker.getSymbolAtLocation(callee);
+                        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+                            symbol = checker.getAliasedSymbol(symbol);
+                        for (const declaration of symbol?.declarations ?? []) {
+                            if (!projectSources.has(declaration.getSourceFile()))
+                                continue;
+                            const callable = typescript_1.default.isFunctionDeclaration(declaration) ? declaration
+                                : typescript_1.default.isVariableDeclaration(declaration) && declaration.initializer
+                                    && (typescript_1.default.isArrowFunction(declaration.initializer)
+                                        || typescript_1.default.isFunctionExpression(declaration.initializer))
+                                    ? declaration.initializer : undefined;
+                            if (callable && pushCallable(callable))
+                                return true;
+                        }
+                    }
+                    else if (typescript_1.default.isPropertyAccessExpression(callee) || typescript_1.default.isElementAccessExpression(callee)) {
+                        const key = typescript_1.default.isPropertyAccessExpression(callee) ? callee.name.text
+                            : callee.argumentExpression
+                                ? (0, decorator_symbols_1.resolveStaticPropertyKey)(callee.argumentExpression, checker, check) : undefined;
+                        const member = symbolAt(typescript_1.default.isPropertyAccessExpression(callee) ? callee.name : callee);
+                        const receiver = rootSymbolAt(callee.expression);
+                        const memberValues = member ? assignedValues.get(member) ?? [] : [];
+                        if (member && aliasSetHas(unresolvedAssignments, member))
+                            return true;
+                        if (member && aliasSetHas(reassignedSymbols, member) && memberValues.length === 0)
+                            return true;
+                        nodes.push(...memberValues);
+                        if (receiver && (aliasSetHas(unresolvedAssignments, receiver)
+                            || aliasSetHas(escapedSymbols, receiver)
+                            || aliasSetHas(unstableContainers, receiver)))
+                            return true;
+                        const receiverUnstable = Boolean(receiver && (aliasSetHas(reassignedSymbols, receiver)
+                            || assignedValues.has(receiver)));
+                        let resolvedCallable = false;
+                        let unresolvedReceiverValue = false;
+                        if (key !== undefined) {
+                            const callableProperties = (object, visited = new Set()) => {
+                                if (visited.has(object))
+                                    return { present: true, callables: [], complete: false };
+                                visited.add(object);
+                                let result = { present: false, callables: [], complete: true };
+                                for (const property of object.properties) {
+                                    if (typescript_1.default.isSpreadAssignment(property)) {
+                                        const spread = resolveConstObject(property.expression, checker, projectSources, check);
+                                        if (!spread) {
+                                            result.complete = false;
+                                            continue;
+                                        }
+                                        const nested = callableProperties(spread, new Set(visited));
+                                        if (nested.present)
+                                            result = nested;
+                                        else
+                                            result.complete &&= nested.complete;
+                                        continue;
+                                    }
+                                    const name = 'name' in property && property.name
+                                        ? typescript_1.default.isComputedPropertyName(property.name)
+                                            ? (0, decorator_symbols_1.resolveStaticPropertyKey)(property.name.expression, checker, check)
+                                            : (typescript_1.default.isIdentifier(property.name) || typescript_1.default.isStringLiteral(property.name))
+                                                ? property.name.text : undefined
+                                        : undefined;
+                                    if (name === undefined && 'name' in property
+                                        && property.name && typescript_1.default.isComputedPropertyName(property.name)) {
+                                        result.complete = false;
+                                    }
+                                    if (name !== key)
+                                        continue;
+                                    const callable = typescript_1.default.isMethodDeclaration(property) ? property
+                                        : typescript_1.default.isPropertyAssignment(property)
+                                            && (typescript_1.default.isArrowFunction(property.initializer)
+                                                || typescript_1.default.isFunctionExpression(property.initializer))
+                                            ? property.initializer : undefined;
+                                    result = {
+                                        present: true,
+                                        callables: callable ? [callable] : [],
+                                        complete: Boolean(callable),
+                                    };
+                                }
+                                return result;
+                            };
+                            const receiverDeclarations = receiver?.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+                            const receiverValues = [
+                                ...(receiver ? [] : [callee.expression]),
+                                ...receiverDeclarations.flatMap(({ initializer }) => initializer ? [initializer] : []),
+                                ...(receiver ? assignedValues.get(receiver) ?? [] : []),
+                            ];
+                            for (const value of receiverValues) {
+                                const object = resolveConstObject(value, checker, projectSources, check);
+                                if (!object) {
+                                    unresolvedReceiverValue = true;
+                                    continue;
+                                }
+                                const effective = callableProperties(object);
+                                unresolvedReceiverValue ||= !effective.complete;
+                                for (const callable of effective.callables) {
+                                    resolvedCallable = true;
+                                    if (pushCallable(callable))
+                                        return true;
+                                }
+                            }
+                        }
+                        const declarations = member?.declarations?.filter((declaration) => (projectSources.has(declaration.getSourceFile()) && (typescript_1.default.isMethodDeclaration(declaration)
+                            || typescript_1.default.isPropertyAssignment(declaration)))) ?? [];
+                        const unstable = receiverUnstable;
+                        if (unresolvedReceiverValue || (receiverUnstable && !resolvedCallable))
+                            return true;
+                        if (!resolvedCallable && declarations.length > 0
+                            && (declarations.length !== 1 || unstable))
+                            return true;
+                        const declaration = resolvedCallable ? undefined : declarations[0];
+                        const callable = declaration && typescript_1.default.isMethodDeclaration(declaration) ? declaration
+                            : declaration && typescript_1.default.isPropertyAssignment(declaration)
+                                && (typescript_1.default.isArrowFunction(declaration.initializer)
+                                    || typescript_1.default.isFunctionExpression(declaration.initializer))
+                                ? declaration.initializer : undefined;
+                        if (callable && pushCallable(callable))
+                            return true;
+                    }
+                }
+                if (typescript_1.default.isIdentifier(candidate)) {
+                    let symbol = checker.getSymbolAtLocation(candidate);
+                    if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+                        symbol = checker.getAliasedSymbol(symbol);
+                    if (symbol && !candidateSymbols.has(symbol)) {
+                        candidateSymbols.add(symbol);
+                        for (const declaration of symbol.declarations ?? []) {
+                            if (typescript_1.default.isVariableDeclaration(declaration) && declaration.initializer
+                                && projectSources.has(declaration.getSourceFile()))
+                                nodes.push(declaration.initializer);
+                        }
+                    }
+                }
+                if (typescript_1.default.isPropertyAccessExpression(candidate) || typescript_1.default.isElementAccessExpression(candidate)) {
+                    const candidateMethod = typescript_1.default.isPropertyAccessExpression(candidate)
+                        ? candidate.name.text : candidate.argumentExpression
+                        ? (0, decorator_symbols_1.resolveStaticPropertyKey)(candidate.argumentExpression, checker, check) : undefined;
+                    if ((candidateMethod === 'create' || candidateMethod === 'createApplicationContext'
+                        || candidateMethod === 'createMicroservice') && ((0, decorator_symbols_1.isStaticSymbolFrom)(candidate.expression, checker, check, '@nestjs/core', 'NestFactory')
+                        || (0, decorator_symbols_1.containsStaticSymbolFrom)(candidate.expression, checker, check, '@nestjs/core', 'NestFactory', projectSources)))
+                        return true;
+                }
+                typescript_1.default.forEachChild(candidate, (child) => { nodes.push(child); });
+            }
+            return false;
+        };
+        const staticUndefined = (input, symbols = new Set(), depth = 0) => {
+            if (depth > 64)
+                return undefined;
+            let expression = input;
+            while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+                || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+                || typescript_1.default.isNonNullExpression(expression))
+                expression = expression.expression;
+            if (typescript_1.default.isVoidExpression(expression))
+                return true;
+            if (expression.kind === typescript_1.default.SyntaxKind.NullKeyword || expression.kind === typescript_1.default.SyntaxKind.TrueKeyword
+                || expression.kind === typescript_1.default.SyntaxKind.FalseKeyword || typescript_1.default.isLiteralExpression(expression)
+                || typescript_1.default.isObjectLiteralExpression(expression) || typescript_1.default.isArrayLiteralExpression(expression)
+                || typescript_1.default.isFunctionExpression(expression) || typescript_1.default.isArrowFunction(expression)
+                || typescript_1.default.isClassExpression(expression) || typescript_1.default.isNewExpression(expression))
+                return false;
+            if (!typescript_1.default.isIdentifier(expression))
+                return undefined;
+            let symbol = checker.getSymbolAtLocation(expression);
+            if (expression.text === 'undefined' && !symbol?.declarations?.length)
+                return true;
+            if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+                symbol = checker.getAliasedSymbol(symbol);
+            if (!symbol || symbols.has(symbol))
+                return undefined;
+            const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+            const declaration = declarations.length === 1 ? declarations[0] : undefined;
+            if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+                || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+                || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+                return undefined;
+            symbols.add(symbol);
+            return staticUndefined(declaration.initializer, symbols, depth + 1);
+        };
+        let steps = 0;
+        while (expressions.length > 0) {
+            check();
+            if (steps >= 256)
+                return true;
+            steps += 1;
+            let node = expressions.pop();
+            while (typescript_1.default.isParenthesizedExpression(node) || typescript_1.default.isAsExpression(node)
+                || typescript_1.default.isTypeAssertionExpression(node) || typescript_1.default.isSatisfiesExpression(node)
+                || typescript_1.default.isNonNullExpression(node))
+                node = node.expression;
+            if ((typescript_1.default.isPropertyAccessExpression(node) || typescript_1.default.isElementAccessExpression(node))) {
+                const object = resolveConstObject(node.expression, checker, projectSources, check);
+                const receiverSymbol = rootSymbolAt(node.expression);
+                const mutableReceiverDeclaration = receiverSymbol?.declarations?.find((declaration) => (typescript_1.default.isVariableDeclaration(declaration)
+                    && projectSources.has(declaration.getSourceFile())
+                    && typescript_1.default.isVariableDeclarationList(declaration.parent)
+                    && !(declaration.parent.flags & typescript_1.default.NodeFlags.Const)));
+                const mutableObjectReceiver = Boolean(mutableReceiverDeclaration && receiverSymbol && (unresolvedAssignments.has(receiverSymbol)
+                    || [
+                        ...(mutableReceiverDeclaration.initializer ? [mutableReceiverDeclaration.initializer] : []),
+                        ...(assignedValues.get(receiverSymbol) ?? []),
+                    ].some(candidateContainsBootstrapAccess)));
+                if (mutableObjectReceiver)
+                    return true;
+                if (object && receiverSymbol && (aliasSetHas(unstableContainers, receiverSymbol)
+                    || aliasSetHas(escapedSymbols, receiverSymbol)
+                    || unresolvedAssignments.has(receiverSymbol)))
+                    return true;
+                const memberSymbol = symbolAt(typescript_1.default.isPropertyAccessExpression(node) ? node.name : node);
+                if (object && memberSymbol && unresolvedAssignments.has(memberSymbol))
+                    return true;
+                if (memberSymbol) {
+                    expressions.push(...(assignedValues.get(memberSymbol) ?? []));
+                    for (const declaration of memberSymbol.declarations ?? []) {
+                        if (typescript_1.default.isPropertyDeclaration(declaration) && declaration.initializer
+                            && projectSources.has(declaration.getSourceFile())) {
+                            expressions.push(declaration.initializer);
+                        }
+                    }
+                }
+                const method = typescript_1.default.isPropertyAccessExpression(node) ? node.name.text
+                    : node.argumentExpression
+                        ? (0, decorator_symbols_1.resolveStaticPropertyKey)(node.argumentExpression, checker, check) : undefined;
+                const canonicalReceiver = (0, decorator_symbols_1.containsStaticSymbolFrom)(node.expression, checker, check, '@nestjs/core', 'NestFactory', projectSources);
+                if (canonicalReceiver && (method === undefined || method === 'create'
+                    || method === 'createApplicationContext' || method === 'createMicroservice'))
+                    return true;
+                if (method !== undefined) {
+                    if (object) {
+                        expressions.push(...effectiveObjectProperty(object, method, checker, projectSources, check).candidates);
+                    }
+                }
+                else {
+                    if (object && includeContainers)
+                        expressions.push(object);
+                }
+                continue;
+            }
+            if (typescript_1.default.isIdentifier(node)) {
+                let symbol = checker.getSymbolAtLocation(node);
+                if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias) {
+                    symbol = checker.getAliasedSymbol(symbol);
+                }
+                const bound = symbol ? parameterBindings.get(symbol) : undefined;
+                if (bound) {
+                    expressions.push(...bound);
+                    continue;
+                }
+                if (!symbol || seen.has(symbol))
+                    continue;
+                seen.add(symbol);
+                if (!asValue && symbol.declarations?.some((declaration) => (typescript_1.default.isFunctionDeclaration(declaration) && projectSources.has(declaration.getSourceFile()))))
+                    continue;
+                if (includeContainers && (aliasSetHas(unstableContainers, symbol)
+                    || aliasSetHas(escapedSymbols, symbol)
+                    || aliasSetHas(unresolvedAssignments, symbol)))
+                    return true;
+                for (const declaration of symbol.declarations ?? []) {
+                    if (typescript_1.default.isVariableDeclaration(declaration) && declaration.initializer
+                        && projectSources.has(declaration.getSourceFile()))
+                        expressions.push(declaration.initializer);
+                    if (asValue && typescript_1.default.isFunctionDeclaration(declaration) && declaration.body
+                        && projectSources.has(declaration.getSourceFile()) && (candidateContainsBootstrapAccess(declaration.body)
+                        || declaration.parameters.some(({ initializer }) => (!!initializer && candidateContainsBootstrapAccess(initializer)))))
+                        return true;
+                    if (typescript_1.default.isBindingElement(declaration)
+                        && typescript_1.default.isObjectBindingPattern(declaration.parent)) {
+                        const variable = declaration.parent.parent;
+                        const key = declaration.propertyName
+                            ? typescript_1.default.isIdentifier(declaration.propertyName) ? declaration.propertyName.text
+                                : (0, decorator_symbols_1.resolveStaticPropertyKey)(typescript_1.default.isComputedPropertyName(declaration.propertyName)
+                                    ? declaration.propertyName.expression : declaration.propertyName, checker, check)
+                            : typescript_1.default.isIdentifier(declaration.name) ? declaration.name.text : undefined;
+                        const canonicalReceiver = typescript_1.default.isVariableDeclaration(variable)
+                            && variable.initializer && (0, decorator_symbols_1.containsStaticSymbolFrom)(variable.initializer, checker, check, '@nestjs/core', 'NestFactory', projectSources);
+                        if (canonicalReceiver && (key === undefined || key === 'create'
+                            || key === 'createApplicationContext' || key === 'createMicroservice'))
+                            return true;
+                    }
+                }
+                expressions.push(...(assignedValues.get(symbol) ?? []));
+                continue;
+            }
+            if (typescript_1.default.isCallExpression(node)) {
+                let callee = node.expression;
+                while (typescript_1.default.isParenthesizedExpression(callee) || typescript_1.default.isAsExpression(callee)
+                    || typescript_1.default.isTypeAssertionExpression(callee) || typescript_1.default.isSatisfiesExpression(callee)
+                    || typescript_1.default.isNonNullExpression(callee))
+                    callee = callee.expression;
+                if (typescript_1.default.isIdentifier(callee)) {
+                    let symbol = checker.getSymbolAtLocation(callee);
+                    if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias) {
+                        symbol = checker.getAliasedSymbol(symbol);
+                    }
+                    for (const declaration of symbol?.declarations ?? []) {
+                        if (!projectSources.has(declaration.getSourceFile()))
+                            continue;
+                        const callable = typescript_1.default.isFunctionDeclaration(declaration) ? declaration
+                            : typescript_1.default.isVariableDeclaration(declaration) && declaration.initializer
+                                && (typescript_1.default.isArrowFunction(declaration.initializer)
+                                    || typescript_1.default.isFunctionExpression(declaration.initializer))
+                                ? declaration.initializer : undefined;
+                        if (!callable?.body)
+                            continue;
+                        const bootstrapEvidence = candidateContainsBootstrapAccess(callable.body)
+                            || callable.parameters.some(({ initializer }) => (!!initializer && candidateContainsBootstrapAccess(initializer))) || node.arguments.some((argument) => candidateContainsBootstrapAccess(argument));
+                        if (callable.modifiers?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.AsyncKeyword)
+                            || ('asteriskToken' in callable && callable.asteriskToken)) {
+                            if (bootstrapEvidence)
+                                return true;
+                            continue;
+                        }
+                        for (const [index, parameter] of callable.parameters.entries()) {
+                            if (!typescript_1.default.isIdentifier(parameter.name) || parameter.dotDotDotToken)
+                                return true;
+                            const parameterSymbol = checker.getSymbolAtLocation(parameter.name);
+                            if (!parameterSymbol)
+                                return true;
+                            if (aliasSetHas(reassignedSymbols, parameterSymbol)
+                                || aliasSetHas(unresolvedAssignments, parameterSymbol)) {
+                                if (bootstrapEvidence)
+                                    return true;
+                                continue;
+                            }
+                            const argument = node.arguments[index];
+                            let actual = argument && !typescript_1.default.isSpreadElement(argument) ? argument : undefined;
+                            const isUndefined = actual ? staticUndefined(actual) : true;
+                            const valuesToBind = [
+                                ...(actual && isUndefined !== true ? [actual] : []),
+                                ...(parameter.initializer && isUndefined !== false ? [parameter.initializer] : []),
+                            ];
+                            for (const value of valuesToBind) {
+                                const values = parameterBindings.get(parameterSymbol) ?? [];
+                                values.push(value);
+                                parameterBindings.set(parameterSymbol, values);
+                            }
+                        }
+                        if (!typescript_1.default.isBlock(callable.body)) {
+                            expressions.push(callable.body);
+                            continue;
+                        }
+                        const returns = [...callable.body.statements];
+                        while (returns.length > 0) {
+                            check();
+                            const current = returns.pop();
+                            if (typescript_1.default.isReturnStatement(current) && current.expression
+                                && !staticallyUnreachable(current)) {
+                                expressions.push(current.expression);
+                            }
+                            else if (!typescript_1.default.isFunctionLike(current) && !typescript_1.default.isClassLike(current)) {
+                                typescript_1.default.forEachChild(current, (child) => { returns.push(child); });
+                            }
+                        }
+                    }
+                }
+                continue;
+            }
+            if (typescript_1.default.isAwaitExpression(node)) {
+                expressions.push(node.expression);
+                continue;
+            }
+            if (asValue && (typescript_1.default.isArrowFunction(node) || typescript_1.default.isFunctionExpression(node))) {
+                if (candidateContainsBootstrapAccess(node.body)
+                    || node.parameters.some(({ initializer }) => (!!initializer && candidateContainsBootstrapAccess(initializer))))
+                    return true;
+                continue;
+            }
+            if (typescript_1.default.isConditionalExpression(node)) {
+                const state = staticState(node.condition);
+                if (state.truthy !== false)
+                    expressions.push(node.whenTrue);
+                if (state.truthy !== true)
+                    expressions.push(node.whenFalse);
+            }
+            else if (typescript_1.default.isBinaryExpression(node)
+                && node.operatorToken.kind === typescript_1.default.SyntaxKind.CommaToken)
+                expressions.push(node.right);
+            else if (typescript_1.default.isBinaryExpression(node) && (node.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+                || node.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken
+                || node.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken)) {
+                const state = staticState(node.left);
+                if (node.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken) {
+                    if (state.truthy !== true)
+                        expressions.push(node.left);
+                    if (state.truthy !== false)
+                        expressions.push(node.right);
+                }
+                else if (node.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken) {
+                    if (state.truthy !== false)
+                        expressions.push(node.left);
+                    if (state.truthy !== true)
+                        expressions.push(node.right);
+                }
+                else {
+                    if (state.nullish !== true)
+                        expressions.push(node.left);
+                    if (state.nullish !== false)
+                        expressions.push(node.right);
+                }
+            }
+            else if (includeContainers && typescript_1.default.isObjectLiteralExpression(node)) {
+                for (const property of node.properties) {
+                    if (typescript_1.default.isPropertyAssignment(property))
+                        expressions.push(property.initializer);
+                    else if (typescript_1.default.isShorthandPropertyAssignment(property))
+                        expressions.push(property.name);
+                    else if (typescript_1.default.isSpreadAssignment(property)) {
+                        if (resolveConstObject(property.expression, checker, projectSources, check)) {
+                            expressions.push(property.expression);
+                        }
+                        else if (candidateContainsBootstrapAccess(property.expression))
+                            return true;
+                    }
+                    else if (typescript_1.default.isMethodDeclaration(property) || typescript_1.default.isAccessor(property)) {
+                        if (candidateContainsBootstrapAccess(property))
+                            return true;
+                        const returnedSymbols = new Set();
+                        const returnedCallableContainsBootstrap = (input, depth = 0) => {
+                            if (depth >= 64)
+                                return true;
+                            if (candidateContainsBootstrapAccess(input))
+                                return true;
+                            let expression = input;
+                            while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
+                                || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
+                                || typescript_1.default.isNonNullExpression(expression))
+                                expression = expression.expression;
+                            if (typescript_1.default.isIdentifier(expression)) {
+                                let symbol = checker.getSymbolAtLocation(expression);
+                                if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias) {
+                                    symbol = checker.getAliasedSymbol(symbol);
+                                }
+                                if (!symbol || returnedSymbols.has(symbol))
+                                    return false;
+                                returnedSymbols.add(symbol);
+                                if (unresolvedAssignments.has(symbol))
+                                    return true;
+                                const writes = assignedValues.get(symbol) ?? [];
+                                if (reassignedSymbols.has(symbol) && writes.length === 0)
+                                    return true;
+                                for (const value of writes) {
+                                    if (returnedCallableContainsBootstrap(value, depth + 1))
+                                        return true;
+                                }
+                                for (const declaration of symbol.declarations ?? []) {
+                                    if (!projectSources.has(declaration.getSourceFile()))
+                                        continue;
+                                    if (typescript_1.default.isBindingElement(declaration) && typescript_1.default.isObjectBindingPattern(declaration.parent)) {
+                                        const variable = declaration.parent.parent;
+                                        const key = declaration.propertyName
+                                            ? typescript_1.default.isIdentifier(declaration.propertyName) ? declaration.propertyName.text
+                                                : typescript_1.default.isComputedPropertyName(declaration.propertyName)
+                                                    ? (0, decorator_symbols_1.resolveStaticPropertyKey)(declaration.propertyName.expression, checker, check)
+                                                    : undefined
+                                            : typescript_1.default.isIdentifier(declaration.name) ? declaration.name.text : undefined;
+                                        if (typescript_1.default.isVariableDeclaration(variable) && variable.initializer
+                                            && (0, decorator_symbols_1.containsStaticSymbolFrom)(variable.initializer, checker, check, '@nestjs/core', 'NestFactory', projectSources) && (key === undefined || key === 'create'
+                                            || key === 'createApplicationContext' || key === 'createMicroservice'))
+                                            return true;
+                                    }
+                                    if (typescript_1.default.isVariableDeclaration(declaration) && declaration.initializer
+                                        && returnedCallableContainsBootstrap(declaration.initializer, depth + 1))
+                                        return true;
+                                    if (typescript_1.default.isFunctionDeclaration(declaration) && declaration.body) {
+                                        if (candidateContainsBootstrapAccess(declaration.body))
+                                            return true;
+                                        const declarationReturns = [...declaration.body.statements];
+                                        while (declarationReturns.length > 0) {
+                                            const nested = declarationReturns.pop();
+                                            if (typescript_1.default.isReturnStatement(nested) && nested.expression
+                                                && !staticallyUnreachable(nested)
+                                                && returnedCallableContainsBootstrap(nested.expression, depth + 1))
+                                                return true;
+                                            if (!typescript_1.default.isFunctionLike(nested) && !typescript_1.default.isClassLike(nested)) {
+                                                typescript_1.default.forEachChild(nested, (child) => { declarationReturns.push(child); });
+                                            }
+                                        }
+                                    }
+                                }
+                                return false;
+                            }
+                            if (typescript_1.default.isPropertyAccessExpression(expression) || typescript_1.default.isElementAccessExpression(expression)) {
+                                const member = symbolAt(typescript_1.default.isPropertyAccessExpression(expression)
+                                    ? expression.name : expression);
+                                if (member && unresolvedAssignments.has(member))
+                                    return true;
+                                for (const value of member ? assignedValues.get(member) ?? [] : []) {
+                                    if (returnedCallableContainsBootstrap(value, depth + 1))
+                                        return true;
+                                }
+                                for (const declaration of member?.declarations ?? []) {
+                                    if (typescript_1.default.isPropertyDeclaration(declaration) && declaration.initializer
+                                        && projectSources.has(declaration.getSourceFile())
+                                        && returnedCallableContainsBootstrap(declaration.initializer, depth + 1))
+                                        return true;
+                                }
+                                const key = typescript_1.default.isPropertyAccessExpression(expression) ? expression.name.text
+                                    : expression.argumentExpression
+                                        ? (0, decorator_symbols_1.resolveStaticPropertyKey)(expression.argumentExpression, checker, check) : undefined;
+                                const receiver = rootSymbolAt(expression.expression);
+                                if (key === undefined || (receiver && (unresolvedAssignments.has(receiver)
+                                    || aliasSetHas(escapedSymbols, receiver)
+                                    || aliasSetHas(unstableContainers, receiver))))
+                                    return true;
+                                const receiverDeclarations = receiver?.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+                                let immediateReceiver = expression.expression;
+                                while (typescript_1.default.isParenthesizedExpression(immediateReceiver)
+                                    || typescript_1.default.isAsExpression(immediateReceiver)
+                                    || typescript_1.default.isTypeAssertionExpression(immediateReceiver)
+                                    || typescript_1.default.isSatisfiesExpression(immediateReceiver)
+                                    || typescript_1.default.isNonNullExpression(immediateReceiver))
+                                    immediateReceiver = immediateReceiver.expression;
+                                const nestedReceiver = typescript_1.default.isPropertyAccessExpression(immediateReceiver)
+                                    || typescript_1.default.isElementAccessExpression(immediateReceiver);
+                                const receiverValues = nestedReceiver ? [immediateReceiver] : [
+                                    ...(receiver ? [] : [immediateReceiver]),
+                                    ...receiverDeclarations.flatMap(({ initializer }) => initializer ? [initializer] : []),
+                                    ...(receiver ? assignedValues.get(receiver) ?? [] : []),
+                                ];
+                                const resolveReceiverObjects = (input, objectDepth = 0) => {
+                                    if (objectDepth >= 64)
+                                        return [];
+                                    let candidate = input;
+                                    while (typescript_1.default.isParenthesizedExpression(candidate) || typescript_1.default.isAsExpression(candidate)
+                                        || typescript_1.default.isTypeAssertionExpression(candidate) || typescript_1.default.isSatisfiesExpression(candidate)
+                                        || typescript_1.default.isNonNullExpression(candidate))
+                                        candidate = candidate.expression;
+                                    const direct = resolveConstObject(candidate, checker, projectSources, check);
+                                    if (direct)
+                                        return [direct];
+                                    if (!typescript_1.default.isPropertyAccessExpression(candidate)
+                                        && !typescript_1.default.isElementAccessExpression(candidate))
+                                        return [];
+                                    const propertyKey = typescript_1.default.isPropertyAccessExpression(candidate) ? candidate.name.text
+                                        : candidate.argumentExpression
+                                            ? (0, decorator_symbols_1.resolveStaticPropertyKey)(candidate.argumentExpression, checker, check) : undefined;
+                                    if (propertyKey === undefined)
+                                        return [];
+                                    const objects = [];
+                                    for (const object of resolveReceiverObjects(candidate.expression, objectDepth + 1)) {
+                                        const property = effectiveObjectProperty(object, propertyKey, checker, projectSources, check);
+                                        for (const candidate of property.candidates) {
+                                            objects.push(...resolveReceiverObjects(candidate, objectDepth + 1));
+                                        }
+                                    }
+                                    return objects;
+                                };
+                                for (const value of receiverValues) {
+                                    const objects = resolveReceiverObjects(value);
+                                    if (objects.length === 0)
+                                        return true;
+                                    for (const object of objects) {
+                                        const property = effectiveObjectProperty(object, key, checker, projectSources, check);
+                                        if (!property.present || property.accessor || property.candidates.length === 0)
+                                            return true;
+                                        for (const candidate of property.candidates) {
+                                            if (returnedCallableContainsBootstrap(candidate, depth + 1))
+                                                return true;
+                                        }
+                                    }
+                                }
+                                return false;
+                            }
+                            if (!typescript_1.default.isArrowFunction(expression) && !typescript_1.default.isFunctionExpression(expression))
+                                return false;
+                            if (!typescript_1.default.isBlock(expression.body)) {
+                                return returnedCallableContainsBootstrap(expression.body, depth + 1);
+                            }
+                            const nestedReturns = [...expression.body.statements];
+                            while (nestedReturns.length > 0) {
+                                const nested = nestedReturns.pop();
+                                if (typescript_1.default.isReturnStatement(nested) && nested.expression
+                                    && !staticallyUnreachable(nested)
+                                    && returnedCallableContainsBootstrap(nested.expression, depth + 1))
+                                    return true;
+                                if (!typescript_1.default.isFunctionLike(nested) && !typescript_1.default.isClassLike(nested)) {
+                                    typescript_1.default.forEachChild(nested, (child) => { nestedReturns.push(child); });
+                                }
+                            }
+                            return false;
+                        };
+                        if (property.body) {
+                            const returns = [...property.body.statements];
+                            while (returns.length > 0) {
+                                const returned = returns.pop();
+                                if (typescript_1.default.isReturnStatement(returned) && returned.expression
+                                    && !staticallyUnreachable(returned)
+                                    && returnedCallableContainsBootstrap(returned.expression))
+                                    return true;
+                                if (!typescript_1.default.isFunctionLike(returned) && !typescript_1.default.isClassLike(returned)) {
+                                    typescript_1.default.forEachChild(returned, (child) => { returns.push(child); });
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            else if (includeContainers && typescript_1.default.isArrayLiteralExpression(node)) {
+                for (const element of node.elements) {
+                    if (!typescript_1.default.isOmittedExpression(element)) {
+                        expressions.push(typescript_1.default.isSpreadElement(element) ? element.expression : element);
+                    }
+                }
+            }
+        }
+        return false;
+    };
+    for (const sourceFile of projectSources) {
+        const nodes = [sourceFile];
+        while (nodes.length > 0) {
+            const node = nodes.pop();
+            check();
+            if (typescript_1.default.isCallExpression(node) && node.arguments[0] && !staticallyUnreachable(node)) {
+                const callee = node.expression;
+                const method = typescript_1.default.isPropertyAccessExpression(callee) ? callee.name.text
+                    : typescript_1.default.isElementAccessExpression(callee) && callee.argumentExpression
+                        ? (0, decorator_symbols_1.resolveStaticPropertyKey)(callee.argumentExpression, checker, check) : undefined;
+                if ((method === 'create' || method === 'createApplicationContext'
+                    || method === 'createMicroservice')
+                    && (typescript_1.default.isPropertyAccessExpression(callee) || typescript_1.default.isElementAccessExpression(callee))
+                    && (0, decorator_symbols_1.containsStaticSymbolFrom)(callee.expression, checker, check, '@nestjs/core', 'NestFactory', projectSources)) {
+                    const symbol = moduleSymbol(node.arguments[0]);
+                    if (symbol)
+                        roots.add(symbol);
+                    else
+                        moduleGraphComplete = false;
+                    for (let parent = node.parent; !typescript_1.default.isSourceFile(parent); parent = parent.parent) {
+                        if (typescript_1.default.isFunctionLike(parent)) {
+                            moduleGraphComplete = false;
+                            break;
+                        }
+                    }
+                }
+                else {
+                    const target = (typescript_1.default.isPropertyAccessExpression(callee)
+                        || typescript_1.default.isElementAccessExpression(callee)) ? callee.expression : undefined;
+                    const unwrappedTarget = target ? unwrapModuleExpression(target) : undefined;
+                    const dynamicTarget = Boolean(unwrappedTarget && typescript_1.default.isElementAccessExpression(unwrappedTarget)
+                        && (!unwrappedTarget.argumentExpression
+                            || (0, decorator_symbols_1.resolveStaticPropertyKey)(unwrappedTarget.argumentExpression, checker, check) === undefined));
+                    if ((method === 'call' || method === 'apply' || method === 'bind')
+                        && target && indirectBootstrapTarget(target, dynamicTarget))
+                        moduleGraphComplete = false;
+                    else {
+                        const unwrappedCallee = unwrapModuleExpression(callee);
+                        const dynamicCallee = typescript_1.default.isElementAccessExpression(unwrappedCallee)
+                            && (!unwrappedCallee.argumentExpression || (0, decorator_symbols_1.resolveStaticPropertyKey)(unwrappedCallee.argumentExpression, checker, check) === undefined);
+                        if (indirectBootstrapTarget(callee, dynamicCallee))
+                            moduleGraphComplete = false;
+                    }
+                }
+                for (const argument of node.arguments) {
+                    const candidate = typescript_1.default.isSpreadElement(argument) ? argument.expression : argument;
+                    if (indirectBootstrapTarget(candidate, false, true)
+                        || indirectBootstrapTarget(candidate, true, true)) {
+                        moduleGraphComplete = false;
+                    }
+                }
+            }
+            typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+        }
+    }
+    const activeModules = new Set(roots.size > 0 ? roots : modulesBySymbol.keys());
+    if (roots.size > 0) {
+        const pending = [...roots];
+        const visitedBaseClasses = new Set();
+        const activateInheritedModules = (node) => {
+            const classes = [node];
+            let steps = 0;
+            while (classes.length > 0) {
+                check();
+                if (steps >= 256) {
+                    moduleGraphComplete = false;
+                    return;
+                }
+                steps += 1;
+                for (const heritage of classes.pop().heritageClauses ?? []) {
+                    if (heritage.token !== typescript_1.default.SyntaxKind.ExtendsKeyword)
+                        continue;
+                    for (const type of heritage.types) {
+                        let symbol = checker.getSymbolAtLocation(type.expression);
+                        if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias) {
+                            symbol = checker.getAliasedSymbol(symbol);
+                        }
+                        const module = symbol ? modulesBySymbol.get(symbol) : undefined;
+                        if (module?.symbol && !activeModules.has(module.symbol)) {
+                            activeModules.add(module.symbol);
+                            pending.push(module.symbol);
+                            continue;
+                        }
+                        const localClass = symbol ? localClassesBySymbol.get(symbol) : undefined;
+                        if (symbol && localClass) {
+                            if (!visitedBaseClasses.has(symbol)) {
+                                visitedBaseClasses.add(symbol);
+                                classes.push(localClass);
+                            }
+                            continue;
+                        }
+                        moduleGraphComplete = false;
+                        if (isExternalModuleReference(type.expression)) {
+                            externalModuleImport ??= type.expression;
+                        }
+                    }
+                }
+            }
+        };
+        while (pending.length > 0) {
+            check();
+            const entry = modulesBySymbol.get(pending.pop());
+            if (entry)
+                activateInheritedModules(entry.node);
+            const metadataSymbol = entry?.metadataArgument
+                ? rootSymbolAt(entry.metadataArgument) : undefined;
+            if (metadataSymbol && (aliasSetHas(unstableContainers, metadataSymbol)
+                || aliasSetHas(escapedSymbols, metadataSymbol)
+                || aliasSetHas(containersWithAssignedImports, metadataSymbol)
+                || aliasSetHas(incompleteLocalCallImportSymbols, metadataSymbol)
+                || aliasSetHas(unresolvedAssignments, metadataSymbol)))
+                moduleGraphComplete = false;
+            if (!entry?.metadata) {
+                if (entry?.metadataArgument)
+                    moduleGraphComplete = false;
+                continue;
+            }
+            const imports = effectiveObjectProperty(entry.metadata, 'imports', checker, projectSources, check);
+            const importsSymbol = checker.getTypeAtLocation(entry.metadata).getProperty('imports');
+            if (importsSymbol && (reassignedSymbols.has(importsSymbol)
+                || unresolvedAssignments.has(importsSymbol)
+                || aliasSetHas(unstableContainers, importsSymbol)
+                || aliasSetHas(escapedSymbols, importsSymbol)
+                || aliasSetHas(incompleteLocalCallImportSymbols, importsSymbol)
+                || assignedValues.has(importsSymbol)))
+                moduleGraphComplete = false;
+            if (imports.candidates.some((candidate) => {
+                const symbol = rootSymbolAt(candidate);
+                return Boolean(symbol && (aliasSetHas(unstableContainers, symbol)
+                    || aliasSetHas(escapedSymbols, symbol)
+                    || aliasSetHas(incompleteLocalCallImportSymbols, symbol)
+                    || aliasSetHas(unresolvedAssignments, symbol)));
+            }))
+                moduleGraphComplete = false;
+            if (imports.candidates.some((candidate) => (mutatedContainerExpressions.has(unwrapModuleExpression(candidate))
+                || mutatedDynamicExpressions.has(unwrapModuleExpression(candidate)))))
+                moduleGraphComplete = false;
+            const expressions = [...imports.candidates];
+            while (expressions.length > 0) {
+                const expression = expressions.pop();
+                const unwrapped = unwrapModuleExpression(expression);
+                if (typescript_1.default.isArrayLiteralExpression(unwrapped)) {
+                    for (const element of unwrapped.elements) {
+                        if (!typescript_1.default.isOmittedExpression(element)) {
+                            expressions.push(typescript_1.default.isSpreadElement(element) ? element.expression : element);
+                        }
+                    }
+                    continue;
+                }
+                if (typescript_1.default.isConditionalExpression(unwrapped)) {
+                    expressions.push(unwrapped.whenTrue, unwrapped.whenFalse);
+                    continue;
+                }
+                const symbol = moduleSymbol(unwrapped);
+                if (symbol && !activeModules.has(symbol)) {
+                    activeModules.add(symbol);
+                    pending.push(symbol);
+                }
+                else if (!symbol)
+                    moduleGraphComplete = false;
+            }
+        }
+    }
+    if (!moduleGraphComplete) {
+        for (const symbol of modulesBySymbol.keys())
+            activeModules.add(symbol);
+    }
+    for (const entry of moduleEntries) {
+        if (entry.symbol && !activeModules.has(entry.symbol))
+            continue;
+        const { metadataArgument, metadata } = entry;
+        if (!metadata) {
+            if (metadataArgument)
+                candidates.push(metadataArgument);
+            continue;
+        }
+        const effectiveProviders = effectiveObjectProperty(metadata, 'providers', checker, projectSources, check);
+        for (const providerExpression of effectiveProviders.candidates) {
+            if (!collect(providerExpression, new Set(), 0))
+                candidates.push(providerExpression);
+            if (!unresolvedProvider && isExternalProviderReference(providerExpression)) {
+                unresolvedProvider = providerExpression;
+            }
+        }
+        const effectiveImports = effectiveObjectProperty(metadata, 'imports', checker, projectSources, check);
+        externalModuleImport ??= effectiveImports.candidates.find((candidate) => (isExternalModuleReference(candidate)));
     }
     return { providers, candidates, unresolvedProvider, externalModuleImport };
 }
@@ -3199,6 +4629,7 @@ async function analyze(context, authConfig) {
             const node = nodes.pop();
             await checkpoint();
             if (typescript_1.default.isCallExpression(node)
+                && !staticallyUnreachable(node)
                 && (0, decorator_symbols_1.isNestJsUseGlobalGuardsCall)(node, checker, check, projectSources)) {
                 if (!globalGuardFound)
                     addDiagnostic('SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED', node.expression);
