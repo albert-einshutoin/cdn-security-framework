@@ -76,6 +76,20 @@ would block only in enforce mode is not reported as an enforce-mode Error.
 | `SC-AUTHN-005` | Warning | Explicit OpenAPI auth contradicts high-confidence Source decorator metadata. Unknown metadata is not reported; partial route identity lowers confidence to heuristic. |
 | `SC-AUTHZ-001` | Warning | Explicitly supplied privileged roles contradict high-confidence Source role metadata with complete authorization evidence. Partial route identity lowers confidence to heuristic. |
 
+## Source AST and Policy drift rules
+
+`compareSourcePolicyContracts(input)` compares statically detected Source operations with the selected target's Allowed Surface Model. It uses the existing route-relation engine, never treats unknown Guard metadata as public, and requires complete Source route coverage before absence becomes an Error.
+
+| Rule | Severity | Condition |
+| --- | --- | --- |
+| `SC-EXPOSURE-004` | Error; Warning in monitor mode | An implemented method is rejected by the effective Policy method set. |
+| `SC-EXPOSURE-005` | Error for a complete definite route; otherwise Warning | Policy permits methods not detected for a Source route or definitely covered route group. Prefix groups aggregate every definitely covered Source route. |
+| `SC-INVENTORY-005` | Error; Warning for partial Source inventory | An exact Policy route has no detected Source implementation. Broad prefixes never prove absence. |
+| `SC-AUTHN-006` | Error for explicit public plus Edge auth; Warning for mapped Source auth without Edge auth | High-confidence explicit Source auth metadata differs from an enforceable Edge gate. Unknown or unsupported comparisons emit no mismatch. |
+| `SC-AUTHZ-002` | Info with Edge auth; otherwise Warning | Explicit role metadata recommends a stricter Edge posture. Role metadata is not enforcement proof. |
+
+Both Source and Policy evidence are included. The comparator does not execute code, inspect Guard bodies, infer Global Guards, discover runtime routes, or modify Policy.
+
 See [Finding Exceptions](finding-exceptions.md) for the exception lifecycle and audit procedure.
 
 ### Authentication compatibility

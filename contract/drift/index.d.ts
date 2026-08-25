@@ -7,5 +7,6 @@ export { compareAuthContracts } from './authentication';
 export { comparePathMethodContracts } from './path-method';
 export { compareRequestContracts } from './request';
 export { compareSourceOpenApiContracts, type SourceOpenApiDriftInput, type SourceOpenApiDriftOptions, } from './source-openapi';
+export { compareSourcePolicyContracts, type SourcePolicyDriftInput, } from './source-policy';
 export type CompareSecurityContractsOptions = RequestDriftOptions;
 export declare function compareSecurityContracts(input: ContractDriftInput, options?: CompareSecurityContractsOptions): SecurityFindingV1[];
