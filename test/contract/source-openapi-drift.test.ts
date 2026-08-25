@@ -326,6 +326,9 @@ describe('Source AST and OpenAPI drift', () => {
     })).toEqual([expect.objectContaining({
       ruleId: 'SC-AUTHZ-001', severity: 'warning', category: 'authorization',
     })]);
+    expect(compareSourceOpenApiContracts(comparison, {
+      declaredPrivilegedRoles: Object.create({ 'GET /admin': ['admin'] }),
+    })).toEqual([]);
   });
 
   test('does not hide contradictions behind duplicate normalized Source routes', () => {

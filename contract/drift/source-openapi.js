@@ -234,6 +234,8 @@ function authorizationFindings(input, rolesByRoute, budget) {
     }));
     const findings = [];
     for (const declared of input.declared.operations) {
+        if (!Object.hasOwn(rolesByRoute, declared.routeKey))
+            continue;
         const roles = rolesByRoute[declared.routeKey];
         if (!roles)
             continue;

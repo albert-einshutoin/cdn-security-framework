@@ -266,6 +266,7 @@ function authorizationFindings(
   }));
   const findings: SecurityFindingV1[] = [];
   for (const declared of input.declared.operations) {
+    if (!Object.hasOwn(rolesByRoute, declared.routeKey)) continue;
     const roles = rolesByRoute[declared.routeKey];
     if (!roles) continue;
     const expected = [...new Set(roles)].sort();
