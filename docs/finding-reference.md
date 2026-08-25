@@ -73,8 +73,8 @@ would block only in enforce mode is not reported as an enforce-mode Error.
 | `SC-INVENTORY-001` | Error; Warning unless both inventories are complete | A statically detected Source operation has no same-shape OpenAPI route. |
 | `SC-INVENTORY-003` | Error; Warning for partial Source inventory | An OpenAPI operation has no statically detected same-shape Source route. |
 | `SC-INVENTORY-004` | Error; Warning unless both inventories are complete | The same normalized route shape has different HTTP method sets. |
-| `SC-AUTHN-005` | Warning | Explicit OpenAPI auth contradicts high-confidence Source decorator metadata. Unknown or incomplete metadata is not reported as a mismatch. |
-| `SC-AUTHZ-001` | Warning | Explicitly supplied privileged roles contradict high-confidence Source role metadata. |
+| `SC-AUTHN-005` | Warning | Explicit OpenAPI auth contradicts high-confidence Source decorator metadata. Unknown metadata is not reported; partial route identity lowers confidence to heuristic. |
+| `SC-AUTHZ-001` | Warning | Explicitly supplied privileged roles contradict high-confidence Source role metadata. Partial route identity lowers confidence to heuristic. |
 
 See [Finding Exceptions](finding-exceptions.md) for the exception lifecycle and audit procedure.
 

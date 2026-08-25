@@ -4,6 +4,7 @@ exports.compareSourceOpenApiContracts = compareSourceOpenApiContracts;
 const shared_1 = require("./shared");
 const MAX_COMPARISON_VISITS = 1_000_000;
 const SOURCE_SCOPE = 'Source metadata does not prove Guard runtime behavior.';
+const ROUTE_SCOPE = 'Route identity is incomplete because route analysis is partial.';
 function consumeComparison(budget, count) {
     if (!Number.isSafeInteger(count) || count < 0 || budget.remaining < count) {
         throw new Error('source OpenAPI drift comparison exceeds visit budget');
@@ -191,6 +192,8 @@ function authFindings(input, budget) {
         return [];
     const implemented = groupedByMethodShape(input.implemented.operations);
     const sourceAuth = new Map(input.implemented.operations.map((operation) => [operation, explicitSourceAuth(operation)]));
+    const routeComplete = input.declared.capabilities.routes === 'complete'
+        && input.implemented.capabilities.routes === 'complete';
     const findings = [];
     for (const declared of input.declared.operations) {
         const sources = implemented.get(`${declared.method} ${(0, shared_1.normalizedPathShape)(declared.path)}`) ?? [];
@@ -209,10 +212,10 @@ function authFindings(input, budget) {
         findings.push((0, shared_1.makeFinding)({
             ruleId: 'SC-AUTHN-005',
             severity: 'warning',
-            confidence: 'high-confidence',
+            confidence: routeComplete ? 'high-confidence' : 'heuristic',
             category: 'authentication',
             title: 'Declared authentication differs from Source metadata',
-            message: `Explicit OpenAPI authentication and high-confidence Source decorator metadata differ. ${SOURCE_SCOPE}`,
+            message: `Explicit OpenAPI authentication and high-confidence Source decorator metadata differ. ${SOURCE_SCOPE}${routeComplete ? '' : ` ${ROUTE_SCOPE}`}`,
             route: route(declared),
             expected,
             actual: { candidates: contradictions.map(({ actual }) => actual) },
@@ -234,6 +237,8 @@ function authorizationFindings(input, rolesByRoute, budget) {
         return [operation, analysis?.enforcementConfidence === 'high'
                 ? [...new Set(analysis.roles)].sort() : undefined];
     }));
+    const routeComplete = input.declared.capabilities.routes === 'complete'
+        && input.implemented.capabilities.routes === 'complete';
     const findings = [];
     for (const declared of input.declared.operations) {
         if (!Object.hasOwn(rolesByRoute, declared.routeKey))
@@ -254,10 +259,10 @@ function authorizationFindings(input, rolesByRoute, budget) {
         findings.push((0, shared_1.makeFinding)({
             ruleId: 'SC-AUTHZ-001',
             severity: 'warning',
-            confidence: 'high-confidence',
+            confidence: routeComplete ? 'high-confidence' : 'heuristic',
             category: 'authorization',
             title: 'Declared privileged roles differ from Source metadata',
-            message: `Explicit privileged-role configuration and high-confidence Source metadata differ. ${SOURCE_SCOPE}`,
+            message: `Explicit privileged-role configuration and high-confidence Source metadata differ. ${SOURCE_SCOPE}${routeComplete ? '' : ` ${ROUTE_SCOPE}`}`,
             route: route(declared),
             expected: { roles: expected },
             actual: { candidates: contradictions.map(({ actual }) => ({ roles: actual })) },

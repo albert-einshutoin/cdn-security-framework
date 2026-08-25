@@ -7,8 +7,8 @@
 - `SC-INVENTORY-001`（error / deterministic）: SourceとOpenAPIのroute inventoryが両方完全なとき、静的に検出した実装route shapeがOpenAPIに存在しない。どちらかのcapabilityが不完全ならheuristic warningへ落とす。
 - `SC-INVENTORY-003`（error / deterministic）: 宣言operationが、完全なSource route解析に存在しない。Source routes capabilityがpartial/unsupportedなら、未解決routeを不存在と断定せずheuristic warningへ落とす。
 - `SC-INVENTORY-004`（error / deterministic）: 同じ正規化route shapeでSourceとOpenAPIのmethod setが異なる。どちらかのroutes capabilityが不完全ならheuristic warningへ落とす。
-- `SC-AUTHN-005`（warning / high-confidence）: OpenAPIの明示public/authenticatedと、高confidenceなSourceの`Public`またはmapped Guard metadataが矛盾する。OpenAPIの複数authentication alternativeをAND集合へ平坦化しない。
-- `SC-AUTHZ-001`（warning / high-confidence）: 明示設定した`declaredPrivilegedRoles`と、高confidenceなSource role metadataが異なる。route名やtag名からprivilegeを推測しない。
+- `SC-AUTHN-005`（warning / high-confidence）: OpenAPIの明示public/authenticatedと、高confidenceなSourceの`Public`またはmapped Guard metadataが矛盾する。OpenAPIの複数authentication alternativeをAND集合へ平坦化しない。route identityがpartialならconfidenceをheuristicへ落とす。
+- `SC-AUTHZ-001`（warning / high-confidence）: 明示設定した`declaredPrivilegedRoles`と、高confidenceなSource role metadataが異なる。route名やtag名からprivilegeを推測しない。route identityがpartialならconfidenceをheuristicへ落とす。
 
 比較する両rootにはEvidenceが必要です。対応operationのFindingは双方のoperation evidenceを持ち、不存在Findingは存在するoperation evidenceと、不存在側のroot evidenceを組み合わせます。
 

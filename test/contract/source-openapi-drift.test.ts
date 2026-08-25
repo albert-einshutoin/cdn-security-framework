@@ -190,6 +190,11 @@ describe('Source AST and OpenAPI drift', () => {
       'SC-AUTHN-005:/public',
     ]);
     expect(findings[0]?.message).toContain('does not prove Guard runtime behavior');
+    expect(compareSourceOpenApiContracts(input(
+      [publicDeclared], [guardedSource], { routes: 'partial' },
+    ))).toEqual([expect.objectContaining({
+      ruleId: 'SC-AUTHN-005', confidence: 'heuristic',
+    })]);
   });
 
   test('matches Source auth against each OpenAPI alternative', () => {
@@ -336,6 +341,15 @@ describe('Source AST and OpenAPI drift', () => {
     expect(compareSourceOpenApiContracts(comparison, {
       declaredPrivilegedRoles: Object.create({ 'GET /admin': ['admin'] }),
     })).toEqual([]);
+    expect(compareSourceOpenApiContracts(input(
+      comparison.declared.operations,
+      [source],
+      { routes: 'partial' },
+    ), {
+      declaredPrivilegedRoles: { 'GET /admin': ['admin'] },
+    })).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ruleId: 'SC-AUTHZ-001', confidence: 'heuristic' }),
+    ]));
   });
 
   test('does not hide contradictions behind duplicate normalized Source routes', () => {
