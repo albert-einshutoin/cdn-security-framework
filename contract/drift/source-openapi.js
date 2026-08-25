@@ -128,7 +128,10 @@ function inventoryFindings(input) {
                 route: { path: declaredOperations[0].path },
                 expected: { methods: declaredMethods },
                 actual: { methods: implementedMethods },
-                evidence: [...declaredOperations[0].provenance, ...implementedOperations[0].provenance],
+                evidence: [
+                    ...declaredOperations.flatMap(({ provenance }) => provenance),
+                    ...implementedOperations.flatMap(({ provenance }) => provenance),
+                ],
                 remediation: { summary: 'Align the implemented and declared HTTP method sets.', safeAutoFix: false },
             }));
     }
@@ -153,7 +156,7 @@ function explicitDeclaredAuth(operation) {
         return undefined;
     return {
         mode: 'authenticated',
-        ...(operation.auth.alternatives.length === 1 ? { kinds: [...new Set(operation.auth.alternatives[0].schemes.map(({ kind }) => kind))].sort() } : {}),
+        alternatives: operation.auth.alternatives.map(({ schemes }) => [...new Set(schemes.map(({ kind }) => kind))].sort()),
     };
 }
 function groupedByMethodShape(operations) {
@@ -168,7 +171,7 @@ function groupedByMethodShape(operations) {
 }
 function authMatches(expected, actual) {
     return expected.mode === actual.mode && (expected.mode === 'public'
-        || expected.kinds === undefined || expected.kinds.join('\0') === actual.kinds.join('\0'));
+        || expected.alternatives.some((kinds) => sameStrings(kinds, actual.kinds)));
 }
 function sameStrings(left, right) {
     return left.length === right.length && left.every((value, index) => value === right[index]);

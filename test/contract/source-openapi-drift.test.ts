@@ -130,15 +130,27 @@ describe('Source AST and OpenAPI drift', () => {
   });
 
   test('reports one method-set mismatch without duplicate inventory findings', () => {
+    const declaredGet = operation('openapi', 'GET', '/users/{id}', {
+      provenance: [{
+        ...operation('openapi', 'GET', '/users/{id}').provenance[0], pointer: '/paths/users/get',
+      }],
+    });
+    const declaredPost = operation('openapi', 'POST', '/users/{id}', {
+      provenance: [{
+        ...operation('openapi', 'POST', '/users/{id}').provenance[0], pointer: '/paths/users/post',
+      }],
+    });
     const findings = compareSourceOpenApiContracts(input(
-      [operation('openapi', 'POST', '/users/{id}')],
+      [declaredGet, declaredPost],
       [operation('source-ast', 'GET', '/users/{userId}')],
     ));
 
     expect(findings).toEqual([expect.objectContaining({
       ruleId: 'SC-INVENTORY-004', severity: 'error',
-      expected: { methods: ['POST'] }, actual: { methods: ['GET'] },
+      expected: { methods: ['GET', 'POST'] }, actual: { methods: ['GET'] },
     })]);
+    expect(findings[0].evidence.map(({ pointer }) => pointer))
+      .toEqual(['/paths/users/get', '/paths/users/post', '/controllers/0']);
   });
 
   test('reports only explicit high-confidence authentication contradictions', () => {
@@ -171,6 +183,38 @@ describe('Source AST and OpenAPI drift', () => {
       'SC-AUTHN-005:/public',
     ]);
     expect(findings[0]?.message).toContain('does not prove Guard runtime behavior');
+  });
+
+  test('matches Source auth against each OpenAPI alternative', () => {
+    const declared = operation('openapi', 'GET', '/choice', {
+      exposure: 'authenticated',
+      auth: {
+        mode: 'alternatives',
+        alternatives: [
+          bearerAuth.alternatives[0],
+          {
+            anonymous: false,
+            schemes: [{
+              name: 'key', kind: 'api-key', scopes: [], capability: 'supported',
+              location: 'header', parameterName: 'x-api-key',
+            }],
+          },
+        ],
+      },
+    });
+    const basicSource = operation('source-ast', 'GET', '/choice', {
+      exposure: 'authenticated',
+      auth: {
+        ...sourceBearerAuth,
+        analysis: {
+          ...sourceBearerAuth.analysis,
+          guards: [{ symbol: 'BasicAuthGuard', authKind: 'basic' }],
+        },
+      },
+    });
+
+    expect(compareSourceOpenApiContracts(input([declared], [basicSource]))
+      .map(({ ruleId }) => ruleId)).toContain('SC-AUTHN-005');
   });
 
   test('compares privileged roles only when explicit configuration is supplied', () => {
