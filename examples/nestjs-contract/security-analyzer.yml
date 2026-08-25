@@ -1,0 +1,7 @@
+public_decorators:
+  - Public
+roles_decorators:
+  - Roles
+guard_mappings:
+  JwtAuthGuard:
+    auth_kind: bearer

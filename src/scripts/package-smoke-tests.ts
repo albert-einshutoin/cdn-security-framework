@@ -185,6 +185,11 @@ function assertPackageContents(pack: PackResult) {
     'examples/openapi/README.md',
     'examples/openapi/README.ja.md',
     'examples/openapi/openapi.yaml',
+    'examples/nestjs-contract/run-analysis.cjs',
+    'examples/nestjs-contract/tsconfig.json',
+    'examples/nestjs-contract/openapi.yaml',
+    'examples/nestjs-contract/policy/security.yml',
+    'examples/nestjs-contract/stubs/nestjs-common/index.d.ts',
     'examples/github-actions/contract-diff.yml',
     'examples/github-actions/fixtures/openapi.yaml',
     'examples/github-actions/fixtures/policy.yml',
@@ -283,6 +288,13 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(result.ok, true, result.errors.join('\\n'));
     `;
     run(process.execPath, ['-e', apiSmoke], { cwd: installDir, stdio: 'inherit' });
+
+    const nestReport = JSON.parse(run(process.execPath, [
+      path.join(installedRoot, 'examples', 'nestjs-contract', 'run-analysis.cjs'),
+    ], { cwd: installDir }));
+    assert.strictEqual(nestReport.schemaVersion, 1);
+    assert.deepStrictEqual(nestReport.diagnostics, ['SOURCE_ANALYZER_DYNAMIC_ROUTE']);
+    assert.strictEqual(nestReport.operations.length, 6);
 
     const cliPath = path.join(installDir, 'node_modules', '.bin', 'cdn-security');
     const version = run(cliPath, ['--version'], { cwd: installDir }).trim();

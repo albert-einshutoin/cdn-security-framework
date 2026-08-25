@@ -1,0 +1,18 @@
+# yaml-language-server: $schema=../../../policy/schema.json
+version: 1
+project: nestjs-contract-example
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, POST]
+  block:
+    header_missing: []
+routes:
+  - name: user-detail
+    match:
+      path_prefixes: ["/users/:id"]
+    auth_gate:
+      type: signed_url
+      secret_env: EXAMPLE_SIGNING_KEY
+      exact_path: true
+response_headers: {}
