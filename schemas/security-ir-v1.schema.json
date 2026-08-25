@@ -213,6 +213,21 @@
                         "required": ["anonymous"],
                         "properties": { "anonymous": { "const": true } }
                       }
+                    },
+                    "items": {
+                      "type": "object",
+                      "properties": {
+                        "schemes": {
+                          "type": "array",
+                          "items": {
+                            "type": "object",
+                            "properties": {
+                              "kind": { "not": { "const": "unknown" } },
+                              "capability": { "const": "supported" }
+                            }
+                          }
+                        }
+                      }
                     }
                   },
                   "analysis": {

@@ -441,7 +441,9 @@ function normalizeAuth(input: ApiAuthenticationContractV1, state: NormalizationS
       || (input.mode === 'alternatives' && !analysis.explicitPublic && guards.length > 0
         && guards.every(({ authKind }) => authKind !== undefined && authKind !== 'unknown')
         && canonicalAlternatives.length > 0
-        && canonicalAlternatives.every(({ anonymous }) => !anonymous));
+        && canonicalAlternatives.every(({ anonymous, schemes }) => !anonymous
+          && schemes.every(({ kind, capability }) => kind !== 'unknown'
+            && capability === 'supported')));
     if (analysis.enforcementConfidence === 'high' && !highConfidenceMatchesMode) {
       throw new Error('authentication mode and analysis confidence are inconsistent');
     }

@@ -223,6 +223,20 @@ describe('Security IR v1', () => {
     ];
     expect(() => createSecurityContract(optionalAuth))
       .toThrow('authentication mode and analysis confidence are inconsistent');
+    const unsupportedScheme = structuredClone(optionalAuth);
+    unsupportedScheme.operations[0].auth.alternatives = [{
+      anonymous: false,
+      schemes: [{
+        name: 'digest', kind: 'unknown', scopes: [], capability: 'unsupported',
+        unsupportedReason: 'http-scheme:digest',
+      }],
+    }];
+    expect(() => createSecurityContract(unsupportedScheme))
+      .toThrow('authentication mode and analysis confidence are inconsistent');
+    const knownUnsupportedScheme = structuredClone(unsupportedScheme);
+    knownUnsupportedScheme.operations[0].auth.alternatives[0].schemes[0].kind = 'bearer';
+    expect(() => createSecurityContract(knownUnsupportedScheme))
+      .toThrow('authentication mode and analysis confidence are inconsistent');
     const unknownKind = structuredClone(input);
     unknownKind.operations[0].auth.analysis!.explicitPublic = false;
     unknownKind.operations[0].auth.analysis!.guards[0].authKind = 'unknown';
@@ -237,6 +251,15 @@ describe('Security IR v1', () => {
     const schemaOnlyUnknownKind = structuredClone(contract);
     schemaOnlyUnknownKind.operations[1].auth = structuredClone(unknownKind.operations[0].auth);
     expect(validate(schemaOnlyUnknownKind)).toBe(false);
+    const schemaOnlyUnsupportedScheme = structuredClone(contract);
+    schemaOnlyUnsupportedScheme.operations[1].auth = structuredClone(
+      unsupportedScheme.operations[0].auth,
+    );
+    expect(validate(schemaOnlyUnsupportedScheme)).toBe(false);
+    schemaOnlyUnsupportedScheme.operations[1].auth = structuredClone(
+      knownUnsupportedScheme.operations[0].auth,
+    );
+    expect(validate(schemaOnlyUnsupportedScheme)).toBe(false);
     const secretRole = structuredClone(input);
     secretRole.operations[0].auth.analysis!.roles = ['secret=do-not-emit'];
     expect(() => createSecurityContract(secretRole)).toThrow('secret-like value is not allowed');
