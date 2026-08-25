@@ -14,6 +14,10 @@ export {
   type SourceOpenApiDriftInput,
   type SourceOpenApiDriftOptions,
 } from './source-openapi';
+export {
+  compareSourcePolicyContracts,
+  type SourcePolicyDriftInput,
+} from './source-policy';
 
 export type CompareSecurityContractsOptions = RequestDriftOptions;
 

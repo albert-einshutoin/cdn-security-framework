@@ -74,6 +74,20 @@ Policy Capabilityの実効範囲が異なるため、Targetは必須です。Mon
 | `SC-AUTHN-005` | Warning | OpenAPIの明示AuthとHigh-confidenceなSource Decorator Metadataが矛盾する。Unknown Metadataは不一致として報告せず、Route IdentityがPartialならConfidenceをHeuristicへ落とす。 |
 | `SC-AUTHZ-001` | Warning | 明示指定したPrivileged Roleと完全なAuthorization Evidenceを持つHigh-confidenceなSource Role Metadataが矛盾する。Route IdentityがPartialならConfidenceをHeuristicへ落とす。 |
 
+## Source ASTとPolicyのDrift Rule
+
+`compareSourcePolicyContracts(input)`は、静的検出したSource Operationと選択TargetのAllowed Surface Modelを比較します。既存のRoute Relation Engineを使い、Unknown Guard MetadataをPublicと扱わず、Source Route CoverageがCompleteの場合だけ不存在をErrorにします。
+
+| Rule | Severity | 条件 |
+| --- | --- | --- |
+| `SC-EXPOSURE-004` | Error、Monitor ModeではWarning | 実装Methodが実効Policy Method集合で拒否される。 |
+| `SC-EXPOSURE-005` | CompleteかつDefiniteなRouteではError、それ以外はWarning | Source Routeまたは確実に包含するRoute Groupで未検出のMethodをPolicyが許可する。Prefixは確実に包含する全Source Routeを集約する。 |
+| `SC-INVENTORY-005` | Error、Source InventoryがPartialならWarning | Exact Policy Routeに検出済みSource実装がない。Broad Prefixから不存在を証明しない。 |
+| `SC-AUTHN-006` | Explicit PublicとEdge Authの差はError、Mapped Source AuthのみならWarning | High-confidenceな明示Source Auth Metadataと検証可能なEdge Gateが異なる。UnknownまたはUnsupportedな比較から不一致を生成しない。 |
+| `SC-AUTHZ-002` | Edge AuthありはInfo、それ以外はWarning | 明示Role Metadataに対して、より厳格なEdge Postureを推奨する。Role MetadataをEnforcement証明として扱わない。 |
+
+SourceとPolicy双方のEvidenceを含めます。Code実行、Guard Body検査、Global Guard推論、Runtime Route Discovery、Policy変更は行いません。
+
 Exceptionの更新・期限延長・削除・監査手順は[Finding Exception運用ガイド](finding-exceptions.ja.md)を参照してください。
 
 ### Authentication Compatibility

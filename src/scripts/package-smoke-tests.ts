@@ -252,6 +252,7 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof pkg.lintPolicy, 'function');
       assert.strictEqual(typeof contract.createSecurityContract, 'function');
       assert.strictEqual(typeof contract.projectPolicyToAllowedSurface, 'function');
+      assert.strictEqual(typeof contract.compareSourcePolicyContracts, 'function');
       assert.strictEqual(typeof securityIr.serializeSecurityContract, 'function');
       assert.strictEqual(schema.properties.schemaVersion.const, 1);
       assert.strictEqual(inspectionSchema.properties.schemaVersion.const, 1);

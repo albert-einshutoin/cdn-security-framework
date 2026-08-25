@@ -102,6 +102,7 @@ test('phase subpath exports expose public compiler contracts', () => {
   assert.strictEqual(typeof contract.projectPolicyToAllowedSurface, 'function');
   assert.strictEqual(typeof contract.relateRoute, 'function');
   assert.strictEqual(typeof contract.compareSecurityContracts, 'function');
+  assert.strictEqual(typeof contract.compareSourcePolicyContracts, 'function');
   assert.strictEqual(typeof contract.loadFindingExceptions, 'function');
   assert.strictEqual(typeof contract.applyFindingExceptions, 'function');
   assert.strictEqual(typeof contract.diffSecurityContracts, 'function');
