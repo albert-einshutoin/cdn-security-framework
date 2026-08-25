@@ -4639,6 +4639,7 @@ describe('NestJS auth metadata analyzer', () => {
       ['const hooks = { register: audit }; if (hooks && hooks) hooks.register.call(app, guard);', 'alternatives'],
       ['const hooks = { register: audit }; if ((0, hooks)) hooks.register.call(app, guard);', 'alternatives'],
       ['const enabled = false; if (enabled) app.useGlobalGuards(guard);', 'alternatives'],
+      ['const selected = 1; switch (selected) { case 1: break; case 2: app.useGlobalGuards(guard); }', 'alternatives'],
       ['const hooks = { register: audit }; void hooks; typeof hooks; hooks === hooks; hooks.register.call(app, guard);', 'alternatives'],
       ['interface H { register: (...args: unknown[]) => unknown } const a: H = { register: app.useGlobalGuards }; const b: H = { register: audit }; b.register = audit; a.register.call(app, guard);', 'unknown'],
       ['interface H { register: (...args: unknown[]) => unknown } const a: H = { register: audit }; const b: H = { register: audit }; b.register = app.useGlobalGuards; a.register.call(app, guard);', 'alternatives'],

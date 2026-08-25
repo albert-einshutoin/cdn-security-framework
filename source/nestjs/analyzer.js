@@ -123,7 +123,10 @@ function staticNullish(input) {
         return false;
     return undefined;
 }
-function staticSwitchValue(input) {
+function staticSwitchValue(input, checker, projectSources, check, seen = new Set(), depth = 0) {
+    check?.();
+    if (depth > 64)
+        return undefined;
     let expression = input;
     while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
         || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
@@ -140,6 +143,19 @@ function staticSwitchValue(input) {
         return 'boolean:false';
     if (expression.kind === typescript_1.default.SyntaxKind.NullKeyword)
         return 'null';
+    if (checker && projectSources && typescript_1.default.isIdentifier(expression)) {
+        const symbol = resolvedSymbolAt(expression, checker);
+        if (!symbol || seen.has(symbol))
+            return undefined;
+        const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+            || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+            return undefined;
+        seen.add(symbol);
+        return staticSwitchValue(declaration.initializer, checker, projectSources, check, seen, depth + 1);
+    }
     return undefined;
 }
 function staticallyUnreachable(node, checker, projectSources, check) {
@@ -177,9 +193,9 @@ function staticallyUnreachable(node, checker, projectSources, check) {
         }
         else if (typescript_1.default.isCaseBlock(parent)
             && (typescript_1.default.isCaseClause(current) || typescript_1.default.isDefaultClause(current))) {
-            const selected = staticSwitchValue(parent.parent.expression);
-            if (selected !== undefined && parent.clauses.every((clause) => (typescript_1.default.isDefaultClause(clause) || staticSwitchValue(clause.expression) !== undefined))) {
-                const matchingIndex = parent.clauses.findIndex((clause) => (typescript_1.default.isCaseClause(clause) && staticSwitchValue(clause.expression) === selected));
+            const selected = staticSwitchValue(parent.parent.expression, checker, projectSources, check);
+            if (selected !== undefined && parent.clauses.every((clause) => (typescript_1.default.isDefaultClause(clause) || staticSwitchValue(clause.expression, checker, projectSources, check) !== undefined))) {
+                const matchingIndex = parent.clauses.findIndex((clause) => (typescript_1.default.isCaseClause(clause) && staticSwitchValue(clause.expression, checker, projectSources, check) === selected));
                 const selectedIndex = matchingIndex >= 0 ? matchingIndex
                     : parent.clauses.findIndex(typescript_1.default.isDefaultClause);
                 const currentIndex = parent.clauses.indexOf(current);

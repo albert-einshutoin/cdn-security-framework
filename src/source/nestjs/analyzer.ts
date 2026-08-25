@@ -166,7 +166,16 @@ function staticNullish(input: ts.Expression): boolean | undefined {
   return undefined;
 }
 
-function staticSwitchValue(input: ts.Expression): string | undefined {
+function staticSwitchValue(
+  input: ts.Expression,
+  checker?: ts.TypeChecker,
+  projectSources?: ReadonlySet<ts.SourceFile>,
+  check?: () => void,
+  seen = new Set<ts.Symbol>(),
+  depth = 0,
+): string | undefined {
+  check?.();
+  if (depth > 64) return undefined;
   let expression = input;
   while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
     || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
@@ -178,6 +187,19 @@ function staticSwitchValue(input: ts.Expression): string | undefined {
   if (expression.kind === ts.SyntaxKind.TrueKeyword) return 'boolean:true';
   if (expression.kind === ts.SyntaxKind.FalseKeyword) return 'boolean:false';
   if (expression.kind === ts.SyntaxKind.NullKeyword) return 'null';
+  if (checker && projectSources && ts.isIdentifier(expression)) {
+    const symbol = resolvedSymbolAt(expression, checker);
+    if (!symbol || seen.has(symbol)) return undefined;
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+      || !ts.isVariableDeclarationList(declaration.parent)
+      || !(declaration.parent.flags & ts.NodeFlags.Const)) return undefined;
+    seen.add(symbol);
+    return staticSwitchValue(
+      declaration.initializer, checker, projectSources, check, seen, depth + 1,
+    );
+  }
   return undefined;
 }
 
@@ -215,12 +237,18 @@ function staticallyUnreachable(
           && staticNullish(parent.left) === false)) return true;
     } else if (ts.isCaseBlock(parent)
       && (ts.isCaseClause(current) || ts.isDefaultClause(current))) {
-      const selected = staticSwitchValue(parent.parent.expression);
+      const selected = staticSwitchValue(
+        parent.parent.expression, checker, projectSources, check,
+      );
       if (selected !== undefined && parent.clauses.every((clause) => (
-        ts.isDefaultClause(clause) || staticSwitchValue(clause.expression) !== undefined
+        ts.isDefaultClause(clause) || staticSwitchValue(
+          clause.expression, checker, projectSources, check,
+        ) !== undefined
       ))) {
         const matchingIndex = parent.clauses.findIndex((clause) => (
-          ts.isCaseClause(clause) && staticSwitchValue(clause.expression) === selected
+          ts.isCaseClause(clause) && staticSwitchValue(
+            clause.expression, checker, projectSources, check,
+          ) === selected
         ));
         const selectedIndex = matchingIndex >= 0 ? matchingIndex
           : parent.clauses.findIndex(ts.isDefaultClause);
