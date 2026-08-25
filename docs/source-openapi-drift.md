@@ -4,7 +4,7 @@
 
 ## Rules and confidence
 
-- `SC-INVENTORY-001` (error, deterministic): a statically implemented route shape is absent from a complete OpenAPI inventory. Incomplete OpenAPI route capability lowers this to a heuristic warning.
+- `SC-INVENTORY-001` (error, deterministic): a statically implemented route shape is absent when both Source and OpenAPI route inventories are complete. Incomplete capability on either side lowers this to a heuristic warning.
 - `SC-INVENTORY-003` (error, deterministic): a declared operation is absent from complete Source route analysis. Partial or unsupported Source route capability lowers this to a heuristic warning because an unresolved route is not proof of absence.
 - `SC-INVENTORY-004` (error, deterministic): Source and OpenAPI have different method sets for the same normalized route shape. Incomplete route capability on either side lowers this to a heuristic warning.
 - `SC-AUTHN-005` (warning, high-confidence): explicit OpenAPI public/authenticated metadata contradicts high-confidence Source `Public` or mapped Guard metadata. Multiple OpenAPI authentication alternatives are not flattened into an AND comparison.

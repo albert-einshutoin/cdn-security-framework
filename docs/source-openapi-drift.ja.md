@@ -4,7 +4,7 @@
 
 ## Ruleとconfidence
 
-- `SC-INVENTORY-001`（error / deterministic）: 静的に検出した実装route shapeが、完全なOpenAPI inventoryに存在しない。OpenAPI routes capabilityが不完全ならheuristic warningへ落とす。
+- `SC-INVENTORY-001`（error / deterministic）: SourceとOpenAPIのroute inventoryが両方完全なとき、静的に検出した実装route shapeがOpenAPIに存在しない。どちらかのcapabilityが不完全ならheuristic warningへ落とす。
 - `SC-INVENTORY-003`（error / deterministic）: 宣言operationが、完全なSource route解析に存在しない。Source routes capabilityがpartial/unsupportedなら、未解決routeを不存在と断定せずheuristic warningへ落とす。
 - `SC-INVENTORY-004`（error / deterministic）: 同じ正規化route shapeでSourceとOpenAPIのmethod setが異なる。どちらかのroutes capabilityが不完全ならheuristic warningへ落とす。
 - `SC-AUTHN-005`（warning / high-confidence）: OpenAPIの明示public/authenticatedと、高confidenceなSourceの`Public`またはmapped Guard metadataが矛盾する。OpenAPIの複数authentication alternativeをAND集合へ平坦化しない。

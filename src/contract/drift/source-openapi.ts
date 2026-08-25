@@ -103,8 +103,10 @@ function inventoryFindings(input: SourceOpenApiDriftInput): SecurityFindingV1[] 
     if (declaredOperations.length === 0) {
       for (const operation of implementedOperations) findings.push(makeFinding({
         ruleId: 'SC-INVENTORY-001',
-        severity: input.declared.capabilities.routes === 'complete' ? 'error' : 'warning',
-        confidence: input.declared.capabilities.routes === 'complete' ? 'deterministic' : 'heuristic',
+        severity: input.declared.capabilities.routes === 'complete'
+          && input.implemented.capabilities.routes === 'complete' ? 'error' : 'warning',
+        confidence: input.declared.capabilities.routes === 'complete'
+          && input.implemented.capabilities.routes === 'complete' ? 'deterministic' : 'heuristic',
         category: 'inventory',
         title: 'Implemented operation is not declared',
         message: 'A statically detected Source operation has no corresponding OpenAPI route shape.',

@@ -127,6 +127,13 @@ describe('Source AST and OpenAPI drift', () => {
     expect(partial).toEqual([expect.objectContaining({
       ruleId: 'SC-INVENTORY-003', severity: 'warning', confidence: 'heuristic',
     })]);
+    expect(compareSourceOpenApiContracts(input(
+      [],
+      [operation('source-ast', 'GET', '/implemented')],
+      { routes: 'partial' },
+    ))).toEqual([expect.objectContaining({
+      ruleId: 'SC-INVENTORY-001', severity: 'warning', confidence: 'heuristic',
+    })]);
   });
 
   test('reports one method-set mismatch without duplicate inventory findings', () => {

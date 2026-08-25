@@ -68,7 +68,7 @@ Policy Capabilityの実効範囲が異なるため、Targetは必須です。Mon
 
 | Rule | Severity | 条件 |
 | --- | --- | --- |
-| `SC-INVENTORY-001` | Error、OpenAPI InventoryがPartialならWarning | 静的検出したSource Operationと同ShapeのOpenAPI Routeがない。 |
+| `SC-INVENTORY-001` | Error、両InventoryがCompleteでなければWarning | 静的検出したSource Operationと同ShapeのOpenAPI Routeがない。 |
 | `SC-INVENTORY-003` | Error、Source InventoryがPartialならWarning | OpenAPI Operationと同ShapeのSource Routeを静的検出できない。 |
 | `SC-INVENTORY-004` | Error、両InventoryがCompleteでなければWarning | 同じ正規化Route ShapeでHTTP Method集合が異なる。 |
 | `SC-AUTHN-005` | Warning | OpenAPIの明示AuthとHigh-confidenceなSource Decorator Metadataが矛盾する。UnknownまたはIncompleteなMetadataは不一致として報告しない。 |
