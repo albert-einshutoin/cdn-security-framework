@@ -4731,6 +4731,10 @@ function ownAuthMetadata(
 ): AuthDecoratorMetadata {
   const result = emptyAuthMetadata();
   const resolvingWrappers = new Set<ts.Symbol>();
+  const safeDecoratorMembers = new Set([
+    ...config.public_decorators,
+    ...config.roles_decorators,
+  ]);
   const applyResolved = (
     resolved: NonNullable<ReturnType<typeof resolveDecoratorCallSymbol>>,
     evidence: ts.Decorator,
@@ -4785,7 +4789,9 @@ function ownAuthMetadata(
         return true;
       }
       for (const argument of resolved.call.arguments) {
-        const symbol = resolveStaticSymbolName(argument, checker, check, projectSources);
+        const symbol = resolveStaticSymbolName(
+          argument, checker, check, projectSources, safeDecoratorMembers,
+        );
         if (symbol) result.guards.push(symbol);
         else {
           result.guardDynamic = true;
@@ -4799,7 +4805,7 @@ function ownAuthMetadata(
       return true;
     }
     const wrapperCall = resolveStaticDecoratorWrapperCall(
-      resolved.call, checker, projectSources, check,
+      resolved.call, checker, projectSources, check, safeDecoratorMembers,
     );
     if (config.public_decorators.includes(resolved.name)) {
       result.publicPresent = true;

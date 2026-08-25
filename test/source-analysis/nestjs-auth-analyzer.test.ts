@@ -434,6 +434,133 @@ describe('NestJS auth metadata analyzer', () => {
         let Public = publicDecorator;
         Public = () => {};
       `), auth('export const Public: MethodDecorator = () => {};')),
+      workspace(controller(`
+        import Auth = require('./auth');
+        const { JwtAuthGuard } = Auth;
+        const Other = (): MethodDecorator => () => {};
+        (Auth as any).Public = Other;
+      `).replace('@Public', '@Auth.Public()'), auth(
+        'export const Public = (): MethodDecorator => () => {};',
+      )),
+      workspace(controller(`
+        import Auth = require('./auth');
+        const { JwtAuthGuard } = Auth;
+        Auth.swap();
+      `).replace('@Public', '@Auth.Public()'), auth(`
+        declare const exports: any;
+        const Other = (): MethodDecorator => () => {};
+        export const Public = (): MethodDecorator => () => {};
+        export function swap() { exports.Public = Other; }
+      `)),
+      ...[
+        'Auth.swap.call(undefined);',
+        'Auth.swap.apply(undefined, []);',
+        'Auth.swap.bind(undefined)();',
+        'const swap = Auth.swap; swap();',
+        'const bound = Auth.swap.bind(undefined); bound();',
+        'Reflect.apply(Auth.swap, undefined, []);',
+        'globalThis.Reflect.apply(Auth.swap, undefined, []);',
+        'Reflect.construct(Auth.swap, []);',
+        'Auth.swap`replace`;',
+      ].map(
+        (invocation) => workspace(controller(`
+          import Auth = require('./auth');
+          const { JwtAuthGuard } = Auth;
+          ${invocation}
+        `).replace('@Public', '@Auth.Public()'), auth(`
+          declare const exports: any;
+          const Other = (): MethodDecorator => () => {};
+          export const Public = (): MethodDecorator => () => {};
+          export function swap(_value?: TemplateStringsArray) { exports.Public = Other; }
+        `)),
+      ),
+      workspace(`
+        import { Controller, Get, UseGuards } from '@nestjs/common';
+        import Auth = require('./auth');
+        const { JwtAuthGuard } = Auth;
+        @Auth.swap() class Setup {}
+        @Controller('mutable-public') @UseGuards(JwtAuthGuard)
+        class MutablePublicController { @Get() @Auth.Public() read() {} }
+      `, auth(`
+        declare const exports: any;
+        const Other = (): MethodDecorator => () => {};
+        export const Public = (): MethodDecorator => () => {};
+        export function swap(): ClassDecorator { exports.Public = Other; return () => {}; }
+      `)),
+      workspace(`
+        import { Controller, Get, UseGuards } from '@nestjs/common';
+        import Auth = require('./auth');
+        const { JwtAuthGuard } = Auth;
+        @Auth.Public() class Setup {}
+        @Controller('mutable-public') @UseGuards(JwtAuthGuard)
+        class MutablePublicController { @Get() @Auth.Public() read() {} }
+      `, auth(`
+        declare const exports: any;
+        const Other = (): MethodDecorator => () => {};
+        export function Public(): ClassDecorator {
+          exports.Public = Other;
+          return () => {};
+        }
+      `)),
+      workspace(controller(`
+        import Auth = require('./auth');
+        const { JwtAuthGuard } = Auth;
+      `).replace('@Public', '@Auth.Public()'), auth(`
+        declare const exports: any;
+        const Other = (): MethodDecorator => () => {};
+        const mutate = () => { exports.Public = Other; };
+        declare const metadata: (...values: unknown[]) => MethodDecorator;
+        export function Public(_value = mutate()) { return metadata('public'); }
+      `)),
+      workspace(controller(`
+        import Auth = require('./auth');
+        const { JwtAuthGuard } = Auth;
+      `).replace('@Public', '@Auth.Public()'), auth(`
+        declare const exports: any;
+        const Other = (): MethodDecorator => () => {};
+        declare const metadata: (...values: unknown[]) => MethodDecorator;
+        const helper = {
+          make() { exports.Public = Other; return metadata('public'); },
+        };
+        export function Public() { return helper.make(); }
+      `)),
+      workspace(controller(`
+        import Auth = require('./auth');
+        const { JwtAuthGuard } = Auth;
+      `).replace('@Public', '@Auth.Public()'), auth(`
+        declare const exports: any;
+        const Other = (): MethodDecorator => () => {};
+        declare const metadata: (...values: unknown[]) => MethodDecorator;
+        const holder = {
+          get value() { exports.Public = Other; return 1; },
+        };
+        export function Public(_value = holder.value) { return metadata('public'); }
+      `)),
+      workspace(controller(`
+        import Auth = require('./auth');
+        const { JwtAuthGuard } = Auth;
+      `).replace('@Public', '@Auth.Public()'), auth(`
+        declare const exports: any;
+        const Other = (): MethodDecorator => () => {};
+        declare const metadata: (...values: unknown[]) => MethodDecorator;
+        let make = () => metadata('public');
+        export function Public() { return make(); }
+        make = () => { exports.Public = Other; return metadata('public'); };
+      `)),
+      workspace(controller(`
+        import Auth = require('./auth');
+        const { JwtAuthGuard } = Auth;
+      `).replace('@Public', '@Auth.Public()'), auth(`
+        declare const exports: any;
+        const Other = (): MethodDecorator => () => {};
+        declare const metadata: (...values: unknown[]) => MethodDecorator;
+        const factories = {
+          safe: () => metadata('public'),
+          mutate: () => { exports.Public = Other; return metadata('public'); },
+        };
+        let key = 'mutate';
+        export function Public() { return factories[key](); }
+      `)),
       workspace(controller("import { JwtAuthGuard, Public } from './auth';"), auth(`
         export let Public: MethodDecorator = () => {};
         Public = () => {};
@@ -565,6 +692,35 @@ describe('NestJS auth metadata analyzer', () => {
         auth: { mode: 'alternatives', analysis: { explicitPublic: false } },
       });
     }
+  });
+
+  test('fails closed when a configured decorator factory mutates another namespace member', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import Auth = require('./auth');
+      const { JwtAuthGuard } = Auth;
+      @Auth.Public() class Setup {}
+      @Controller('mutable-roles') @UseGuards(JwtAuthGuard)
+      class MutableRolesController { @Get() @Auth.Roles('admin') read() {} }
+    `, {
+      'src/auth.ts': `
+        declare const exports: any;
+        const Audit = (): MethodDecorator => () => {};
+        export class JwtAuthGuard {}
+        export const Roles = (_role: string): MethodDecorator => () => {};
+        export function Public(): ClassDecorator {
+          exports.Roles = Audit;
+          return () => {};
+        }
+      `,
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations[0]).toMatchObject({
+      auth: { analysis: { roles: ['admin'], enforcementConfidence: 'unknown' } },
+    });
   });
 
   test('resolves a precomputed guard decorator used without a call', async () => {
@@ -1064,6 +1220,12 @@ describe('NestJS auth metadata analyzer', () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
       import * as auth from './auth';
+      const Other = (): void => {};
+      (auth.Public, Other)();
+      false && auth.swap;
+      true ? Other : auth.swap;
+      const disabled = false;
+      disabled && auth.swap;
       @Controller('namespace') @UseGuards(auth.JwtAuthGuard)
       class NamespaceController {
         @Get('public') @auth.Public() publicRoute() {}
@@ -1072,9 +1234,11 @@ describe('NestJS auth metadata analyzer', () => {
     `, {
       'src/auth.ts': `
         declare const metadata: (...values: unknown[]) => MethodDecorator;
+        const metadataAlias = metadata;
         export class JwtAuthGuard {}
-        export const Public = (): MethodDecorator => metadata('public');
+        export const Public = (): MethodDecorator => metadataAlias('public');
         export const Roles = (...roles: string[]): MethodDecorator => metadata('roles', roles);
+        export function swap(): void {}
       `,
     });
     const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));

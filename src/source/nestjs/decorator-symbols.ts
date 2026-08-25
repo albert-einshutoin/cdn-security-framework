@@ -53,9 +53,23 @@ const MEMBER_WRITE_INDEX_CACHE = new WeakMap<
 const STABLE_RECEIVER_SYMBOL_CACHE = new WeakMap<
   ReadonlyMap<ts.Symbol, readonly CallableWriteRecord[]>, Map<ts.Symbol, ts.Symbol | false>
 >();
-type StaticMemberMutation = { escaped: boolean; dynamic: boolean; keys: ReadonlySet<string> };
+type StaticMemberMutation = {
+  escaped: boolean;
+  dynamic: boolean;
+  unsafeMemberUse: boolean;
+  keys: ReadonlySet<string>;
+  calls: readonly {
+    key?: string;
+    invocation: ts.CallExpression | ts.TaggedTemplateExpression;
+    directDecorator: boolean;
+    simpleFactory: boolean;
+  }[];
+};
 const STATIC_MEMBER_WRITE_CACHE = new WeakMap<
   ReadonlySet<ts.SourceFile>, WeakMap<ts.Symbol, StaticMemberMutation>
+>();
+const SIMPLE_DECORATOR_FACTORY_CACHE = new WeakMap<
+  ReadonlySet<ts.SourceFile>, WeakMap<ts.Symbol, boolean>
 >();
 const INCOMPLETE_LOCAL_CONST = Symbol('incomplete-local-const');
 const LOCAL_CONST_INITIALIZER_CACHE = new WeakMap<
@@ -1362,11 +1376,395 @@ export function resolveDecoratorCallSymbol(
   };
 }
 
+function isSimpleDecoratorFactory(
+  reference: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+): boolean {
+  const seen = new Set<ts.Symbol>();
+  const isEffectFree = (input: ts.Node): boolean => {
+    const nodes: ts.Node[] = [input];
+    while (nodes.length > 0) {
+      const node = nodes.pop()!;
+      check();
+      if (ts.isPropertyAccessExpression(node) || ts.isElementAccessExpression(node)
+        || ts.isCallExpression(node) || ts.isNewExpression(node)
+        || ts.isTaggedTemplateExpression(node) || ts.isDeleteExpression(node)
+        || ts.isAwaitExpression(node) || ts.isYieldExpression(node)
+        || ts.isBinaryExpression(node) && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+          && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+        || (ts.isPrefixUnaryExpression(node) || ts.isPostfixUnaryExpression(node))
+          && (node.operator === ts.SyntaxKind.PlusPlusToken
+            || node.operator === ts.SyntaxKind.MinusMinusToken)) return false;
+      ts.forEachChild(node, (child) => { nodes.push(child); });
+    }
+    return true;
+  };
+  const resolve = (expression: ts.Expression, depth: number): boolean => {
+    check();
+    if (depth > 64) return false;
+    const resolvedExpression = resolveConstInitializer(
+      expression, checker, check, projectSources,
+    );
+    const symbol = targetSymbol(resolvedExpression, checker, check);
+    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE || seen.has(symbol)) return false;
+    seen.add(symbol);
+    const declaration = symbol.declarations?.find((candidate): candidate is (
+      ts.FunctionDeclaration | ts.MethodDeclaration | ts.VariableDeclaration | ts.PropertyAssignment
+    ) => projectSources.has(candidate.getSourceFile()) && (
+      ts.isFunctionDeclaration(candidate) && candidate.body !== undefined
+      || ts.isMethodDeclaration(candidate) && candidate.body !== undefined
+      || ts.isVariableDeclaration(candidate) && candidate.initializer !== undefined
+      || ts.isPropertyAssignment(candidate)
+    ));
+    const implementation = declaration && (ts.isVariableDeclaration(declaration)
+      || ts.isPropertyAssignment(declaration)) ? declaration.initializer : declaration;
+    if (!implementation || (!ts.isFunctionDeclaration(implementation)
+      && !ts.isMethodDeclaration(implementation) && !ts.isArrowFunction(implementation)
+      && !ts.isFunctionExpression(implementation))) {
+      return !declaration && Boolean(symbol.declarations?.length)
+        && symbol.declarations!.every((candidate) => candidate.getSourceFile().isDeclarationFile
+          || ts.canHaveModifiers(candidate) && ts.getModifiers(candidate)?.some(
+            ({ kind }) => kind === ts.SyntaxKind.DeclareKeyword,
+          ) || ts.isVariableDeclaration(candidate)
+            && ts.isVariableStatement(candidate.parent.parent)
+            && candidate.parent.parent.modifiers?.some(
+              ({ kind }) => kind === ts.SyntaxKind.DeclareKeyword,
+            ));
+    }
+    if (implementation.modifiers?.some(({ kind }) => kind === ts.SyntaxKind.AsyncKeyword)
+      || ('asteriskToken' in implementation && implementation.asteriskToken)
+      || implementation.parameters.some((parameter) => parameter.initializer
+        && !isEffectFree(parameter.initializer))) return false;
+    const body = implementation.body;
+    if (!body) return false;
+    const returned = ts.isBlock(body)
+      ? body.statements.length === 1 && ts.isReturnStatement(body.statements[0])
+        ? body.statements[0].expression : undefined
+      : body;
+    if (!returned) return false;
+    const call = unwrapExpression(returned);
+    if (!ts.isCallExpression(call) || call.arguments.some((argument) => !isEffectFree(argument))) {
+      return false;
+    }
+    const resolvedCallee = resolveConstInitializer(
+      call.expression, checker, check, projectSources,
+    );
+    const callee = targetSymbol(resolvedCallee, checker, check);
+    if (!callee || callee === UNKNOWN_NESTJS_ROUTE) return false;
+    if (!callee.declarations?.some((candidate) => projectSources.has(candidate.getSourceFile()))) {
+      return true;
+    }
+    if (!ts.isIdentifier(unwrapExpression(resolvedCallee))
+      || callableBindingMayBeWritten(
+        callee, callee.declarations ?? [], checker, projectSources, check,
+      )) return false;
+    return resolve(resolvedCallee, depth + 1);
+  };
+  const symbol = targetSymbol(reference, checker, check);
+  if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE) return false;
+  let cache = SIMPLE_DECORATOR_FACTORY_CACHE.get(projectSources);
+  if (!cache) {
+    cache = new WeakMap();
+    SIMPLE_DECORATOR_FACTORY_CACHE.set(projectSources, cache);
+  }
+  const cached = cache.get(symbol);
+  if (cached !== undefined) return cached;
+  const result = resolve(reference, 0);
+  cache.set(symbol, result);
+  return result;
+}
+
+function staticMemberMayBeWritten(
+  reference: ts.PropertyAccessExpression | ts.ElementAccessExpression,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+  ignoredCall?: ts.CallExpression,
+  safeDecoratorMembers?: ReadonlySet<string>,
+): boolean {
+  const key = ts.isPropertyAccessExpression(reference) ? reference.name.text
+    : reference.argumentExpression
+      ? resolveStaticPropertyKey(reference.argumentExpression, checker, check) : undefined;
+  const receiver = unwrapExpression(reference.expression);
+  let receiverSymbol = ts.isIdentifier(receiver) ? checker.getSymbolAtLocation(receiver) : undefined;
+  if (receiverSymbol?.flags && receiverSymbol.flags & ts.SymbolFlags.Alias) {
+    receiverSymbol = checker.getAliasedSymbol(receiverSymbol);
+  }
+  if (!key || !receiverSymbol) return true;
+  let projectCache = STATIC_MEMBER_WRITE_CACHE.get(projectSources);
+  if (!projectCache) {
+    projectCache = new WeakMap();
+    STATIC_MEMBER_WRITE_CACHE.set(projectSources, projectCache);
+  }
+  let mutation = projectCache.get(receiverSymbol);
+  if (!mutation) {
+    let escaped = false;
+    let dynamic = false;
+    let unsafeMemberUse = false;
+    const keys = new Set<string>();
+    const calls: Array<{
+      key?: string;
+      invocation: ts.CallExpression | ts.TaggedTemplateExpression;
+      directDecorator: boolean;
+      simpleFactory: boolean;
+    }> = [];
+    const nodes: ts.Node[] = [...projectSources];
+    while (nodes.length > 0 && !escaped && !dynamic) {
+      const node = nodes.pop()!;
+      check();
+      if (ts.isIdentifier(node)) {
+        let symbol = checker.getSymbolAtLocation(node);
+        if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+        if (symbol === receiverSymbol) {
+          const declarationName = (ts.isImportEqualsDeclaration(node.parent)
+            || ts.isNamespaceImport(node.parent)) && node.parent.name === node;
+          let usage: ts.Expression = node;
+          while (ts.isParenthesizedExpression(usage.parent) || ts.isAsExpression(usage.parent)
+            || ts.isTypeAssertionExpression(usage.parent) || ts.isSatisfiesExpression(usage.parent)
+            || ts.isNonNullExpression(usage.parent)) usage = usage.parent;
+          const member = (ts.isPropertyAccessExpression(usage.parent)
+            || ts.isElementAccessExpression(usage.parent))
+            && usage.parent.expression === usage ? usage.parent : undefined;
+          if (!declarationName && !member) {
+            const parent = usage.parent;
+            const readOnly = (ts.isIfStatement(parent) || ts.isWhileStatement(parent)
+              || ts.isDoStatement(parent) || ts.isSwitchStatement(parent))
+              && parent.expression === usage
+              || ts.isPrefixUnaryExpression(parent)
+              && parent.operator === ts.SyntaxKind.ExclamationToken
+              || (ts.isTypeOfExpression(parent) || ts.isVoidExpression(parent))
+              && parent.expression === usage
+              || ts.isExpressionStatement(parent)
+              || ts.isBinaryExpression(parent)
+              && (parent.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
+                || parent.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken);
+            escaped = !readOnly;
+          } else if (member) {
+            const memberKey = ts.isPropertyAccessExpression(member) ? member.name.text
+              : member.argumentExpression
+                ? resolveStaticPropertyKey(member.argumentExpression, checker, check) : undefined;
+            const staticallyDiscarded = (input: ts.Expression): boolean => {
+              let current = input;
+              while (current.parent) {
+                const parent = current.parent;
+                if (ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent)
+                  || ts.isTypeAssertionExpression(parent) || ts.isSatisfiesExpression(parent)
+                  || ts.isNonNullExpression(parent)) {
+                  current = parent;
+                  continue;
+                }
+                if (ts.isBinaryExpression(parent)) {
+                  if (parent.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+                    if (parent.left === current) return true;
+                  } else if (parent.right === current
+                    && (parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+                      || parent.operatorToken.kind === ts.SyntaxKind.BarBarToken
+                      || parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken)) {
+                    const resolvedLeft = resolveLocalConstInitializer(
+                      parent.left, checker, projectSources, check,
+                    );
+                    const left = resolvedLeft.incomplete
+                      ? unwrapExpression(parent.left) : resolvedLeft.expression;
+                    const truthy = left.kind === ts.SyntaxKind.TrueKeyword ? true
+                      : left.kind === ts.SyntaxKind.FalseKeyword
+                        || left.kind === ts.SyntaxKind.NullKeyword || ts.isVoidExpression(left)
+                        ? false : ts.isStringLiteralLike(left) ? left.text.length > 0
+                          : ts.isNumericLiteral(left) ? Number(left.text) !== 0
+                            : ts.isBigIntLiteral(left) ? left.text !== '0n' : undefined;
+                    const nonNullish = left.kind === ts.SyntaxKind.NullKeyword
+                      || ts.isVoidExpression(left) ? false : truthy !== undefined ? true : undefined;
+                    if (parent.operatorToken.kind === ts.SyntaxKind.BarBarToken && truthy === true
+                      || parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+                        && truthy === false
+                      || parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+                        && nonNullish === true) return true;
+                  } else break;
+                  current = parent;
+                  continue;
+                }
+                if (ts.isConditionalExpression(parent)
+                  && (parent.whenTrue === current || parent.whenFalse === current)) {
+                  const resolvedCondition = resolveLocalConstInitializer(
+                    parent.condition, checker, projectSources, check,
+                  );
+                  const condition = resolvedCondition.incomplete
+                    ? unwrapExpression(parent.condition) : resolvedCondition.expression;
+                  const selected = condition.kind === ts.SyntaxKind.TrueKeyword ? parent.whenTrue
+                    : condition.kind === ts.SyntaxKind.FalseKeyword ? parent.whenFalse : undefined;
+                  if (selected && selected !== current) return true;
+                  current = parent;
+                  continue;
+                }
+                break;
+              }
+              return false;
+            };
+            const invokedMember = (): {
+              invocation: ts.CallExpression | ts.TaggedTemplateExpression;
+              direct: boolean;
+            } | undefined => {
+              if (staticallyDiscarded(member)) return undefined;
+              let current: ts.Expression = member;
+              let direct = true;
+              while (current.parent) {
+                const parent = current.parent;
+                if (ts.isParenthesizedExpression(parent) || ts.isAsExpression(parent)
+                  || ts.isTypeAssertionExpression(parent) || ts.isSatisfiesExpression(parent)
+                  || ts.isNonNullExpression(parent)) {
+                  current = parent;
+                  continue;
+                }
+                if (ts.isBinaryExpression(parent)) {
+                  if (parent.operatorToken.kind === ts.SyntaxKind.CommaToken) {
+                    if (parent.right !== current) return undefined;
+                  } else if (parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+                    || parent.operatorToken.kind === ts.SyntaxKind.BarBarToken
+                    || parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken) {
+                    if (parent.right === current) {
+                      const left = unwrapExpression(parent.left);
+                      const truthy = left.kind === ts.SyntaxKind.TrueKeyword ? true
+                        : left.kind === ts.SyntaxKind.FalseKeyword
+                          || left.kind === ts.SyntaxKind.NullKeyword || ts.isVoidExpression(left)
+                          ? false : ts.isStringLiteralLike(left) ? left.text.length > 0
+                            : ts.isNumericLiteral(left) ? Number(left.text) !== 0
+                              : ts.isBigIntLiteral(left) ? left.text !== '0n' : undefined;
+                      const nonNullish = left.kind === ts.SyntaxKind.NullKeyword
+                        || ts.isVoidExpression(left) ? false : truthy !== undefined ? true : undefined;
+                      if (parent.operatorToken.kind === ts.SyntaxKind.BarBarToken && truthy === true
+                        || parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken
+                        && truthy === false
+                        || parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
+                        && nonNullish === true) return undefined;
+                    }
+                  } else break;
+                  current = parent;
+                  continue;
+                }
+                if (ts.isConditionalExpression(parent)
+                  && (parent.whenTrue === current || parent.whenFalse === current)) {
+                  const condition = unwrapExpression(parent.condition);
+                  const selected = condition.kind === ts.SyntaxKind.TrueKeyword ? parent.whenTrue
+                    : condition.kind === ts.SyntaxKind.FalseKeyword ? parent.whenFalse : undefined;
+                  if (selected && selected !== current) return undefined;
+                  current = parent;
+                  continue;
+                }
+                if ((ts.isPropertyAccessExpression(parent) || ts.isElementAccessExpression(parent))
+                  && parent.expression === current) {
+                  const invocation = ts.isPropertyAccessExpression(parent) ? parent.name.text
+                    : parent.argumentExpression
+                      ? resolveStaticPropertyKey(parent.argumentExpression, checker, check) : undefined;
+                  if (invocation === 'bind') {
+                    const bindCall = parent.parent;
+                    if (!ts.isCallExpression(bindCall) || bindCall.expression !== parent) return undefined;
+                    let bound: ts.Expression = bindCall;
+                    while (ts.isParenthesizedExpression(bound.parent) || ts.isAsExpression(bound.parent)
+                      || ts.isTypeAssertionExpression(bound.parent)
+                      || ts.isSatisfiesExpression(bound.parent)
+                      || ts.isNonNullExpression(bound.parent)) bound = bound.parent;
+                    if (ts.isCallExpression(bound.parent) && bound.parent.expression === bound) {
+                      return { invocation: bound.parent, direct: false };
+                    }
+                    return ts.isTaggedTemplateExpression(bound.parent) && bound.parent.tag === bound
+                      ? { invocation: bound.parent, direct: false } : undefined;
+                  }
+                  if (invocation !== 'call' && invocation !== 'apply') return undefined;
+                  direct = false;
+                  current = parent;
+                  continue;
+                }
+                if (ts.isCallExpression(parent) && parent.arguments[0] === current) {
+                  const callee = unwrapExpression(parent.expression);
+                  const reflectInvocation = ts.isPropertyAccessExpression(callee)
+                    && isStandardReflectReceiver(callee.expression, checker, check)
+                    && (callee.name.text === 'apply' || callee.name.text === 'construct');
+                  return reflectInvocation ? { invocation: parent, direct: false } : undefined;
+                }
+                break;
+              }
+              if (ts.isCallExpression(current.parent) && current.parent.expression === current) {
+                return { invocation: current.parent, direct };
+              }
+              return ts.isTaggedTemplateExpression(current.parent) && current.parent.tag === current
+                ? { invocation: current.parent, direct: false } : undefined;
+            };
+            const invoked = invokedMember();
+            if (invoked) {
+              let decorated: ts.Node = invoked.invocation;
+              while (ts.isParenthesizedExpression(decorated.parent)
+                || ts.isAsExpression(decorated.parent)
+                || ts.isTypeAssertionExpression(decorated.parent)
+                || ts.isSatisfiesExpression(decorated.parent)
+                || ts.isNonNullExpression(decorated.parent)) decorated = decorated.parent;
+              calls.push({
+                ...(memberKey === undefined ? {} : { key: memberKey }),
+                invocation: invoked.invocation,
+                directDecorator: invoked.direct && ts.isDecorator(decorated.parent)
+                  && decorated.parent.expression === decorated,
+                simpleFactory: invoked.direct && isSimpleDecoratorFactory(
+                  member, checker, projectSources, check,
+                ),
+              });
+              continue;
+            }
+            let target: ts.Node = member;
+            let mutated = false;
+            while (target.parent && !ts.isStatement(target)) {
+              const parent = target.parent;
+              const mutates = ts.isBinaryExpression(parent) && parent.left === target
+                && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+                && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
+                || ts.isDeleteExpression(parent) && parent.expression === target
+                || (ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent))
+                && parent.operand === target
+                || ts.isTaggedTemplateExpression(parent) && parent.tag === target;
+              if (mutates) {
+                if (memberKey === undefined) dynamic = true;
+                else keys.add(memberKey);
+                mutated = true;
+                break;
+              }
+              target = parent;
+            }
+            if (!mutated) {
+              let value: ts.Expression = member;
+              while (ts.isParenthesizedExpression(value.parent) || ts.isAsExpression(value.parent)
+                || ts.isTypeAssertionExpression(value.parent) || ts.isSatisfiesExpression(value.parent)
+                || ts.isNonNullExpression(value.parent)) value = value.parent;
+              const parent = value.parent;
+              const discarded = staticallyDiscarded(member) || ts.isExpressionStatement(parent);
+              const callParent = ts.isCallExpression(parent) && parent.arguments.some(
+                (argument) => argument === value,
+              ) ? parent : undefined;
+              const resolved = callParent
+                ? resolveDecoratorCallSymbol(callParent, checker, check, projectSources, true)
+                : undefined;
+              const trustedGuardArgument = resolved?.name === 'UseGuards'
+                && resolved.trustedNestJsCommon;
+              unsafeMemberUse ||= !discarded && !trustedGuardArgument;
+            }
+          }
+        }
+      }
+      ts.forEachChild(node, (child) => { nodes.push(child); });
+    }
+    mutation = { escaped, dynamic, unsafeMemberUse, keys, calls };
+    projectCache.set(receiverSymbol, mutation);
+  }
+  return mutation.escaped || mutation.dynamic || mutation.unsafeMemberUse || mutation.keys.has(key)
+    || mutation.calls.some((record) => record.invocation !== ignoredCall
+      && !(record.directDecorator && record.key !== undefined
+        && record.simpleFactory && safeDecoratorMembers?.has(record.key)));
+}
+
 export function resolveStaticDecoratorWrapperCall(
   call: ts.CallExpression,
   checker: ts.TypeChecker,
   projectSources: ReadonlySet<ts.SourceFile>,
   check: () => void,
+  safeDecoratorMembers?: ReadonlySet<string>,
 ): { call?: ts.CallExpression; symbol: ts.Symbol; stable: boolean; dynamic: boolean } | undefined {
   let effectiveExpression: ts.Expression = call.expression;
   const original = unwrapExpression(call.expression);
@@ -1420,6 +1818,12 @@ export function resolveStaticDecoratorWrapperCall(
   const objectAccess = ts.isPropertyAccessExpression(unwrappedCallee)
     || ts.isElementAccessExpression(unwrappedCallee);
   const stable = Boolean((!objectAccess || isNamespaceImportAccess(unwrappedCallee, checker))
+    && (!objectAccess || isSimpleDecoratorFactory(
+      unwrappedCallee, checker, projectSources, check,
+    ))
+    && (!objectAccess || !staticMemberMayBeWritten(
+      unwrappedCallee, checker, projectSources, check, call, safeDecoratorMembers,
+    ))
     && declaration && ((ts.isVariableDeclaration(declaration)
       && ts.isVariableDeclarationList(declaration.parent)
       && declaration.parent.flags & ts.NodeFlags.Const)
@@ -1479,7 +1883,7 @@ export function resolveStaticDecoratorWrapperCall(
   };
   if (!ts.isBlock(body)) {
     const resolved = resolveReturnedCall(body, new Set(), 0);
-    return resolved && { ...resolved, symbol, stable };
+    return resolved ? { ...resolved, symbol, stable } : { symbol, stable, dynamic: false };
   }
   if (body.statements.length === 1 && ts.isReturnStatement(body.statements[0])
     && body.statements[0].expression) {
@@ -1496,6 +1900,7 @@ export function resolveStaticSymbolName(
   checker: ts.TypeChecker,
   check: () => void,
   projectSources?: ReadonlySet<ts.SourceFile>,
+  safeDecoratorMembers?: ReadonlySet<string>,
 ): string | undefined {
   const reference = unwrapExpression(expression);
   if (projectSources && ts.isIdentifier(reference)) {
@@ -1506,88 +1911,11 @@ export function resolveStaticSymbolName(
     )) return undefined;
   }
   if (projectSources && (ts.isPropertyAccessExpression(reference)
-    || ts.isElementAccessExpression(reference))) {
-    const key = ts.isPropertyAccessExpression(reference) ? reference.name.text
-      : reference.argumentExpression
-        ? resolveStaticPropertyKey(reference.argumentExpression, checker, check) : undefined;
-    const receiver = unwrapExpression(reference.expression);
-    let receiverSymbol = ts.isIdentifier(receiver) ? checker.getSymbolAtLocation(receiver) : undefined;
-    if (receiverSymbol?.flags && receiverSymbol.flags & ts.SymbolFlags.Alias) {
-      receiverSymbol = checker.getAliasedSymbol(receiverSymbol);
-    }
-    if (!key || !receiverSymbol) return undefined;
-    let projectCache = STATIC_MEMBER_WRITE_CACHE.get(projectSources);
-    if (!projectCache) {
-      projectCache = new WeakMap();
-      STATIC_MEMBER_WRITE_CACHE.set(projectSources, projectCache);
-    }
-    let mutation = projectCache.get(receiverSymbol);
-    if (!mutation) {
-      let escaped = false;
-      let dynamic = false;
-      const keys = new Set<string>();
-      const nodes: ts.Node[] = [...projectSources];
-      while (nodes.length > 0 && !escaped && !dynamic) {
-        const node = nodes.pop()!;
-        check();
-        if (ts.isIdentifier(node)) {
-          let symbol = checker.getSymbolAtLocation(node);
-          if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
-          if (symbol === receiverSymbol) {
-            const declarationName = (ts.isImportEqualsDeclaration(node.parent)
-              || ts.isNamespaceImport(node.parent)) && node.parent.name === node;
-            let usage: ts.Expression = node;
-            while (ts.isParenthesizedExpression(usage.parent) || ts.isAsExpression(usage.parent)
-              || ts.isTypeAssertionExpression(usage.parent) || ts.isSatisfiesExpression(usage.parent)
-              || ts.isNonNullExpression(usage.parent)) usage = usage.parent;
-            const member = (ts.isPropertyAccessExpression(usage.parent)
-              || ts.isElementAccessExpression(usage.parent))
-              && usage.parent.expression === usage ? usage.parent : undefined;
-            if (!declarationName && !member) {
-              const parent = usage.parent;
-              const readOnly = (ts.isIfStatement(parent) || ts.isWhileStatement(parent)
-                || ts.isDoStatement(parent) || ts.isSwitchStatement(parent))
-                && parent.expression === usage
-                || ts.isPrefixUnaryExpression(parent)
-                && parent.operator === ts.SyntaxKind.ExclamationToken
-                || (ts.isTypeOfExpression(parent) || ts.isVoidExpression(parent))
-                && parent.expression === usage
-                || ts.isExpressionStatement(parent)
-                || ts.isBinaryExpression(parent)
-                && (parent.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
-                  || parent.operatorToken.kind === ts.SyntaxKind.ExclamationEqualsEqualsToken);
-              escaped = !readOnly;
-            } else if (member) {
-              const memberKey = ts.isPropertyAccessExpression(member) ? member.name.text
-                : member.argumentExpression
-                  ? resolveStaticPropertyKey(member.argumentExpression, checker, check) : undefined;
-              let target: ts.Node = member;
-              while (target.parent && !ts.isStatement(target)) {
-                const parent = target.parent;
-                const mutates = ts.isBinaryExpression(parent) && parent.left === target
-                  && parent.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
-                  && parent.operatorToken.kind <= ts.SyntaxKind.LastAssignment
-                  || ts.isDeleteExpression(parent) && parent.expression === target
-                  || (ts.isPrefixUnaryExpression(parent) || ts.isPostfixUnaryExpression(parent))
-                  && parent.operand === target
-                  || ts.isCallExpression(parent) && parent.expression === target
-                  || ts.isTaggedTemplateExpression(parent) && parent.tag === target;
-                if (mutates) {
-                  if (memberKey === undefined) dynamic = true;
-                  else keys.add(memberKey);
-                  break;
-                }
-                target = parent;
-              }
-            }
-          }
-        }
-        ts.forEachChild(node, (child) => { nodes.push(child); });
-      }
-      mutation = { escaped, dynamic, keys };
-      projectCache.set(receiverSymbol, mutation);
-    }
-    if (mutation.escaped || mutation.dynamic || mutation.keys.has(key)) return undefined;
+    || ts.isElementAccessExpression(reference))
+    && staticMemberMayBeWritten(
+      reference, checker, projectSources, check, undefined, safeDecoratorMembers,
+    )) {
+    return undefined;
   }
   const symbol = targetSymbol(expression, checker, check);
   return !symbol || symbol === UNKNOWN_NESTJS_ROUTE

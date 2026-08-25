@@ -38,6 +38,7 @@ const CALLABLE_WRITE_INDEX_CACHE = new WeakMap();
 const MEMBER_WRITE_INDEX_CACHE = new WeakMap();
 const STABLE_RECEIVER_SYMBOL_CACHE = new WeakMap();
 const STATIC_MEMBER_WRITE_CACHE = new WeakMap();
+const SIMPLE_DECORATOR_FACTORY_CACHE = new WeakMap();
 const INCOMPLETE_LOCAL_CONST = Symbol('incomplete-local-const');
 const LOCAL_CONST_INITIALIZER_CACHE = new WeakMap();
 function callableWriteIndex(projectSources, checker, check) {
@@ -1280,7 +1281,380 @@ function resolveDecoratorCallSymbol(call, checker, check, projectSources, retain
         indirectInvocation,
     };
 }
-function resolveStaticDecoratorWrapperCall(call, checker, projectSources, check) {
+function isSimpleDecoratorFactory(reference, checker, projectSources, check) {
+    const seen = new Set();
+    const isEffectFree = (input) => {
+        const nodes = [input];
+        while (nodes.length > 0) {
+            const node = nodes.pop();
+            check();
+            if (typescript_1.default.isPropertyAccessExpression(node) || typescript_1.default.isElementAccessExpression(node)
+                || typescript_1.default.isCallExpression(node) || typescript_1.default.isNewExpression(node)
+                || typescript_1.default.isTaggedTemplateExpression(node) || typescript_1.default.isDeleteExpression(node)
+                || typescript_1.default.isAwaitExpression(node) || typescript_1.default.isYieldExpression(node)
+                || typescript_1.default.isBinaryExpression(node) && node.operatorToken.kind >= typescript_1.default.SyntaxKind.FirstAssignment
+                    && node.operatorToken.kind <= typescript_1.default.SyntaxKind.LastAssignment
+                || (typescript_1.default.isPrefixUnaryExpression(node) || typescript_1.default.isPostfixUnaryExpression(node))
+                    && (node.operator === typescript_1.default.SyntaxKind.PlusPlusToken
+                        || node.operator === typescript_1.default.SyntaxKind.MinusMinusToken))
+                return false;
+            typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+        }
+        return true;
+    };
+    const resolve = (expression, depth) => {
+        check();
+        if (depth > 64)
+            return false;
+        const resolvedExpression = resolveConstInitializer(expression, checker, check, projectSources);
+        const symbol = targetSymbol(resolvedExpression, checker, check);
+        if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE || seen.has(symbol))
+            return false;
+        seen.add(symbol);
+        const declaration = symbol.declarations?.find((candidate) => projectSources.has(candidate.getSourceFile()) && (typescript_1.default.isFunctionDeclaration(candidate) && candidate.body !== undefined
+            || typescript_1.default.isMethodDeclaration(candidate) && candidate.body !== undefined
+            || typescript_1.default.isVariableDeclaration(candidate) && candidate.initializer !== undefined
+            || typescript_1.default.isPropertyAssignment(candidate)));
+        const implementation = declaration && (typescript_1.default.isVariableDeclaration(declaration)
+            || typescript_1.default.isPropertyAssignment(declaration)) ? declaration.initializer : declaration;
+        if (!implementation || (!typescript_1.default.isFunctionDeclaration(implementation)
+            && !typescript_1.default.isMethodDeclaration(implementation) && !typescript_1.default.isArrowFunction(implementation)
+            && !typescript_1.default.isFunctionExpression(implementation))) {
+            return !declaration && Boolean(symbol.declarations?.length)
+                && symbol.declarations.every((candidate) => candidate.getSourceFile().isDeclarationFile
+                    || typescript_1.default.canHaveModifiers(candidate) && typescript_1.default.getModifiers(candidate)?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.DeclareKeyword) || typescript_1.default.isVariableDeclaration(candidate)
+                    && typescript_1.default.isVariableStatement(candidate.parent.parent)
+                    && candidate.parent.parent.modifiers?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.DeclareKeyword));
+        }
+        if (implementation.modifiers?.some(({ kind }) => kind === typescript_1.default.SyntaxKind.AsyncKeyword)
+            || ('asteriskToken' in implementation && implementation.asteriskToken)
+            || implementation.parameters.some((parameter) => parameter.initializer
+                && !isEffectFree(parameter.initializer)))
+            return false;
+        const body = implementation.body;
+        if (!body)
+            return false;
+        const returned = typescript_1.default.isBlock(body)
+            ? body.statements.length === 1 && typescript_1.default.isReturnStatement(body.statements[0])
+                ? body.statements[0].expression : undefined
+            : body;
+        if (!returned)
+            return false;
+        const call = unwrapExpression(returned);
+        if (!typescript_1.default.isCallExpression(call) || call.arguments.some((argument) => !isEffectFree(argument))) {
+            return false;
+        }
+        const resolvedCallee = resolveConstInitializer(call.expression, checker, check, projectSources);
+        const callee = targetSymbol(resolvedCallee, checker, check);
+        if (!callee || callee === UNKNOWN_NESTJS_ROUTE)
+            return false;
+        if (!callee.declarations?.some((candidate) => projectSources.has(candidate.getSourceFile()))) {
+            return true;
+        }
+        if (!typescript_1.default.isIdentifier(unwrapExpression(resolvedCallee))
+            || callableBindingMayBeWritten(callee, callee.declarations ?? [], checker, projectSources, check))
+            return false;
+        return resolve(resolvedCallee, depth + 1);
+    };
+    const symbol = targetSymbol(reference, checker, check);
+    if (!symbol || symbol === UNKNOWN_NESTJS_ROUTE)
+        return false;
+    let cache = SIMPLE_DECORATOR_FACTORY_CACHE.get(projectSources);
+    if (!cache) {
+        cache = new WeakMap();
+        SIMPLE_DECORATOR_FACTORY_CACHE.set(projectSources, cache);
+    }
+    const cached = cache.get(symbol);
+    if (cached !== undefined)
+        return cached;
+    const result = resolve(reference, 0);
+    cache.set(symbol, result);
+    return result;
+}
+function staticMemberMayBeWritten(reference, checker, projectSources, check, ignoredCall, safeDecoratorMembers) {
+    const key = typescript_1.default.isPropertyAccessExpression(reference) ? reference.name.text
+        : reference.argumentExpression
+            ? resolveStaticPropertyKey(reference.argumentExpression, checker, check) : undefined;
+    const receiver = unwrapExpression(reference.expression);
+    let receiverSymbol = typescript_1.default.isIdentifier(receiver) ? checker.getSymbolAtLocation(receiver) : undefined;
+    if (receiverSymbol?.flags && receiverSymbol.flags & typescript_1.default.SymbolFlags.Alias) {
+        receiverSymbol = checker.getAliasedSymbol(receiverSymbol);
+    }
+    if (!key || !receiverSymbol)
+        return true;
+    let projectCache = STATIC_MEMBER_WRITE_CACHE.get(projectSources);
+    if (!projectCache) {
+        projectCache = new WeakMap();
+        STATIC_MEMBER_WRITE_CACHE.set(projectSources, projectCache);
+    }
+    let mutation = projectCache.get(receiverSymbol);
+    if (!mutation) {
+        let escaped = false;
+        let dynamic = false;
+        let unsafeMemberUse = false;
+        const keys = new Set();
+        const calls = [];
+        const nodes = [...projectSources];
+        while (nodes.length > 0 && !escaped && !dynamic) {
+            const node = nodes.pop();
+            check();
+            if (typescript_1.default.isIdentifier(node)) {
+                let symbol = checker.getSymbolAtLocation(node);
+                if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
+                    symbol = checker.getAliasedSymbol(symbol);
+                if (symbol === receiverSymbol) {
+                    const declarationName = (typescript_1.default.isImportEqualsDeclaration(node.parent)
+                        || typescript_1.default.isNamespaceImport(node.parent)) && node.parent.name === node;
+                    let usage = node;
+                    while (typescript_1.default.isParenthesizedExpression(usage.parent) || typescript_1.default.isAsExpression(usage.parent)
+                        || typescript_1.default.isTypeAssertionExpression(usage.parent) || typescript_1.default.isSatisfiesExpression(usage.parent)
+                        || typescript_1.default.isNonNullExpression(usage.parent))
+                        usage = usage.parent;
+                    const member = (typescript_1.default.isPropertyAccessExpression(usage.parent)
+                        || typescript_1.default.isElementAccessExpression(usage.parent))
+                        && usage.parent.expression === usage ? usage.parent : undefined;
+                    if (!declarationName && !member) {
+                        const parent = usage.parent;
+                        const readOnly = (typescript_1.default.isIfStatement(parent) || typescript_1.default.isWhileStatement(parent)
+                            || typescript_1.default.isDoStatement(parent) || typescript_1.default.isSwitchStatement(parent))
+                            && parent.expression === usage
+                            || typescript_1.default.isPrefixUnaryExpression(parent)
+                                && parent.operator === typescript_1.default.SyntaxKind.ExclamationToken
+                            || (typescript_1.default.isTypeOfExpression(parent) || typescript_1.default.isVoidExpression(parent))
+                                && parent.expression === usage
+                            || typescript_1.default.isExpressionStatement(parent)
+                            || typescript_1.default.isBinaryExpression(parent)
+                                && (parent.operatorToken.kind === typescript_1.default.SyntaxKind.EqualsEqualsEqualsToken
+                                    || parent.operatorToken.kind === typescript_1.default.SyntaxKind.ExclamationEqualsEqualsToken);
+                        escaped = !readOnly;
+                    }
+                    else if (member) {
+                        const memberKey = typescript_1.default.isPropertyAccessExpression(member) ? member.name.text
+                            : member.argumentExpression
+                                ? resolveStaticPropertyKey(member.argumentExpression, checker, check) : undefined;
+                        const staticallyDiscarded = (input) => {
+                            let current = input;
+                            while (current.parent) {
+                                const parent = current.parent;
+                                if (typescript_1.default.isParenthesizedExpression(parent) || typescript_1.default.isAsExpression(parent)
+                                    || typescript_1.default.isTypeAssertionExpression(parent) || typescript_1.default.isSatisfiesExpression(parent)
+                                    || typescript_1.default.isNonNullExpression(parent)) {
+                                    current = parent;
+                                    continue;
+                                }
+                                if (typescript_1.default.isBinaryExpression(parent)) {
+                                    if (parent.operatorToken.kind === typescript_1.default.SyntaxKind.CommaToken) {
+                                        if (parent.left === current)
+                                            return true;
+                                    }
+                                    else if (parent.right === current
+                                        && (parent.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+                                            || parent.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken
+                                            || parent.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken)) {
+                                        const resolvedLeft = resolveLocalConstInitializer(parent.left, checker, projectSources, check);
+                                        const left = resolvedLeft.incomplete
+                                            ? unwrapExpression(parent.left) : resolvedLeft.expression;
+                                        const truthy = left.kind === typescript_1.default.SyntaxKind.TrueKeyword ? true
+                                            : left.kind === typescript_1.default.SyntaxKind.FalseKeyword
+                                                || left.kind === typescript_1.default.SyntaxKind.NullKeyword || typescript_1.default.isVoidExpression(left)
+                                                ? false : typescript_1.default.isStringLiteralLike(left) ? left.text.length > 0
+                                                : typescript_1.default.isNumericLiteral(left) ? Number(left.text) !== 0
+                                                    : typescript_1.default.isBigIntLiteral(left) ? left.text !== '0n' : undefined;
+                                        const nonNullish = left.kind === typescript_1.default.SyntaxKind.NullKeyword
+                                            || typescript_1.default.isVoidExpression(left) ? false : truthy !== undefined ? true : undefined;
+                                        if (parent.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken && truthy === true
+                                            || parent.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+                                                && truthy === false
+                                            || parent.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken
+                                                && nonNullish === true)
+                                            return true;
+                                    }
+                                    else
+                                        break;
+                                    current = parent;
+                                    continue;
+                                }
+                                if (typescript_1.default.isConditionalExpression(parent)
+                                    && (parent.whenTrue === current || parent.whenFalse === current)) {
+                                    const resolvedCondition = resolveLocalConstInitializer(parent.condition, checker, projectSources, check);
+                                    const condition = resolvedCondition.incomplete
+                                        ? unwrapExpression(parent.condition) : resolvedCondition.expression;
+                                    const selected = condition.kind === typescript_1.default.SyntaxKind.TrueKeyword ? parent.whenTrue
+                                        : condition.kind === typescript_1.default.SyntaxKind.FalseKeyword ? parent.whenFalse : undefined;
+                                    if (selected && selected !== current)
+                                        return true;
+                                    current = parent;
+                                    continue;
+                                }
+                                break;
+                            }
+                            return false;
+                        };
+                        const invokedMember = () => {
+                            if (staticallyDiscarded(member))
+                                return undefined;
+                            let current = member;
+                            let direct = true;
+                            while (current.parent) {
+                                const parent = current.parent;
+                                if (typescript_1.default.isParenthesizedExpression(parent) || typescript_1.default.isAsExpression(parent)
+                                    || typescript_1.default.isTypeAssertionExpression(parent) || typescript_1.default.isSatisfiesExpression(parent)
+                                    || typescript_1.default.isNonNullExpression(parent)) {
+                                    current = parent;
+                                    continue;
+                                }
+                                if (typescript_1.default.isBinaryExpression(parent)) {
+                                    if (parent.operatorToken.kind === typescript_1.default.SyntaxKind.CommaToken) {
+                                        if (parent.right !== current)
+                                            return undefined;
+                                    }
+                                    else if (parent.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+                                        || parent.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken
+                                        || parent.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken) {
+                                        if (parent.right === current) {
+                                            const left = unwrapExpression(parent.left);
+                                            const truthy = left.kind === typescript_1.default.SyntaxKind.TrueKeyword ? true
+                                                : left.kind === typescript_1.default.SyntaxKind.FalseKeyword
+                                                    || left.kind === typescript_1.default.SyntaxKind.NullKeyword || typescript_1.default.isVoidExpression(left)
+                                                    ? false : typescript_1.default.isStringLiteralLike(left) ? left.text.length > 0
+                                                    : typescript_1.default.isNumericLiteral(left) ? Number(left.text) !== 0
+                                                        : typescript_1.default.isBigIntLiteral(left) ? left.text !== '0n' : undefined;
+                                            const nonNullish = left.kind === typescript_1.default.SyntaxKind.NullKeyword
+                                                || typescript_1.default.isVoidExpression(left) ? false : truthy !== undefined ? true : undefined;
+                                            if (parent.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken && truthy === true
+                                                || parent.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken
+                                                    && truthy === false
+                                                || parent.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken
+                                                    && nonNullish === true)
+                                                return undefined;
+                                        }
+                                    }
+                                    else
+                                        break;
+                                    current = parent;
+                                    continue;
+                                }
+                                if (typescript_1.default.isConditionalExpression(parent)
+                                    && (parent.whenTrue === current || parent.whenFalse === current)) {
+                                    const condition = unwrapExpression(parent.condition);
+                                    const selected = condition.kind === typescript_1.default.SyntaxKind.TrueKeyword ? parent.whenTrue
+                                        : condition.kind === typescript_1.default.SyntaxKind.FalseKeyword ? parent.whenFalse : undefined;
+                                    if (selected && selected !== current)
+                                        return undefined;
+                                    current = parent;
+                                    continue;
+                                }
+                                if ((typescript_1.default.isPropertyAccessExpression(parent) || typescript_1.default.isElementAccessExpression(parent))
+                                    && parent.expression === current) {
+                                    const invocation = typescript_1.default.isPropertyAccessExpression(parent) ? parent.name.text
+                                        : parent.argumentExpression
+                                            ? resolveStaticPropertyKey(parent.argumentExpression, checker, check) : undefined;
+                                    if (invocation === 'bind') {
+                                        const bindCall = parent.parent;
+                                        if (!typescript_1.default.isCallExpression(bindCall) || bindCall.expression !== parent)
+                                            return undefined;
+                                        let bound = bindCall;
+                                        while (typescript_1.default.isParenthesizedExpression(bound.parent) || typescript_1.default.isAsExpression(bound.parent)
+                                            || typescript_1.default.isTypeAssertionExpression(bound.parent)
+                                            || typescript_1.default.isSatisfiesExpression(bound.parent)
+                                            || typescript_1.default.isNonNullExpression(bound.parent))
+                                            bound = bound.parent;
+                                        if (typescript_1.default.isCallExpression(bound.parent) && bound.parent.expression === bound) {
+                                            return { invocation: bound.parent, direct: false };
+                                        }
+                                        return typescript_1.default.isTaggedTemplateExpression(bound.parent) && bound.parent.tag === bound
+                                            ? { invocation: bound.parent, direct: false } : undefined;
+                                    }
+                                    if (invocation !== 'call' && invocation !== 'apply')
+                                        return undefined;
+                                    direct = false;
+                                    current = parent;
+                                    continue;
+                                }
+                                if (typescript_1.default.isCallExpression(parent) && parent.arguments[0] === current) {
+                                    const callee = unwrapExpression(parent.expression);
+                                    const reflectInvocation = typescript_1.default.isPropertyAccessExpression(callee)
+                                        && isStandardReflectReceiver(callee.expression, checker, check)
+                                        && (callee.name.text === 'apply' || callee.name.text === 'construct');
+                                    return reflectInvocation ? { invocation: parent, direct: false } : undefined;
+                                }
+                                break;
+                            }
+                            if (typescript_1.default.isCallExpression(current.parent) && current.parent.expression === current) {
+                                return { invocation: current.parent, direct };
+                            }
+                            return typescript_1.default.isTaggedTemplateExpression(current.parent) && current.parent.tag === current
+                                ? { invocation: current.parent, direct: false } : undefined;
+                        };
+                        const invoked = invokedMember();
+                        if (invoked) {
+                            let decorated = invoked.invocation;
+                            while (typescript_1.default.isParenthesizedExpression(decorated.parent)
+                                || typescript_1.default.isAsExpression(decorated.parent)
+                                || typescript_1.default.isTypeAssertionExpression(decorated.parent)
+                                || typescript_1.default.isSatisfiesExpression(decorated.parent)
+                                || typescript_1.default.isNonNullExpression(decorated.parent))
+                                decorated = decorated.parent;
+                            calls.push({
+                                ...(memberKey === undefined ? {} : { key: memberKey }),
+                                invocation: invoked.invocation,
+                                directDecorator: invoked.direct && typescript_1.default.isDecorator(decorated.parent)
+                                    && decorated.parent.expression === decorated,
+                                simpleFactory: invoked.direct && isSimpleDecoratorFactory(member, checker, projectSources, check),
+                            });
+                            continue;
+                        }
+                        let target = member;
+                        let mutated = false;
+                        while (target.parent && !typescript_1.default.isStatement(target)) {
+                            const parent = target.parent;
+                            const mutates = typescript_1.default.isBinaryExpression(parent) && parent.left === target
+                                && parent.operatorToken.kind >= typescript_1.default.SyntaxKind.FirstAssignment
+                                && parent.operatorToken.kind <= typescript_1.default.SyntaxKind.LastAssignment
+                                || typescript_1.default.isDeleteExpression(parent) && parent.expression === target
+                                || (typescript_1.default.isPrefixUnaryExpression(parent) || typescript_1.default.isPostfixUnaryExpression(parent))
+                                    && parent.operand === target
+                                || typescript_1.default.isTaggedTemplateExpression(parent) && parent.tag === target;
+                            if (mutates) {
+                                if (memberKey === undefined)
+                                    dynamic = true;
+                                else
+                                    keys.add(memberKey);
+                                mutated = true;
+                                break;
+                            }
+                            target = parent;
+                        }
+                        if (!mutated) {
+                            let value = member;
+                            while (typescript_1.default.isParenthesizedExpression(value.parent) || typescript_1.default.isAsExpression(value.parent)
+                                || typescript_1.default.isTypeAssertionExpression(value.parent) || typescript_1.default.isSatisfiesExpression(value.parent)
+                                || typescript_1.default.isNonNullExpression(value.parent))
+                                value = value.parent;
+                            const parent = value.parent;
+                            const discarded = staticallyDiscarded(member) || typescript_1.default.isExpressionStatement(parent);
+                            const callParent = typescript_1.default.isCallExpression(parent) && parent.arguments.some((argument) => argument === value) ? parent : undefined;
+                            const resolved = callParent
+                                ? resolveDecoratorCallSymbol(callParent, checker, check, projectSources, true)
+                                : undefined;
+                            const trustedGuardArgument = resolved?.name === 'UseGuards'
+                                && resolved.trustedNestJsCommon;
+                            unsafeMemberUse ||= !discarded && !trustedGuardArgument;
+                        }
+                    }
+                }
+            }
+            typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
+        }
+        mutation = { escaped, dynamic, unsafeMemberUse, keys, calls };
+        projectCache.set(receiverSymbol, mutation);
+    }
+    return mutation.escaped || mutation.dynamic || mutation.unsafeMemberUse || mutation.keys.has(key)
+        || mutation.calls.some((record) => record.invocation !== ignoredCall
+            && !(record.directDecorator && record.key !== undefined
+                && record.simpleFactory && safeDecoratorMembers?.has(record.key)));
+}
+function resolveStaticDecoratorWrapperCall(call, checker, projectSources, check, safeDecoratorMembers) {
     let effectiveExpression = call.expression;
     const original = unwrapExpression(call.expression);
     if (typescript_1.default.isIdentifier(original)) {
@@ -1328,6 +1702,8 @@ function resolveStaticDecoratorWrapperCall(call, checker, projectSources, check)
     const objectAccess = typescript_1.default.isPropertyAccessExpression(unwrappedCallee)
         || typescript_1.default.isElementAccessExpression(unwrappedCallee);
     const stable = Boolean((!objectAccess || isNamespaceImportAccess(unwrappedCallee, checker))
+        && (!objectAccess || isSimpleDecoratorFactory(unwrappedCallee, checker, projectSources, check))
+        && (!objectAccess || !staticMemberMayBeWritten(unwrappedCallee, checker, projectSources, check, call, safeDecoratorMembers))
         && declaration && ((typescript_1.default.isVariableDeclaration(declaration)
         && typescript_1.default.isVariableDeclarationList(declaration.parent)
         && declaration.parent.flags & typescript_1.default.NodeFlags.Const)
@@ -1391,7 +1767,7 @@ function resolveStaticDecoratorWrapperCall(call, checker, projectSources, check)
     };
     if (!typescript_1.default.isBlock(body)) {
         const resolved = resolveReturnedCall(body, new Set(), 0);
-        return resolved && { ...resolved, symbol, stable };
+        return resolved ? { ...resolved, symbol, stable } : { symbol, stable, dynamic: false };
     }
     if (body.statements.length === 1 && typescript_1.default.isReturnStatement(body.statements[0])
         && body.statements[0].expression) {
@@ -1402,7 +1778,7 @@ function resolveStaticDecoratorWrapperCall(call, checker, projectSources, check)
     }
     return { symbol, stable, dynamic: true };
 }
-function resolveStaticSymbolName(expression, checker, check, projectSources) {
+function resolveStaticSymbolName(expression, checker, check, projectSources, safeDecoratorMembers) {
     const reference = unwrapExpression(expression);
     if (projectSources && typescript_1.default.isIdentifier(reference)) {
         let binding = checker.getSymbolAtLocation(reference);
@@ -1412,95 +1788,9 @@ function resolveStaticSymbolName(expression, checker, check, projectSources) {
             return undefined;
     }
     if (projectSources && (typescript_1.default.isPropertyAccessExpression(reference)
-        || typescript_1.default.isElementAccessExpression(reference))) {
-        const key = typescript_1.default.isPropertyAccessExpression(reference) ? reference.name.text
-            : reference.argumentExpression
-                ? resolveStaticPropertyKey(reference.argumentExpression, checker, check) : undefined;
-        const receiver = unwrapExpression(reference.expression);
-        let receiverSymbol = typescript_1.default.isIdentifier(receiver) ? checker.getSymbolAtLocation(receiver) : undefined;
-        if (receiverSymbol?.flags && receiverSymbol.flags & typescript_1.default.SymbolFlags.Alias) {
-            receiverSymbol = checker.getAliasedSymbol(receiverSymbol);
-        }
-        if (!key || !receiverSymbol)
-            return undefined;
-        let projectCache = STATIC_MEMBER_WRITE_CACHE.get(projectSources);
-        if (!projectCache) {
-            projectCache = new WeakMap();
-            STATIC_MEMBER_WRITE_CACHE.set(projectSources, projectCache);
-        }
-        let mutation = projectCache.get(receiverSymbol);
-        if (!mutation) {
-            let escaped = false;
-            let dynamic = false;
-            const keys = new Set();
-            const nodes = [...projectSources];
-            while (nodes.length > 0 && !escaped && !dynamic) {
-                const node = nodes.pop();
-                check();
-                if (typescript_1.default.isIdentifier(node)) {
-                    let symbol = checker.getSymbolAtLocation(node);
-                    if (symbol?.flags && symbol.flags & typescript_1.default.SymbolFlags.Alias)
-                        symbol = checker.getAliasedSymbol(symbol);
-                    if (symbol === receiverSymbol) {
-                        const declarationName = (typescript_1.default.isImportEqualsDeclaration(node.parent)
-                            || typescript_1.default.isNamespaceImport(node.parent)) && node.parent.name === node;
-                        let usage = node;
-                        while (typescript_1.default.isParenthesizedExpression(usage.parent) || typescript_1.default.isAsExpression(usage.parent)
-                            || typescript_1.default.isTypeAssertionExpression(usage.parent) || typescript_1.default.isSatisfiesExpression(usage.parent)
-                            || typescript_1.default.isNonNullExpression(usage.parent))
-                            usage = usage.parent;
-                        const member = (typescript_1.default.isPropertyAccessExpression(usage.parent)
-                            || typescript_1.default.isElementAccessExpression(usage.parent))
-                            && usage.parent.expression === usage ? usage.parent : undefined;
-                        if (!declarationName && !member) {
-                            const parent = usage.parent;
-                            const readOnly = (typescript_1.default.isIfStatement(parent) || typescript_1.default.isWhileStatement(parent)
-                                || typescript_1.default.isDoStatement(parent) || typescript_1.default.isSwitchStatement(parent))
-                                && parent.expression === usage
-                                || typescript_1.default.isPrefixUnaryExpression(parent)
-                                    && parent.operator === typescript_1.default.SyntaxKind.ExclamationToken
-                                || (typescript_1.default.isTypeOfExpression(parent) || typescript_1.default.isVoidExpression(parent))
-                                    && parent.expression === usage
-                                || typescript_1.default.isExpressionStatement(parent)
-                                || typescript_1.default.isBinaryExpression(parent)
-                                    && (parent.operatorToken.kind === typescript_1.default.SyntaxKind.EqualsEqualsEqualsToken
-                                        || parent.operatorToken.kind === typescript_1.default.SyntaxKind.ExclamationEqualsEqualsToken);
-                            escaped = !readOnly;
-                        }
-                        else if (member) {
-                            const memberKey = typescript_1.default.isPropertyAccessExpression(member) ? member.name.text
-                                : member.argumentExpression
-                                    ? resolveStaticPropertyKey(member.argumentExpression, checker, check) : undefined;
-                            let target = member;
-                            while (target.parent && !typescript_1.default.isStatement(target)) {
-                                const parent = target.parent;
-                                const mutates = typescript_1.default.isBinaryExpression(parent) && parent.left === target
-                                    && parent.operatorToken.kind >= typescript_1.default.SyntaxKind.FirstAssignment
-                                    && parent.operatorToken.kind <= typescript_1.default.SyntaxKind.LastAssignment
-                                    || typescript_1.default.isDeleteExpression(parent) && parent.expression === target
-                                    || (typescript_1.default.isPrefixUnaryExpression(parent) || typescript_1.default.isPostfixUnaryExpression(parent))
-                                        && parent.operand === target
-                                    || typescript_1.default.isCallExpression(parent) && parent.expression === target
-                                    || typescript_1.default.isTaggedTemplateExpression(parent) && parent.tag === target;
-                                if (mutates) {
-                                    if (memberKey === undefined)
-                                        dynamic = true;
-                                    else
-                                        keys.add(memberKey);
-                                    break;
-                                }
-                                target = parent;
-                            }
-                        }
-                    }
-                }
-                typescript_1.default.forEachChild(node, (child) => { nodes.push(child); });
-            }
-            mutation = { escaped, dynamic, keys };
-            projectCache.set(receiverSymbol, mutation);
-        }
-        if (mutation.escaped || mutation.dynamic || mutation.keys.has(key))
-            return undefined;
+        || typescript_1.default.isElementAccessExpression(reference))
+        && staticMemberMayBeWritten(reference, checker, projectSources, check, undefined, safeDecoratorMembers)) {
+        return undefined;
     }
     const symbol = targetSymbol(expression, checker, check);
     return !symbol || symbol === UNKNOWN_NESTJS_ROUTE

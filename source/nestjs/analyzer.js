@@ -4967,6 +4967,10 @@ function isUnresolvedStoredGuardDecorator(decorator, checker, projectSources, ch
 function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps, maxDepth) {
     const result = emptyAuthMetadata();
     const resolvingWrappers = new Set();
+    const safeDecoratorMembers = new Set([
+        ...config.public_decorators,
+        ...config.roles_decorators,
+    ]);
     const applyResolved = (resolved, evidence, depth) => {
         check();
         if (resolved.indirectInvocation) {
@@ -5019,7 +5023,7 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps,
                 return true;
             }
             for (const argument of resolved.call.arguments) {
-                const symbol = (0, decorator_symbols_1.resolveStaticSymbolName)(argument, checker, check, projectSources);
+                const symbol = (0, decorator_symbols_1.resolveStaticSymbolName)(argument, checker, check, projectSources, safeDecoratorMembers);
                 if (symbol)
                     result.guards.push(symbol);
                 else {
@@ -5033,7 +5037,7 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps,
             result.guardDynamic = true;
             return true;
         }
-        const wrapperCall = (0, decorator_symbols_1.resolveStaticDecoratorWrapperCall)(resolved.call, checker, projectSources, check);
+        const wrapperCall = (0, decorator_symbols_1.resolveStaticDecoratorWrapperCall)(resolved.call, checker, projectSources, check, safeDecoratorMembers);
         if (config.public_decorators.includes(resolved.name)) {
             result.publicPresent = true;
             result.explicitPublic = false;
