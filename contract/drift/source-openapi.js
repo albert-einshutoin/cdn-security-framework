@@ -155,7 +155,8 @@ function explicitSourceAuth(operation) {
     };
 }
 function explicitDeclaredAuth(operation) {
-    if (operation.auth.mode === 'none' && operation.exposure === 'public') {
+    if (operation.exposure === 'public' && (operation.auth.mode === 'none'
+        || operation.auth.alternatives.some(({ anonymous }) => anonymous))) {
         return { mode: 'public', kinds: [] };
     }
     if (operation.auth.mode !== 'alternatives' || operation.auth.alternatives.some(({ anonymous, schemes }) => anonymous || schemes.some(({ kind, capability }) => kind === 'unknown' || capability !== 'supported')))

@@ -217,6 +217,25 @@ describe('Source AST and OpenAPI drift', () => {
       .map(({ ruleId }) => ruleId)).toContain('SC-AUTHN-005');
   });
 
+  test('treats an explicit anonymous OpenAPI alternative as public', () => {
+    const declared = operation('openapi', 'GET', '/optional', {
+      exposure: 'public',
+      auth: {
+        mode: 'alternatives',
+        alternatives: [
+          { anonymous: true, schemes: [] },
+          bearerAuth.alternatives[0],
+        ],
+      },
+    });
+    const implemented = operation('source-ast', 'GET', '/optional', {
+      exposure: 'authenticated', auth: sourceBearerAuth,
+    });
+
+    expect(compareSourceOpenApiContracts(input([declared], [implemented]))
+      .map(({ ruleId }) => ruleId)).toContain('SC-AUTHN-005');
+  });
+
   test('preserves repeated auth-kind requirements', () => {
     const declared = operation('openapi', 'GET', '/keys', {
       exposure: 'authenticated',

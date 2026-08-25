@@ -171,7 +171,8 @@ function explicitSourceAuth(operation: ApiOperationContractV1) {
 }
 
 function explicitDeclaredAuth(operation: ApiOperationContractV1) {
-  if (operation.auth.mode === 'none' && operation.exposure === 'public') {
+  if (operation.exposure === 'public' && (operation.auth.mode === 'none'
+    || operation.auth.alternatives.some(({ anonymous }) => anonymous))) {
     return { mode: 'public' as const, kinds: [] };
   }
   if (operation.auth.mode !== 'alternatives' || operation.auth.alternatives.some(
