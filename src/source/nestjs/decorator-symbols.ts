@@ -992,6 +992,7 @@ export function resolveDecoratorSymbol(
   checker: ts.TypeChecker,
   check: () => void,
   projectSources?: ReadonlySet<ts.SourceFile>,
+  retainIndirectCustom = false,
 ): {
   name: string;
   call: ts.CallExpression;
@@ -1004,7 +1005,9 @@ export function resolveDecoratorSymbol(
   );
   const call = ts.isCallExpression(expression) ? expression : undefined;
   if (!call) return undefined;
-  return resolveDecoratorCallSymbol(call, checker, check, projectSources);
+  return resolveDecoratorCallSymbol(
+    call, checker, check, projectSources, retainIndirectCustom,
+  );
 }
 
 export function resolveBareDecoratorName(
@@ -1241,6 +1244,7 @@ export function resolveDecoratorCallSymbol(
   checker: ts.TypeChecker,
   check: () => void,
   projectSources?: ReadonlySet<ts.SourceFile>,
+  retainIndirectCustom = false,
 ): {
   name: string;
   call: ts.CallExpression;
@@ -1345,7 +1349,7 @@ export function resolveDecoratorCallSymbol(
       : undefined;
   }
   const nestJsCommon = originatesFromNestJsCommon(symbol);
-  if (indirectInvocation && (!nestJsCommon
+  if (indirectInvocation && !retainIndirectCustom && (!nestJsCommon
     || (symbol.getName() !== 'UseGuards' && symbol.getName() !== 'applyDecorators'))) return undefined;
   return {
     name: symbol.getName(),

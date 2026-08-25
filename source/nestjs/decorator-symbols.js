@@ -943,12 +943,12 @@ function classifyNestJsRouteDecorator(decorator, checker, check) {
             || result.name === 'RequestMapping' || result.name === 'Search' || result.name === 'Version')),
     };
 }
-function resolveDecoratorSymbol(decorator, checker, check, projectSources) {
+function resolveDecoratorSymbol(decorator, checker, check, projectSources, retainIndirectCustom = false) {
     const expression = resolveConstInitializer(decorator.expression, checker, check, projectSources);
     const call = typescript_1.default.isCallExpression(expression) ? expression : undefined;
     if (!call)
         return undefined;
-    return resolveDecoratorCallSymbol(call, checker, check, projectSources);
+    return resolveDecoratorCallSymbol(call, checker, check, projectSources, retainIndirectCustom);
 }
 function resolveBareDecoratorName(decorator, checker, check) {
     const expression = unwrapExpression(decorator.expression);
@@ -1163,7 +1163,7 @@ function standardFunctionPrototypeMethod(input, checker, check) {
         && globalReceiver.text === 'globalThis' && !hasRuntimeBinding(globalReceiver, checker)
         ? method : undefined;
 }
-function resolveDecoratorCallSymbol(call, checker, check, projectSources) {
+function resolveDecoratorCallSymbol(call, checker, check, projectSources, retainIndirectCustom = false) {
     const standardReflectMethod = (input) => {
         const member = unwrapExpression(input);
         const method = typescript_1.default.isPropertyAccessExpression(member) ? member.name.text
@@ -1267,7 +1267,7 @@ function resolveDecoratorCallSymbol(call, checker, check, projectSources) {
             : undefined;
     }
     const nestJsCommon = originatesFromNestJsCommon(symbol);
-    if (indirectInvocation && (!nestJsCommon
+    if (indirectInvocation && !retainIndirectCustom && (!nestJsCommon
         || (symbol.getName() !== 'UseGuards' && symbol.getName() !== 'applyDecorators')))
         return undefined;
     return {

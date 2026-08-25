@@ -66,7 +66,10 @@ function sourceLocation(node, workspaceRoot) {
 function digest(sourceFile) {
     return `sha256:${(0, node_crypto_1.createHash)('sha256').update(sourceFile.text).digest('hex')}`;
 }
-function staticTruth(input) {
+function staticTruth(input, checker, projectSources, check, seen = new Set(), depth = 0) {
+    check?.();
+    if (depth > 64)
+        return undefined;
     let expression = input;
     while (typescript_1.default.isParenthesizedExpression(expression) || typescript_1.default.isAsExpression(expression)
         || typescript_1.default.isTypeAssertionExpression(expression) || typescript_1.default.isSatisfiesExpression(expression)
@@ -82,6 +85,26 @@ function staticTruth(input) {
     }
     if (typescript_1.default.isNumericLiteral(expression))
         return Number(expression.text) !== 0;
+    if (typescript_1.default.isBigIntLiteral(expression))
+        return BigInt(expression.text.slice(0, -1)) !== 0n;
+    if (typescript_1.default.isObjectLiteralExpression(expression) || typescript_1.default.isArrayLiteralExpression(expression)
+        || typescript_1.default.isFunctionExpression(expression) || typescript_1.default.isArrowFunction(expression)
+        || typescript_1.default.isClassExpression(expression) || typescript_1.default.isRegularExpressionLiteral(expression)
+        || typescript_1.default.isNewExpression(expression))
+        return true;
+    if (checker && projectSources && typescript_1.default.isIdentifier(expression)) {
+        const symbol = resolvedSymbolAt(expression, checker);
+        if (!symbol || seen.has(symbol))
+            return undefined;
+        const declarations = symbol.declarations?.filter(typescript_1.default.isVariableDeclaration) ?? [];
+        const declaration = declarations.length === 1 ? declarations[0] : undefined;
+        if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+            || !typescript_1.default.isVariableDeclarationList(declaration.parent)
+            || !(declaration.parent.flags & typescript_1.default.NodeFlags.Const))
+            return undefined;
+        seen.add(symbol);
+        return staticTruth(declaration.initializer, checker, projectSources, check, seen, depth + 1);
+    }
     return undefined;
 }
 function staticNullish(input) {
@@ -119,7 +142,7 @@ function staticSwitchValue(input) {
         return 'null';
     return undefined;
 }
-function staticallyUnreachable(node) {
+function staticallyUnreachable(node, checker, projectSources, check) {
     const stopsSequentialFlow = (statement) => (typescript_1.default.isReturnStatement(statement) || typescript_1.default.isThrowStatement(statement)
         || typescript_1.default.isBreakStatement(statement) || typescript_1.default.isContinueStatement(statement)
         || (typescript_1.default.isBlock(statement) && statement.statements.some(stopsSequentialFlow)));
@@ -127,7 +150,7 @@ function staticallyUnreachable(node) {
     while (!typescript_1.default.isSourceFile(current)) {
         const parent = current.parent;
         if (typescript_1.default.isIfStatement(parent)) {
-            const truth = staticTruth(parent.expression);
+            const truth = staticTruth(parent.expression, checker, projectSources, check);
             if ((current === parent.thenStatement && truth === false)
                 || (current === parent.elseStatement && truth === true))
                 return true;
@@ -135,17 +158,17 @@ function staticallyUnreachable(node) {
         else if ((typescript_1.default.isWhileStatement(parent) || typescript_1.default.isForStatement(parent))
             && current === parent.statement) {
             const condition = typescript_1.default.isWhileStatement(parent) ? parent.expression : parent.condition;
-            if (condition && staticTruth(condition) === false)
+            if (condition && staticTruth(condition, checker, projectSources, check) === false)
                 return true;
         }
         else if (typescript_1.default.isConditionalExpression(parent)) {
-            const truth = staticTruth(parent.condition);
+            const truth = staticTruth(parent.condition, checker, projectSources, check);
             if ((current === parent.whenTrue && truth === false)
                 || (current === parent.whenFalse && truth === true))
                 return true;
         }
         else if (typescript_1.default.isBinaryExpression(parent) && current === parent.right) {
-            const truth = staticTruth(parent.left);
+            const truth = staticTruth(parent.left, checker, projectSources, check);
             if ((parent.operatorToken.kind === typescript_1.default.SyntaxKind.AmpersandAmpersandToken && truth === false)
                 || (parent.operatorToken.kind === typescript_1.default.SyntaxKind.BarBarToken && truth === true)
                 || (parent.operatorToken.kind === typescript_1.default.SyntaxKind.QuestionQuestionToken
@@ -4931,8 +4954,26 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps,
     const applyResolved = (resolved, evidence, depth) => {
         check();
         if (resolved.indirectInvocation) {
-            result.guardDynamic = true;
-            return true;
+            if (config.public_decorators.includes(resolved.name)) {
+                result.publicPresent = true;
+                result.explicitPublic = false;
+                result.publicDynamic = true;
+                result.publicEvidence = [evidence];
+                return true;
+            }
+            if (config.roles_decorators.includes(resolved.name)) {
+                result.rolesPresent = true;
+                result.roles = [];
+                result.rolesDynamic = true;
+                result.authorizationEvidence = [evidence];
+                return true;
+            }
+            if (resolved.nestJsCommon
+                && (resolved.name === 'UseGuards' || resolved.name === 'applyDecorators')) {
+                result.guardDynamic = true;
+                return true;
+            }
+            return false;
         }
         if (depth > maxDepth) {
             result.guardDynamic = true;
@@ -4944,7 +4985,7 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps,
                     result.guardDynamic = true;
                     continue;
                 }
-                const nested = (0, decorator_symbols_1.resolveDecoratorCallSymbol)(argument, checker, check, projectSources);
+                const nested = (0, decorator_symbols_1.resolveDecoratorCallSymbol)(argument, checker, check, projectSources, true);
                 if (nested) {
                     if (!applyResolved(nested, evidence, depth + 1))
                         result.guardDynamic = true;
@@ -5013,7 +5054,7 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps,
             return true;
         }
         const wrapper = wrapperCall?.call
-            && (0, decorator_symbols_1.resolveDecoratorCallSymbol)(wrapperCall.call, checker, check, projectSources);
+            && (0, decorator_symbols_1.resolveDecoratorCallSymbol)(wrapperCall.call, checker, check, projectSources, true);
         if (!wrapper)
             return false;
         if (!wrapperCall.stable || resolvingWrappers.has(wrapperCall.symbol)
@@ -5041,11 +5082,9 @@ function ownAuthMetadata(node, checker, projectSources, config, check, maxSteps,
             result.publicEvidence = [decorator];
             continue;
         }
-        const resolved = (0, decorator_symbols_1.resolveDecoratorSymbol)(decorator, checker, check, projectSources);
-        if (resolved) {
-            applyResolved(resolved, decorator, 0);
-        }
-        else if (isUnresolvedStoredGuardDecorator(decorator, checker, projectSources, check)) {
+        const resolved = (0, decorator_symbols_1.resolveDecoratorSymbol)(decorator, checker, check, projectSources, true);
+        const handled = resolved ? applyResolved(resolved, decorator, 0) : false;
+        if (!handled && isUnresolvedStoredGuardDecorator(decorator, checker, projectSources, check)) {
             result.guardDynamic = true;
         }
     }
@@ -5698,7 +5737,7 @@ async function analyze(context, authConfig) {
             const node = nodes.pop();
             await checkpoint();
             if (typescript_1.default.isCallExpression(node)
-                && !staticallyUnreachable(node)
+                && !staticallyUnreachable(node, checker, projectSources, check)
                 && !isInsideNonThrowingCatch(node, checker, projectSources, check)
                 && !isInsideProvablyUninvokedFunction(node)
                 && (0, decorator_symbols_1.isNestJsUseGlobalGuardsCall)(node, checker, check, projectSources)) {

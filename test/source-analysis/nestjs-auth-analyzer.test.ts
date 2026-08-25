@@ -373,6 +373,42 @@ describe('NestJS auth metadata analyzer', () => {
     ]));
   });
 
+  test('fails closed for indirectly invoked configured auth decorators', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard, Public, Roles } from './auth';
+      @Controller('indirect-public') @UseGuards(JwtAuthGuard)
+      class IndirectPublicController {
+        @Get('call') @Public.call(undefined) call() {}
+        @Get('reflect') @Reflect.apply(Public, undefined, []) reflect() {}
+        @Get('roles') @Roles.call(undefined, 'admin') roles() {}
+      }
+    `, {
+      'src/auth.ts': `
+        export class JwtAuthGuard {}
+        export const Public = (): MethodDecorator => () => {};
+        export const Roles = (..._roles: string[]): MethodDecorator => () => {};
+      `,
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer({
+      ...authConfig, public_decorators: ['Public'],
+    }), context(root));
+
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ routeKey: 'GET /indirect-public/call', exposure: 'unknown' }),
+      expect.objectContaining({ routeKey: 'GET /indirect-public/reflect', exposure: 'unknown' }),
+      expect.objectContaining({
+        routeKey: 'GET /indirect-public/roles',
+        auth: expect.objectContaining({
+          mode: 'alternatives',
+          analysis: expect.objectContaining({ roles: [], enforcementConfidence: 'unknown' }),
+        }),
+      }),
+    ]));
+  });
+
   test('fails closed when a configured bare public decorator is reassigned', async () => {
     const controller = (declaration: string) => `
       import { Controller, Get, UseGuards } from '@nestjs/common';
@@ -4602,6 +4638,7 @@ describe('NestJS auth metadata analyzer', () => {
       ['declare function mutate(value: { register: (...args: unknown[]) => unknown }): void; const hooks = { register: audit }; mutate(false || hooks); hooks.register.call(app, guard);', 'unknown'],
       ['const hooks = { register: audit }; if (hooks && hooks) hooks.register.call(app, guard);', 'alternatives'],
       ['const hooks = { register: audit }; if ((0, hooks)) hooks.register.call(app, guard);', 'alternatives'],
+      ['const enabled = false; if (enabled) app.useGlobalGuards(guard);', 'alternatives'],
       ['const hooks = { register: audit }; void hooks; typeof hooks; hooks === hooks; hooks.register.call(app, guard);', 'alternatives'],
       ['interface H { register: (...args: unknown[]) => unknown } const a: H = { register: app.useGlobalGuards }; const b: H = { register: audit }; b.register = audit; a.register.call(app, guard);', 'unknown'],
       ['interface H { register: (...args: unknown[]) => unknown } const a: H = { register: audit }; const b: H = { register: audit }; b.register = app.useGlobalGuards; a.register.call(app, guard);', 'alternatives'],

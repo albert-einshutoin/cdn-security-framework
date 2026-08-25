@@ -110,7 +110,16 @@ function digest(sourceFile: ts.SourceFile): string {
   return `sha256:${createHash('sha256').update(sourceFile.text).digest('hex')}`;
 }
 
-function staticTruth(input: ts.Expression): boolean | undefined {
+function staticTruth(
+  input: ts.Expression,
+  checker?: ts.TypeChecker,
+  projectSources?: ReadonlySet<ts.SourceFile>,
+  check?: () => void,
+  seen = new Set<ts.Symbol>(),
+  depth = 0,
+): boolean | undefined {
+  check?.();
+  if (depth > 64) return undefined;
   let expression = input;
   while (ts.isParenthesizedExpression(expression) || ts.isAsExpression(expression)
     || ts.isTypeAssertionExpression(expression) || ts.isSatisfiesExpression(expression)
@@ -122,6 +131,24 @@ function staticTruth(input: ts.Expression): boolean | undefined {
     return expression.text.length > 0;
   }
   if (ts.isNumericLiteral(expression)) return Number(expression.text) !== 0;
+  if (ts.isBigIntLiteral(expression)) return BigInt(expression.text.slice(0, -1)) !== 0n;
+  if (ts.isObjectLiteralExpression(expression) || ts.isArrayLiteralExpression(expression)
+    || ts.isFunctionExpression(expression) || ts.isArrowFunction(expression)
+    || ts.isClassExpression(expression) || ts.isRegularExpressionLiteral(expression)
+    || ts.isNewExpression(expression)) return true;
+  if (checker && projectSources && ts.isIdentifier(expression)) {
+    const symbol = resolvedSymbolAt(expression, checker);
+    if (!symbol || seen.has(symbol)) return undefined;
+    const declarations = symbol.declarations?.filter(ts.isVariableDeclaration) ?? [];
+    const declaration = declarations.length === 1 ? declarations[0] : undefined;
+    if (!declaration?.initializer || !projectSources.has(declaration.getSourceFile())
+      || !ts.isVariableDeclarationList(declaration.parent)
+      || !(declaration.parent.flags & ts.NodeFlags.Const)) return undefined;
+    seen.add(symbol);
+    return staticTruth(
+      declaration.initializer, checker, projectSources, check, seen, depth + 1,
+    );
+  }
   return undefined;
 }
 
@@ -154,7 +181,12 @@ function staticSwitchValue(input: ts.Expression): string | undefined {
   return undefined;
 }
 
-function staticallyUnreachable(node: ts.Node): boolean {
+function staticallyUnreachable(
+  node: ts.Node,
+  checker?: ts.TypeChecker,
+  projectSources?: ReadonlySet<ts.SourceFile>,
+  check?: () => void,
+): boolean {
   const stopsSequentialFlow = (statement: ts.Statement): boolean => (
     ts.isReturnStatement(statement) || ts.isThrowStatement(statement)
     || ts.isBreakStatement(statement) || ts.isContinueStatement(statement)
@@ -164,19 +196,19 @@ function staticallyUnreachable(node: ts.Node): boolean {
   while (!ts.isSourceFile(current)) {
     const parent = current.parent;
     if (ts.isIfStatement(parent)) {
-      const truth = staticTruth(parent.expression);
+      const truth = staticTruth(parent.expression, checker, projectSources, check);
       if ((current === parent.thenStatement && truth === false)
         || (current === parent.elseStatement && truth === true)) return true;
     } else if ((ts.isWhileStatement(parent) || ts.isForStatement(parent))
       && current === parent.statement) {
       const condition = ts.isWhileStatement(parent) ? parent.expression : parent.condition;
-      if (condition && staticTruth(condition) === false) return true;
+      if (condition && staticTruth(condition, checker, projectSources, check) === false) return true;
     } else if (ts.isConditionalExpression(parent)) {
-      const truth = staticTruth(parent.condition);
+      const truth = staticTruth(parent.condition, checker, projectSources, check);
       if ((current === parent.whenTrue && truth === false)
         || (current === parent.whenFalse && truth === true)) return true;
     } else if (ts.isBinaryExpression(parent) && current === parent.right) {
-      const truth = staticTruth(parent.left);
+      const truth = staticTruth(parent.left, checker, projectSources, check);
       if ((parent.operatorToken.kind === ts.SyntaxKind.AmpersandAmpersandToken && truth === false)
         || (parent.operatorToken.kind === ts.SyntaxKind.BarBarToken && truth === true)
         || (parent.operatorToken.kind === ts.SyntaxKind.QuestionQuestionToken
@@ -4678,8 +4710,26 @@ function ownAuthMetadata(
   ): boolean => {
     check();
     if (resolved.indirectInvocation) {
-      result.guardDynamic = true;
-      return true;
+      if (config.public_decorators.includes(resolved.name)) {
+        result.publicPresent = true;
+        result.explicitPublic = false;
+        result.publicDynamic = true;
+        result.publicEvidence = [evidence];
+        return true;
+      }
+      if (config.roles_decorators.includes(resolved.name)) {
+        result.rolesPresent = true;
+        result.roles = [];
+        result.rolesDynamic = true;
+        result.authorizationEvidence = [evidence];
+        return true;
+      }
+      if (resolved.nestJsCommon
+        && (resolved.name === 'UseGuards' || resolved.name === 'applyDecorators')) {
+        result.guardDynamic = true;
+        return true;
+      }
+      return false;
     }
     if (depth > maxDepth) {
       result.guardDynamic = true;
@@ -4691,7 +4741,7 @@ function ownAuthMetadata(
           result.guardDynamic = true;
           continue;
         }
-        const nested = resolveDecoratorCallSymbol(argument, checker, check, projectSources);
+        const nested = resolveDecoratorCallSymbol(argument, checker, check, projectSources, true);
         if (nested) {
           if (!applyResolved(nested, evidence, depth + 1)) result.guardDynamic = true;
         }
@@ -4754,7 +4804,7 @@ function ownAuthMetadata(
       return true;
     }
     const wrapper = wrapperCall?.call
-      && resolveDecoratorCallSymbol(wrapperCall.call, checker, check, projectSources);
+      && resolveDecoratorCallSymbol(wrapperCall.call, checker, check, projectSources, true);
     if (!wrapper) return false;
     if (!wrapperCall.stable || resolvingWrappers.has(wrapperCall.symbol)
       || depth >= maxDepth) {
@@ -4779,10 +4829,9 @@ function ownAuthMetadata(
       result.publicEvidence = [decorator];
       continue;
     }
-    const resolved = resolveDecoratorSymbol(decorator, checker, check, projectSources);
-    if (resolved) {
-      applyResolved(resolved, decorator, 0);
-    } else if (isUnresolvedStoredGuardDecorator(decorator, checker, projectSources, check)) {
+    const resolved = resolveDecoratorSymbol(decorator, checker, check, projectSources, true);
+    const handled = resolved ? applyResolved(resolved, decorator, 0) : false;
+    if (!handled && isUnresolvedStoredGuardDecorator(decorator, checker, projectSources, check)) {
       result.guardDynamic = true;
     }
   }
@@ -5460,7 +5509,7 @@ async function analyze(
       const node = nodes.pop()!;
       await checkpoint();
       if (ts.isCallExpression(node)
-        && !staticallyUnreachable(node)
+        && !staticallyUnreachable(node, checker, projectSources, check)
         && !isInsideNonThrowingCatch(node, checker, projectSources, check)
         && !isInsideProvablyUninvokedFunction(node)
         && isNestJsUseGlobalGuardsCall(node, checker, check, projectSources)) {

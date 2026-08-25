@@ -16,7 +16,7 @@ export declare function classifyNestJsRouteDecorator(decorator: ts.Decorator, ch
     };
     unsupported: boolean;
 };
-export declare function resolveDecoratorSymbol(decorator: ts.Decorator, checker: ts.TypeChecker, check: () => void, projectSources?: ReadonlySet<ts.SourceFile>): {
+export declare function resolveDecoratorSymbol(decorator: ts.Decorator, checker: ts.TypeChecker, check: () => void, projectSources?: ReadonlySet<ts.SourceFile>, retainIndirectCustom?: boolean): {
     name: string;
     call: ts.CallExpression;
     nestJsCommon: boolean;
@@ -25,7 +25,7 @@ export declare function resolveDecoratorSymbol(decorator: ts.Decorator, checker:
 } | undefined;
 export declare function resolveBareDecoratorName(decorator: ts.Decorator, checker: ts.TypeChecker, check: () => void): string | undefined;
 export declare function isBareDecoratorBindingStable(decorator: ts.Decorator, checker: ts.TypeChecker, projectSources: ReadonlySet<ts.SourceFile>, check: () => void): boolean;
-export declare function resolveDecoratorCallSymbol(call: ts.CallExpression, checker: ts.TypeChecker, check: () => void, projectSources?: ReadonlySet<ts.SourceFile>): {
+export declare function resolveDecoratorCallSymbol(call: ts.CallExpression, checker: ts.TypeChecker, check: () => void, projectSources?: ReadonlySet<ts.SourceFile>, retainIndirectCustom?: boolean): {
     name: string;
     call: ts.CallExpression;
     nestJsCommon: boolean;
