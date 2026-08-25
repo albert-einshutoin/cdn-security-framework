@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "operationKeys": [
+    "DELETE /users/{id}",
+    "GET /users/duplicate",
+    "GET /users/inherited",
+    "GET /users/{id}",
+    "PATCH /users/details",
+    "POST /users"
+  ],
+  "diagnostics": ["SOURCE_ANALYZER_DYNAMIC_ROUTE"],
+  "sourceOpenApiRules": [
+    "SC-INVENTORY-001:GET /users/duplicate",
+    "SC-INVENTORY-001:GET /users/inherited",
+    "SC-INVENTORY-003:GET /declared-only",
+    "SC-INVENTORY-004:/users/details"
+  ],
+  "sourcePolicyRules": [
+    "SC-EXPOSURE-004:PATCH /users/details",
+    "SC-EXPOSURE-004:DELETE /users/{id}",
+    "SC-AUTHN-006:POST /users",
+    "SC-AUTHN-006:GET /users/duplicate",
+    "SC-AUTHN-006:GET /users/inherited",
+    "SC-AUTHZ-002:POST /users",
+    "SC-EXPOSURE-005:/users",
+    "SC-EXPOSURE-005:/users/details",
+    "SC-EXPOSURE-005:/users/duplicate",
+    "SC-EXPOSURE-005:/users/inherited",
+    "SC-EXPOSURE-005:/users/{id}",
+    "SC-INVENTORY-005:/users/:id"
+  ]
+}
