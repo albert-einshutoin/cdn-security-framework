@@ -1,5 +1,5 @@
 import { type SecurityFindingV1 } from './finding';
-export declare const WAIVABLE_FINDING_RULE_IDS: readonly ["SC-AUTHN-001", "SC-AUTHN-002", "SC-AUTHN-003", "SC-AUTHN-004", "SC-EXPOSURE-001", "SC-EXPOSURE-002", "SC-EXPOSURE-003", "SC-INVENTORY-002", "SC-LIMIT-001", "SC-LIMIT-002", "SC-REQUEST-001", "SC-REQUEST-002", "SC-REQUEST-003"];
+export declare const WAIVABLE_FINDING_RULE_IDS: readonly ["SC-AUTHN-001", "SC-AUTHN-002", "SC-AUTHN-003", "SC-AUTHN-004", "SC-AUTHN-005", "SC-AUTHZ-001", "SC-EXPOSURE-001", "SC-EXPOSURE-002", "SC-EXPOSURE-003", "SC-INVENTORY-001", "SC-INVENTORY-002", "SC-INVENTORY-003", "SC-INVENTORY-004", "SC-LIMIT-001", "SC-LIMIT-002", "SC-REQUEST-001", "SC-REQUEST-002", "SC-REQUEST-003"];
 export type FindingExceptionTarget = 'aws' | 'cloudflare';
 export interface FindingExceptionSelectorV1 {
     instance_id?: string;

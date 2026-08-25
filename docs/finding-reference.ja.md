@@ -62,6 +62,18 @@ Policy Capabilityの実効範囲が異なるため、Targetは必須です。Mon
 | `SC-GOV-002` | Warning | 有効期限内のExceptionが現在のFindingに一致しない。 |
 | `SC-GOV-003` | Warning | 1件のFindingに複数Exceptionが一致し、最も限定的な1件だけを適用した。 |
 
+## Source ASTとOpenAPIのDrift Rule
+
+`compareSourceOpenApiContracts(input, options)`は、正規化済みSource AST MetadataとOpenAPIを比較します。Parameter名はRoute Shape一致に影響しません。Operation不在は該当Route InventoryがCompleteな場合だけErrorとし、AuthenticationとRoleの明示的な矛盾は、MetadataだけではGuardのRuntime動作を証明できないためWarningとします。
+
+| Rule | Severity | 条件 |
+| --- | --- | --- |
+| `SC-INVENTORY-001` | Error、OpenAPI InventoryがPartialならWarning | 静的検出したSource Operationと同ShapeのOpenAPI Routeがない。 |
+| `SC-INVENTORY-003` | Error、Source InventoryがPartialならWarning | OpenAPI Operationと同ShapeのSource Routeを静的検出できない。 |
+| `SC-INVENTORY-004` | Error、両InventoryがCompleteでなければWarning | 同じ正規化Route ShapeでHTTP Method集合が異なる。 |
+| `SC-AUTHN-005` | Warning | OpenAPIの明示AuthとHigh-confidenceなSource Decorator Metadataが矛盾する。UnknownまたはIncompleteなMetadataは不一致として報告しない。 |
+| `SC-AUTHZ-001` | Warning | 明示指定したPrivileged RoleとHigh-confidenceなSource Role Metadataが矛盾する。 |
+
 Exceptionの更新・期限延長・削除・監査手順は[Finding Exception運用ガイド](finding-exceptions.ja.md)を参照してください。
 
 ### Authentication Compatibility
