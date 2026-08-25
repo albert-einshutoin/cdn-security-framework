@@ -8,7 +8,7 @@
 - `SC-INVENTORY-003` (error, deterministic): a declared operation is absent from complete Source route analysis. Partial or unsupported Source route capability lowers this to a heuristic warning because an unresolved route is not proof of absence.
 - `SC-INVENTORY-004` (error, deterministic): Source and OpenAPI have different method sets for the same normalized route shape. Incomplete route capability on either side lowers this to a heuristic warning.
 - `SC-AUTHN-005` (warning, high-confidence): explicit OpenAPI public/authenticated metadata contradicts high-confidence Source `Public` or mapped Guard metadata. Multiple OpenAPI authentication alternatives are not flattened into an AND comparison. Partial route identity lowers confidence to heuristic.
-- `SC-AUTHZ-001` (warning, high-confidence): explicitly configured `declaredPrivilegedRoles` differ from high-confidence Source role metadata. Route names and tags are never used to infer privilege. Partial route identity lowers confidence to heuristic.
+- `SC-AUTHZ-001` (warning, high-confidence): explicitly configured `declaredPrivilegedRoles` differ from high-confidence Source role metadata with complete `authorization` evidence. Route names and tags are never used to infer privilege. Partial route identity lowers confidence to heuristic.
 
 Both comparison roots must provide evidence. Findings for matched operations include both operation evidence sets; inventory-absence findings combine the present operation evidence with the missing side's root evidence.
 

@@ -72,7 +72,7 @@ Policy Capabilityの実効範囲が異なるため、Targetは必須です。Mon
 | `SC-INVENTORY-003` | Error、Source InventoryがPartialならWarning | OpenAPI Operationと同ShapeのSource Routeを静的検出できない。 |
 | `SC-INVENTORY-004` | Error、両InventoryがCompleteでなければWarning | 同じ正規化Route ShapeでHTTP Method集合が異なる。 |
 | `SC-AUTHN-005` | Warning | OpenAPIの明示AuthとHigh-confidenceなSource Decorator Metadataが矛盾する。Unknown Metadataは不一致として報告せず、Route IdentityがPartialならConfidenceをHeuristicへ落とす。 |
-| `SC-AUTHZ-001` | Warning | 明示指定したPrivileged RoleとHigh-confidenceなSource Role Metadataが矛盾する。Route IdentityがPartialならConfidenceをHeuristicへ落とす。 |
+| `SC-AUTHZ-001` | Warning | 明示指定したPrivileged Roleと完全なAuthorization Evidenceを持つHigh-confidenceなSource Role Metadataが矛盾する。Route IdentityがPartialならConfidenceをHeuristicへ落とす。 |
 
 Exceptionの更新・期限延長・削除・監査手順は[Finding Exception運用ガイド](finding-exceptions.ja.md)を参照してください。
 

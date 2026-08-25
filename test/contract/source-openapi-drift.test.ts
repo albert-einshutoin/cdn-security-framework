@@ -37,6 +37,13 @@ function operation(
   };
 }
 
+function authorizationProvenance(path: string) {
+  const routeEvidence = operation('source-ast', 'GET', path).provenance[0];
+  return [routeEvidence, {
+    ...routeEvidence, pointer: '/controllers/0/roles', capability: 'authorization',
+  }];
+}
+
 function contract(
   source: 'openapi' | 'source-ast',
   operations: ApiOperationInputV1[],
@@ -327,12 +334,18 @@ describe('Source AST and OpenAPI drift', () => {
         ...sourceBearerAuth,
         analysis: { ...sourceBearerAuth.analysis, roles: ['ops'] },
       },
+      provenance: authorizationProvenance('/admin'),
     });
     const comparison = input([
       operation('openapi', 'GET', '/admin', { exposure: 'authenticated', auth: bearerAuth }),
     ], [source]);
 
     expect(compareSourceOpenApiContracts(comparison)).toEqual([]);
+    expect(compareSourceOpenApiContracts(input(comparison.declared.operations, [operation(
+      'source-ast', 'GET', '/admin', { exposure: 'authenticated', auth: sourceBearerAuth },
+    )]), {
+      declaredPrivilegedRoles: { 'GET /admin': ['admin'] },
+    })).toEqual([]);
     expect(compareSourceOpenApiContracts(comparison, {
       declaredPrivilegedRoles: { 'GET /admin': ['admin'] },
     })).toEqual([expect.objectContaining({
@@ -361,6 +374,7 @@ describe('Source AST and OpenAPI drift', () => {
         ...sourceBearerAuth,
         analysis: { ...sourceBearerAuth.analysis, roles: ['admin'] },
       },
+      provenance: authorizationProvenance('/users/{first}'),
     });
     const contradictory = operation('source-ast', 'GET', '/users/{second}', {
       auth: {
@@ -369,6 +383,7 @@ describe('Source AST and OpenAPI drift', () => {
           enforcementConfidence: 'high', capabilityReasons: [],
         },
       },
+      provenance: authorizationProvenance('/users/{second}'),
     });
 
     const findings = compareSourceOpenApiContracts(input([declared], [matching, contradictory]), {
@@ -387,6 +402,7 @@ describe('Source AST and OpenAPI drift', () => {
           enforcementConfidence: 'high', capabilityReasons: [],
         },
       },
+      provenance: authorizationProvenance('/admin'),
     });
     const comparison = input([declared], [implemented]);
 

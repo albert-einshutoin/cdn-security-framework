@@ -266,7 +266,10 @@ function authorizationFindings(
   const implemented = groupedByMethodShape(input.implemented.operations);
   const sourceRoles = new Map(input.implemented.operations.map((operation) => {
     const analysis = operation.auth.analysis;
-    return [operation, analysis?.enforcementConfidence === 'high'
+    const explicitRoles = operation.provenance.some(
+      ({ capability, complete }) => capability === 'authorization' && complete,
+    );
+    return [operation, analysis?.enforcementConfidence === 'high' && explicitRoles
       ? [...new Set(analysis.roles)].sort() : undefined] as const;
   }));
   const routeComplete = input.declared.capabilities.routes === 'complete'
