@@ -64,6 +64,18 @@ would block only in enforce mode is not reported as an enforce-mode Error.
 | `SC-GOV-002` | Warning | A live exception matches no current Finding. |
 | `SC-GOV-003` | Warning | Multiple live exceptions match one Finding; only the most specific is applied. |
 
+## Source AST and OpenAPI drift rules
+
+`compareSourceOpenApiContracts(input, options)` compares normalized Source AST metadata with OpenAPI. Parameter names do not affect route-shape equality. Missing operations become Errors only when the relevant route inventory is complete; explicit authentication and role contradictions remain Warnings because metadata does not prove runtime Guard behavior.
+
+| Rule | Severity | Condition |
+| --- | --- | --- |
+| `SC-INVENTORY-001` | Error; Warning unless both inventories are complete | A statically detected Source operation has no same-shape OpenAPI route. |
+| `SC-INVENTORY-003` | Error; Warning for partial Source inventory | An OpenAPI operation has no statically detected same-shape Source route. |
+| `SC-INVENTORY-004` | Error; Warning unless both inventories are complete | The same normalized route shape has different HTTP method sets. |
+| `SC-AUTHN-005` | Warning | Explicit OpenAPI auth contradicts high-confidence Source decorator metadata. Unknown metadata is not reported; partial route identity lowers confidence to heuristic. |
+| `SC-AUTHZ-001` | Warning | Explicitly supplied privileged roles contradict high-confidence Source role metadata with complete authorization evidence. Partial route identity lowers confidence to heuristic. |
+
 See [Finding Exceptions](finding-exceptions.md) for the exception lifecycle and audit procedure.
 
 ### Authentication compatibility

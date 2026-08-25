@@ -1,6 +1,6 @@
 "use strict";
 Object.defineProperty(exports, "__esModule", { value: true });
-exports.compareRequestContracts = exports.comparePathMethodContracts = exports.compareAuthContracts = void 0;
+exports.compareSourceOpenApiContracts = exports.compareRequestContracts = exports.comparePathMethodContracts = exports.compareAuthContracts = void 0;
 exports.compareSecurityContracts = compareSecurityContracts;
 const authentication_1 = require("./authentication");
 const path_method_1 = require("./path-method");
@@ -12,6 +12,8 @@ var path_method_2 = require("./path-method");
 Object.defineProperty(exports, "comparePathMethodContracts", { enumerable: true, get: function () { return path_method_2.comparePathMethodContracts; } });
 var request_2 = require("./request");
 Object.defineProperty(exports, "compareRequestContracts", { enumerable: true, get: function () { return request_2.compareRequestContracts; } });
+var source_openapi_1 = require("./source-openapi");
+Object.defineProperty(exports, "compareSourceOpenApiContracts", { enumerable: true, get: function () { return source_openapi_1.compareSourceOpenApiContracts; } });
 function compareSecurityContracts(input, options = {}) {
     return (0, shared_1.stableFindings)([
         ...(0, path_method_1.comparePathMethodContracts)(input),

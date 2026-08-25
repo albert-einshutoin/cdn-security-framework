@@ -102,6 +102,13 @@ describe('Finding Exception Contract v1', () => {
     };
     expect(validateFindingExceptionSet(exceptionSet([valid]), { currentDate: '2026-08-23' }))
       .toEqual({ valid: true, errors: [] });
+    expect(validateFindingExceptionSet(exceptionSet([
+      { ...valid, rule_id: 'SC-INVENTORY-001' },
+      { ...valid, id: 'EXC-2026-002', rule_id: 'SC-INVENTORY-003' },
+      { ...valid, id: 'EXC-2026-003', rule_id: 'SC-INVENTORY-004' },
+      { ...valid, id: 'EXC-2026-004', rule_id: 'SC-AUTHN-005' },
+      { ...valid, id: 'EXC-2026-005', rule_id: 'SC-AUTHZ-001' },
+    ]), { currentDate: '2026-08-23' })).toEqual({ valid: true, errors: [] });
     const broad = {
       ...valid,
       selector: {},

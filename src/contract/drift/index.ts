@@ -9,6 +9,11 @@ export type { RequestDriftOptions } from './request';
 export { compareAuthContracts } from './authentication';
 export { comparePathMethodContracts } from './path-method';
 export { compareRequestContracts } from './request';
+export {
+  compareSourceOpenApiContracts,
+  type SourceOpenApiDriftInput,
+  type SourceOpenApiDriftOptions,
+} from './source-openapi';
 
 export type CompareSecurityContractsOptions = RequestDriftOptions;
 
