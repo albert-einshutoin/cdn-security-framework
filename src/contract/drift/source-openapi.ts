@@ -16,7 +16,21 @@ export interface SourceOpenApiDriftOptions {
   declaredPrivilegedRoles?: Readonly<Record<string, readonly string[]>>;
 }
 
-function validateInput(input: SourceOpenApiDriftInput, options: SourceOpenApiDriftOptions): void {
+interface ComparisonBudget {
+  remaining: number;
+}
+
+function consumeComparison(budget: ComparisonBudget, count: number): void {
+  if (!Number.isSafeInteger(count) || count < 0 || budget.remaining < count) {
+    throw new Error('source OpenAPI drift comparison exceeds visit budget');
+  }
+  budget.remaining -= count;
+}
+
+function validateInput(
+  input: SourceOpenApiDriftInput,
+  options: SourceOpenApiDriftOptions,
+): ComparisonBudget {
   if (!input?.declared || !input.implemented || !input.declaredEvidence || !input.implementedEvidence
     || !options || typeof options !== 'object' || Array.isArray(options)
     || input.declared.schemaVersion !== 1 || input.implemented.schemaVersion !== 1
@@ -30,21 +44,18 @@ function validateInput(input: SourceOpenApiDriftInput, options: SourceOpenApiDri
       > MAX_COMPARISON_VISITS - input.implemented.operations.length) {
     throw new Error('invalid source OpenAPI drift input');
   }
-  let visits = input.declared.operations.length + input.implemented.operations.length;
-  const consume = (count: number): void => {
-    if (!Number.isSafeInteger(count) || count < 0 || visits > MAX_COMPARISON_VISITS - count) {
-      throw new Error('source OpenAPI drift comparison exceeds visit budget');
-    }
-    visits += count;
-  };
+  const budget = { remaining: MAX_COMPARISON_VISITS };
+  consumeComparison(budget, input.declared.operations.length + input.implemented.operations.length);
   const validateOperation = (operation: ApiOperationContractV1): void => {
     const roles = operation.auth.analysis?.roles ?? [];
     if (roles.some((role) => typeof role !== 'string' || role.length > 16_384)) {
       throw new Error('invalid source role metadata');
     }
-    consume(operation.provenance.length + operation.auth.alternatives.length
+    consumeComparison(budget, operation.provenance.length + operation.auth.alternatives.length
       + (operation.auth.analysis?.guards.length ?? 0) + roles.length);
-    for (const alternative of operation.auth.alternatives) consume(alternative.schemes.length);
+    for (const alternative of operation.auth.alternatives) {
+      consumeComparison(budget, alternative.schemes.length);
+    }
   };
   for (const operation of input.declared.operations) validateOperation(operation);
   for (const operation of input.implemented.operations) validateOperation(operation);
@@ -62,8 +73,9 @@ function validateInput(input: SourceOpenApiDriftInput, options: SourceOpenApiDri
       || roles.some((role) => typeof role !== 'string' || role.length > 16_384)) {
       throw new Error('invalid declared privileged roles');
     }
-    consume(roles.length + 1);
+    consumeComparison(budget, roles.length + 1);
   }
+  return budget;
 }
 
 function groupedByShape(operations: readonly ApiOperationContractV1[]) {
@@ -152,9 +164,10 @@ function explicitSourceAuth(operation: ApiOperationContractV1) {
   if (operation.auth.mode === 'none' && analysis.explicitPublic) return { mode: 'public' as const, kinds: [] };
   if (operation.auth.mode !== 'alternatives' || analysis.explicitPublic || analysis.guards.length === 0
     || analysis.guards.some(({ authKind }) => !authKind || authKind === 'unknown')) return undefined;
-  return { mode: 'authenticated' as const, kinds: [...new Set(
-    analysis.guards.map(({ authKind }) => authKind!),
-  )].sort() };
+  return {
+    mode: 'authenticated' as const,
+    kinds: analysis.guards.map(({ authKind }) => authKind!).sort(),
+  };
 }
 
 function explicitDeclaredAuth(operation: ApiOperationContractV1) {
@@ -168,9 +181,8 @@ function explicitDeclaredAuth(operation: ApiOperationContractV1) {
   )) return undefined;
   return {
     mode: 'authenticated' as const,
-    alternatives: operation.auth.alternatives.map(({ schemes }) => [...new Set(
-      schemes.map(({ kind }) => kind),
-    )].sort()),
+    alternatives: operation.auth.alternatives.map(({ schemes }) => schemes
+      .map(({ kind }) => kind).sort()),
   };
 }
 
@@ -197,16 +209,25 @@ function sameStrings(left: readonly string[], right: readonly string[]): boolean
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
-function authFindings(input: SourceOpenApiDriftInput): SecurityFindingV1[] {
+function authFindings(input: SourceOpenApiDriftInput, budget: ComparisonBudget): SecurityFindingV1[] {
   if (input.implemented.capabilities.authentication === 'unsupported') return [];
   const implemented = groupedByMethodShape(input.implemented.operations);
+  const sourceAuth = new Map(input.implemented.operations.map(
+    (operation) => [operation, explicitSourceAuth(operation)] as const,
+  ));
   const findings: SecurityFindingV1[] = [];
   for (const declared of input.declared.operations) {
     const sources = implemented.get(`${declared.method} ${normalizedPathShape(declared.path)}`) ?? [];
     const expected = explicitDeclaredAuth(declared);
     if (!expected) continue;
+    const expectedWidth = expected.mode === 'authenticated'
+      ? expected.alternatives.reduce((total, kinds) => total + kinds.length, 0) : 0;
     const contradictions = sources.flatMap((source) => {
-      const actual = explicitSourceAuth(source);
+      const actual = sourceAuth.get(source);
+      consumeComparison(
+        budget,
+        1 + source.provenance.length + expectedWidth + 2 * (actual?.kinds.length ?? 0),
+      );
       return actual && !authMatches(expected, actual) ? [{ source, actual }] : [];
     });
     if (contradictions.length === 0) continue;
@@ -233,9 +254,15 @@ function authFindings(input: SourceOpenApiDriftInput): SecurityFindingV1[] {
 function authorizationFindings(
   input: SourceOpenApiDriftInput,
   rolesByRoute: Readonly<Record<string, readonly string[]>> | undefined,
+  budget: ComparisonBudget,
 ): SecurityFindingV1[] {
   if (!rolesByRoute) return [];
   const implemented = groupedByMethodShape(input.implemented.operations);
+  const sourceRoles = new Map(input.implemented.operations.map((operation) => {
+    const analysis = operation.auth.analysis;
+    return [operation, analysis?.enforcementConfidence === 'high'
+      ? [...new Set(analysis.roles)].sort() : undefined] as const;
+  }));
   const findings: SecurityFindingV1[] = [];
   for (const declared of input.declared.operations) {
     const roles = rolesByRoute[declared.routeKey];
@@ -244,9 +271,12 @@ function authorizationFindings(
     const contradictions = (implemented.get(
       `${declared.method} ${normalizedPathShape(declared.path)}`,
     ) ?? []).flatMap((source) => {
-      const analysis = source.auth.analysis;
-      if (!analysis || analysis.enforcementConfidence !== 'high') return [];
-      const actual = [...new Set(analysis.roles)].sort();
+      const actual = sourceRoles.get(source);
+      consumeComparison(
+        budget,
+        1 + source.provenance.length + expected.length + 2 * (actual?.length ?? 0),
+      );
+      if (!actual) return [];
       return sameStrings(expected, actual) ? [] : [{ source, actual }];
     });
     if (contradictions.length === 0) continue;
@@ -274,10 +304,10 @@ export function compareSourceOpenApiContracts(
   input: SourceOpenApiDriftInput,
   options: SourceOpenApiDriftOptions = {},
 ): SecurityFindingV1[] {
-  validateInput(input, options);
+  const budget = validateInput(input, options);
   return stableFindings([
     ...inventoryFindings(input),
-    ...authFindings(input),
-    ...authorizationFindings(input, options.declaredPrivilegedRoles),
+    ...authFindings(input, budget),
+    ...authorizationFindings(input, options.declaredPrivilegedRoles, budget),
   ]);
 }

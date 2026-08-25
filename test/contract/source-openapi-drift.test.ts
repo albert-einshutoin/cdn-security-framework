@@ -217,6 +217,78 @@ describe('Source AST and OpenAPI drift', () => {
       .map(({ ruleId }) => ruleId)).toContain('SC-AUTHN-005');
   });
 
+  test('preserves repeated auth-kind requirements', () => {
+    const declared = operation('openapi', 'GET', '/keys', {
+      exposure: 'authenticated',
+      auth: {
+        mode: 'alternatives', alternatives: [{
+          anonymous: false,
+          schemes: ['one', 'two'].map((name) => ({
+            name, kind: 'api-key' as const, scopes: [], capability: 'supported' as const,
+            location: 'header' as const, parameterName: `x-${name}`,
+          })),
+        }],
+      },
+    });
+    const implemented = operation('source-ast', 'GET', '/keys', {
+      exposure: 'authenticated',
+      auth: {
+        mode: 'alternatives', alternatives: [{
+          anonymous: false,
+          schemes: [{
+            name: 'one', kind: 'api-key', scopes: [], capability: 'supported',
+            location: 'header', parameterName: 'x-one',
+          }],
+        }], analysis: {
+          guards: [{ symbol: 'ApiKeyGuard', authKind: 'api-key' }],
+          explicitPublic: false, roles: [], enforcementConfidence: 'high', capabilityReasons: [],
+        },
+      },
+    });
+
+    expect(compareSourceOpenApiContracts(input([declared], [implemented]))
+      .map(({ ruleId }) => ruleId)).toContain('SC-AUTHN-005');
+  });
+
+  test('bounds comparisons within duplicate normalized route groups', () => {
+    const declared = Array.from({ length: 1001 }, (_, index) =>
+      operation('openapi', 'GET', `/bulk/{declared${index}}`));
+    const implemented = Array.from({ length: 1000 }, (_, index) =>
+      operation('source-ast', 'GET', `/bulk/{implemented${index}}`));
+
+    expect(() => compareSourceOpenApiContracts(input(declared, implemented)))
+      .toThrow('source OpenAPI drift comparison exceeds visit budget');
+  });
+
+  test('charges repeated guard width within duplicate route groups', () => {
+    const schemes = Array.from({ length: 1000 }, (_, index) => ({
+      name: `key-${index}`, kind: 'api-key' as const, scopes: [], capability: 'supported' as const,
+      location: 'header' as const, parameterName: `x-key-${index}`,
+    }));
+    const guards = schemes.map((_, index) => ({
+      symbol: `ApiKeyGuard${index}`, authKind: 'api-key' as const,
+    }));
+    const declared = Array.from({ length: 30 }, (_, index) =>
+      operation('openapi', 'GET', `/wide/{declared${index}}`, {
+        exposure: 'authenticated',
+        auth: { mode: 'alternatives', alternatives: [{ anonymous: false, schemes }] },
+      }));
+    const implemented = Array.from({ length: 30 }, (_, index) =>
+      operation('source-ast', 'GET', `/wide/{implemented${index}}`, {
+        exposure: 'authenticated',
+        auth: {
+          mode: 'alternatives', alternatives: [{ anonymous: false, schemes }],
+          analysis: {
+            guards, explicitPublic: false, roles: [],
+            enforcementConfidence: 'high', capabilityReasons: [],
+          },
+        },
+      }));
+
+    expect(() => compareSourceOpenApiContracts(input(declared, implemented)))
+      .toThrow('source OpenAPI drift comparison exceeds visit budget');
+  });
+
   test('compares privileged roles only when explicit configuration is supplied', () => {
     const source = operation('source-ast', 'GET', '/admin', {
       exposure: 'privileged',
