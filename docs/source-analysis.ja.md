@@ -60,6 +60,30 @@ TypeScript messageとsource snippetは破棄し、固定safe message、数値cod
 option、source/標準Library content、TypeScript version、Loader versionをdigestへ含め、invalid/cancelled/limit超過Resultはcacheしません。
 内部で以前のProgramを再利用できますが、cacheなしでも同じ正しさを維持します。
 
+## NestJS認証Metadata
+
+Runnerは`cdn-security-framework/source-analysis`、NestJS Analyzerは
+`cdn-security-framework/source/nestjs`からimportします。
+
+`createNestJsSourceAnalyzer()`は検証済みのprogrammatic auth optionを受け取ります。
+同じplain data構造を`schemas/nestjs-source-analysis-options.schema.json`で定義します。
+AnalyzerはJavaScript設定をloadせず、Decoratorも実行しません。意味を持つのは、設定で
+明示したPublic/Role Decorator symbol名とGuard mappingだけです。Guard class名だけから
+JWT、API key、issuer、audience、algorithm、その他runtime動作を推測しません。
+
+class/methodの`@UseGuards()`は実行順にcomposeし、1つのAuthentication alternativeとして
+保持します。複数GuardをORへ変換しません。未mappingまたはdynamicなGuardは`unknown`です。
+設定済みPublic Decoratorが明示されれば`auth.mode: none`になり得ますが、local Guard不在は
+認証なしを意味しません。Global Guardと`APP_GUARD`はpartial capabilityだからです。
+静的Role labelは`auth.analysis.roles`へ出力しますが、Authorization enforcementの証明には
+なりません。Labelはrawのまま出力され、内部組織名を含み得るため、IRは公開物ではなく
+Review dataとして扱う必要があります。
+
+`auth.analysis`はGuardの発見順、mapping済みkind、明示Public、Role label、enforcement
+confidence、固定capability reasonを保持し、provenanceはclass/method Decorator位置を示します。
+Dynamic引数、spread、computed label、実行可能config、Guard body、Global bootstrap動作、
+暗号学的な正しさは推測しません。
+
 ## LimitとCancellation
 
 `SourceAnalysisLimits`はFile数、合計source bytes、File単位bytes、AST node数、

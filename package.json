@@ -45,11 +45,22 @@
       "require": "./recommendation/index.js",
       "default": "./recommendation/index.js"
     },
+    "./source-analysis": {
+      "types": "./source-analysis/index.d.ts",
+      "require": "./source-analysis/index.js",
+      "default": "./source-analysis/index.js"
+    },
+    "./source/nestjs": {
+      "types": "./source/nestjs/index.d.ts",
+      "require": "./source/nestjs/index.js",
+      "default": "./source/nestjs/index.js"
+    },
     "./schemas/security-ir-v1.schema.json": "./schemas/security-ir-v1.schema.json",
     "./schemas/openapi-inspection-v1.schema.json": "./schemas/openapi-inspection-v1.schema.json",
     "./schemas/finding-v1.schema.json": "./schemas/finding-v1.schema.json",
     "./schemas/finding-exceptions-v1.schema.json": "./schemas/finding-exceptions-v1.schema.json",
     "./schemas/contract-diff-report-v1.schema.json": "./schemas/contract-diff-report-v1.schema.json",
+    "./schemas/nestjs-source-analysis-options.schema.json": "./schemas/nestjs-source-analysis-options.schema.json",
     "./bin/cli": "./bin/cli.js",
     "./bin/cli.js": "./bin/cli.js"
   },
@@ -108,7 +119,8 @@
     "commander": "^14.0.3",
     "esbuild": "^0.28.1",
     "inquirer": "^14.0.1",
-    "js-yaml": "^5.2.0"
+    "js-yaml": "^5.2.0",
+    "typescript": "^6.0.3"
   },
   "files": [
     "bin/",
@@ -117,6 +129,8 @@
     "schemas/",
     "openapi/",
     "recommendation/",
+    "source-analysis/",
+    "source/",
     "emitter/",
     "lib/",
     "parser/",
@@ -172,7 +186,6 @@
     "@types/node": "^26.0.1",
     "c8": "^11.0.0",
     "json-schema-to-typescript": "^15.0.4",
-    "typescript": "^6.0.3",
     "vitest": "^4.1.7"
   }
 }

@@ -1,0 +1,36 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "https://cdn-security.dev/schemas/nestjs-source-analysis-options.schema.json",
+  "title": "NestJS source analysis auth options",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["public_decorators", "roles_decorators", "guard_mappings"],
+  "properties": {
+    "public_decorators": { "$ref": "#/definitions/decoratorNames" },
+    "roles_decorators": { "$ref": "#/definitions/decoratorNames" },
+    "guard_mappings": {
+      "type": "object",
+      "maxProperties": 128,
+      "propertyNames": { "$ref": "#/definitions/symbolName" },
+      "additionalProperties": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["auth_kind"],
+        "properties": {
+          "auth_kind": {
+            "enum": ["basic", "bearer", "api_key", "oauth2", "openid_connect", "mutual_tls"]
+          }
+        }
+      }
+    }
+  },
+  "definitions": {
+    "symbolName": { "type": "string", "pattern": "^[A-Za-z_$][A-Za-z0-9_$]*$" },
+    "decoratorNames": {
+      "type": "array",
+      "maxItems": 128,
+      "uniqueItems": true,
+      "items": { "$ref": "#/definitions/symbolName" }
+    }
+  }
+}

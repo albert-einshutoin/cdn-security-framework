@@ -153,6 +153,7 @@ function assertPackageContents(pack: PackResult) {
     'schemas/finding-exceptions-v1.schema.json',
     'schemas/finding-v1.schema.json',
     'schemas/contract-diff-report-v1.schema.json',
+    'schemas/nestjs-source-analysis-options.schema.json',
     'openapi/index.js',
     'openapi/index.d.ts',
     'openapi/load-document.js',
@@ -163,6 +164,12 @@ function assertPackageContents(pack: PackResult) {
     'openapi/ref-resolver.d.ts',
     'openapi/operation-normalizer.js',
     'openapi/operation-normalizer.d.ts',
+    'source-analysis/index.js',
+    'source-analysis/index.d.ts',
+    'source/nestjs/index.js',
+    'source/nestjs/index.d.ts',
+    'source/nestjs/analyzer.js',
+    'source/nestjs/auth-config.js',
     'openapi/inspect.js',
     'openapi/inspect.d.ts',
     'openapi/policy-candidate.js',
@@ -236,8 +243,11 @@ function smokeInstalledPackage(tarballPath: string) {
       const exceptionSchema = require(${JSON.stringify(`${packageName}/schemas/finding-exceptions-v1.schema.json`)});
       const findingSchema = require(${JSON.stringify(`${packageName}/schemas/finding-v1.schema.json`)});
       const contractDiffSchema = require(${JSON.stringify(`${packageName}/schemas/contract-diff-report-v1.schema.json`)});
+      const nestJsOptionsSchema = require(${JSON.stringify(`${packageName}/schemas/nestjs-source-analysis-options.schema.json`)});
       const openapi = require(${JSON.stringify(`${packageName}/openapi`)});
       const recommendation = require(${JSON.stringify(`${packageName}/recommendation`)});
+      const sourceAnalysis = require(${JSON.stringify(`${packageName}/source-analysis`)});
+      const nestjs = require(${JSON.stringify(`${packageName}/source/nestjs`)});
       assert.strictEqual(typeof pkg.compile, 'function');
       assert.strictEqual(typeof pkg.lintPolicy, 'function');
       assert.strictEqual(typeof contract.createSecurityContract, 'function');
@@ -248,6 +258,7 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(exceptionSchema.properties.version.const, 1);
       assert.strictEqual(findingSchema.properties.schemaVersion.const, 1);
       assert.strictEqual(contractDiffSchema.properties.schemaVersion.const, 1);
+      assert.strictEqual(nestJsOptionsSchema.type, 'object');
       assert.strictEqual(typeof contract.loadFindingExceptions, 'function');
       assert.strictEqual(typeof contract.applyFindingExceptions, 'function');
       assert.strictEqual(typeof contract.diffSecurityContracts, 'function');
@@ -259,6 +270,9 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof openapi.inspectOpenApi, 'function');
       assert.strictEqual(typeof openapi.generatePolicyCandidate, 'function');
       assert.strictEqual(typeof recommendation.recommendRequestLimits, 'function');
+      assert.strictEqual(typeof sourceAnalysis.runSourceAnalyzer, 'function');
+      assert.strictEqual(typeof nestjs.createNestJsSourceAnalyzer, 'function');
+      assert.strictEqual(typeof nestjs.validateNestJsAuthConfig, 'function');
       const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const result = pkg.lintPolicy({
         policyPath: path.join(pkgRoot, 'policy', 'base.yml'),

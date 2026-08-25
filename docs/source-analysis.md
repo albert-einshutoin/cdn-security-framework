@@ -73,6 +73,34 @@ TypeScript version, and loader
 version; invalid, cancelled, and limit-exceeded loads are never cached. A prior
 Program may be reused internally, but cache-free execution remains correct.
 
+## NestJS authentication metadata
+
+Import the runner from `cdn-security-framework/source-analysis` and the NestJS
+analyzer from `cdn-security-framework/source/nestjs`.
+
+`createNestJsSourceAnalyzer()` accepts a validated programmatic auth option;
+`schemas/nestjs-source-analysis-options.schema.json` describes the same plain-data
+shape. The analyzer never loads JavaScript configuration or executes decorators.
+Only configured Public/Role decorator symbol names and explicit Guard mappings
+have meaning. Guard class names alone never imply JWT, API-key, issuer, audience,
+algorithm, or other runtime behavior.
+
+Class and method `@UseGuards()` metadata is composed in execution order and kept
+as one authentication alternative; multiple Guards are not converted into OR.
+An unmapped or dynamic Guard remains `unknown`. An explicitly configured Public
+decorator can produce `auth.mode: none`, but absence of a local Guard never does,
+because global and `APP_GUARD` behavior is only a partial capability. Static Role
+labels are reported in `auth.analysis.roles`; they do not prove authorization
+enforcement. These labels are emitted verbatim and can contain internal
+organization names, so consumers must treat the IR as review data rather than a
+public artifact.
+
+`auth.analysis` preserves discovered Guard order, mapped kinds, explicit Public
+state, Role labels, enforcement confidence, and fixed capability reasons. Source
+provenance points to the class/method decorators. Dynamic arguments, spreads,
+computed labels, executable config, Guard bodies, global bootstrap behavior, and
+cryptographic correctness are not inferred.
+
 ## Limits and cancellation
 
 `SourceAnalysisLimits` bounds files, total source bytes, bytes per file, AST

@@ -80,9 +80,23 @@ export interface ApiAuthAlternativeV1 {
   schemes: ApiAuthSchemeV1[];
 }
 
+export interface ApiAuthGuardAnalysisV1 {
+  symbol: string;
+  authKind?: AuthSchemeKindV1;
+}
+
+export interface ApiAuthAnalysisV1 {
+  guards: ApiAuthGuardAnalysisV1[];
+  explicitPublic: boolean;
+  roles: string[];
+  enforcementConfidence: 'high' | 'unknown';
+  capabilityReasons: string[];
+}
+
 export interface ApiAuthenticationContractV1 {
   mode: 'none' | 'unknown' | 'alternatives';
   alternatives: ApiAuthAlternativeV1[];
+  analysis?: ApiAuthAnalysisV1;
 }
 
 export interface ApiOperationContractV1 {
@@ -154,6 +168,16 @@ function sortedSet(
   if (!Array.isArray(values)) throw new Error(`invalid ${field}`);
   consume(state, values.length);
   return [...new Set(values.map((value) => nonEmpty(transform(nonEmpty(value, field)), field)))].sort(compareText);
+}
+
+function sortedRawSet(values: readonly string[], field: string, state: NormalizationState): string[] {
+  if (!Array.isArray(values)) throw new Error(`invalid ${field}`);
+  consume(state, values.length);
+  for (const value of values) {
+    if (typeof value !== 'string' || value.length > MAX_STRING_LENGTH) throw new Error(`invalid ${field}`);
+    if (SECRET_PATTERN.test(value.trim())) throw new Error('secret-like value is not allowed');
+  }
+  return [...new Set(values)].sort(compareText);
 }
 
 function normalizeConstraints(
@@ -388,7 +412,47 @@ function normalizeAuth(input: ApiAuthenticationContractV1, state: NormalizationS
   const canonicalAlternatives = [...new Map(alternatives.map((alternative) => (
     [stableSerialize(alternative), alternative]
   ))).entries()].sort(([left], [right]) => compareText(left, right)).map(([, alternative]) => alternative);
-  return { mode: input.mode, alternatives: canonicalAlternatives };
+  let analysis: ApiAuthAnalysisV1 | undefined;
+  if (input.analysis !== undefined) {
+    if (!input.analysis || typeof input.analysis !== 'object'
+      || !Array.isArray(input.analysis.guards)
+      || !['high', 'unknown'].includes(input.analysis.enforcementConfidence)) {
+      throw new Error('invalid authentication analysis');
+    }
+    consume(state, input.analysis.guards.length);
+    const guards = input.analysis.guards.map((guard) => {
+      if (!guard || typeof guard !== 'object'
+        || (guard.authKind !== undefined && !AUTH_SCHEME_KINDS.includes(guard.authKind))) {
+        throw new Error('invalid authentication guard analysis');
+      }
+      return {
+        symbol: nonEmpty(guard.symbol, 'authentication guard symbol'),
+        ...(guard.authKind === undefined ? {} : { authKind: guard.authKind }),
+      };
+    });
+    analysis = {
+      guards,
+      explicitPublic: booleanValue(input.analysis.explicitPublic, 'explicit public override'),
+      roles: sortedRawSet(input.analysis.roles, 'authorization role', state),
+      enforcementConfidence: input.analysis.enforcementConfidence,
+      capabilityReasons: sortedSet(input.analysis.capabilityReasons, 'authentication capability reason', state),
+    };
+    const highConfidenceMatchesMode = (input.mode === 'none' && analysis.explicitPublic)
+      || (input.mode === 'alternatives' && !analysis.explicitPublic && guards.length > 0
+        && guards.every(({ authKind }) => authKind !== undefined && authKind !== 'unknown')
+        && canonicalAlternatives.length > 0
+        && canonicalAlternatives.every(({ anonymous, schemes }) => !anonymous
+          && schemes.every(({ kind, capability }) => kind !== 'unknown'
+            && capability === 'supported')));
+    if (analysis.enforcementConfidence === 'high' && !highConfidenceMatchesMode) {
+      throw new Error('authentication mode and analysis confidence are inconsistent');
+    }
+  }
+  return {
+    mode: input.mode,
+    alternatives: canonicalAlternatives,
+    ...(analysis === undefined ? {} : { analysis }),
+  };
 }
 
 function normalizeOperation(input: ApiOperationInputV1, state: NormalizationState): ApiOperationContractV1 {

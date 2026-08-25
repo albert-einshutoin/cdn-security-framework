@@ -39,6 +39,8 @@ export const SOURCE_ANALYZER_DIAGNOSTIC_CODES = [
   'SOURCE_ANALYZER_OPERATION_LIMIT',
   'SOURCE_ANALYZER_DEPTH_LIMIT',
   'SOURCE_ANALYZER_DYNAMIC_ROUTE',
+  'SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA',
+  'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED',
   'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR',
   'SOURCE_ANALYZER_CANCELLED',
   'SOURCE_ANALYZER_TIMEOUT',
@@ -48,6 +50,8 @@ export const SOURCE_ANALYZER_DIAGNOSTIC_CODES = [
 
 const SOURCE_ANALYZER_RESULT_DIAGNOSTIC_CODES = [
   'SOURCE_ANALYZER_DYNAMIC_ROUTE',
+  'SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA',
+  'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED',
   'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR',
 ] as const;
 
@@ -155,6 +159,8 @@ const SAFE_MESSAGES: Readonly<Record<SourceAnalyzerDiagnosticCode, string>> = Ob
   SOURCE_ANALYZER_OPERATION_LIMIT: 'Source analysis operation limit was exceeded.',
   SOURCE_ANALYZER_DEPTH_LIMIT: 'Source analysis depth limit was exceeded.',
   SOURCE_ANALYZER_DYNAMIC_ROUTE: 'A dynamic route expression could not be resolved statically.',
+  SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA: 'Dynamic authentication metadata could not be resolved statically.',
+  SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED: 'Global NestJS guards are not analyzed.',
   SOURCE_ANALYZER_UNSUPPORTED_DECORATOR: 'A source decorator is not supported by this analyzer.',
   SOURCE_ANALYZER_CANCELLED: 'Source analysis was cancelled.',
   SOURCE_ANALYZER_TIMEOUT: 'Source analysis timed out.',

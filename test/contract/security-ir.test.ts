@@ -175,6 +175,96 @@ describe('Security IR v1', () => {
       .operations[0].auth.alternatives).toHaveLength(2);
   });
 
+  test('preserves Guard execution order and validates source auth analysis', () => {
+    const input = structuredClone(baseInput);
+    input.operations[0].auth.analysis = {
+      guards: [
+        { symbol: 'JwtAuthGuard', authKind: 'bearer' },
+        { symbol: 'ApiKeyGuard', authKind: 'api-key' },
+      ],
+      explicitPublic: true,
+      roles: ['ops', ' admin ', '', 'ops'],
+      enforcementConfidence: 'high',
+      capabilityReasons: [],
+    };
+    const contract = createSecurityContract(input);
+    const schema = JSON.parse(fs.readFileSync(
+      path.join(process.cwd(), 'schemas/security-ir-v1.schema.json'), 'utf8',
+    ));
+    const validate = new Ajv({ allErrors: true }).compile(schema);
+    expect(validate(contract), JSON.stringify(validate.errors)).toBe(true);
+    expect(contract.operations.find(({ routeKey }) => routeKey === 'POST /users')?.auth.analysis).toEqual({
+      guards: [
+        { symbol: 'JwtAuthGuard', authKind: 'bearer' },
+        { symbol: 'ApiKeyGuard', authKind: 'api-key' },
+      ],
+      explicitPublic: true,
+      roles: ['', ' admin ', 'ops'],
+      enforcementConfidence: 'high',
+      capabilityReasons: [],
+    });
+
+    const invalidKind = structuredClone(input) as any;
+    invalidKind.operations[0].auth.analysis.guards[0].authKind = 'jwt';
+    expect(() => createSecurityContract(invalidKind)).toThrow('invalid authentication guard analysis');
+    const contradictory = structuredClone(input);
+    contradictory.operations[0].exposure = 'unknown';
+    contradictory.operations[0].auth.mode = 'unknown';
+    expect(() => createSecurityContract(contradictory))
+      .toThrow('authentication mode and analysis confidence are inconsistent');
+    const optionalAuth = structuredClone(input);
+    optionalAuth.operations[0].auth.mode = 'alternatives';
+    optionalAuth.operations[0].auth.analysis!.explicitPublic = false;
+    optionalAuth.operations[0].auth.alternatives = [
+      { anonymous: true, schemes: [] },
+      { anonymous: false, schemes: [{
+        name: 'JwtAuthGuard', kind: 'bearer', scopes: [], capability: 'supported',
+      }] },
+    ];
+    expect(() => createSecurityContract(optionalAuth))
+      .toThrow('authentication mode and analysis confidence are inconsistent');
+    const unsupportedScheme = structuredClone(optionalAuth);
+    unsupportedScheme.operations[0].auth.alternatives = [{
+      anonymous: false,
+      schemes: [{
+        name: 'digest', kind: 'unknown', scopes: [], capability: 'unsupported',
+        unsupportedReason: 'http-scheme:digest',
+      }],
+    }];
+    expect(() => createSecurityContract(unsupportedScheme))
+      .toThrow('authentication mode and analysis confidence are inconsistent');
+    const knownUnsupportedScheme = structuredClone(unsupportedScheme);
+    knownUnsupportedScheme.operations[0].auth.alternatives[0].schemes[0].kind = 'bearer';
+    expect(() => createSecurityContract(knownUnsupportedScheme))
+      .toThrow('authentication mode and analysis confidence are inconsistent');
+    const unknownKind = structuredClone(input);
+    unknownKind.operations[0].auth.analysis!.explicitPublic = false;
+    unknownKind.operations[0].auth.analysis!.guards[0].authKind = 'unknown';
+    expect(() => createSecurityContract(unknownKind))
+      .toThrow('authentication mode and analysis confidence are inconsistent');
+    const schemaOnlyUnknown = structuredClone(contract);
+    schemaOnlyUnknown.operations[0].auth.analysis = structuredClone(input.operations[0].auth.analysis);
+    expect(validate(schemaOnlyUnknown)).toBe(false);
+    const schemaOnlyOptional = structuredClone(contract);
+    schemaOnlyOptional.operations[1].auth = structuredClone(optionalAuth.operations[0].auth);
+    expect(validate(schemaOnlyOptional)).toBe(false);
+    const schemaOnlyUnknownKind = structuredClone(contract);
+    schemaOnlyUnknownKind.operations[1].auth = structuredClone(unknownKind.operations[0].auth);
+    expect(validate(schemaOnlyUnknownKind)).toBe(false);
+    const schemaOnlyUnsupportedScheme = structuredClone(contract);
+    schemaOnlyUnsupportedScheme.operations[1].auth = structuredClone(
+      unsupportedScheme.operations[0].auth,
+    );
+    expect(validate(schemaOnlyUnsupportedScheme)).toBe(false);
+    schemaOnlyUnsupportedScheme.operations[1].auth = structuredClone(
+      knownUnsupportedScheme.operations[0].auth,
+    );
+    expect(validate(schemaOnlyUnsupportedScheme)).toBe(false);
+    const secretRole = structuredClone(input);
+    secretRole.operations[0].auth.analysis!.roles = ['secret=do-not-emit'];
+    expect(() => createSecurityContract(secretRole)).toThrow('secret-like value is not allowed');
+  });
+
   test('serializes equivalent inputs identically regardless of set and provenance order', () => {
     const first = createSecurityContract(baseInput);
     const reversed: SecurityContractInputV1 = {

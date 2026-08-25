@@ -59,7 +59,9 @@ function resolveStaticStrings(expression, checker, projectSources, options = {})
         }
         if (!typescript_1.default.isIdentifier(node))
             return undefined;
-        let symbol = checker.getSymbolAtLocation(node);
+        let symbol = typescript_1.default.isShorthandPropertyAssignment(node.parent) && node.parent.name === node
+            ? checker.getShorthandAssignmentValueSymbol(node.parent)
+            : checker.getSymbolAtLocation(node);
         if (!symbol)
             return undefined;
         if (symbol.flags & typescript_1.default.SymbolFlags.Alias)
