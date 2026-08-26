@@ -28,7 +28,12 @@ export {
   type SarifReportErrorCode,
   type UnifiedContractDiffSarifOptions,
 } from '../reporters/sarif';
-export { renderContractDiffGitHubSummary } from '../reporters/github-summary';
+export {
+  renderContractDiffGitHubSummary,
+  renderUnifiedGitHubSummary,
+  type UnifiedGitHubSummaryExecutionStatus,
+  type UnifiedGitHubSummaryOptions,
+} from '../reporters/github-summary';
 export { renderUnifiedContractDiffText, type UnifiedContractDiffTextOptions } from '../reporters/text';
 export {
   JSON_REPORT_ERROR_CODES,
