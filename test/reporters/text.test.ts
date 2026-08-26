@@ -1,0 +1,189 @@
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { describe, expect, test } from 'vitest';
+
+const { diffSecurityContracts } = require('../../contract') as typeof import('../../src/contract');
+const { renderUnifiedContractDiffText } = require('../../reporters/text') as typeof import('../../src/reporters/text');
+
+function reportFixture() {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'contract-text-'));
+  const openapiPath = path.join(root, 'openapi.yaml');
+  const policyPath = path.join(root, 'security.yml');
+  fs.writeFileSync(openapiPath, `openapi: 3.1.0
+info: { title: Contract, version: 1.0.0 }
+paths:
+  /health:
+    get:
+      security: []
+      responses:
+        '200': { description: OK }
+`);
+  fs.writeFileSync(policyPath, `version: 1
+defaults: { mode: enforce }
+request:
+  allow_methods: [GET]
+  limits: { max_uri_length: 21 }
+  block: { header_missing: [] }
+routes: []
+response_headers: {}
+`);
+  return diffSecurityContracts({
+    openapiPath,
+    policyPath,
+    target: 'aws',
+    workspaceRoot: root,
+    currentDate: '2026-08-23',
+  });
+}
+
+function finding(instanceId: string, severity: 'error' | 'warning' | 'info') {
+  return {
+    schemaVersion: 1 as const,
+    ruleId: `SC-TST-${instanceId.slice(-3)}`,
+    instanceId,
+    severity,
+    confidence: 'deterministic' as const,
+    category: 'exposure' as const,
+    title: `Unexpected \u001b]8;;https://example.invalid\u0007route\u001b]8;;\u0007 ${instanceId}`,
+    message: 'token=super-secret should never be printed',
+    route: { method: 'GET', path: '/users?token=super-secret#fragment' },
+    expected: { authorization: 'Bearer super-secret', safe: 'ok' },
+    actual: { password: 'super-secret', count: 1 },
+    evidence: [{
+      source: 'openapi' as const,
+      uri: 'openapi.yaml?token=super-secret',
+      pointer: '/paths/~1users/get',
+      digest: 'sha256:abc',
+      analyzer: 'test',
+      capability: 'routes',
+      complete: true,
+    }],
+    remediation: { summary: 'Review the route policy', safeAutoFix: false },
+  };
+}
+
+describe('Unified contract text reporter', () => {
+  test('renders ordered analysis, comparison, capability, findings, and suppression sections', () => {
+    const report = reportFixture();
+    const text = renderUnifiedContractDiffText(report);
+
+    expect(text.startsWith('Summary:')).toBe(true);
+    expect(text).toContain('Input analysis:');
+    expect(text).toContain('Comparison:');
+    expect(text).toContain('Capabilities:');
+    expect(text).toContain('Findings:');
+    expect(text).toContain('evaluated=0 (no findings)');
+    expect(text).toContain('not evaluated:');
+    expect(text).toContain('policy.request.header_limits:partial');
+    expect(text.endsWith('\n')).toBe(true);
+  });
+
+  test('keeps findings stable and does not leak query, control, or secret values', () => {
+    const base = reportFixture();
+    const first = finding('finding-001', 'warning');
+    const second = finding('finding-002', 'error');
+    const report = {
+      ...base,
+      summary: {
+        ...base.summary,
+        total: 2,
+        error: 1,
+        warning: 1,
+        bySeverity: { ...base.summary.bySeverity, error: 1, warning: 1 },
+        byCategory: { ...base.summary.byCategory, exposure: 2 },
+      },
+      findings: [first, second],
+      omittedComparisons: ['openapi.parameters:unsupported'],
+      analyzerCapabilities: {
+        ...base.analyzerCapabilities,
+        openapi: { routes: 'complete', parameters: 'unsupported', requestBodies: 'partial', authentication: 'complete' },
+      },
+    };
+
+    const output = renderUnifiedContractDiffText(report);
+    const reordered = renderUnifiedContractDiffText({ ...report, findings: [second, first] });
+    expect(output).toBe(reordered);
+    expect(output).not.toContain('super-secret');
+    expect(output).not.toContain('token=super-secret');
+    expect(output).toContain('GET /users');
+    expect(output).toContain('unsupported');
+    expect(output).not.toContain('\u001b]');
+
+    const unsafe = { ...report, findings: [{ ...first, evidence: [{ ...first.evidence[0], uri: '/Users/private/source.yaml' }] }] };
+    expect(renderUnifiedContractDiffText(unsafe)).toContain('evidence=[external]');
+    const remote = { ...report, findings: [{ ...first, evidence: [{ ...first.evidence[0], uri: 'https://evil.example/secret?token=leak' }] }] };
+    expect(renderUnifiedContractDiffText(remote)).toContain('evidence=[external]');
+  });
+
+  test('distinguishes omitted comparisons and bounds findings/output', () => {
+    const base = reportFixture();
+    const findings = [finding('finding-001', 'error'), finding('finding-002', 'warning')];
+    const report = {
+      ...base,
+      summary: {
+        ...base.summary,
+        total: 2,
+        error: 1,
+        warning: 1,
+        bySeverity: { ...base.summary.bySeverity, error: 1, warning: 1 },
+        byCategory: { ...base.summary.byCategory, exposure: 2 },
+      },
+      findings,
+      omittedComparisons: ['openapi.parameters:unsupported'],
+    };
+    const output = renderUnifiedContractDiffText(report, {
+      maxFindings: 1,
+      maxOutputBytes: 1_300,
+    });
+
+    expect(output).toContain('1 additional finding(s) omitted by maxFindings.');
+    expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(1_300);
+    expect(output).toContain('[output truncated');
+  });
+
+  test('renders suppressed findings only when requested', () => {
+    const base = reportFixture();
+    const suppressed = finding('finding-003', 'info');
+    const report = {
+      ...base,
+      summary: { ...base.summary, suppressed: 1 },
+      suppressedFindings: [suppressed],
+    };
+
+    expect(renderUnifiedContractDiffText(report, { includeSuppressed: false }))
+      .not.toContain('Suppressed findings:');
+    expect(renderUnifiedContractDiffText(report, { includeSuppressed: true }))
+      .toContain('Suppressed findings:');
+  });
+
+  test('keeps ANSI opt-in and disabled output terminal-safe', () => {
+    const base = reportFixture();
+    const report = {
+      ...base,
+      summary: { ...base.summary, total: 1, warning: 1, bySeverity: { ...base.summary.bySeverity, warning: 1 } },
+      findings: [finding('finding-004', 'warning')],
+    };
+    expect(renderUnifiedContractDiffText(report)).not.toContain('\u001b[');
+    expect(renderUnifiedContractDiffText(report, { color: true })).toContain('\u001b[33mWARNING');
+  });
+
+  test('keeps analyzer diagnostics visible as limitations', () => {
+    const report = {
+      ...reportFixture(),
+      analyzerDiagnostics: [{
+        code: 'OPENAPI_LIMIT_NEAR' as const,
+        level: 'warning' as const,
+        message: 'OpenAPI analysis usage is near the configured limit.',
+        metric: 'operations' as const,
+        used: 80,
+        limit: 100,
+      }],
+    };
+    const output = renderUnifiedContractDiffText(report);
+    expect(output).toContain('Analysis diagnostics:');
+    expect(output).toContain('OPENAPI_LIMIT_NEAR');
+    expect(output).toContain('analyzer diagnostic(s) require attention');
+    expect(output).not.toContain('Limitations:\n  none reported');
+  });
+});
