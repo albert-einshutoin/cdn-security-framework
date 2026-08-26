@@ -14,10 +14,31 @@ interface SarifRun {
                 analyzers: string[];
                 findingSchemaVersion: number;
                 reportSchemaVersion: number;
+                capabilities?: {
+                    openapi: Record<string, string>;
+                    policy: Array<{
+                        id: string;
+                        status: string;
+                    }>;
+                };
+                omittedComparisons?: string[];
+                analyzerDiagnostics?: string[];
             };
         };
     };
     results: SarifResult[];
+    invocations?: SarifInvocation[];
+}
+interface SarifInvocation {
+    executionSuccessful: boolean;
+    toolExecutionNotifications: Array<{
+        descriptor: {
+            id: string;
+        };
+        message: {
+            text: string;
+        };
+    }>;
 }
 interface SarifRule {
     id: string;
@@ -40,6 +61,8 @@ interface SarifRule {
         category: string;
         confidence: string;
         tags: string[];
+        evidenceSources?: string[];
+        capabilities?: string[];
     };
 }
 interface SarifResult {
@@ -61,6 +84,8 @@ interface SarifResult {
         category: string;
         confidence: string;
         tags: string[];
+        evidenceSources?: string[];
+        capabilities?: string[];
     };
 }
 interface SarifLocation {
@@ -92,5 +117,17 @@ interface SarifLocation {
     }>;
 }
 type SarifLevel = 'error' | 'warning' | 'note';
+export declare const SARIF_ERROR_CODES: readonly ["SARIF_UNIFIED_REPORT_INVALID", "SARIF_LOCATION_INVALID", "SARIF_OUTPUT_LIMIT_EXCEEDED", "SARIF_PRIVACY_VIOLATION"];
+export type SarifReportErrorCode = typeof SARIF_ERROR_CODES[number];
+export declare class SarifReportError extends Error {
+    readonly code: SarifReportErrorCode;
+    constructor(code: SarifReportErrorCode, message: string);
+}
+export interface UnifiedContractDiffSarifOptions {
+    maxRelatedLocations?: number;
+    maxResults?: number;
+    maxOutputBytes?: number;
+}
 export declare function renderFindingsAsSarif(report: ContractDiffReportV1): SarifLog;
+export declare function renderUnifiedContractDiffSarif(report: ContractDiffReportV1, options?: UnifiedContractDiffSarifOptions): SarifLog;
 export {};
