@@ -125,14 +125,14 @@ const PRIMARY_SOURCE_ORDER: Record<string, readonly FindingEvidenceV1['source'][
   'SC-AUTHN-002': ['openapi', 'policy', 'source-ast'],
   'SC-AUTHN-003': ['openapi', 'policy', 'source-ast'],
   'SC-AUTHN-004': ['openapi', 'policy', 'source-ast'],
-  'SC-AUTHN-005': ['source-ast', 'openapi', 'policy'],
+  'SC-AUTHN-005': ['openapi', 'source-ast', 'policy'],
   'SC-AUTHN-006': ['source-ast', 'policy'],
   'SC-AUTHZ-001': ['source-ast', 'openapi', 'policy'],
   'SC-AUTHZ-002': ['source-ast', 'policy'],
   'SC-EXPOSURE-001': ['openapi', 'policy', 'source-ast'],
   'SC-EXPOSURE-002': ['openapi', 'policy'],
   'SC-EXPOSURE-003': ['policy', 'openapi'],
-  'SC-EXPOSURE-004': ['policy', 'source-ast'],
+  'SC-EXPOSURE-004': ['source-ast', 'policy'],
   'SC-EXPOSURE-005': ['policy', 'source-ast'],
   'SC-GOV-001': ['policy'],
   'SC-GOV-002': ['policy'],
@@ -142,8 +142,8 @@ const PRIMARY_SOURCE_ORDER: Record<string, readonly FindingEvidenceV1['source'][
   'SC-INVENTORY-003': ['openapi', 'source-ast'],
   'SC-INVENTORY-004': ['openapi', 'source-ast', 'policy'],
   'SC-INVENTORY-005': ['policy', 'source-ast'],
-  'SC-LIMIT-001': ['openapi', 'policy'],
-  'SC-LIMIT-002': ['openapi', 'policy'],
+  'SC-LIMIT-001': ['policy', 'openapi'],
+  'SC-LIMIT-002': ['policy', 'openapi'],
   'SC-REQUEST-001': ['openapi', 'policy'],
   'SC-REQUEST-002': ['policy', 'openapi'],
   'SC-REQUEST-003': ['openapi', 'policy'],
@@ -331,9 +331,10 @@ function unifiedEvidence(evidence: readonly FindingEvidenceV1[]): FindingEvidenc
 }
 
 function primaryEvidence(finding: SecurityFindingV1, evidence: readonly FindingEvidenceV1[]): FindingEvidenceV1 | undefined {
-  const order = PRIMARY_SOURCE_ORDER[finding.ruleId] ?? Object.entries(SOURCE_PRIORITY)
-    .sort(([, left], [, right]) => left - right)
-    .map(([source]) => source as FindingEvidenceV1['source']);
+  const order = PRIMARY_SOURCE_ORDER[finding.ruleId];
+  if (!order) {
+    throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Finding rule family has no primary-source mapping.');
+  }
   return order.flatMap((source) => evidence.filter((item) => item.source === source))[0] ?? evidence[0];
 }
 

@@ -132,5 +132,14 @@ describe('Unified contract SARIF adapter', () => {
     });
     expect(policyPrimary.runs[0].results[0].locations?.[0].physicalLocation.artifactLocation.uri)
       .toBe('policy/security.yml');
+
+    const unknownRule = {
+      ...input,
+      findings: [createFinding({
+        ...input.findings[0],
+        ruleId: 'SC-TEST-001',
+      })],
+    };
+    expect(() => renderUnifiedContractDiffSarif(unknownRule)).toThrowError(/SARIF_UNIFIED_REPORT_INVALID/);
   });
 });
