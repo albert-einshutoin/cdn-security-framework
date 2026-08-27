@@ -129,6 +129,8 @@ describe('Finding Contract v1', () => {
         'Digest username="user", response="digest-secret"',
         'Negotiate negotiate-secret',
         'AWS4-HMAC-SHA256 Credential=aws-secret, Signature=aws-signature-secret',
+        'Authorization: Digest username="user",\n response="folded-lf-secret"',
+        'Authorization: Digest username="user",\r\n signature="folded-crlf-secret"',
       ].join('\n'),
       expected: {
         headers: {
@@ -157,6 +159,7 @@ describe('Finding Contract v1', () => {
       'second-secret', 'token-secret', 'password-secret',
       'alpha beta', 'json-secret', 'basic-secret', 'digest-secret', 'negotiate-secret',
       'aws-secret', 'aws-signature-secret',
+      'folded-lf-secret', 'folded-crlf-secret',
     ]) {
       expect(serialized).not.toContain(secret);
     }

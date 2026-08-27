@@ -121,11 +121,15 @@ describe('Unified contract text reporter', () => {
         { ...first, message: 'Basic basic-secret' },
         { ...first, message: 'Digest username="user", response="standalone-digest-secret"' },
         { ...first, message: 'Negotiate negotiate-secret' },
+        { ...first, message: 'Authorization: Digest username="user",\n response="folded-lf-secret"' },
+        { ...first, message: 'Authorization: Digest username="user",\r\n signature="folded-crlf-secret"' },
       ],
     });
     expect(schemeOutput).not.toContain('basic-secret');
     expect(schemeOutput).not.toContain('standalone-digest-secret');
     expect(schemeOutput).not.toContain('negotiate-secret');
+    expect(schemeOutput).not.toContain('folded-lf-secret');
+    expect(schemeOutput).not.toContain('folded-crlf-secret');
 
     const multipartHeaders = renderUnifiedContractDiffText({
       ...report,
