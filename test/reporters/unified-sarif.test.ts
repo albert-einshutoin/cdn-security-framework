@@ -113,7 +113,10 @@ describe('Unified contract SARIF adapter', () => {
 
   test.each([
     ['Bearer [REDACTED]actual-token', true],
+    ['Bearer [REDACTED],actual-token', true],
     ['?token=[REDACTED]actual-token', true],
+    ['?token=[REDACTED],actual-token', true],
+    ['token=[REDACTED],actual-token', true],
     ['Bearer [REDACTED]', false],
     ['?token=[REDACTED]', false],
   ])('handles redaction marker boundaries: %s', (message, shouldReject) => {
