@@ -495,7 +495,7 @@ export function contractDiffExitCode(
 }
 
 export function formatContractDiffJson(report: ContractDiffReportV1): string {
-  return renderUnifiedContractDiffJson(report);
+  return renderUnifiedContractDiffJson(report, { maxOutputBytes: Number.MAX_SAFE_INTEGER });
 }
 
 export function formatContractDiffText(

@@ -75,6 +75,84 @@ describe('Unified contract JSON reporter', () => {
     expect(renderUnifiedContractDiffJson(report, { pretty: false })).toBe(`${compact}\n`);
   });
 
+  test('preserves canonical severity ordering', () => {
+    const report = reportFixture();
+    const finding = {
+      schemaVersion: 1 as const,
+      confidence: 'deterministic' as const,
+      category: 'exposure' as const,
+      title: 'ordering',
+      message: 'safe output',
+      evidence: [{
+        source: 'openapi' as const,
+        uri: 'openapi.yaml',
+        digest: `sha256:${'a'.repeat(64)}`,
+        analyzer: 'test',
+        capability: 'routes',
+        complete: true,
+      }],
+    };
+    const ordered = {
+      ...report,
+      findings: [
+        { ...finding, ruleId: 'SC-AAA-001', instanceId: 'a'.repeat(64), severity: 'warning' as const },
+        { ...finding, ruleId: 'SC-ZZZ-999', instanceId: 'b'.repeat(64), severity: 'error' as const },
+      ],
+      summary: {
+        ...report.summary,
+        total: 2,
+        error: 1,
+        warning: 1,
+        bySeverity: { ...report.summary.bySeverity, error: 1, warning: 1 },
+        byConfidence: { ...report.summary.byConfidence, deterministic: 2 },
+        byCategory: { ...report.summary.byCategory, exposure: 2 },
+      },
+    };
+
+    expect(JSON.parse(renderUnifiedContractDiffJson(ordered)).findings.map(
+      ({ severity }: { severity: string }) => severity,
+    )).toEqual(['error', 'warning']);
+  });
+
+  test('keeps legacy contract diff JSON output unbounded', () => {
+    const report = reportFixture();
+    const findings = Array.from({ length: 80 }, (_, index) => ({
+      schemaVersion: 1 as const,
+      ruleId: 'SC-TST-001',
+      instanceId: index.toString(16).padStart(64, '0'),
+      severity: 'error' as const,
+      confidence: 'deterministic' as const,
+      category: 'exposure' as const,
+      title: 'large legacy report',
+      message: 'safe output '.repeat(1_300),
+      evidence: [{
+        source: 'openapi' as const,
+        uri: 'openapi.yaml',
+        digest: `sha256:${'a'.repeat(64)}`,
+        analyzer: 'test',
+        capability: 'routes',
+        complete: true,
+      }],
+    }));
+    const largeReport = {
+      ...report,
+      findings,
+      summary: {
+        ...report.summary,
+        total: findings.length,
+        error: findings.length,
+        warning: 0,
+        info: 0,
+        bySeverity: { error: findings.length, warning: 0, info: 0 },
+        byConfidence: { deterministic: findings.length, 'high-confidence': 0, heuristic: 0 },
+        byCategory: { ...report.summary.byCategory, exposure: findings.length },
+      },
+    };
+
+    expect(Buffer.byteLength(formatContractDiffJson(largeReport), 'utf8')).toBeGreaterThan(1_048_576);
+    expect(() => renderUnifiedContractDiffJson(largeReport)).toThrowError(/JSON_REPORT_OUTPUT_LIMIT_EXCEEDED/);
+  });
+
   test('rejects schema-invalid, private, unsupported, and oversized reports without raw details', () => {
     const report = reportFixture();
     expect(() => renderUnifiedContractDiffJson({ ...report, target: 'invalid' as 'aws' }))
