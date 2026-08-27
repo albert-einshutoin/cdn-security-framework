@@ -23,6 +23,13 @@ export { renderFindingsAsSarif, type SarifLog } from '../reporters/sarif';
 export { renderContractDiffGitHubSummary } from '../reporters/github-summary';
 export { renderUnifiedContractDiffText, type UnifiedContractDiffTextOptions } from '../reporters/text';
 export {
+  JSON_REPORT_ERROR_CODES,
+  JsonReportError,
+  renderUnifiedContractDiffJson,
+  type JsonReportErrorCode,
+  type UnifiedContractDiffJsonOptions,
+} from '../reporters/json';
+export {
   CONTRACT_DIFF_FAIL_ON,
   ContractDiffInputError,
   contractDiffExitCode,

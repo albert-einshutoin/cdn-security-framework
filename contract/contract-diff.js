@@ -51,6 +51,7 @@ const drift_1 = require("./drift");
 const finding_exceptions_1 = require("./finding-exceptions");
 const finding_1 = require("./finding");
 const security_ir_1 = require("./security-ir");
+const json_1 = require("../reporters/json");
 const text_1 = require("../reporters/text");
 exports.CONTRACT_DIFF_FAIL_ON = ['error', 'warning', 'never'];
 class ContractDiffInputError extends Error {
@@ -413,7 +414,7 @@ function contractDiffExitCode(report, failOn) {
     return failOn === 'warning' && report.summary.warning > 0 ? 1 : 0;
 }
 function formatContractDiffJson(report) {
-    return `${JSON.stringify(report, null, 2)}\n`;
+    return (0, json_1.renderUnifiedContractDiffJson)(report, { maxOutputBytes: Number.MAX_SAFE_INTEGER });
 }
 function formatContractDiffText(report, options = {}) {
     return (0, text_1.renderUnifiedContractDiffText)(report, options);

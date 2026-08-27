@@ -26,6 +26,7 @@ import {
   type SecurityFindingV1,
 } from './finding';
 import { serializeSecurityContract, type SecurityContractCapabilitiesV1 } from './security-ir';
+import { renderUnifiedContractDiffJson } from '../reporters/json';
 import { renderUnifiedContractDiffText } from '../reporters/text';
 
 export const CONTRACT_DIFF_FAIL_ON = ['error', 'warning', 'never'] as const;
@@ -494,7 +495,7 @@ export function contractDiffExitCode(
 }
 
 export function formatContractDiffJson(report: ContractDiffReportV1): string {
-  return `${JSON.stringify(report, null, 2)}\n`;
+  return renderUnifiedContractDiffJson(report, { maxOutputBytes: Number.MAX_SAFE_INTEGER });
 }
 
 export function formatContractDiffText(
