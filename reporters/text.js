@@ -2,25 +2,19 @@
 Object.defineProperty(exports, "__esModule", { value: true });
 exports.renderUnifiedContractDiffText = renderUnifiedContractDiffText;
 const finding_order_1 = require("../contract/finding-order");
+const sensitive_text_1 = require("../contract/sensitive-text");
 const DEFAULT_MAX_OUTPUT_BYTES = 1_048_576;
 const MAX_FIELD_LENGTH = 512;
 const MAX_VALUE_DEPTH = 8;
 const MAX_VALUE_NODES = 256;
 const MAX_ARRAY_ITEMS = 32;
 const MAX_OBJECT_KEYS = 32;
-const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|set[-_]?cookie|api[-_]?key|access[_-]?token|refresh[_-]?token|token|secret|password)/i;
 function compareText(left, right) {
     return left < right ? -1 : left > right ? 1 : 0;
 }
-function redactText(value) {
-    return value
-        .replace(/([?&][^=\s&#]+)=([^&#\s]*)/g, '$1=[REDACTED]')
-        .replace(/\b(authorization|cookie|set-cookie|x-api-key|api-key|access[_-]?token|refresh[_-]?token|token|password|secret)\s*[:=]\s*[^\r\n]*/gi, '$1=[REDACTED]')
-        .replace(/\b(Bearer|Basic)\s+[^\s,;]+/gi, '$1 [REDACTED]');
-}
 function terminalText(value) {
     const boundedInput = value.slice(0, MAX_FIELD_LENGTH);
-    const bounded = redactText(boundedInput).slice(0, MAX_FIELD_LENGTH);
+    const bounded = (0, sensitive_text_1.redactSensitiveText)(boundedInput).slice(0, MAX_FIELD_LENGTH);
     return `${bounded}${value.length > MAX_FIELD_LENGTH ? '[TRUNCATED]' : ''}`
         .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (`\\u{${character.codePointAt(0)?.toString(16).padStart(4, '0')}}`));
 }
@@ -58,7 +52,7 @@ function safeValue(value, state, depth) {
         return '[REDACTED_UNREADABLE]';
     }
     for (const key of keys.slice(0, MAX_OBJECT_KEYS)) {
-        if (SENSITIVE_KEY_PATTERN.test(key)) {
+        if (sensitive_text_1.SENSITIVE_KEY_PATTERN.test(key)) {
             output[terminalText(key)] = '[REDACTED]';
             continue;
         }

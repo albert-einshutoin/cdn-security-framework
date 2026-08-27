@@ -2,6 +2,7 @@ import type { AllowedCapabilityStatus } from '../contract/allowed-surface';
 import type { ContractDiffReportV1 } from '../contract/contract-diff';
 import type { FindingEvidenceV1, SecurityFindingV1 } from '../contract/finding';
 import { sortFindings } from '../contract/finding-order';
+import { redactSensitiveText, SENSITIVE_KEY_PATTERN } from '../contract/sensitive-text';
 import type { CapabilityLevelV1, SecurityContractCapabilitiesV1 } from '../contract/security-ir';
 
 export interface UnifiedContractDiffTextOptions {
@@ -17,22 +18,13 @@ const MAX_VALUE_DEPTH = 8;
 const MAX_VALUE_NODES = 256;
 const MAX_ARRAY_ITEMS = 32;
 const MAX_OBJECT_KEYS = 32;
-const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|set[-_]?cookie|api[-_]?key|access[_-]?token|refresh[_-]?token|token|secret|password)/i;
-
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function redactText(value: string): string {
-  return value
-    .replace(/([?&][^=\s&#]+)=([^&#\s]*)/g, '$1=[REDACTED]')
-    .replace(/\b(authorization|cookie|set-cookie|x-api-key|api-key|access[_-]?token|refresh[_-]?token|token|password|secret)\s*[:=]\s*[^\r\n]*/gi, '$1=[REDACTED]')
-    .replace(/\b(Bearer|Basic)\s+[^\s,;]+/gi, '$1 [REDACTED]');
-}
-
 function terminalText(value: string): string {
   const boundedInput = value.slice(0, MAX_FIELD_LENGTH);
-  const bounded = redactText(boundedInput).slice(0, MAX_FIELD_LENGTH);
+  const bounded = redactSensitiveText(boundedInput).slice(0, MAX_FIELD_LENGTH);
   return `${bounded}${value.length > MAX_FIELD_LENGTH ? '[TRUNCATED]' : ''}`
     .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (
       `\\u{${character.codePointAt(0)?.toString(16).padStart(4, '0')}}`

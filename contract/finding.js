@@ -4,6 +4,7 @@ exports.FINDING_EVIDENCE_SOURCES = exports.FINDING_CATEGORIES = exports.FINDING_
 exports.computeFindingInstanceId = computeFindingInstanceId;
 exports.createFinding = createFinding;
 const node_crypto_1 = require("node:crypto");
+const sensitive_text_1 = require("./sensitive-text");
 exports.FINDING_SEVERITIES = ['error', 'warning', 'info'];
 exports.FINDING_CONFIDENCES = ['deterministic', 'high-confidence', 'heuristic'];
 exports.FINDING_CATEGORIES = [
@@ -24,18 +25,13 @@ exports.FINDING_EVIDENCE_SOURCES = [
     'generated-artifact',
 ];
 const RULE_ID_PATTERN = /^SC-[A-Z][A-Z0-9]*-[0-9]{3}$/;
-const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|set[-_]?cookie|api[-_]?key|token|secret|password)/i;
 const MAX_REDACTION_DEPTH = 32;
 const MAX_REDACTION_NODES = 10_000;
 const MAX_REDACTED_STRING_LENGTH = 16_384;
 function redactString(value) {
     const truncated = value.length > MAX_REDACTED_STRING_LENGTH;
     const bounded = value.slice(0, MAX_REDACTED_STRING_LENGTH);
-    const redacted = bounded
-        .replace(/([?&][^=\s&#]+)=([^&#\s]*)/g, '$1=[REDACTED]')
-        .replace(/\b(authorization|cookie|set-cookie|x-api-key|api-key)\s*[:=]\s*[^\r\n]*/gi, '$1: [REDACTED]')
-        .replace(/(["']?(?:authorization|cookie|set[-_]?cookie|api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret)["']?\s*[:=]\s*)[^\r\n]*/gi, '$1[REDACTED]')
-        .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]');
+    const redacted = (0, sensitive_text_1.redactSensitiveText)(bounded);
     return `${redacted.slice(0, MAX_REDACTED_STRING_LENGTH)}${truncated ? '[TRUNCATED]' : ''}`;
 }
 function redactValue(value, state = { seen: new WeakSet(), nodes: 0 }, depth = 0) {
@@ -76,7 +72,7 @@ function redactValue(value, state = { seen: new WeakSet(), nodes: 0 }, depth = 0
             break;
         }
         const child = value[key];
-        if (SENSITIVE_KEY_PATTERN.test(key)) {
+        if (sensitive_text_1.SENSITIVE_KEY_PATTERN.test(key)) {
             state.nodes += 1;
             output[key] = '[REDACTED]';
         }
