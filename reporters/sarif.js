@@ -59,9 +59,10 @@ const PRIMARY_SOURCE_ORDER = {
     'SC-REQUEST-002': ['policy', 'openapi'],
     'SC-REQUEST-003': ['openapi', 'policy'],
 };
-const UNIFIED_AUTH_SCHEME_PATTERN = /\b(?:Bearer|Basic)\s+(?!\[REDACTED\](?=$|\s|[,;#](?=$|\s)|["'}\]]+(?=$|[\s,;])))[^\s,;}"']+/i;
-const UNIFIED_ASSIGNMENT_PATTERN = /(?<![?&])\b(?:authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|password|secret)\s*[:=]\s*["']?(?!\[REDACTED\](?=$|\s|[,;#](?=$|\s)|["'}\]]+(?=$|[\s,;])))[^\s,"'}]+/i;
-const UNIFIED_QUERY_PATTERN = /[?&][^=\s&#]+=(?!\[REDACTED\](?=$|\s|[,;#](?=$|\s)|["'}\]]+(?=$|[\s,;]|&(?=[^=\s&#]+=)|#(?=$|\s))|&(?=[^=\s&#]+=)|#(?=$|\s)))[^&#\s}"']*/;
+const UNIFIED_AUTH_SCHEME_PREFIX = /\b(?:Bearer|Basic)\s+/gi;
+const UNIFIED_ASSIGNMENT_PREFIX = /(?<![?&])\b(?:authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|password|secret)\s*[:=]\s*["']?/gi;
+const UNIFIED_QUERY_PREFIX = /[?&][^=\s&#]+=/g;
+const UNIFIED_REDACTED_MARKER = '[REDACTED]';
 function compareText(left, right) {
     return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -183,10 +184,34 @@ function renderFindingsAsSarif(report) {
             }],
     };
 }
+// Consume the complete structural suffix so a safe delimiter cannot hide a later secret.
+function isCompleteRedactedValue(value, markerEnd, query) {
+    let index = markerEnd;
+    while (index < value.length && /["'}\]]/u.test(value[index] ?? ''))
+        index += 1;
+    while (index < value.length && /[,;#]/u.test(value[index] ?? ''))
+        index += 1;
+    if (index >= value.length || /\s/u.test(value[index] ?? ''))
+        return true;
+    return query && value[index] === '&' && /^[^=\s&#]+=/.test(value.slice(index + 1));
+}
+function hasUnsafeSensitiveValue(value, prefix, query) {
+    for (const match of value.matchAll(prefix)) {
+        const markerStart = (match.index ?? 0) + match[0].length;
+        if (!value.startsWith(UNIFIED_REDACTED_MARKER, markerStart)
+            || !isCompleteRedactedValue(value, markerStart + UNIFIED_REDACTED_MARKER.length, query)) {
+            return true;
+        }
+    }
+    return false;
+}
+function hasUnsafeSensitiveText(value) {
+    return hasUnsafeSensitiveValue(value, UNIFIED_AUTH_SCHEME_PREFIX, false)
+        || hasUnsafeSensitiveValue(value, UNIFIED_ASSIGNMENT_PREFIX, false)
+        || hasUnsafeSensitiveValue(value, UNIFIED_QUERY_PREFIX, true);
+}
 function unifiedText(value) {
-    if (UNIFIED_AUTH_SCHEME_PATTERN.test(value)
-        || UNIFIED_ASSIGNMENT_PATTERN.test(value)
-        || UNIFIED_QUERY_PATTERN.test(value)) {
+    if (hasUnsafeSensitiveText(value)) {
         throw new SarifReportError('SARIF_PRIVACY_VIOLATION', 'Finding text contains sensitive data.');
     }
     return value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (`\\u{${character.codePointAt(0)?.toString(16).padStart(4, '0')}}`));
