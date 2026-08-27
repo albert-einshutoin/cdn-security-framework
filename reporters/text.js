@@ -15,7 +15,7 @@ function compareText(left, right) {
 function redactText(value) {
     return value
         .replace(/([?&][^=\s&#]+)=([^&#\s]*)/g, '$1=[REDACTED]')
-        .replace(/\b(authorization|cookie|set-cookie|x-api-key|api-key|access[_-]?token|refresh[_-]?token|token|password|secret)\s*[:=]\s*[^\r\n,;]*/gi, '$1=[REDACTED]')
+        .replace(/\b(authorization|cookie|set-cookie|x-api-key|api-key|access[_-]?token|refresh[_-]?token|token|password|secret)\s*[:=]\s*[^\r\n]*/gi, '$1=[REDACTED]')
         .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]');
 }
 function terminalText(value) {

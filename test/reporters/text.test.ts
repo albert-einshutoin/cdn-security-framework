@@ -115,6 +115,17 @@ describe('Unified contract text reporter', () => {
     expect(headerOutput).not.toContain('Zm9vOmJhcg==');
     expect(headerOutput).toContain('authorization=[REDACTED]');
 
+    const multipartHeaders = renderUnifiedContractDiffText({
+      ...report,
+      findings: [
+        { ...first, message: 'authorization: Digest username="user", response="digest-secret"' },
+        { ...first, message: 'cookie: session=session-secret; refresh=refresh-secret' },
+      ],
+    });
+    expect(multipartHeaders).not.toContain('digest-secret');
+    expect(multipartHeaders).not.toContain('session-secret');
+    expect(multipartHeaders).not.toContain('refresh-secret');
+
     const unsafe = { ...report, findings: [{ ...first, evidence: [{ ...first.evidence[0], uri: '/Users/private/source.yaml' }] }] };
     expect(renderUnifiedContractDiffText(unsafe)).toContain('evidence=[external]');
     const remote = { ...report, findings: [{ ...first, evidence: [{ ...first.evidence[0], uri: 'https://evil.example/secret?token=leak' }] }] };
