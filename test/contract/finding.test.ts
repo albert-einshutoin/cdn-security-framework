@@ -122,7 +122,16 @@ describe('Finding Contract v1', () => {
   test('redacts sensitive headers and query values before returning a Finding', () => {
     const finding = createFinding({
       ...baseInput,
-      message: 'Authorization: Bearer message-secret\nCookie: sid=first-secret; refresh=second-secret',
+      message: [
+        'Authorization: Bearer message-secret',
+        'Cookie: sid=first-secret; refresh=second-secret',
+        'Basic basic-secret',
+        'Digest username="user", response="digest-secret"',
+        'Negotiate negotiate-secret',
+        'AWS4-HMAC-SHA256 Credential=aws-secret, Signature=aws-signature-secret',
+        'Authorization: Digest username="user",\n response="folded-lf-secret"',
+        'Authorization: Digest username="user",\r\n signature="folded-crlf-secret"',
+      ].join('\n'),
       expected: {
         headers: {
           authorization: 'Bearer object-secret',
@@ -148,7 +157,9 @@ describe('Finding Contract v1', () => {
       'message-secret', 'object-secret', 'cookie-secret', 'api-key-secret',
       'query-secret', 'visible-secret', 'raw-secret', 'uri-secret', 'first-secret',
       'second-secret', 'token-secret', 'password-secret',
-      'alpha beta', 'json-secret',
+      'alpha beta', 'json-secret', 'basic-secret', 'digest-secret', 'negotiate-secret',
+      'aws-secret', 'aws-signature-secret',
+      'folded-lf-secret', 'folded-crlf-secret',
     ]) {
       expect(serialized).not.toContain(secret);
     }

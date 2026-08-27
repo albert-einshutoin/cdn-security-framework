@@ -25,8 +25,8 @@ import {
   type FindingSeverity,
   type SecurityFindingV1,
 } from './finding';
-import { sortFindings } from './finding-order';
 import { serializeSecurityContract, type SecurityContractCapabilitiesV1 } from './security-ir';
+import { renderUnifiedContractDiffText } from '../reporters/text';
 
 export const CONTRACT_DIFF_FAIL_ON = ['error', 'warning', 'never'] as const;
 export type ContractDiffFailOn = typeof CONTRACT_DIFF_FAIL_ON[number];
@@ -497,48 +497,9 @@ export function formatContractDiffJson(report: ContractDiffReportV1): string {
   return `${JSON.stringify(report, null, 2)}\n`;
 }
 
-function terminalText(value: string): string {
-  return value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (
-    `\\u{${character.codePointAt(0)?.toString(16).padStart(4, '0')}}`
-  ));
-}
-
-function findingLines(finding: SecurityFindingV1, color: boolean): string[] {
-  const labels = { error: '\u001b[31mERROR\u001b[0m', warning: '\u001b[33mWARNING\u001b[0m', info: '\u001b[36mINFO\u001b[0m' };
-  const label = color ? labels[finding.severity] : finding.severity.toUpperCase();
-  const route = finding.route ? `${finding.route.method ?? '*'} ${finding.route.path ?? '*'}` : '-';
-  const details = [
-    finding.expected === undefined ? undefined : `expected=${terminalText(JSON.stringify(finding.expected) ?? 'null')}`,
-    finding.actual === undefined ? undefined : `actual=${terminalText(JSON.stringify(finding.actual) ?? 'null')}`,
-  ].filter((value): value is string => Boolean(value)).join(' ');
-  return [
-    `${label} ${finding.ruleId} ${terminalText(route)} ${terminalText(finding.title)}`,
-    ...(details ? [`  ${details}`] : []),
-    ...finding.evidence.map(({ uri, pointer }) => `  evidence=${terminalText(uri)}${terminalText(pointer ?? '')}`),
-    ...(finding.remediation ? [`  remediation=${terminalText(finding.remediation.summary)}`] : []),
-  ];
-}
-
 export function formatContractDiffText(
   report: ContractDiffReportV1,
   options: { color?: boolean } = {},
 ): string {
-  const active = sortFindings([...report.findings, ...report.exceptionDiagnostics]);
-  return [
-    `Summary: total=${report.summary.total} error=${report.summary.error}`
-      + ` warning=${report.summary.warning} info=${report.summary.info}`
-      + ` suppressed=${report.summary.suppressed}`,
-    `Target: ${report.target}`,
-    `OpenAPI digest: ${report.inputDigests.openapi}`,
-    `Policy digest: ${report.inputDigests.policy}`,
-    `Omitted/unknown comparisons: ${report.omittedComparisons.length || 'none'}`,
-    ...report.omittedComparisons.map((comparison) => `  ${terminalText(comparison)}`),
-    'Findings:',
-    ...(active.length > 0 ? active.flatMap((finding) => findingLines(finding, Boolean(options.color))) : ['(none)']),
-    ...(report.suppressedFindings.length > 0 ? [
-      'Suppressed findings:',
-      ...report.suppressedFindings.flatMap((finding) => findingLines(finding, Boolean(options.color))),
-    ] : []),
-    '',
-  ].join('\n');
+  return renderUnifiedContractDiffText(report, options);
 }
