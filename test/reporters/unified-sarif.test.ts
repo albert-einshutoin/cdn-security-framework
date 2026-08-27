@@ -114,14 +114,26 @@ describe('Unified contract SARIF adapter', () => {
   test.each([
     ['Bearer [REDACTED]actual-token', true],
     ['Bearer [REDACTED],actual-token', true],
+    ['Bearer [REDACTED]"actual-token', true],
+    ['Bearer [REDACTED]"}actual-token', true],
     ['?token=[REDACTED]actual-token', true],
     ['?token=[REDACTED],actual-token', true],
+    ['?token=[REDACTED]#actual-token', true],
+    ['?token=[REDACTED]&actual-token', true],
+    ['?token=[REDACTED]"}actual-token', true],
     ['token=[REDACTED],actual-token', true],
+    ['token="[REDACTED]"actual-token', true],
+    ['token="[REDACTED]"}actual-token', true],
     ['Cookie: [REDACTED]&actual-token', true],
     ['password=[REDACTED]#actual-token', true],
     ['Bearer [REDACTED]', false],
+    ['Bearer [REDACTED]"', false],
+    ['Cookie: [REDACTED],', false],
     ['?token=[REDACTED]', false],
+    ['?token=[REDACTED],', false],
     ['?token=[REDACTED]&session=[REDACTED]', false],
+    ['password=[REDACTED]#', false],
+    ['token="[REDACTED]",', false],
   ])('handles redaction marker boundaries: %s', (message, shouldReject) => {
     const input = report();
     input.findings = input.findings.map((finding) => ({ ...finding, message }));

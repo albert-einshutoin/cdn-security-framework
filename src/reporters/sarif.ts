@@ -148,9 +148,9 @@ const PRIMARY_SOURCE_ORDER: Record<string, readonly FindingEvidenceV1['source'][
   'SC-REQUEST-002': ['policy', 'openapi'],
   'SC-REQUEST-003': ['openapi', 'policy'],
 };
-const UNIFIED_AUTH_SCHEME_PATTERN = /\b(?:Bearer|Basic)\s+(?!\[REDACTED\](?=$|[\s}"']))[^\s,;}"']+/i;
-const UNIFIED_ASSIGNMENT_PATTERN = /(?<![?&])\b(?:authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|password|secret)\s*[:=]\s*["']?(?!\[REDACTED\](?=$|[\s}"']))[^\s,"'}]+/i;
-const UNIFIED_QUERY_PATTERN = /[?&][^=\s&#]+=(?!\[REDACTED\](?=$|[\s&#}"']))[^&#\s}"']*/;
+const UNIFIED_AUTH_SCHEME_PATTERN = /\b(?:Bearer|Basic)\s+(?!\[REDACTED\](?=$|\s|[,;#](?=$|\s)|["'}\]]+(?=$|[\s,;])))[^\s,;}"']+/i;
+const UNIFIED_ASSIGNMENT_PATTERN = /(?<![?&])\b(?:authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|password|secret)\s*[:=]\s*["']?(?!\[REDACTED\](?=$|\s|[,;#](?=$|\s)|["'}\]]+(?=$|[\s,;])))[^\s,"'}]+/i;
+const UNIFIED_QUERY_PATTERN = /[?&][^=\s&#]+=(?!\[REDACTED\](?=$|\s|[,;#](?=$|\s)|["'}\]]+(?=$|[\s,;]|&(?=[^=\s&#]+=)|#(?=$|\s))|&(?=[^=\s&#]+=)|#(?=$|\s)))[^&#\s}"']*/;
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
