@@ -27,7 +27,7 @@ function redactText(value: string): string {
   return value
     .replace(/([?&][^=\s&#]+)=([^&#\s]*)/g, '$1=[REDACTED]')
     .replace(/\b(authorization|cookie|set-cookie|x-api-key|api-key|access[_-]?token|refresh[_-]?token|token|password|secret)\s*[:=]\s*[^\r\n]*/gi, '$1=[REDACTED]')
-    .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]');
+    .replace(/\b(Bearer|Basic)\s+[^\s,;]+/gi, '$1 [REDACTED]');
 }
 
 function terminalText(value: string): string {

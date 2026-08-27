@@ -115,6 +115,13 @@ describe('Unified contract text reporter', () => {
     expect(headerOutput).not.toContain('Zm9vOmJhcg==');
     expect(headerOutput).toContain('authorization=[REDACTED]');
 
+    const basicOutput = renderUnifiedContractDiffText({
+      ...report,
+      findings: [{ ...first, message: 'Basic basic-secret' }],
+    });
+    expect(basicOutput).not.toContain('basic-secret');
+    expect(basicOutput).toContain('Basic [REDACTED]');
+
     const multipartHeaders = renderUnifiedContractDiffText({
       ...report,
       findings: [
