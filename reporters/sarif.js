@@ -59,7 +59,8 @@ const PRIMARY_SOURCE_ORDER = {
     'SC-REQUEST-002': ['policy', 'openapi'],
     'SC-REQUEST-003': ['openapi', 'policy'],
 };
-const UNIFIED_SECRET_PATTERN = /\b(?:Bearer|Basic)\s+(?!\[REDACTED\](?=$|[\s;}"'&#]))[^\s,;}"']+|\b(?:authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|password|secret)\s*[:=]\s*["']?(?!\[REDACTED\](?=$|[\s"'}&#]))[^\s,"'}]+/i;
+const UNIFIED_AUTH_SCHEME_PATTERN = /\b(?:Bearer|Basic)\s+(?!\[REDACTED\](?=$|[\s}"']))[^\s,;}"']+/i;
+const UNIFIED_ASSIGNMENT_PATTERN = /(?<![?&])\b(?:authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|password|secret)\s*[:=]\s*["']?(?!\[REDACTED\](?=$|[\s}"']))[^\s,"'}]+/i;
 const UNIFIED_QUERY_PATTERN = /[?&][^=\s&#]+=(?!\[REDACTED\](?=$|[\s&#}"']))[^&#\s}"']*/;
 function compareText(left, right) {
     return left < right ? -1 : left > right ? 1 : 0;
@@ -183,7 +184,9 @@ function renderFindingsAsSarif(report) {
     };
 }
 function unifiedText(value) {
-    if (UNIFIED_SECRET_PATTERN.test(value) || UNIFIED_QUERY_PATTERN.test(value)) {
+    if (UNIFIED_AUTH_SCHEME_PATTERN.test(value)
+        || UNIFIED_ASSIGNMENT_PATTERN.test(value)
+        || UNIFIED_QUERY_PATTERN.test(value)) {
         throw new SarifReportError('SARIF_PRIVACY_VIOLATION', 'Finding text contains sensitive data.');
     }
     return value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (`\\u{${character.codePointAt(0)?.toString(16).padStart(4, '0')}}`));

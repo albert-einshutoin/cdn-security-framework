@@ -117,8 +117,11 @@ describe('Unified contract SARIF adapter', () => {
     ['?token=[REDACTED]actual-token', true],
     ['?token=[REDACTED],actual-token', true],
     ['token=[REDACTED],actual-token', true],
+    ['Cookie: [REDACTED]&actual-token', true],
+    ['password=[REDACTED]#actual-token', true],
     ['Bearer [REDACTED]', false],
     ['?token=[REDACTED]', false],
+    ['?token=[REDACTED]&session=[REDACTED]', false],
   ])('handles redaction marker boundaries: %s', (message, shouldReject) => {
     const input = report();
     input.findings = input.findings.map((finding) => ({ ...finding, message }));
