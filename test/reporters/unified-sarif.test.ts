@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest';
+import { describe, expect, test, vi } from 'vitest';
 
 import { createFinding, type ContractDiffReportV1 } from '../../src/contract';
 import {
@@ -111,6 +111,43 @@ describe('Unified contract SARIF adapter', () => {
       .toThrowError(/SARIF_OUTPUT_LIMIT_EXCEEDED/);
   });
 
+  test('enforces the output byte limit before materializing every result', () => {
+    const input = report();
+    const seed = input.findings[0];
+    input.findings = Array.from({ length: 100 }, (_, index) => createFinding({
+      ...seed,
+      title: `Finding ${index}`,
+      message: `Finding ${index} is outside the allowed surface.`,
+      route: { ...seed.route, path: `/admin/${index}` },
+    }));
+    const stringify = vi.spyOn(JSON, 'stringify');
+
+    try {
+      expect(() => renderUnifiedContractDiffSarif(input, { maxOutputBytes: 4_096 }))
+        .toThrowError(/SARIF_OUTPUT_LIMIT_EXCEEDED/);
+      const materializedFullOutput = stringify.mock.calls.some(([value]) => {
+        if (!value || typeof value !== 'object') return false;
+        const runs = (value as { runs?: Array<{ results?: unknown[] }> }).runs;
+        return runs?.[0]?.results?.length === input.findings.length;
+      });
+      expect(materializedFullOutput).toBe(false);
+    } finally {
+      stringify.mockRestore();
+    }
+  });
+
+  test('escapes remediation Markdown before placing it in SARIF help', () => {
+    const input = report();
+    input.findings[0] = {
+      ...input.findings[0],
+      remediation: { summary: '[review](file:///etc/passwd)', safeAutoFix: false },
+    };
+
+    const help = renderUnifiedContractDiffSarif(input).runs[0].tool.driver.rules[0].help;
+    expect(help.text).toBe('[review](file:///etc/passwd)');
+    expect(help.markdown).toBe('\\[review\\]\\(file:///etc/passwd\\)');
+  });
+
   test.each([
     ['Bearer [REDACTED]actual-token', true],
     ['Bearer [REDACTED],actual-token', true],
@@ -145,7 +182,72 @@ describe('Unified contract SARIF adapter', () => {
     } else {
       expect(() => renderUnifiedContractDiffSarif(input)).not.toThrow();
     }
-    });
+  });
+
+  test('does not promote a generated or runtime-only evidence item to primary', () => {
+    const input = report();
+    const seed = input.findings[0];
+    input.findings = [createFinding({
+      ...seed,
+      evidence: [{ ...seed.evidence[0], source: 'runtime', uri: 'runtime/events.json' }],
+    })];
+
+    const result = renderUnifiedContractDiffSarif(input).runs[0].results[0];
+    expect(result.locations).toBeUndefined();
+    expect(result.relatedLocations?.[0].physicalLocation.artifactLocation.uri)
+      .toBe('runtime/events.json');
+  });
+
+  test('deduplicates evidence after URI normalization', () => {
+    const input = report();
+    const seed = input.findings[0];
+    input.findings = [createFinding({
+      ...seed,
+      evidence: [
+        { ...seed.evidence[0], source: 'openapi', uri: 'specs/open api.yml', pointer: '/paths' },
+        { ...seed.evidence[0], source: 'policy', uri: 'specs/open%20api.yml', pointer: ' /paths ' },
+      ],
+    })];
+
+    const result = renderUnifiedContractDiffSarif(input).runs[0].results[0];
+    const locations = [...(result.locations ?? []), ...(result.relatedLocations ?? [])];
+    expect(locations).toHaveLength(1);
+    expect(locations[0].physicalLocation.artifactLocation.uri).toBe('specs/open%20api.yml');
+  });
+
+  test.each(['line:0:column:1', 'line:1:column:0', `line:${'9'.repeat(309)}:column:1`])(
+    'rejects invalid source coordinates: %s',
+    (pointer) => {
+      const input = report();
+      input.findings[0].evidence = input.findings[0].evidence.map((evidence) => ({ ...evidence, pointer }));
+      expect(() => renderUnifiedContractDiffSarif(input)).toThrowError(/SARIF_LOCATION_INVALID/);
+    },
+  );
+
+  test('rejects oversized evidence before unbounded sorting', () => {
+    const input = report();
+    const seed = input.findings[0];
+    input.findings = [{
+      ...seed,
+      evidence: Array.from({ length: 1_025 }, (_, index) => ({
+        ...seed.evidence[0],
+        uri: `policy/${index}.yml`,
+        pointer: `/routes/${index}`,
+      })),
+    }];
+
+    expect(() => renderUnifiedContractDiffSarif(input)).toThrowError(/SARIF_UNIFIED_REPORT_INVALID/);
+  });
+
+  test('rejects oversized finding text before sorting', () => {
+    const input = report();
+    input.findings[0] = {
+      ...input.findings[0],
+      route: { ...input.findings[0].route, path: 'x'.repeat(16_385) },
+    };
+
+    expect(() => renderUnifiedContractDiffSarif(input)).toThrowError(/SARIF_UNIFIED_REPORT_INVALID/);
+  });
 
   test('uses a deterministic full-finding tie-breaker before maxResults', () => {
     const input = report();

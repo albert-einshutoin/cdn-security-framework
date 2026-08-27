@@ -24,6 +24,12 @@ exports.SarifReportError = SarifReportError;
 const DEFAULT_MAX_RELATED_LOCATIONS = 32;
 const DEFAULT_MAX_RESULTS = 10_000;
 const DEFAULT_MAX_OUTPUT_BYTES = 1_048_576;
+const MAX_UNIFIED_FINDINGS = 20_000;
+const MAX_UNIFIED_EVIDENCE = 1_024;
+const MAX_UNIFIED_AUXILIARY_ITEMS = 10_000;
+const MAX_UNIFIED_INPUT_NODES = 500_000;
+const MAX_UNIFIED_CANONICAL_NODES = 100_000;
+const MAX_UNIFIED_STRING_LENGTH = 16_384;
 const SOURCE_PRIORITY = {
     'source-ast': 0,
     openapi: 1,
@@ -63,6 +69,7 @@ const UNIFIED_AUTH_SCHEME_PREFIX = /\b(?:Bearer|Basic)\s+/gi;
 const UNIFIED_ASSIGNMENT_PREFIX = /(?<![?&])\b(?:authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|password|secret)\s*[:=]\s*["']?/gi;
 const UNIFIED_QUERY_PREFIX = /[?&][^=\s&#]+=/g;
 const UNIFIED_REDACTED_MARKER = '[REDACTED]';
+const SOURCE_POSITION_PATTERN = /^line:([1-9]\d*):column:([1-9]\d*)$/u;
 function compareText(left, right) {
     return left < right ? -1 : left > right ? 1 : 0;
 }
@@ -85,6 +92,17 @@ function safeUri(uri) {
     catch {
         throw new Error('SARIF evidence URI must be workspace-relative');
     }
+}
+function normalizedEvidenceUri(evidence) {
+    try {
+        return safeUri(evidence.uri);
+    }
+    catch {
+        throw new SarifReportError('SARIF_LOCATION_INVALID', 'Finding evidence URI is not workspace-relative.');
+    }
+}
+function normalizedEvidencePointer(evidence) {
+    return evidence.pointer?.trim() ?? '';
 }
 function evidenceKey(evidence) {
     return [evidence.uri, evidence.pointer ?? '', evidence.source, evidence.digest].join('\u0000');
@@ -211,35 +229,48 @@ function hasUnsafeSensitiveText(value) {
         || hasUnsafeSensitiveValue(value, UNIFIED_QUERY_PREFIX, true);
 }
 function unifiedText(value) {
+    if (typeof value !== 'string' || value.length > MAX_UNIFIED_STRING_LENGTH) {
+        throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified SARIF text exceeds the string limit.');
+    }
     if (hasUnsafeSensitiveText(value)) {
         throw new SarifReportError('SARIF_PRIVACY_VIOLATION', 'Finding text contains sensitive data.');
     }
     return value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (`\\u{${character.codePointAt(0)?.toString(16).padStart(4, '0')}}`));
 }
+function unifiedMarkdown(value) {
+    return unifiedText(value).replace(/[\\`*_[\]{}()<>#+.!|~-]/g, '\\$&');
+}
 function unifiedEvidenceKey(evidence) {
     return [
-        SOURCE_PRIORITY[evidence.source], evidence.uri, evidence.pointer ?? '', evidence.source,
+        SOURCE_PRIORITY[evidence.source], evidence.uri, normalizedEvidencePointer(evidence), evidence.source,
         evidence.digest, evidence.analyzer, evidence.capability, String(evidence.complete),
     ].join('\u0000');
 }
 function unifiedEvidenceIdentity(evidence) {
-    return [evidence.uri, evidence.pointer ?? ''].join('\u0000');
+    return [normalizedEvidenceUri(evidence), normalizedEvidencePointer(evidence)].join('\u0000');
 }
-function canonicalJson(value, ancestors = new WeakSet()) {
+function canonicalJson(value, state = { ancestors: new WeakSet(), nodes: 0 }) {
+    state.nodes += 1;
+    if (state.nodes > MAX_UNIFIED_CANONICAL_NODES) {
+        throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Finding identity exceeds the value limit.');
+    }
+    if (typeof value === 'string' && value.length > MAX_UNIFIED_STRING_LENGTH) {
+        throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Finding identity contains an oversized string.');
+    }
     if (value === null || typeof value !== 'object')
         return JSON.stringify(value) ?? String(value);
-    if (ancestors.has(value))
+    if (state.ancestors.has(value))
         return '[circular]';
-    ancestors.add(value);
+    state.ancestors.add(value);
     try {
         if (Array.isArray(value))
-            return `[${value.map((item) => canonicalJson(item, ancestors)).join(',')}]`;
+            return `[${value.map((item) => canonicalJson(item, state)).join(',')}]`;
         const record = value;
         return `{${Object.keys(record).sort(compareText)
-            .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key], ancestors)}`).join(',')}}`;
+            .map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key], state)}`).join(',')}}`;
     }
     finally {
-        ancestors.delete(value);
+        state.ancestors.delete(value);
     }
 }
 function unifiedFindingKey(finding) {
@@ -262,22 +293,25 @@ function primaryEvidence(finding, evidence) {
     if (!order) {
         throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Finding rule family has no primary-source mapping.');
     }
-    return order.flatMap((source) => evidence.filter((item) => item.source === source))[0] ?? evidence[0];
+    return order.flatMap((source) => evidence.filter((item) => item.source === source))[0];
 }
 function unifiedLocation(evidence, id) {
-    let uri;
-    try {
-        uri = safeUri(evidence.uri);
-    }
-    catch {
-        throw new SarifReportError('SARIF_LOCATION_INVALID', 'Finding evidence URI is not workspace-relative.');
+    const uri = normalizedEvidenceUri(evidence);
+    const pointer = normalizedEvidencePointer(evidence);
+    if (pointer?.startsWith('line:')) {
+        const sourcePosition = SOURCE_POSITION_PATTERN.exec(pointer);
+        if (!sourcePosition || sourcePosition[0] !== pointer
+            || !Number.isSafeInteger(Number(sourcePosition[1]))
+            || !Number.isSafeInteger(Number(sourcePosition[2]))) {
+            throw new SarifReportError('SARIF_LOCATION_INVALID', 'Finding source coordinates are invalid.');
+        }
     }
     try {
         return location({
             ...evidence,
             uri,
             source: unifiedText(evidence.source),
-            pointer: evidence.pointer === undefined ? undefined : unifiedText(evidence.pointer),
+            pointer: evidence.pointer === undefined ? undefined : unifiedText(pointer),
             digest: unifiedText(evidence.digest),
             analyzer: unifiedText(evidence.analyzer),
             capability: unifiedText(evidence.capability),
@@ -291,12 +325,13 @@ function unifiedLocation(evidence, id) {
 }
 function unifiedRule(finding) {
     const help = finding.remediation?.summary ?? finding.message;
+    const helpText = unifiedText(help);
     return {
         id: unifiedText(finding.ruleId),
         name: unifiedText(finding.ruleId.replace(/-/g, '_')),
         shortDescription: { text: unifiedText(finding.title) },
         fullDescription: { text: unifiedText(finding.message) },
-        help: { text: unifiedText(help), markdown: unifiedText(help) },
+        help: { text: helpText, markdown: unifiedMarkdown(helpText) },
         helpUri: FINDING_REFERENCE,
         defaultConfiguration: { level: LEVELS[finding.severity] },
         properties: {
@@ -305,6 +340,84 @@ function unifiedRule(finding) {
             tags: [...new Set((finding.tags ?? []).map(unifiedText))].sort(compareText),
         },
     };
+}
+function assertBoundedUnifiedValue(value, state) {
+    state.nodes += 1;
+    if (state.nodes > MAX_UNIFIED_INPUT_NODES) {
+        throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified report exceeds the value limit.');
+    }
+    if (typeof value === 'string') {
+        if (value.length > MAX_UNIFIED_STRING_LENGTH) {
+            throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified SARIF text exceeds the string limit.');
+        }
+        return;
+    }
+    if (value === null || typeof value !== 'object' || state.ancestors.has(value))
+        return;
+    state.ancestors.add(value);
+    try {
+        if (Array.isArray(value)) {
+            if (value.length > MAX_UNIFIED_INPUT_NODES) {
+                throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified report contains an oversized array.');
+            }
+            for (let index = 0; index < value.length; index += 1) {
+                const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+                if (!descriptor || !('value' in descriptor)) {
+                    throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified report contains an invalid array.');
+                }
+                assertBoundedUnifiedValue(descriptor.value, state);
+            }
+            return;
+        }
+        for (const key of Object.keys(value)) {
+            if (key.length > MAX_UNIFIED_STRING_LENGTH) {
+                throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified report contains an oversized key.');
+            }
+            const descriptor = Object.getOwnPropertyDescriptor(value, key);
+            if (!descriptor || !('value' in descriptor)) {
+                throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified report contains an accessor property.');
+            }
+            assertBoundedUnifiedValue(descriptor.value, state);
+        }
+    }
+    finally {
+        state.ancestors.delete(value);
+    }
+}
+function assertUnifiedInputBounds(report) {
+    const findingCollections = [report.findings, report.exceptionDiagnostics, report.suppressedFindings];
+    const findingCount = findingCollections.reduce((total, findings) => total + findings.length, 0);
+    if (findingCount > MAX_UNIFIED_FINDINGS) {
+        throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified report exceeds the finding limit.');
+    }
+    const state = { ancestors: new WeakSet(), nodes: 0 };
+    for (const findings of findingCollections) {
+        for (const finding of findings) {
+            if (!finding || typeof finding !== 'object' || !Array.isArray(finding.evidence)) {
+                throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified report contains an invalid Finding.');
+            }
+            if (finding.evidence.length > MAX_UNIFIED_EVIDENCE) {
+                throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Finding exceeds the evidence limit.');
+            }
+            assertBoundedUnifiedValue(finding, state);
+            unifiedText(finding.ruleId);
+            unifiedText(finding.title);
+            unifiedText(finding.message);
+            if (finding.remediation)
+                unifiedText(finding.remediation.summary);
+        }
+    }
+    if (report.analyzerDiagnostics.length > MAX_UNIFIED_AUXILIARY_ITEMS
+        || report.omittedComparisons.length > MAX_UNIFIED_AUXILIARY_ITEMS
+        || report.appliedExceptionIds.length > MAX_UNIFIED_AUXILIARY_ITEMS
+        || report.analyzerCapabilities.policy.length > MAX_UNIFIED_AUXILIARY_ITEMS
+        || Object.keys(report.analyzerCapabilities.openapi).length > MAX_UNIFIED_AUXILIARY_ITEMS) {
+        throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified report exceeds an auxiliary item limit.');
+    }
+    assertBoundedUnifiedValue(report.analyzerCapabilities, state);
+    assertBoundedUnifiedValue(report.analyzerDiagnostics, state);
+    assertBoundedUnifiedValue(report.omittedComparisons, state);
+    assertBoundedUnifiedValue(report.appliedExceptionIds, state);
 }
 function unifiedResult(finding, suppressed, maxRelatedLocations) {
     const evidence = unifiedEvidence(finding.evidence);
@@ -378,7 +491,12 @@ function unifiedNotification(report, truncated) {
 }
 function renderUnifiedContractDiffSarif(report, options = {}) {
     if (!report || typeof report !== 'object' || !Array.isArray(report.findings)
-        || !Array.isArray(report.suppressedFindings) || !Array.isArray(report.exceptionDiagnostics)) {
+        || !Array.isArray(report.suppressedFindings) || !Array.isArray(report.exceptionDiagnostics)
+        || !Array.isArray(report.analyzerDiagnostics) || !Array.isArray(report.omittedComparisons)
+        || !Array.isArray(report.appliedExceptionIds) || !report.analyzerCapabilities
+        || typeof report.analyzerCapabilities !== 'object'
+        || !report.analyzerCapabilities.openapi || typeof report.analyzerCapabilities.openapi !== 'object'
+        || !Array.isArray(report.analyzerCapabilities.policy)) {
         throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified report is invalid.');
     }
     if (!options || typeof options !== 'object') {
@@ -392,6 +510,7 @@ function renderUnifiedContractDiffSarif(report, options = {}) {
         throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'SARIF limits are invalid.');
     }
     try {
+        assertUnifiedInputBounds(report);
         const allFindings = [
             ...report.findings,
             ...report.exceptionDiagnostics,
@@ -415,7 +534,10 @@ function renderUnifiedContractDiffSarif(report, options = {}) {
             omittedComparisons: [...new Set(report.omittedComparisons)].sort(compareText).map(unifiedText),
             analyzerDiagnostics: [...new Set(report.analyzerDiagnostics.map(({ code }) => code))].sort(compareText).map(unifiedText),
         };
-        const output = {
+        const truncated = findings.length < allFindings.length
+            || allFindings.some((finding) => unifiedEvidence(finding.evidence).length > maxRelatedLocations + 1);
+        const invocation = unifiedNotification(report, truncated);
+        const emptyOutput = {
             version: '2.1.0',
             $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
             runs: [{
@@ -423,20 +545,55 @@ function renderUnifiedContractDiffSarif(report, options = {}) {
                         driver: {
                             name: 'cdn-security-framework',
                             informationUri: FINDING_REFERENCE,
-                            rules: [...rules.values()]
-                                .sort((left, right) => compareText(left.ruleId, right.ruleId))
-                                .map(unifiedRule),
+                            rules: [],
                             properties,
                         },
                     },
-                    results: findings.map((finding) => unifiedResult(finding, suppressedIds.has(finding.instanceId), maxRelatedLocations)),
+                    results: [],
+                    ...(invocation ? { invocations: [invocation] } : {}),
                 }],
         };
-        const truncated = findings.length < allFindings.length
-            || allFindings.some((finding) => unifiedEvidence(finding.evidence).length > maxRelatedLocations + 1);
-        const invocation = unifiedNotification(report, truncated);
-        if (invocation)
-            output.runs[0].invocations = [invocation];
+        const serializedEmptyOutput = JSON.stringify(emptyOutput);
+        const emptyOutputBytes = Buffer.byteLength(serializedEmptyOutput, 'utf8');
+        const fixedOutputBytes = emptyOutputBytes - 4;
+        let rulesBytes = 2;
+        let resultsBytes = 2;
+        const outputRules = [];
+        const outputResults = [];
+        const assertOutputWithinLimit = () => {
+            if (fixedOutputBytes + rulesBytes + resultsBytes > maxOutputBytes) {
+                throw new SarifReportError('SARIF_OUTPUT_LIMIT_EXCEEDED', 'SARIF output exceeds the configured byte limit.');
+            }
+        };
+        assertOutputWithinLimit();
+        for (const finding of [...rules.values()].sort((left, right) => compareText(left.ruleId, right.ruleId))) {
+            const item = unifiedRule(finding);
+            const serializedItem = JSON.stringify(item);
+            rulesBytes += (outputRules.length > 0 ? 1 : 0) + Buffer.byteLength(serializedItem, 'utf8');
+            assertOutputWithinLimit();
+            outputRules.push(item);
+        }
+        for (const finding of findings) {
+            const item = unifiedResult(finding, suppressedIds.has(finding.instanceId), maxRelatedLocations);
+            const serializedItem = JSON.stringify(item);
+            resultsBytes += (outputResults.length > 0 ? 1 : 0) + Buffer.byteLength(serializedItem, 'utf8');
+            assertOutputWithinLimit();
+            outputResults.push(item);
+        }
+        const output = {
+            ...emptyOutput,
+            runs: [{
+                    ...emptyOutput.runs[0],
+                    tool: {
+                        ...emptyOutput.runs[0].tool,
+                        driver: {
+                            ...emptyOutput.runs[0].tool.driver,
+                            rules: outputRules,
+                        },
+                    },
+                    results: outputResults,
+                }],
+        };
         if (Buffer.byteLength(JSON.stringify(output), 'utf8') > maxOutputBytes) {
             throw new SarifReportError('SARIF_OUTPUT_LIMIT_EXCEEDED', 'SARIF output exceeds the configured byte limit.');
         }
