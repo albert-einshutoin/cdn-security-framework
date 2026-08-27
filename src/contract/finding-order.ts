@@ -6,12 +6,16 @@ function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-export function sortFindings(findings: readonly SecurityFindingV1[]): SecurityFindingV1[] {
-  return [...findings].sort((left, right) => (
+export function compareFindings(left: SecurityFindingV1, right: SecurityFindingV1): number {
+  return (
     SEVERITY_ORDER[left.severity] - SEVERITY_ORDER[right.severity]
     || compareText(left.ruleId, right.ruleId)
     || compareText(left.route?.path ?? '', right.route?.path ?? '')
     || compareText(left.route?.method ?? '', right.route?.method ?? '')
     || compareText(left.instanceId, right.instanceId)
-  ));
+  );
+}
+
+export function sortFindings(findings: readonly SecurityFindingV1[]): SecurityFindingV1[] {
+  return [...findings].sort(compareFindings);
 }

@@ -1,6 +1,6 @@
 import type { ContractDiffReportV1 } from '../contract/contract-diff';
 import type { FindingEvidenceV1, SecurityFindingV1 } from '../contract/finding';
-import { sortFindings } from '../contract/finding-order';
+import { compareFindings, sortFindings } from '../contract/finding-order';
 
 export interface SarifLog {
   version: '2.1.0';
@@ -148,8 +148,8 @@ const PRIMARY_SOURCE_ORDER: Record<string, readonly FindingEvidenceV1['source'][
   'SC-REQUEST-002': ['policy', 'openapi'],
   'SC-REQUEST-003': ['openapi', 'policy'],
 };
-const UNIFIED_SECRET_PATTERN = /\b(?:Bearer|Basic)\s+(?!\[REDACTED\])[^\s,;]+|\b(?:authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|password|secret)\s*[:=]\s*["']?(?!\[REDACTED\])[^\s,"'}]+/i;
-const UNIFIED_QUERY_PATTERN = /[?&][^=\s&#]+=(?!\[REDACTED\])[^&#\s]*/;
+const UNIFIED_SECRET_PATTERN = /\b(?:Bearer|Basic)\s+(?!\[REDACTED\](?=$|[\s,;}"'&#]))[^\s,;}"']+|\b(?:authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|password|secret)\s*[:=]\s*["']?(?!\[REDACTED\](?=$|[\s,"'}&#]))[^\s,"'}]+/i;
+const UNIFIED_QUERY_PATTERN = /[?&][^=\s&#]+=(?!\[REDACTED\](?=$|[\s&#,;}"']))[^&#\s}"']*/;
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -480,11 +480,13 @@ export function renderUnifiedContractDiffSarif(
     throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'SARIF limits are invalid.');
   }
   try {
-    const allFindings = sortFindings([
+    const allFindings = [
       ...report.findings,
       ...report.exceptionDiagnostics,
       ...report.suppressedFindings,
-    ]);
+    ].sort((left, right) => (
+      compareFindings(left, right) || compareText(unifiedFindingKey(left), unifiedFindingKey(right))
+    ));
     const findings = allFindings.slice(0, maxResults);
     const suppressedIds = new Set(report.suppressedFindings.map(({ instanceId }) => instanceId));
     const rules = new Map<string, SecurityFindingV1>();

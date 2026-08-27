@@ -70,7 +70,7 @@ describe('Unified contract SARIF adapter', () => {
         ...finding,
         evidence: [...finding.evidence].reverse(),
       })),
-    });
+  });
 
     expect(second).toEqual(first);
     const result = first.runs[0].results[0];
@@ -109,6 +109,43 @@ describe('Unified contract SARIF adapter', () => {
 
     expect(() => renderUnifiedContractDiffSarif(input, { maxOutputBytes: 64 }))
       .toThrowError(/SARIF_OUTPUT_LIMIT_EXCEEDED/);
+  });
+
+  test.each([
+    ['Bearer [REDACTED]actual-token', true],
+    ['?token=[REDACTED]actual-token', true],
+    ['Bearer [REDACTED]', false],
+    ['?token=[REDACTED]', false],
+  ])('handles redaction marker boundaries: %s', (message, shouldReject) => {
+    const input = report();
+    input.findings = input.findings.map((finding) => ({ ...finding, message }));
+    if (shouldReject) {
+      expect(() => renderUnifiedContractDiffSarif(input)).toThrowError(/SARIF_PRIVACY_VIOLATION/);
+    } else {
+      expect(() => renderUnifiedContractDiffSarif(input)).not.toThrow();
+    }
+    });
+
+  test('uses a deterministic full-finding tie-breaker before maxResults', () => {
+    const input = report();
+    const seed = input.findings[0];
+    const findingInput = {
+      ruleId: seed.ruleId,
+      severity: seed.severity,
+      confidence: seed.confidence,
+      category: seed.category,
+      route: seed.route,
+      evidence: seed.evidence,
+    };
+    const first = createFinding({ ...findingInput, title: 'First finding', message: 'First finding' });
+    const second = createFinding({ ...findingInput, title: 'Second finding', message: 'Second finding' });
+    expect(second.instanceId).toBe(first.instanceId);
+    const result = renderUnifiedContractDiffSarif({
+      ...input,
+      findings: [second, first],
+    }, { maxResults: 1 });
+
+    expect(result.runs[0].results[0].message.text).toBe('First finding');
   });
 
   test('uses the rule-family primary-source allowlist instead of always selecting Source', () => {
