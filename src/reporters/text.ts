@@ -26,12 +26,13 @@ function compareText(left: string, right: string): number {
 function redactText(value: string): string {
   return value
     .replace(/([?&][^=\s&#]+)=([^&#\s]*)/g, '$1=[REDACTED]')
-    .replace(/\b(authorization|cookie|set-cookie|x-api-key|api-key|access[_-]?token|refresh[_-]?token|token|password|secret)\s*[:=]\s*[^\s,;]*/gi, '$1=[REDACTED]')
+    .replace(/\b(authorization|cookie|set-cookie|x-api-key|api-key|access[_-]?token|refresh[_-]?token|token|password|secret)\s*[:=]\s*[^\r\n,;]*/gi, '$1=[REDACTED]')
     .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]');
 }
 
 function terminalText(value: string): string {
-  const bounded = redactText(value).slice(0, MAX_FIELD_LENGTH);
+  const boundedInput = value.slice(0, MAX_FIELD_LENGTH);
+  const bounded = redactText(boundedInput).slice(0, MAX_FIELD_LENGTH);
   return `${bounded}${value.length > MAX_FIELD_LENGTH ? '[TRUNCATED]' : ''}`
     .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (
       `\\u{${character.codePointAt(0)?.toString(16).padStart(4, '0')}}`
@@ -116,7 +117,7 @@ function capabilityCounts(capabilities: readonly string[]): string {
     .join(' ');
 }
 
-function capabilityLines(report: ContractDiffReportV1): string[] {
+function* capabilityLines(report: ContractDiffReportV1): Generator<string> {
   const openapiEntries = Object.entries(report.analyzerCapabilities.openapi) as Array<
     [keyof SecurityContractCapabilitiesV1, CapabilityLevelV1]
   >;
@@ -124,37 +125,30 @@ function capabilityLines(report: ContractDiffReportV1): string[] {
     .sort((left, right) => compareText(left.id, right.id));
   const openapiStatus = capabilityAggregate(openapiEntries.map(([, status]) => status));
   const policyStatus = capabilityAggregate(policyEntries.map(({ status }) => status));
-  const lines = [
-    'Capabilities:',
-    `  OpenAPI: ${openapiStatus} (${capabilityCounts(openapiEntries.map(([, status]) => status)) || 'none'})`,
-    `  Policy: ${policyStatus} (${capabilityCounts(policyEntries.map(({ status }) => status)) || 'none'})`,
-  ];
+  yield 'Capabilities:';
+  yield `  OpenAPI: ${openapiStatus} (${capabilityCounts(openapiEntries.map(([, status]) => status)) || 'none'})`;
+  yield `  Policy: ${policyStatus} (${capabilityCounts(policyEntries.map(({ status }) => status)) || 'none'})`;
   for (const [name, status] of openapiEntries.sort(([left], [right]) => compareText(left, right))) {
     if (status === 'complete') continue;
-    lines.push(`    openapi.${name}: ${status} (${status === 'unsupported' ? 'not evaluated' : 'partial coverage'})`);
+    yield `    openapi.${name}: ${status} (${status === 'unsupported' ? 'not evaluated' : 'partial coverage'})`;
   }
   for (const { id, status } of policyEntries) {
     if (status === 'supported') continue;
     const reason = status === 'unsupported' ? 'not evaluated' : status === 'warning-only' ? 'warning-only' : 'partial coverage';
-    lines.push(`    policy.${terminalText(id)}: ${status} (${reason})`);
+    yield `    policy.${terminalText(id)}: ${status} (${reason})`;
   }
-  return lines;
 }
 
-function diagnosticLines(report: ContractDiffReportV1): string[] {
-  const diagnostics = [...report.analyzerDiagnostics].sort((left, right) => compareText(
+function sortedDiagnostics(report: ContractDiffReportV1): ContractDiffReportV1['analyzerDiagnostics'] {
+  return [...report.analyzerDiagnostics].sort((left, right) => compareText(
     [left.code, left.capability ?? '', left.metric ?? '', left.message].join('\u0000'),
     [right.code, right.capability ?? '', right.metric ?? '', right.message].join('\u0000'),
   ));
-  return [
-    'Analysis diagnostics:',
-    ...(diagnostics.length === 0
-      ? ['  none']
-      : diagnostics.map((diagnostic) => {
-        const scope = diagnostic.capability ?? diagnostic.metric ?? 'analysis';
-        return `  ${terminalText(diagnostic.level.toUpperCase())} ${terminalText(diagnostic.code)} ${terminalText(scope)}: ${terminalText(diagnostic.message)}`;
-      })),
-  ];
+}
+
+function diagnosticText(diagnostic: ContractDiffReportV1['analyzerDiagnostics'][number]): string {
+  const scope = diagnostic.capability ?? diagnostic.metric ?? 'analysis';
+  return `  ${terminalText(diagnostic.level.toUpperCase())} ${terminalText(diagnostic.code)} ${terminalText(scope)}: ${terminalText(diagnostic.message)}`;
 }
 
 function evidenceText(evidence: FindingEvidenceV1): string {
@@ -164,6 +158,25 @@ function evidenceText(evidence: FindingEvidenceV1): string {
     : terminalText(rawUri);
   const pointer = evidence.pointer ? terminalText(evidence.pointer) : '';
   return `${uri}${pointer ? `#${pointer}` : ''}`;
+}
+
+function compareEvidence(left: FindingEvidenceV1, right: FindingEvidenceV1): number {
+  return compareText(
+    [left.source, left.uri, left.pointer ?? '', left.digest, left.analyzer, left.capability, String(left.complete)].join('\u0000'),
+    [right.source, right.uri, right.pointer ?? '', right.digest, right.analyzer, right.capability, String(right.complete)].join('\u0000'),
+  );
+}
+
+function boundedEvidence(evidence: readonly FindingEvidenceV1[]): FindingEvidenceV1[] {
+  const selected: FindingEvidenceV1[] = [];
+  for (const item of evidence) {
+    let index = 0;
+    while (index < selected.length && compareEvidence(selected[index], item) <= 0) index += 1;
+    if (index >= MAX_ARRAY_ITEMS && selected.length >= MAX_ARRAY_ITEMS) continue;
+    selected.splice(index, 0, item);
+    if (selected.length > MAX_ARRAY_ITEMS) selected.pop();
+  }
+  return selected;
 }
 
 function routeText(finding: SecurityFindingV1): string {
@@ -186,31 +199,34 @@ function findingLines(finding: SecurityFindingV1, color: boolean): string[] {
     `  message=${terminalText(finding.message)}`,
     ...(finding.expected === undefined ? [] : [`  expected=${safeValueText(finding.expected)}`]),
     ...(finding.actual === undefined ? [] : [`  actual=${safeValueText(finding.actual)}`]),
-    ...[...finding.evidence]
-      .sort((left, right) => compareText(
-        [left.source, left.uri, left.pointer ?? '', left.digest, left.analyzer, left.capability, String(left.complete)].join('\u0000'),
-        [right.source, right.uri, right.pointer ?? '', right.digest, right.analyzer, right.capability, String(right.complete)].join('\u0000'),
-      ))
-      .slice(0, MAX_ARRAY_ITEMS)
+    ...boundedEvidence(finding.evidence)
       .map((evidence) => `  evidence=${evidenceText(evidence)}`),
     ...(finding.evidence.length > MAX_ARRAY_ITEMS ? ['  evidence=[TRUNCATED]'] : []),
     ...(finding.remediation ? [`  remediation=${terminalText(finding.remediation.summary)}`] : []),
   ];
 }
 
-function findingSection(
+type AppendLine = (line: string) => boolean;
+
+function appendFindingSection(
+  appendLine: AppendLine,
   title: string,
   findings: readonly SecurityFindingV1[],
   color: boolean,
   maxFindings: number | undefined,
-): string[] {
-  const displayed = maxFindings === undefined ? findings : findings.slice(0, maxFindings);
-  const omitted = findings.length - displayed.length;
-  const lines = [title, `  evaluated=${findings.length}${findings.length === 0 ? ' (no findings)' : ''}`];
-  if (omitted > 0) lines.push(`  ${omitted} additional finding(s) omitted by maxFindings.`);
-  if (displayed.length > 0) lines.push(...displayed.flatMap((finding) => findingLines(finding, color)));
-  else lines.push('  (none)');
-  return lines;
+  includeTitle = true,
+): boolean {
+  if (includeTitle && !appendLine(title)) return false;
+  const displayedCount = maxFindings === undefined ? findings.length : Math.min(findings.length, maxFindings);
+  const omitted = findings.length - displayedCount;
+  if (!appendLine(`  evaluated=${findings.length}${findings.length === 0 ? ' (no findings)' : ''}`)) return false;
+  if (omitted > 0 && !appendLine(`  ${omitted} additional finding(s) omitted by maxFindings.`)) return false;
+  for (let index = 0; index < displayedCount; index += 1) {
+    for (const line of findingLines(findings[index], color)) {
+      if (!appendLine(line)) return false;
+    }
+  }
+  return displayedCount > 0 || appendLine('  (none)');
 }
 
 function byteLength(value: string): number {
@@ -223,15 +239,44 @@ function truncateOutput(value: string, maxBytes: number): string {
   const budget = Math.max(0, maxBytes - byteLength(marker));
   let bytes = 0;
   let prefix = '';
-  for (const character of value) {
+  for (let index = 0; index < value.length;) {
+    const codePoint = value.codePointAt(index);
+    if (codePoint === undefined) break;
+    const character = String.fromCodePoint(codePoint);
     const size = byteLength(character);
     if (bytes + size > budget) break;
     prefix += character;
     bytes += size;
+    index += character.length;
   }
   const output = `${prefix}${marker}`;
   if (byteLength(output) <= maxBytes) return output;
   return Buffer.from(output, 'utf8').subarray(0, maxBytes).toString('utf8');
+}
+
+function renderBoundedText(
+  maxBytes: number,
+  render: (appendLine: AppendLine) => void,
+): string {
+  const marker = `\n[output truncated at ${maxBytes} bytes]\n`;
+  const budget = Math.max(0, maxBytes - byteLength(marker));
+  const chunks: string[] = [];
+  let bytes = 0;
+  let truncated = false;
+  const appendLine: AppendLine = (line) => {
+    if (truncated) return false;
+    const chunk = `${line}\n`;
+    if (bytes + byteLength(chunk) > budget) {
+      truncated = true;
+      return false;
+    }
+    chunks.push(chunk);
+    bytes += byteLength(chunk);
+    return true;
+  };
+  render(appendLine);
+  const output = chunks.join('');
+  return truncated ? truncateOutput(`${output}${marker}`, maxBytes) : output;
 }
 
 export function renderUnifiedContractDiffText(
@@ -245,48 +290,46 @@ export function renderUnifiedContractDiffText(
   const omittedComparisons = [...new Set(report.omittedComparisons)].sort(compareText);
   const activeFindings = sortFindings(report.findings);
   const diagnostics = sortFindings(report.exceptionDiagnostics);
+  const analyzerDiagnostics = sortedDiagnostics(report);
   const includeSuppressed = options.includeSuppressed ?? report.suppressedFindings.length > 0;
-  const lines = [
-    `Summary: total=${report.summary.total} error=${report.summary.error}`
+  return renderBoundedText(maxOutputBytes, (appendLine) => {
+    if (!appendLine(`Summary: total=${report.summary.total} error=${report.summary.error}`
       + ` warning=${report.summary.warning} info=${report.summary.info}`
-      + ` suppressed=${report.summary.suppressed}`,
-    `Target: ${terminalText(report.target)}`,
-    `OpenAPI digest: ${terminalText(report.inputDigests.openapi)}`,
-    `Policy digest: ${terminalText(report.inputDigests.policy)}`,
-    `Exceptions digest: ${terminalText(report.inputDigests.exceptions ?? 'none')}`,
-    `Omitted/unknown comparisons: ${omittedComparisons.length || 'none'}`,
-    ...omittedComparisons.map((comparison) => `  ${terminalText(comparison)}`),
-    'Input analysis:',
-    '  declared: analyzed (OpenAPI)',
-    '  implemented: not requested (source input is absent)',
-    '  allowed: analyzed (Policy)',
-    `  Exception input: ${report.inputDigests.exceptions ? 'analyzed' : 'not requested'}`,
-    'Comparison:',
-    `  status: ${omittedComparisons.length > 0 ? 'partial' : 'completed'}`,
-    `  evaluated findings: ${report.summary.total}`,
-    `  not evaluated: ${omittedComparisons.length > 0 ? `${omittedComparisons.length} comparison(s); absence of findings is not proof of no drift` : 'none'}`,
-    ...capabilityLines(report),
-    ...diagnosticLines(report),
-    ...findingSection('Findings:', activeFindings, color, maxFindings),
-    ...(includeSuppressed ? [
-      'Suppressed findings:',
-      ...findingSection('', sortFindings(report.suppressedFindings), color, maxFindings).slice(1),
-    ] : []),
-    ...(diagnostics.length > 0 ? [
-      'Exception/governance diagnostics:',
-      ...diagnostics.flatMap((finding) => findingLines(finding, color)),
-    ] : []),
-    'Limitations:',
-    ...(omittedComparisons.length > 0
-      ? [`  ${omittedComparisons.length} comparison(s) were omitted or are unknown.`]
-      : []),
-    ...(report.analyzerDiagnostics.length > 0
-      ? [`  ${report.analyzerDiagnostics.length} analyzer diagnostic(s) require attention.`]
-      : []),
-    ...(omittedComparisons.length === 0 && report.analyzerDiagnostics.length === 0
-      ? ['  none reported']
-      : []),
-    '',
-  ];
-  return truncateOutput(lines.join('\n'), maxOutputBytes);
+      + ` suppressed=${report.summary.suppressed}`)) return;
+    if (!appendLine(`Target: ${terminalText(report.target)}`)
+      || !appendLine(`OpenAPI digest: ${terminalText(report.inputDigests.openapi)}`)
+      || !appendLine(`Policy digest: ${terminalText(report.inputDigests.policy)}`)
+      || !appendLine(`Exceptions digest: ${terminalText(report.inputDigests.exceptions ?? 'none')}`)
+      || !appendLine(`Omitted/unknown comparisons: ${omittedComparisons.length || 'none'}`)) return;
+    for (const comparison of omittedComparisons) if (!appendLine(`  ${terminalText(comparison)}`)) return;
+    if (!appendLine('Input analysis:')
+      || !appendLine('  declared: analyzed (OpenAPI)')
+      || !appendLine('  implemented: not requested (source input is absent)')
+      || !appendLine('  allowed: analyzed (Policy)')
+      || !appendLine(`  Exception input: ${report.inputDigests.exceptions ? 'analyzed' : 'not requested'}`)
+      || !appendLine('Comparison:')
+      || !appendLine(`  status: ${omittedComparisons.length > 0 ? 'partial' : 'completed'}`)
+      || !appendLine(`  evaluated findings: ${report.summary.total}`)
+      || !appendLine(`  not evaluated: ${omittedComparisons.length > 0 ? `${omittedComparisons.length} comparison(s); absence of findings is not proof of no drift` : 'none'}`)) return;
+    for (const line of capabilityLines(report)) if (!appendLine(line)) return;
+    if (!appendLine('Analysis diagnostics:')) return;
+    if (analyzerDiagnostics.length === 0) {
+      if (!appendLine('  none')) return;
+    } else {
+      for (const diagnostic of analyzerDiagnostics) if (!appendLine(diagnosticText(diagnostic))) return;
+    }
+    if (!appendFindingSection(appendLine, 'Findings:', activeFindings, color, maxFindings)) return;
+    if (includeSuppressed) {
+      if (!appendLine('Suppressed findings:')
+        || !appendFindingSection(appendLine, '', sortFindings(report.suppressedFindings), color, maxFindings, false)) return;
+    }
+    if (diagnostics.length > 0) {
+      if (!appendLine('Exception/governance diagnostics:')
+        || !appendFindingSection(appendLine, '', diagnostics, color, maxFindings, false)) return;
+    }
+    if (!appendLine('Limitations:')) return;
+    if (omittedComparisons.length > 0 && !appendLine(`  ${omittedComparisons.length} comparison(s) were omitted or are unknown.`)) return;
+    if (analyzerDiagnostics.length > 0 && !appendLine(`  ${analyzerDiagnostics.length} analyzer diagnostic(s) require attention.`)) return;
+    if (omittedComparisons.length === 0 && analyzerDiagnostics.length === 0 && !appendLine('  none reported')) return;
+  });
 }
