@@ -7,5 +7,6 @@ These examples use **cdn-security-framework** as a dev dependency: init → edit
 | [aws-cloudfront/](aws-cloudfront/) | AWS CloudFront Functions | `npm install` → `npm run init` → `npm run build` → deploy `dist/edge/viewer-request.js` and `viewer-response.js` |
 | [cloudflare/](cloudflare/) | Cloudflare Workers | `npm install` → `npm run init` → `npm run build` → deploy `dist/edge/cloudflare/index.ts` |
 | [openapi/](openapi/) | OpenAPI 3.1 | inspect → generate a review-only policy candidate → lint/build locally |
+| [nestjs-contract/](nestjs-contract/) | NestJS static source | analyze routes/auth metadata → compare OpenAPI and Policy without starting the app |
 
 Run the AWS example from `examples/aws-cloudfront/`; it installs the framework from the repo root (`file:../..`). For a published package, use `"cdn-security-framework": "^1.0.0"` in `package.json` and `npm install` from your project.

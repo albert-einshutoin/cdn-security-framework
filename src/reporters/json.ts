@@ -123,11 +123,7 @@ function itemPath(pathName: string): string {
 
 function stableArray(pathName: string, values: unknown[]): unknown[] {
   if (pathName === '/findings' || pathName === '/suppressedFindings' || pathName === '/exceptionDiagnostics') {
-    return sortFindings(values as SecurityFindingV1[]).sort((left, right) => {
-      const a = JSON.stringify(left);
-      const b = JSON.stringify(right);
-      return a < b ? -1 : a > b ? 1 : 0;
-    });
+    return sortFindings(values as SecurityFindingV1[]);
   }
   if (pathName === '/analyzerCapabilities/policy' || pathName === '/analyzerDiagnostics') {
     return [...values].sort((left, right) => {

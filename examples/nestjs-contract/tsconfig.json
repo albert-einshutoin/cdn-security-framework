@@ -1,0 +1,11 @@
+{
+  "extends": "./tsconfig.base.json",
+  "files": [
+    "src/decorators.ts",
+    "src/guards.ts",
+    "src/base.controller.ts",
+    "src/users.controller.ts",
+    "src/runtime-prefix.ts"
+  ],
+  "references": [{ "path": "./packages/shared" }]
+}

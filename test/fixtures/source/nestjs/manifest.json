@@ -1,0 +1,13 @@
+{
+  "schemaVersion": 1,
+  "fixture": "../../../../examples/nestjs-contract",
+  "cases": [
+    { "id": "static-routes", "capabilities": ["routePaths", "httpMethods", "routerPrefixes"], "rules": ["SC-INVENTORY-001", "SC-INVENTORY-003"] },
+    { "id": "auth-metadata", "capabilities": ["authentication", "authorization"], "rules": ["SC-AUTHN-001", "SC-AUTHZ-001"] },
+    { "id": "dynamic-route", "capabilities": ["dynamicExpressions"], "diagnostics": ["SOURCE_ANALYZER_DYNAMIC_ROUTE"] },
+    { "id": "inheritance", "capabilities": ["inheritedMetadata"], "rules": [] },
+    { "id": "duplicate-route", "capabilities": ["routePaths"], "diagnostics": [] },
+    { "id": "runtime-prefix-versioning", "capabilities": ["globalPrefixes"], "status": "unsupported" },
+    { "id": "project-reference", "capabilities": ["routePaths"], "status": "partial" }
+  ]
+}

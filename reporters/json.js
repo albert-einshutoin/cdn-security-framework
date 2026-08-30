@@ -110,11 +110,7 @@ function itemPath(pathName) {
 }
 function stableArray(pathName, values) {
     if (pathName === '/findings' || pathName === '/suppressedFindings' || pathName === '/exceptionDiagnostics') {
-        return (0, finding_order_1.sortFindings)(values).sort((left, right) => {
-            const a = JSON.stringify(left);
-            const b = JSON.stringify(right);
-            return a < b ? -1 : a > b ? 1 : 0;
-        });
+        return (0, finding_order_1.sortFindings)(values);
     }
     if (pathName === '/analyzerCapabilities/policy' || pathName === '/analyzerDiagnostics') {
         return [...values].sort((left, right) => {

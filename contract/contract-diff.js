@@ -414,7 +414,7 @@ function contractDiffExitCode(report, failOn) {
     return failOn === 'warning' && report.summary.warning > 0 ? 1 : 0;
 }
 function formatContractDiffJson(report) {
-    return (0, json_1.renderUnifiedContractDiffJson)(report);
+    return (0, json_1.renderUnifiedContractDiffJson)(report, { maxOutputBytes: Number.MAX_SAFE_INTEGER });
 }
 function formatContractDiffText(report, options = {}) {
     return (0, text_1.renderUnifiedContractDiffText)(report, options);

@@ -1,0 +1,24 @@
+openapi: 3.1.0
+info:
+  title: NestJS static contract example
+  version: 1.0.0
+paths:
+  /users/{id}:
+    parameters:
+      - name: id
+        in: path
+        required: true
+        schema: { type: string }
+    get:
+      responses: { "200": { description: ok } }
+    delete:
+      responses: { "204": { description: deleted } }
+  /users:
+    post:
+      responses: { "201": { description: created } }
+  /users/details:
+    put:
+      responses: { "200": { description: intentionally mismatched method } }
+  /declared-only:
+    get:
+      responses: { "200": { description: intentionally missing implementation } }

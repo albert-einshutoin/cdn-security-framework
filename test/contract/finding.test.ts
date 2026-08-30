@@ -136,6 +136,9 @@ describe('Finding Contract v1', () => {
         'Signature raw-signature-secret',
         'Negotiate negotiate-secret',
         'Analyzer detail sk-proj-syntheticvalue123 ghp_syntheticvalue12345678',
+        'AWS4-HMAC-SHA256 Credential=aws-secret, Signature=aws-signature-secret',
+        'Authorization: Digest username="user",\n response="folded-lf-secret"',
+        'Authorization: Digest username="user",\r\n signature="folded-crlf-secret"',
       ].join('\n'),
       expected: {
         headers: {
@@ -167,6 +170,8 @@ describe('Finding Contract v1', () => {
       'first-negotiate-secret', 'negotiate-second-secret',
       'raw-digest-secret', 'raw-aws-secret', 'raw-hawk-secret', 'raw-signature-secret',
       'sk-proj-syntheticvalue123', 'ghp_syntheticvalue12345678',
+      'aws-secret', 'aws-signature-secret',
+      'folded-lf-secret', 'folded-crlf-secret',
     ]) {
       expect(serialized).not.toContain(secret);
     }

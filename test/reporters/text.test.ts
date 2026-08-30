@@ -110,6 +110,38 @@ describe('Unified contract text reporter', () => {
     expect(output).toContain('unsupported');
     expect(output).not.toContain('\u001b]');
 
+    const headerCredential = { ...first, message: 'authorization: Basic Zm9vOmJhcg==' };
+    const headerOutput = renderUnifiedContractDiffText({ ...report, findings: [headerCredential] });
+    expect(headerOutput).not.toContain('Zm9vOmJhcg==');
+    expect(headerOutput).toContain('authorization=[REDACTED]');
+
+    const schemeOutput = renderUnifiedContractDiffText({
+      ...report,
+      findings: [
+        { ...first, message: 'Basic basic-secret' },
+        { ...first, message: 'Digest username="user", response="standalone-digest-secret"' },
+        { ...first, message: 'Negotiate negotiate-secret' },
+        { ...first, message: 'Authorization: Digest username="user",\n response="folded-lf-secret"' },
+        { ...first, message: 'Authorization: Digest username="user",\r\n signature="folded-crlf-secret"' },
+      ],
+    });
+    expect(schemeOutput).not.toContain('basic-secret');
+    expect(schemeOutput).not.toContain('standalone-digest-secret');
+    expect(schemeOutput).not.toContain('negotiate-secret');
+    expect(schemeOutput).not.toContain('folded-lf-secret');
+    expect(schemeOutput).not.toContain('folded-crlf-secret');
+
+    const multipartHeaders = renderUnifiedContractDiffText({
+      ...report,
+      findings: [
+        { ...first, message: 'authorization: Digest username="user", response="digest-secret"' },
+        { ...first, message: 'cookie: session=session-secret; refresh=refresh-secret' },
+      ],
+    });
+    expect(multipartHeaders).not.toContain('digest-secret');
+    expect(multipartHeaders).not.toContain('session-secret');
+    expect(multipartHeaders).not.toContain('refresh-secret');
+
     const unsafe = { ...report, findings: [{ ...first, evidence: [{ ...first.evidence[0], uri: '/Users/private/source.yaml' }] }] };
     expect(renderUnifiedContractDiffText(unsafe)).toContain('evidence=[external]');
     const remote = { ...report, findings: [{ ...first, evidence: [{ ...first.evidence[0], uri: 'https://evil.example/secret?token=leak' }] }] };
@@ -192,6 +224,82 @@ describe('Unified contract text reporter', () => {
     };
     expect(renderUnifiedContractDiffText(report)).not.toContain('\u001b[');
     expect(renderUnifiedContractDiffText(report, { color: true })).toContain('\u001b[33mWARNING');
+
+    const coloredFull = renderUnifiedContractDiffText(report, { color: true, maxOutputBytes: 100_000 });
+    const firstAnsi = coloredFull.indexOf('\u001b[33m');
+    if (firstAnsi < 0) throw new Error('Expected a colored finding in the full report');
+    const truncationLimit = Array.from({ length: 128 }, (_, offset) => firstAnsi + offset)
+      .find((limit) => limit - Buffer.byteLength(`\n[output truncated at ${limit} bytes]\n`, 'utf8') >= firstAnsi
+        && limit - Buffer.byteLength(`\n[output truncated at ${limit} bytes]\n`, 'utf8') < firstAnsi + '\u001b[33m'.length);
+    if (truncationLimit === undefined) throw new Error('Could not choose an ANSI-boundary truncation limit');
+    const truncated = renderUnifiedContractDiffText(report, { color: true, maxOutputBytes: truncationLimit });
+    const ansiTokens = truncated.match(/\u001b\[[0-9;]*m/g) ?? [];
+    expect(truncated.replace(/\u001b\[[0-9;]*m/g, '')).not.toContain('\u001b');
+    expect(ansiTokens.filter((token) => token !== '\u001b[0m')).toHaveLength(
+      ansiTokens.filter((token) => token === '\u001b[0m').length,
+    );
+  });
+
+  test('bounds exception diagnostics with maxFindings', () => {
+    const base = reportFixture();
+    const first = finding('finding-005', 'error');
+    const second = finding('finding-006', 'warning');
+    const output = renderUnifiedContractDiffText({
+      ...base,
+      exceptionDiagnostics: [first, second],
+    }, { maxFindings: 0 });
+
+    expect(output).toContain('Exception/governance diagnostics:');
+    expect(output).toContain('2 additional finding(s) omitted by maxFindings.');
+    expect(output).not.toContain('finding-005');
+    expect(output).not.toContain('finding-006');
+  });
+
+  test('pins the no-source text contract', () => {
+    const report = reportFixture();
+    const output = renderUnifiedContractDiffText(report)
+      .replace(/^(OpenAPI|Policy|Exceptions) digest: (?!none$).*$/gm, '$1 digest: <digest>');
+
+    expect(output).toMatchInlineSnapshot(`
+      "Summary: total=0 error=0 warning=0 info=0 suppressed=0
+      Target: aws
+      OpenAPI digest: <digest>
+      Policy digest: <digest>
+      Exceptions digest: none
+      Omitted/unknown comparisons: 6
+        policy.request.content_type:unsupported
+        policy.request.graphql_guard:warning-only
+        policy.request.header_limits:partial
+        policy.response.csp_nonce:unsupported
+        policy.response.response_dlp:warning-only
+        policy.routes.request.allow_methods:unsupported
+      Input analysis:
+        declared: analyzed (OpenAPI)
+        implemented: not requested (source input is absent)
+        allowed: analyzed (Policy)
+        Exception input: not requested
+      Comparison:
+        status: partial
+        evaluated findings: 0
+        not evaluated: 6 comparison(s); absence of findings is not proof of no drift
+      Capabilities:
+        OpenAPI: complete (complete=4)
+        Policy: unsupported (partial=1 unsupported=3 supported=7 warning-only=2)
+          policy.request.content_type: unsupported (not evaluated)
+          policy.request.graphql_guard: warning-only (warning-only)
+          policy.request.header_limits: partial (partial coverage)
+          policy.response.csp_nonce: unsupported (not evaluated)
+          policy.response.response_dlp: warning-only (warning-only)
+          policy.routes.request.allow_methods: unsupported (not evaluated)
+      Analysis diagnostics:
+        none
+      Findings:
+        evaluated=0 (no findings)
+        (none)
+      Limitations:
+        6 comparison(s) were omitted or are unknown.
+      "
+    `);
   });
 
   test('keeps analyzer diagnostics visible as limitations', () => {

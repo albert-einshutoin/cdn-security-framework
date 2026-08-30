@@ -36,6 +36,8 @@ docs/SELF-REVIEW.md
 dist/
 /examples/*/dist/
 /examples/*/policy/
+!/examples/nestjs-contract/policy/
+!/examples/nestjs-contract/policy/security.yml
 /examples/*/node_modules/
 *.log
 .wrangler/
