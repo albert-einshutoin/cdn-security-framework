@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
 
+import { redactSensitiveText, SENSITIVE_KEY_PATTERN } from './sensitive-text';
+
 export const FINDING_SEVERITIES = ['error', 'warning', 'info'] as const;
 export const FINDING_CONFIDENCES = ['deterministic', 'high-confidence', 'heuristic'] as const;
 export const FINDING_CATEGORIES = [
@@ -70,19 +72,15 @@ export interface FindingCreationOptions {
 }
 
 const RULE_ID_PATTERN = /^SC-[A-Z][A-Z0-9]*-[0-9]{3}$/;
-const SENSITIVE_KEY_PATTERN = /(?:authorization|cookie|set[-_]?cookie|api[-_]?key|token|secret|password)/i;
 const MAX_REDACTION_DEPTH = 32;
 const MAX_REDACTION_NODES = 10_000;
 const MAX_REDACTED_STRING_LENGTH = 16_384;
+const REDACTION_LOOKAHEAD = 256;
 
 function redactString(value: string): string {
   const truncated = value.length > MAX_REDACTED_STRING_LENGTH;
-  const bounded = value.slice(0, MAX_REDACTED_STRING_LENGTH);
-  const redacted = bounded
-    .replace(/([?&][^=\s&#]+)=([^&#\s]*)/g, '$1=[REDACTED]')
-    .replace(/\b(authorization|cookie|set-cookie|x-api-key|api-key)\s*[:=]\s*[^\r\n]*/gi, '$1: [REDACTED]')
-    .replace(/(["']?(?:authorization|cookie|set[-_]?cookie|api[_-]?key|access[_-]?token|refresh[_-]?token|token|password|secret)["']?\s*[:=]\s*)[^\r\n]*/gi, '$1[REDACTED]')
-    .replace(/\bBearer\s+[^\s,;]+/gi, 'Bearer [REDACTED]');
+  const bounded = value.slice(0, MAX_REDACTED_STRING_LENGTH + REDACTION_LOOKAHEAD);
+  const redacted = redactSensitiveText(bounded);
   return `${redacted.slice(0, MAX_REDACTED_STRING_LENGTH)}${truncated ? '[TRUNCATED]' : ''}`;
 }
 

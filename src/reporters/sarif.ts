@@ -1,6 +1,7 @@
 import type { ContractDiffReportV1 } from '../contract/contract-diff';
 import type { FindingEvidenceV1, SecurityFindingV1 } from '../contract/finding';
 import { compareFindings, sortFindings } from '../contract/finding-order';
+import { hasUnsafeSensitiveText } from '../contract/sensitive-text';
 
 export interface SarifLog {
   version: '2.1.0';
@@ -154,14 +155,14 @@ const PRIMARY_SOURCE_ORDER: Record<string, readonly FindingEvidenceV1['source'][
   'SC-REQUEST-002': ['policy', 'openapi'],
   'SC-REQUEST-003': ['openapi', 'policy'],
 };
-const UNIFIED_AUTH_SCHEME_PREFIX = /\b(?:Bearer|Basic)\s+/gi;
-const UNIFIED_ASSIGNMENT_PREFIX = /(?<![?&])\b(?:authorization|cookie|set-cookie|x-api-key|api[-_]?key|access[-_]?token|refresh[-_]?token|token|password|secret)\s*[:=]\s*["']?/gi;
-const UNIFIED_QUERY_PREFIX = /[?&][^=\s&#]+=/g;
-const UNIFIED_REDACTED_MARKER = '[REDACTED]';
 const SOURCE_POSITION_PATTERN = /^line:([1-9]\d*):column:([1-9]\d*)$/u;
 
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function serializedBytes(value: unknown): number {
+  return Buffer.byteLength(JSON.stringify(value) ?? '', 'utf8');
 }
 
 function safeUri(uri: string): string {
@@ -301,32 +302,6 @@ export function renderFindingsAsSarif(report: ContractDiffReportV1): SarifLog {
   };
 }
 
-// Consume the complete structural suffix so a safe delimiter cannot hide a later secret.
-function isCompleteRedactedValue(value: string, markerEnd: number, query: boolean): boolean {
-  let index = markerEnd;
-  while (index < value.length && /["'}\]]/u.test(value[index] ?? '')) index += 1;
-  while (index < value.length && /[,;#]/u.test(value[index] ?? '')) index += 1;
-  if (index >= value.length || /\s/u.test(value[index] ?? '')) return true;
-  return query && value[index] === '&' && /^[^=\s&#]+=/.test(value.slice(index + 1));
-}
-
-function hasUnsafeSensitiveValue(value: string, prefix: RegExp, query: boolean): boolean {
-  for (const match of value.matchAll(prefix)) {
-    const markerStart = (match.index ?? 0) + match[0].length;
-    if (!value.startsWith(UNIFIED_REDACTED_MARKER, markerStart)
-      || !isCompleteRedactedValue(value, markerStart + UNIFIED_REDACTED_MARKER.length, query)) {
-      return true;
-    }
-  }
-  return false;
-}
-
-function hasUnsafeSensitiveText(value: string): boolean {
-  return hasUnsafeSensitiveValue(value, UNIFIED_AUTH_SCHEME_PREFIX, false)
-    || hasUnsafeSensitiveValue(value, UNIFIED_ASSIGNMENT_PREFIX, false)
-    || hasUnsafeSensitiveValue(value, UNIFIED_QUERY_PREFIX, true);
-}
-
 function unifiedText(value: string): string {
   if (typeof value !== 'string' || value.length > MAX_UNIFIED_STRING_LENGTH) {
     throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified SARIF text exceeds the string limit.');
@@ -340,7 +315,7 @@ function unifiedText(value: string): string {
 }
 
 function unifiedMarkdown(value: string): string {
-  return unifiedText(value).replace(/[\\`*_[\]{}()<>#+.!|~-]/g, '\\$&');
+  return value.replace(/[\\`*_[\]{}()<>#+.!|~-]/g, '\\$&');
 }
 
 function unifiedEvidenceKey(evidence: FindingEvidenceV1): string {
@@ -621,7 +596,7 @@ export function renderUnifiedContractDiffSarif(
   report: ContractDiffReportV1,
   options: UnifiedContractDiffSarifOptions = {},
 ): SarifLog {
-  if (!report || typeof report !== 'object' || !Array.isArray(report.findings)
+  if (!report || typeof report !== 'object' || report.schemaVersion !== 1 || !Array.isArray(report.findings)
     || !Array.isArray(report.suppressedFindings) || !Array.isArray(report.exceptionDiagnostics)
     || !Array.isArray(report.analyzerDiagnostics) || !Array.isArray(report.omittedComparisons)
     || !Array.isArray(report.appliedExceptionIds) || !report.analyzerCapabilities
@@ -656,18 +631,162 @@ export function renderUnifiedContractDiffSarif(
       const existing = rules.get(finding.ruleId);
       if (!existing || unifiedFindingKey(finding) < unifiedFindingKey(existing)) rules.set(finding.ruleId, finding);
     }
-    const analyzers = [...new Set(findings.flatMap((finding) => finding.evidence.map(({ analyzer }) => unifiedText(analyzer))))]
-      .sort(compareText);
+    const budgetSkeleton: SarifLog = {
+      version: '2.1.0',
+      $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
+      runs: [{
+        tool: {
+          driver: {
+            name: 'cdn-security-framework',
+            informationUri: FINDING_REFERENCE,
+            rules: [],
+            properties: {
+              analyzers: [],
+              findingSchemaVersion: 1,
+              reportSchemaVersion: report.schemaVersion,
+              capabilities: { openapi: {}, policy: [] },
+              omittedComparisons: [],
+              analyzerDiagnostics: [],
+            },
+          },
+        },
+        results: [],
+      }],
+    };
+    const staticOutputBytes = serializedBytes(budgetSkeleton);
+    const invocationBudgetOutput: SarifLog = {
+      ...budgetSkeleton,
+      runs: [{
+        ...budgetSkeleton.runs[0],
+        invocations: [{ executionSuccessful: true, toolExecutionNotifications: [] }],
+      }],
+    };
+    const invocationOverhead = serializedBytes(invocationBudgetOutput) - staticOutputBytes;
+    let dynamicOutputBytes = 0;
+    const assertAuxiliaryWithinLimit = (additionalBytes: number): void => {
+      if (staticOutputBytes + dynamicOutputBytes + additionalBytes > maxOutputBytes) {
+        throw new SarifReportError('SARIF_OUTPUT_LIMIT_EXCEEDED', 'SARIF output exceeds the configured byte limit.');
+      }
+      dynamicOutputBytes += additionalBytes;
+    };
+    assertAuxiliaryWithinLimit(0);
+    const accountArrayItem = (value: unknown, index: number): void => {
+      assertAuxiliaryWithinLimit((index > 0 ? 1 : 0) + serializedBytes(value));
+    };
+    const accountObjectEntry = (key: string, value: string, index: number): void => {
+      assertAuxiliaryWithinLimit(
+        (index > 0 ? 1 : 0) + serializedBytes(key) + 1 + serializedBytes(value),
+      );
+    };
+    const analyzerSet = new Set<string>();
+    for (const finding of findings) {
+      for (const { analyzer: rawAnalyzer } of finding.evidence) {
+        const analyzer = unifiedText(rawAnalyzer);
+        if (analyzerSet.has(analyzer)) continue;
+        accountArrayItem(analyzer, analyzerSet.size);
+        analyzerSet.add(analyzer);
+      }
+    }
+    const openapiCapabilities = report.analyzerCapabilities.openapi;
+    const openapiEntries = new Map<string, string>();
+    for (const rawName in openapiCapabilities) {
+      if (!Object.prototype.hasOwnProperty.call(openapiCapabilities, rawName)) continue;
+      openapiEntries.set(
+        unifiedText(rawName),
+        unifiedText(openapiCapabilities[rawName as keyof typeof openapiCapabilities]),
+      );
+    }
+    let openapiEntryCount = 0;
+    for (const [name, status] of openapiEntries) {
+      accountObjectEntry(name, status, openapiEntryCount);
+      openapiEntryCount += 1;
+    }
+    let policyEntryCount = 0;
+    for (const { id: rawId, status: rawStatus } of report.analyzerCapabilities.policy) {
+      accountArrayItem(
+        { id: unifiedText(rawId), status: unifiedText(rawStatus) },
+        policyEntryCount,
+      );
+      policyEntryCount += 1;
+    }
+    const omittedRawValues = new Set(report.omittedComparisons);
+    let omittedComparisonCount = 0;
+    for (const rawComparison of omittedRawValues) {
+      accountArrayItem(unifiedText(rawComparison), omittedComparisonCount);
+      omittedComparisonCount += 1;
+    }
+    const analyzerDiagnosticCodes = new Set<string>();
+    for (const { code: rawCode } of report.analyzerDiagnostics) {
+      if (analyzerDiagnosticCodes.has(rawCode)) continue;
+      analyzerDiagnosticCodes.add(rawCode);
+      accountArrayItem(unifiedText(rawCode), analyzerDiagnosticCodes.size - 1);
+    }
+    const truncated = findings.length < allFindings.length
+      || allFindings.some((finding) => unifiedEvidence(finding.evidence).length > maxRelatedLocations + 1);
+    let notificationCount = 0;
+    const accountNotification = (id: string, text: string): void => {
+      const notification = { descriptor: { id }, message: { text } };
+      assertAuxiliaryWithinLimit(
+        (notificationCount === 0 ? invocationOverhead : 0)
+          + (notificationCount > 0 ? 1 : 0)
+          + serializedBytes(notification),
+      );
+      notificationCount += 1;
+    };
+    let capabilityUnsupported = false;
+    let capabilityPartial = false;
+    const observeCapabilityStatus = (status: string): void => {
+      if (status === 'unsupported') capabilityUnsupported = true;
+      else if (status === 'partial' || status === 'warning-only') capabilityPartial = true;
+    };
+    for (const rawName in openapiCapabilities) {
+      if (Object.prototype.hasOwnProperty.call(openapiCapabilities, rawName)) {
+        observeCapabilityStatus(openapiCapabilities[rawName as keyof typeof openapiCapabilities]);
+      }
+    }
+    for (const { status } of report.analyzerCapabilities.policy) observeCapabilityStatus(status);
+    if (capabilityUnsupported || capabilityPartial) {
+      accountNotification(
+        capabilityUnsupported ? 'SARIF_CAPABILITY_UNSUPPORTED' : 'SARIF_CAPABILITY_PARTIAL',
+        capabilityUnsupported
+          ? 'One or more analyzer capabilities are unsupported.'
+          : 'One or more analyzer capabilities are partial.',
+      );
+    }
+    if (omittedRawValues.size > 0) {
+      let omittedFailed = false;
+      for (const item of omittedRawValues) {
+        if (/(?:^|:)failed(?:$|:)/u.test(item)) {
+          omittedFailed = true;
+          break;
+        }
+      }
+      accountNotification(
+        omittedFailed ? 'SARIF_COMPARISON_FAILED' : 'SARIF_COMPARISON_PARTIAL',
+        unifiedText(omittedRawValues.size + ' comparison(s) were omitted or unknown.'),
+      );
+    }
+    for (const diagnostic of report.analyzerDiagnostics) {
+      accountNotification(
+        'SARIF_ANALYZER_DIAGNOSTIC',
+        unifiedText(diagnostic.code + ': ' + diagnostic.message),
+      );
+    }
+    if (truncated) {
+      accountNotification(
+        'SARIF_OUTPUT_TRUNCATED',
+        'SARIF output was bounded by the configured result/location limit.',
+      );
+    }
+    const analyzers = [...analyzerSet].sort(compareText);
     const properties = {
       analyzers,
       findingSchemaVersion: 1,
       reportSchemaVersion: report.schemaVersion,
       capabilities: unifiedCapabilities(report),
-      omittedComparisons: [...new Set(report.omittedComparisons)].sort(compareText).map(unifiedText),
-      analyzerDiagnostics: [...new Set(report.analyzerDiagnostics.map(({ code }) => code))].sort(compareText).map(unifiedText),
+      omittedComparisons: [...omittedRawValues].sort(compareText).map(unifiedText),
+      analyzerDiagnostics: [...analyzerDiagnosticCodes].sort(compareText).map(unifiedText),
     };
-    const truncated = findings.length < allFindings.length
-      || allFindings.some((finding) => unifiedEvidence(finding.evidence).length > maxRelatedLocations + 1);
     const invocation = unifiedNotification(report, truncated);
     const emptyOutput: SarifLog = {
       version: '2.1.0',

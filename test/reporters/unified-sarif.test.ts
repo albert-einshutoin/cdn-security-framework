@@ -136,6 +136,71 @@ describe('Unified contract SARIF adapter', () => {
     }
   });
 
+  test('enforces the output byte limit before materializing diagnostic notifications', () => {
+    const input = report();
+    input.analyzerDiagnostics = Array.from({ length: 100 }, (_, index) => ({
+      code: 'OPENAPI_LIMIT_NEAR' as const,
+      level: 'warning' as const,
+      message: `Diagnostic ${index}`,
+    }));
+    const stringify = vi.spyOn(JSON, 'stringify');
+
+    try {
+      expect(() => renderUnifiedContractDiffSarif(input, { maxOutputBytes: 4_096 }))
+        .toThrowError(/SARIF_OUTPUT_LIMIT_EXCEEDED/);
+      const materializedFullInvocation = stringify.mock.calls.some(([value]) => {
+        if (!value || typeof value !== 'object') return false;
+        const runs = (value as {
+          runs?: Array<{
+            invocations?: Array<{
+              toolExecutionNotifications?: Array<{ descriptor?: { id?: string } }>;
+            }>;
+          }>;
+        }).runs;
+        return runs?.[0]?.invocations?.[0]?.toolExecutionNotifications
+          ?.filter(({ descriptor }) => descriptor?.id === 'SARIF_ANALYZER_DIAGNOSTIC').length
+          === input.analyzerDiagnostics.length;
+      });
+      expect(materializedFullInvocation).toBe(false);
+    } finally {
+      stringify.mockRestore();
+    }
+  });
+
+  test('enforces the output byte limit before materializing auxiliary properties', () => {
+    const input = report();
+    input.omittedComparisons = Array.from({ length: 1_000 }, (_, index) => `comparison-${index}`);
+    const stringify = vi.spyOn(JSON, 'stringify');
+
+    try {
+      expect(() => renderUnifiedContractDiffSarif(input, { maxOutputBytes: 4_096 }))
+        .toThrowError(/SARIF_OUTPUT_LIMIT_EXCEEDED/);
+      const materializedFullProperties = stringify.mock.calls.some(([value]) => {
+        if (!value || typeof value !== 'object') return false;
+        const runs = (value as {
+          runs?: Array<{
+            tool?: { driver?: { properties?: { omittedComparisons?: unknown[] } } };
+          }>;
+        }).runs;
+        return runs?.[0]?.tool?.driver?.properties?.omittedComparisons?.length
+          === input.omittedComparisons.length;
+      });
+      expect(materializedFullProperties).toBe(false);
+    } finally {
+      stringify.mockRestore();
+    }
+  });
+
+  test('accepts the exact serialized output byte boundary', () => {
+    const input = report();
+    const output = renderUnifiedContractDiffSarif(input);
+    const outputBytes = Buffer.byteLength(JSON.stringify(output), 'utf8');
+
+    expect(renderUnifiedContractDiffSarif(input, { maxOutputBytes: outputBytes })).toEqual(output);
+    expect(() => renderUnifiedContractDiffSarif(input, { maxOutputBytes: outputBytes - 1 }))
+      .toThrowError(/SARIF_OUTPUT_LIMIT_EXCEEDED/);
+  });
+
   test('escapes remediation Markdown before placing it in SARIF help', () => {
     const input = report();
     input.findings[0] = {
@@ -151,20 +216,30 @@ describe('Unified contract SARIF adapter', () => {
   test.each([
     ['Bearer [REDACTED]actual-token', true],
     ['Bearer [REDACTED],actual-token', true],
+    ['Bearer [REDACTED], actual-token', true],
+    ['Bearer [REDACTED] actual-token', true],
+    ['Bearer [REDACTED]\n actual-token', true],
     ['Bearer [REDACTED]"actual-token', true],
+    ['Bearer [REDACTED]" actual-token', true],
     ['Bearer [REDACTED]"}actual-token', true],
     ['Bearer [REDACTED]",actual-token', true],
     ['?token=[REDACTED]actual-token', true],
     ['?token=[REDACTED],actual-token', true],
+    ['?token=[REDACTED], actual-token', true],
+    ['?token=[REDACTED] actual-token', true],
     ['?token=[REDACTED]#actual-token', true],
     ['?token=[REDACTED]&actual-token', true],
     ['?token=[REDACTED]"}actual-token', true],
     ['?token=[REDACTED]",actual-token', true],
     ['token=[REDACTED],actual-token', true],
+    ['token=[REDACTED], actual-token', true],
+    ['token=[REDACTED] actual-token', true],
     ['token="[REDACTED]"actual-token', true],
     ['token="[REDACTED]"}actual-token', true],
     ['token="[REDACTED]",actual-token', true],
     ['Cookie: [REDACTED]&actual-token', true],
+    ['Cookie: [REDACTED]\r\n session=actual-token', true],
+    ['Digest [REDACTED], response=actual-token', true],
     ['password=[REDACTED]#actual-token', true],
     ['Bearer [REDACTED]', false],
     ['Bearer [REDACTED]"', false],
@@ -182,6 +257,50 @@ describe('Unified contract SARIF adapter', () => {
     } else {
       expect(() => renderUnifiedContractDiffSarif(input)).not.toThrow();
     }
+  });
+
+  test.each([
+    'Analyzer detail sk-proj-syntheticvalue123',
+    'Analyzer detail ghp_syntheticvalue12345678',
+    '"token": "raw-secret"',
+    'Digest username="user", response="digest-secret"',
+    'Digest raw-digest-secret',
+    'AWS4-HMAC-SHA256 raw-aws-secret',
+    'Hawk raw-hawk-secret',
+    'Signature raw-signature-secret',
+    'Negotiate negotiate-secret',
+  ])('rejects raw credentials outside the Finding factory: %s', (message) => {
+    const input = report();
+    input.findings = input.findings.map((finding) => ({ ...finding, message }));
+    expect(() => renderUnifiedContractDiffSarif(input)).toThrowError(/SARIF_PRIVACY_VIOLATION/);
+  });
+
+  test('accepts a sanitized JSON value followed by a non-sensitive field', () => {
+    const input = report();
+    input.findings = input.findings.map((finding) => ({
+      ...finding,
+      message: '{"token":"[REDACTED]","status":"ok"}',
+    }));
+
+    expect(() => renderUnifiedContractDiffSarif(input)).not.toThrow();
+  });
+
+  test.each([2, 'token=actual-secret'])('rejects a report schema mismatch before output', (schemaVersion) => {
+    const input = { ...report(), schemaVersion } as unknown as ContractDiffReportV1;
+
+    expect(() => renderUnifiedContractDiffSarif(input)).toThrowError(/SARIF_UNIFIED_REPORT_INVALID/);
+  });
+
+  test.each([
+    'Bearer [REDACTED]\nStatus: ok',
+    'token=[REDACTED]\nstatus=ok',
+    '{"token":"[REDACTED]" , "status":"ok"}',
+    '{"token":"[REDACTED]" }',
+  ])('accepts safe continuation after a redacted value: %s', (message) => {
+    const input = report();
+    input.findings = input.findings.map((finding) => ({ ...finding, message }));
+
+    expect(() => renderUnifiedContractDiffSarif(input)).not.toThrow();
   });
 
   test('does not promote a generated or runtime-only evidence item to primary', () => {

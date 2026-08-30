@@ -116,6 +116,32 @@ describe('Unified contract text reporter', () => {
     expect(renderUnifiedContractDiffText(remote)).toContain('evidence=[external]');
   });
 
+  test('redacts provider tokens that cross the terminal field boundary', () => {
+    const base = reportFixture();
+    const item = finding('finding-005', 'warning');
+    const output = renderUnifiedContractDiffText({
+      ...base,
+      findings: [{
+        ...item,
+        message: `${'x'.repeat(502)} sk-proj-syntheticvalue1234567890`,
+      }],
+    });
+
+    expect(output).not.toContain('sk-proj-s');
+  });
+
+  test('redacts every value after an auth scheme delimiter', () => {
+    const base = reportFixture();
+    const item = finding('finding-006', 'warning');
+    const output = renderUnifiedContractDiffText({
+      ...base,
+      findings: [{ ...item, message: 'Bearer first-secret, second-secret' }],
+    });
+
+    expect(output).not.toContain('first-secret');
+    expect(output).not.toContain('second-secret');
+  });
+
   test('distinguishes omitted comparisons and bounds findings/output', () => {
     const base = reportFixture();
     const findings = [finding('finding-001', 'error'), finding('finding-002', 'warning')];
