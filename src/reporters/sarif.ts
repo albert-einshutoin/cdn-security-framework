@@ -368,18 +368,28 @@ function canonicalJson(
 
 function unifiedFindingKey(finding: SecurityFindingV1): string {
   const { evidence, tags, ...fields } = finding;
-  return `${canonicalJson({ ...fields, tags: tags ? [...tags].sort(compareText) : undefined })}\u0000${unifiedEvidence(evidence).map((item) => canonicalJson(item)).join('\u0000')}`;
+  return `${canonicalJson({ ...fields, tags: tags ? [...tags].sort(compareText) : undefined })}\u0000${unifiedEvidence(finding.ruleId, evidence).map((item) => canonicalJson(item)).join('\u0000')}`;
 }
 
-function unifiedEvidence(evidence: readonly FindingEvidenceV1[]): FindingEvidenceV1[] {
-  const sorted = [...evidence].sort((left, right) => compareText(unifiedEvidenceKey(left), unifiedEvidenceKey(right)));
-  const seen = new Set<string>();
-  return sorted.filter((item) => {
+function unifiedEvidence(ruleId: string, evidence: readonly FindingEvidenceV1[]): FindingEvidenceV1[] {
+  const order = PRIMARY_SOURCE_ORDER[ruleId];
+  if (!order) {
+    throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Finding rule family has no primary-source mapping.');
+  }
+  const sourceRank = (source: FindingEvidenceV1['source']): number => {
+    const index = order.indexOf(source);
+    return index < 0 ? order.length + SOURCE_PRIORITY[source] : index;
+  };
+  const sorted = [...evidence]
+    .sort((left, right) => compareText(unifiedEvidenceKey(left), unifiedEvidenceKey(right)));
+  const deduplicated = new Map<string, FindingEvidenceV1>();
+  for (const item of sorted) {
     const identity = unifiedEvidenceIdentity(item);
-    if (seen.has(identity)) return false;
-    seen.add(identity);
-    return true;
-  });
+    const current = deduplicated.get(identity);
+    if (!current || sourceRank(item.source) < sourceRank(current.source)) deduplicated.set(identity, item);
+  }
+  return [...deduplicated.values()]
+    .sort((left, right) => compareText(unifiedEvidenceKey(left), unifiedEvidenceKey(right)));
 }
 
 function primaryEvidence(finding: SecurityFindingV1, evidence: readonly FindingEvidenceV1[]): FindingEvidenceV1 | undefined {
@@ -523,7 +533,7 @@ function unifiedResult(
   suppressed: boolean,
   maxRelatedLocations: number,
 ): SarifResult {
-  const evidence = unifiedEvidence(finding.evidence);
+  const evidence = unifiedEvidence(finding.ruleId, finding.evidence);
   const primary = primaryEvidence(finding, evidence);
   const related = evidence.filter((item) => item !== primary).slice(0, maxRelatedLocations);
   const sources = [...new Set(evidence.map(({ source }) => unifiedText(source)))].sort(compareText);
@@ -731,7 +741,7 @@ export function renderUnifiedContractDiffSarif(
     }
     const truncated = findings.length < allFindings.length
       || allFindings.some((finding) => {
-        const evidence = unifiedEvidence(finding.evidence);
+        const evidence = unifiedEvidence(finding.ruleId, finding.evidence);
         const primary = (PRIMARY_SOURCE_ORDER[finding.ruleId] ?? [])
           .flatMap((source) => evidence.filter((item) => item.source === source))[0];
         return evidence.length > maxRelatedLocations + (primary ? 1 : 0);

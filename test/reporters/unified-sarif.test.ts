@@ -371,6 +371,22 @@ describe('Unified contract SARIF adapter', () => {
     expect(locations[0].physicalLocation.artifactLocation.uri).toBe('specs/open%20api.yml');
   });
 
+  test('keeps the rule-family primary source when normalized locations match', () => {
+    const input = report();
+    const seed = input.findings[0];
+    input.findings = [createFinding({
+      ...seed,
+      ruleId: 'SC-REQUEST-002',
+      evidence: [
+        { ...seed.evidence[0], source: 'openapi', uri: 'shared/evidence.yml', pointer: '/same' },
+        { ...seed.evidence[0], source: 'policy', uri: 'shared/evidence.yml', pointer: '/same' },
+      ],
+    })];
+
+    const result = renderUnifiedContractDiffSarif(input).runs[0].results[0];
+    expect(result.properties?.evidenceSources).toEqual(['policy']);
+  });
+
   test.each(['line:0:column:1', 'line:1:column:0', `line:${'9'.repeat(309)}:column:1`])(
     'rejects invalid source coordinates: %s',
     (pointer) => {
