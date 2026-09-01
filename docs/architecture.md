@@ -159,8 +159,8 @@ flowchart TB
 3. **Defense in Depth** – Edge + WAF + App
 4. **Portable Security** – CDN-independent
 
-The Security Compiler comparison evaluates declared, implemented, allowed, and
-observed API views without treating any one as globally authoritative. See
+A planned Security Compiler comparison will evaluate declared, implemented,
+allowed, and observed API views without treating any one as globally authoritative. See
 [ADR 0003: Security Contract Trust Model](adr/0003-security-contract-trust-model.md).
 
 ---

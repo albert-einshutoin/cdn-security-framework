@@ -6,14 +6,14 @@ import path from 'node:path';
 const RELEASE_VERSIONS = ['v1.5.0', 'v1.6.0', 'v1.7.0', 'v1.8.0', 'v1.9.0', 'v2.0.0', 'v2.1.0'];
 const VERSION_PATTERN = /\bv\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\b/gu;
 const CAPABILITY_ROWS = [
-  ['OpenAPI inspect', 'Implemented'],
-  ['OpenAPI policy candidate', 'Implemented'],
-  ['OpenAPI↔Policy drift', 'Implemented'],
-  ['NestJS Source Analyzer core', 'Experimental/Implemented core'],
-  ['Source-aware contract diff CLI', 'Planned v1.6'],
-  ['Runtime Evidence v1', 'Planned v1.8'],
-  ['Policy Composition', 'Planned v1.9'],
-  ['LSP/VS Code', 'Planned v2.1'],
+  ['OpenAPI inspect', 'Implemented', 'CLI/API', 'local refs only'],
+  ['OpenAPI policy candidate', 'Implemented', 'CLI/API', 'review-only; never auto-applied'],
+  ['OpenAPI↔Policy drift', 'Implemented', 'CLI/JSON/SARIF/GHA', 'no source needed'],
+  ['NestJS Source Analyzer core', 'Experimental/Implemented core', 'Programmatic', 'no app execution; metadata is not enforcement proof'],
+  ['Source-aware contract diff CLI', 'Planned v1.6', '—', '—'],
+  ['Runtime Evidence v1', 'Planned v1.8', '—', '—'],
+  ['Policy Composition', 'Planned v1.9', '—', '—'],
+  ['LSP/VS Code', 'Planned v2.1', '—', '—'],
 ] as const;
 const ROADMAP_EN_HEADINGS = [
   '## 1. Product thesis',
@@ -82,9 +82,12 @@ function checkCapabilityTable(content: string, label: string): void {
   if (rows.length !== CAPABILITY_ROWS.length) {
     throw new Error(`${label} capability row count is ${rows.length}; expected ${CAPABILITY_ROWS.length}`);
   }
-  for (const [capability, status] of CAPABILITY_ROWS) {
-    if (!rows.some((row) => row[1] === capability && row[2] === status)) {
-      throw new Error(`${label} capability row is missing or changed: ${capability} / ${status}`);
+  for (const [capability, status, interfaceName, limit] of CAPABILITY_ROWS) {
+    if (!rows.some((row) => row[1] === capability
+      && row[2] === status
+      && row[3] === interfaceName
+      && row[4] === limit)) {
+      throw new Error(`${label} capability row is missing or changed: ${capability} / ${status} / ${interfaceName} / ${limit}`);
     }
   }
 }

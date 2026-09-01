@@ -158,8 +158,8 @@ flowchart TB
 3. **Defense in Depth** – Edge + WAF + App
 4. **Portable Security** – CDN に依存しない
 
-Security Compiler比較はDeclared、Implemented、Allowed、Observed APIを対象とし、
-いずれか1つを常に正とは扱いません。詳細は
+将来の Security Compiler 比較（段階的提供を計画中）は Declared、Implemented、
+Allowed、Observed API を対象とし、いずれか1つを常に正とは扱いません。詳細は
 [ADR 0003: Security ContractのTrust Model](adr/0003-security-contract-trust-model.ja.md)を参照してください。
 
 ---
