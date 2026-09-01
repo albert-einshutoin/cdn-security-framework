@@ -10,6 +10,7 @@ import {
   createFinding,
   sortFindings,
   type FindingInputV1,
+  type SecurityFindingV1,
 } from '../contract';
 
 type FileDigest = { path: string; sha256: string; size: number };
@@ -157,6 +158,94 @@ function assertNoAbsoluteOrSecretText(values: string[], root: string): void {
   }
 }
 
+type ReportEvidence = Pick<FindingInputV1['evidence'][number], 'uri' | 'pointer' | 'source' | 'digest' | 'analyzer' | 'capability' | 'complete'>;
+type ReportFinding = SecurityFindingV1;
+type SarifLocation = {
+  physicalLocation: {
+    artifactLocation: { uri: string };
+    region?: { startLine: number; startColumn?: number };
+    properties: Omit<ReportEvidence, 'uri' | 'pointer'>;
+  };
+  logicalLocations?: Array<{ fullyQualifiedName: string }>;
+};
+type SarifResult = {
+  ruleId: string;
+  level: 'error' | 'warning' | 'note';
+  partialFingerprints?: { 'securityContractFinding/v1'?: string };
+  locations?: SarifLocation[];
+  relatedLocations?: SarifLocation[];
+};
+
+function evidenceFingerprint(evidence: ReportEvidence): string {
+  return JSON.stringify([
+    evidence.uri,
+    evidence.pointer ?? '',
+    evidence.source,
+    evidence.digest,
+    evidence.analyzer,
+    evidence.capability,
+    evidence.complete,
+  ]);
+}
+
+function findingFingerprint(finding: ReportFinding): string {
+  return JSON.stringify({
+    ruleId: finding.ruleId,
+    instanceId: finding.instanceId,
+    severity: finding.severity,
+    evidence: finding.evidence.map(evidenceFingerprint).sort(),
+  });
+}
+
+function sarifLocationEvidence(location: SarifLocation): ReportEvidence {
+  const region = location.physicalLocation.region;
+  const pointer = location.logicalLocations?.[0]?.fullyQualifiedName
+    ?? (region ? `line:${region.startLine}:column:${region.startColumn ?? 1}` : undefined);
+  return {
+    uri: location.physicalLocation.artifactLocation.uri,
+    ...(pointer ? { pointer } : {}),
+    ...location.physicalLocation.properties,
+  };
+}
+
+function sarifFindingFingerprint(result: SarifResult): string {
+  const instanceId = result.partialFingerprints?.['securityContractFinding/v1'];
+  if (!instanceId) throw new Error(`SARIF result ${result.ruleId} is missing finding identity`);
+  const severity = result.level === 'note' ? 'info' : result.level;
+  const locations = [...(result.locations ?? []), ...(result.relatedLocations ?? [])];
+  return JSON.stringify({
+    ruleId: result.ruleId,
+    instanceId,
+    severity,
+    evidence: locations.map(sarifLocationEvidence).map(evidenceFingerprint).sort(),
+  });
+}
+
+function summaryCell(value: string): string {
+  const normalized = value.replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}|`]/gu, ' ').replace(/\s+/gu, ' ').trim();
+  return normalized.length > 120 ? `${normalized.slice(0, 117)}...` : normalized;
+}
+
+function summaryRoute(finding: SecurityFindingV1): string {
+  const method = summaryCell(finding.route?.method ?? '');
+  const routePath = summaryCell((finding.route?.path ?? '').split(/[?#]/u, 1)[0]);
+  return method || routePath ? `\`${[method, routePath].filter(Boolean).join(' ')}\`` : '-';
+}
+
+function summaryRow(finding: SecurityFindingV1): string {
+  return `| ${finding.severity} | ${summaryCell(finding.ruleId)} | ${summaryRoute(finding)} | ${summaryCell(finding.title)} |`;
+}
+
+function topSummaryRows(summary: string): string[] {
+  const marker = '## Top findings';
+  const start = summary.indexOf(marker);
+  if (start < 0) throw new Error('GitHub summary is missing the Top findings section');
+  const section = summary.slice(start + marker.length);
+  const rows = [...section.matchAll(/^\| ([^|]*) \| ([^|]*) \| ([^|]*) \| ([^|]*) \|$/gmu)]
+    .map(([row]) => row);
+  return rows.slice(2);
+}
+
 function auditReportConsistency(root: string): boolean {
   fs.mkdirSync(root, { recursive: true });
   const jsonPath = path.join(root, 'contract-json.json');
@@ -169,20 +258,35 @@ function auditReportConsistency(root: string): boolean {
   runCli([...contractArgs, '--format', 'json', '--out', jsonPath]);
   runCli([...contractArgs, '--format', 'sarif', '--out', sarifPath]);
   runCli([...contractArgs, '--format', 'github-summary', '--out', summaryPath]);
-  const json = JSON.parse(fs.readFileSync(jsonPath, 'utf8')) as { findings: Array<{ ruleId: string; severity: string }> };
-  const sarif = JSON.parse(fs.readFileSync(sarifPath, 'utf8')) as { runs: Array<{ results: Array<{ ruleId: string; level: string }> }> };
-  const jsonFindings = json.findings.map(({ ruleId, severity }) => `${ruleId}|${severity}`).sort();
-  const sarifFindings = sarif.runs[0].results.map(({ ruleId, level }) => `${ruleId}|${level === 'note' ? 'info' : level}`).sort();
-  if (JSON.stringify(jsonFindings) !== JSON.stringify(sarifFindings)) throw new Error('JSON/SARIF finding rule or severity drifted');
+  const json = JSON.parse(fs.readFileSync(jsonPath, 'utf8')) as {
+    findings: ReportFinding[];
+    suppressedFindings: ReportFinding[];
+    exceptionDiagnostics: ReportFinding[];
+  };
+  const sarif = JSON.parse(fs.readFileSync(sarifPath, 'utf8')) as { runs: Array<{ results: SarifResult[] }> };
+  const jsonFindings = [
+    ...json.findings,
+    ...json.exceptionDiagnostics,
+    ...json.suppressedFindings,
+  ].map(findingFingerprint).sort();
+  const sarifFindings = sarif.runs[0].results.map(sarifFindingFingerprint).sort();
+  if (JSON.stringify(jsonFindings) !== JSON.stringify(sarifFindings)) throw new Error('JSON/SARIF finding identity or evidence drifted');
   const summary = fs.readFileSync(summaryPath, 'utf8');
-  const jsonRuleIds = new Set(json.findings.map(({ ruleId }) => ruleId));
-  const summaryRuleIds = new Set([...summary.matchAll(/\bSC-[A-Z0-9]+-\d{3}\b/gu)].map(([ruleId]) => ruleId));
-  for (const ruleId of summaryRuleIds) if (!jsonRuleIds.has(ruleId)) throw new Error(`GitHub summary has unknown ${ruleId}`);
-  const repeated = runTwice('contract-json-repeat', (outputPath) => runCli([...contractArgs, '--format', 'json', '--out', outputPath]), root);
+  const summaryFindings = sortFindings([
+    ...json.findings,
+    ...json.exceptionDiagnostics,
+  ]);
+  const expectedSummaryRows = summaryFindings.slice(0, 10).map(summaryRow);
+  if (JSON.stringify(topSummaryRows(summary)) !== JSON.stringify(expectedSummaryRows)) {
+    throw new Error('GitHub summary top findings identity, order, or severity drifted');
+  }
+  const repeatedJson = runTwice('contract-json-repeat', (outputPath) => runCli([...contractArgs, '--format', 'json', '--out', outputPath]), root, '.json');
+  const repeatedSarif = runTwice('contract-sarif-repeat', (outputPath) => runCli([...contractArgs, '--format', 'sarif', '--out', outputPath]), root, '.json');
+  const repeatedSummary = runTwice('contract-summary-repeat', (outputPath) => runCli([...contractArgs, '--format', 'github-summary', '--out', outputPath]), root, '.md');
   assertNoAbsoluteOrSecretText([
     fs.readFileSync(jsonPath, 'utf8'), fs.readFileSync(sarifPath, 'utf8'), summary,
   ], repoRoot);
-  return repeated;
+  return repeatedJson && repeatedSarif && repeatedSummary;
 }
 
 function main(): void {
