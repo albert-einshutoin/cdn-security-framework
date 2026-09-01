@@ -9,6 +9,9 @@ const yaml = require('js-yaml');
 
 const repoRoot = path.join(__dirname, '..');
 const packageName = require(path.join(repoRoot, 'package.json')).name;
+const packageManifest = require(path.join(repoRoot, 'docs', 'api-manifest.json')) as {
+  requiredPackageFiles: string[];
+};
 
 type PackedFile = {
   path: string;
@@ -211,8 +214,9 @@ function assertPackageContents(pack: PackResult) {
     'policy/archetypes/admin-panel.yml',
     'policy/archetypes/microservice-origin.yml',
   ].forEach((filePath) => assertPackedFile(files, filePath));
+  packageManifest.requiredPackageFiles.forEach((filePath) => assertPackedFile(files, filePath));
   assertExecutable(files, 'bin/cli.js');
-  const forbidden = /(^|\/)(?:\.env(?:\..*)?|coverage(?:\/|$)|junit[^/]*|tmp(?:\/|$)|.*\.map$|.*\.(?:pem|key|p12|pfx))$/iu;
+  const forbidden = /(^|\/)(?:\.env(?:\..*)?|coverage(?:\/.*)?|junit[^/]*|tmp(?:\/.*)?|.*\.map$|.*\.(?:pem|key|p12|pfx))$/iu;
   for (const file of pack.files) {
     assert.ok(!forbidden.test(file.path), `npm package must not include ${file.path}`);
   }

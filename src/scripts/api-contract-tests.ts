@@ -171,14 +171,14 @@ test('public imports are side-effect free from an unrelated cwd', () => {
   const importPaths = Object.values(manifest.entrypoints)
     .filter((entrypoint) => entrypoint.require)
     .map((entrypoint) => path.join(repoRoot, entrypoint.require!.replace(/^\.\//u, '')));
-  const script = `for (const file of ${JSON.stringify(importPaths)}) require(file);`;
+  const script = `for (const file of ${JSON.stringify(importPaths)}) require(file); console.log('IMPORTS_COMPLETE');`;
   const result = childProcess.spawnSync(process.execPath, ['-e', script], {
     cwd: os.tmpdir(),
     env: { PATH: process.env.PATH || '' },
     encoding: 'utf8',
   });
   assert.strictEqual(result.status, 0, result.stderr);
-  assert.strictEqual(result.stdout, '');
+  assert.strictEqual(result.stdout, 'IMPORTS_COMPLETE\n');
   assert.strictEqual(result.stderr, '');
 });
 
