@@ -85,7 +85,8 @@ Every version follows the same gates:
 3. Repository, docs, API, Node/package, deterministic, and security work ([#557](https://github.com/albert-einshutoin/cdn-security-framework/issues/557), [#559](https://github.com/albert-einshutoin/cdn-security-framework/issues/559), [#560](https://github.com/albert-einshutoin/cdn-security-framework/issues/560), [#562](https://github.com/albert-einshutoin/cdn-security-framework/issues/562), [#564](https://github.com/albert-einshutoin/cdn-security-framework/issues/564), [#566](https://github.com/albert-einshutoin/cdn-security-framework/issues/566), [#568](https://github.com/albert-einshutoin/cdn-security-framework/issues/568)).
 4. Midpoint status review ([#542](https://github.com/albert-einshutoin/cdn-security-framework/issues/542)).
 5. RC Go/No-Go review ([#544](https://github.com/albert-einshutoin/cdn-security-framework/issues/544)).
-6. Version bump, tag, and publish only after an explicit RC decision; then post-release review.
+6. Release Issue/PR contract ([#571](https://github.com/albert-einshutoin/cdn-security-framework/issues/571)).
+7. Version bump, tag, and publish only after an explicit RC decision; then post-release review.
 
 For v1.5, #555 records that a schema validator tightening and AWS CSP nonce
 fail-closed change reject some previously valid v1.4 policies. The release

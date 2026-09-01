@@ -4,6 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const RELEASE_VERSIONS = ['v1.5.0', 'v1.6.0', 'v1.7.0', 'v1.8.0', 'v1.9.0', 'v2.0.0', 'v2.1.0'];
+const VERSION_PATTERN = /\bv\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\b/gu;
 const ROADMAP_EN_HEADINGS = [
   '## 1. Product thesis',
   '## 2. Four truths and evidence',
@@ -39,9 +40,17 @@ function assertIncludes(content: string, expected: string, label: string): void 
 
 function localLinks(content: string): string[] {
   const links: string[] = [];
-  const pattern = /\]\((\.\/[^)#\s]+)(?:#[^)]+)?\)/gu;
-  for (const match of content.matchAll(pattern)) links.push(match[1]);
+  const pattern = /\]\(([^)#\s]+)(?:#[^)]+)?\)/gu;
+  for (const match of content.matchAll(pattern)) {
+    const target = match[1];
+    if (target.startsWith('#') || target.startsWith('/') || /^[A-Za-z][A-Za-z0-9+.-]*:/u.test(target)) continue;
+    links.push(target);
+  }
   return links;
+}
+
+function versions(content: string): string[] {
+  return [...new Set(content.match(VERSION_PATTERN) ?? [])].sort();
 }
 
 function checkLocalLinks(repoRoot: string, relativePath: string, content: string): void {
@@ -65,9 +74,8 @@ export function checkDocsSync(repoRoot: string): void {
     assertIncludes(roadmapEn, version, `English roadmap version ${version}`);
     assertIncludes(roadmapJa, version, `Japanese roadmap version ${version}`);
   }
-  if (RELEASE_VERSIONS.filter((version) => roadmapEn.includes(version)).length
-    !== RELEASE_VERSIONS.filter((version) => roadmapJa.includes(version)).length) {
-    throw new Error('English/Japanese roadmap version counts differ');
+  if (JSON.stringify(versions(roadmapEn)) !== JSON.stringify(versions(roadmapJa))) {
+    throw new Error(`English/Japanese roadmap version sets differ: ${versions(roadmapEn).join(',')} != ${versions(roadmapJa).join(',')}`);
   }
   if (/^## Track [A-G]:/mu.test(roadmapEn) || /^## Track [A-G]:/mu.test(roadmapJa)) {
     throw new Error('legacy Track A-G headings must not be canonical roadmap sections');
@@ -88,6 +96,8 @@ export function checkDocsSync(repoRoot: string): void {
   assertIncludes(roadmapJa, 'Implemented', 'Japanese implementation status');
   assertIncludes(roadmapEn, '#555', 'English compatibility gate link');
   assertIncludes(roadmapJa, '#555', 'Japanese compatibility gate link');
+  assertIncludes(roadmapEn, '#571', 'English release issue link');
+  assertIncludes(roadmapJa, '#571', 'Japanese release issue link');
 }
 
 export function main(repoRoot = path.join(__dirname, '..')): void {

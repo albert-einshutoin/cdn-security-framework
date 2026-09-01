@@ -83,7 +83,8 @@ flowchart LR
 3. Repository、docs、API、Node/package、deterministic、security work（[#557](https://github.com/albert-einshutoin/cdn-security-framework/issues/557)、[#559](https://github.com/albert-einshutoin/cdn-security-framework/issues/559)、[#560](https://github.com/albert-einshutoin/cdn-security-framework/issues/560)、[#562](https://github.com/albert-einshutoin/cdn-security-framework/issues/562)、[#564](https://github.com/albert-einshutoin/cdn-security-framework/issues/564)、[#566](https://github.com/albert-einshutoin/cdn-security-framework/issues/566)、[#568](https://github.com/albert-einshutoin/cdn-security-framework/issues/568)）。
 4. Midpoint status review（[#542](https://github.com/albert-einshutoin/cdn-security-framework/issues/542)）。
 5. RC Go / No-Go review（[#544](https://github.com/albert-einshutoin/cdn-security-framework/issues/544)）。
-6. Version bump、tag、publish は明示された RC decision の後だけに行い、その後 post-release review を行います。
+6. Release Issue / PR contract（[#571](https://github.com/albert-einshutoin/cdn-security-framework/issues/571)）。
+7. Version bump、tag、publish は明示された RC decision の後だけに行い、その後 post-release review を行います。
 
 v1.5 について #555 は、過去に有効だった v1.4 policy を拒否する schema
 validator の厳格化と AWS CSP nonce fail-closed 化を記録しています。v1.5.0 の
