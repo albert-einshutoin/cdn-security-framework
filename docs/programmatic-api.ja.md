@@ -19,6 +19,20 @@ const { compile, emitWaf, lintPolicy, migratePolicy, runDoctor } = require('cdn-
 
 CLI（`bin/cli.js`）もこれらの関数に委譲しています。CLI で再現するバグは API でも再現し、逆もまた然りです。
 
+## Package contract と stability
+
+機械可読な [Package/API manifest](api-manifest.json) が entrypoint、declaration、schema、
+bin、必須 example の inventory の正本です。既存の root / phase API と CLI は **stable**、
+Contract / OpenAPI / recommendation entrypoint は **stable additive** です。
+`source-analysis` と `source/nestjs` は **experimental** で、minor release で変更される
+可能性があります。どちらも programmatic / static 専用で application runtime の
+enforcement を証明しません。`bin/commands/`、`reporters/`、`scripts/` は tarball に
+含まれていても package internal です。
+
+API module の import は side-effect free でなければなりません。policy の読込、出力の書込、
+stdout/stderr への表示、process 終了を import 時に行いません。明示的な
+Generate → Diff → Review → Apply は CLI を使ってください。
+
 ## スコープ
 
 compiler は parser / validator / emitter の phase module に分かれています。`lintPolicy()` は parser + validator を完全 in-process で実行します。`compile()` もこの phase 境界を使い、emitter phase は生成物の互換性を保つため必要な箇所で既存ターゲットスクリプトへ委譲します。

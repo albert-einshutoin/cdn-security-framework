@@ -1,0 +1,136 @@
+{
+  "schemaVersion": 1,
+  "packageVersion": "1.4.0",
+  "packageVersionSource": "package.json",
+  "entrypoints": {
+    ".": {
+      "status": "stable",
+      "release": "existing",
+      "require": "./lib/index.js",
+      "types": "./lib/index.d.ts",
+      "exports": ["compile", "emitWaf", "lintPolicy", "migratePolicy", "runDoctor"]
+    },
+    "./emitter": {
+      "status": "stable",
+      "release": "existing",
+      "require": "./emitter/index.js",
+      "types": "./emitter/index.d.ts",
+      "exports": ["compileArtifacts", "listInfraArtifacts", "resolveAbsolute"]
+    },
+    "./parser": {
+      "status": "stable",
+      "release": "existing",
+      "require": "./parser/index.js",
+      "types": "./parser/index.d.ts",
+      "exports": ["parsePolicyFile"]
+    },
+    "./validator": {
+      "status": "stable",
+      "release": "existing",
+      "require": "./validator/index.js",
+      "types": "./validator/index.d.ts",
+      "exports": ["formatAjvErrors", "validateCorsCredentials", "validatePolicy"]
+    },
+    "./contract": {
+      "status": "stable",
+      "release": "additive",
+      "require": "./contract/index.js",
+      "types": "./contract/index.d.ts",
+      "exports": [
+        "AUTH_SCHEME_KINDS", "CAPABILITY_LEVELS", "CONTRACT_DIFF_FAIL_ON", "CONTRACT_SOURCES",
+        "ContractDiffInputError", "EXPOSURES", "FINDING_CATEGORIES", "FINDING_CONFIDENCES",
+        "FINDING_EVIDENCE_SOURCES", "FINDING_SEVERITIES", "HTTP_METHODS", "JSON_REPORT_ERROR_CODES",
+        "JsonReportError", "ROUTE_RELATIONS", "SARIF_ERROR_CODES", "SarifReportError", "VALUE_TYPES",
+        "WAIVABLE_FINDING_RULE_IDS", "applyFindingExceptions", "canonicalizePath", "compareAuthContracts",
+        "compareFindings", "comparePathMethodContracts", "compareRequestContracts", "compareSecurityContracts",
+        "compareSourceOpenApiContracts", "compareSourcePolicyContracts", "computeFindingInstanceId",
+        "contractDiffExitCode", "createFinding", "createRouteKey", "createSecurityContract",
+        "diffSecurityContracts", "formatContractDiffJson", "formatContractDiffText", "loadFindingExceptions",
+        "normalizeHttpMethod", "projectPolicyToAllowedSurface", "relateHosts", "relateMethods", "relatePath",
+        "relateRoute", "renderContractDiffGitHubSummary", "renderFindingsAsSarif", "renderUnifiedContractDiffJson",
+        "renderUnifiedContractDiffSarif", "renderUnifiedContractDiffText", "serializeSecurityContract", "sortFindings",
+        "validateFindingExceptionSet"
+      ]
+    },
+    "./contract/security-ir": {
+      "status": "stable",
+      "release": "additive",
+      "require": "./contract/security-ir.js",
+      "types": "./contract/security-ir.d.ts",
+      "exports": ["AUTH_SCHEME_KINDS", "CAPABILITY_LEVELS", "CONTRACT_SOURCES", "EXPOSURES", "VALUE_TYPES", "createSecurityContract", "serializeSecurityContract"]
+    },
+    "./openapi": {
+      "status": "stable",
+      "release": "additive",
+      "require": "./openapi/index.js",
+      "types": "./openapi/index.d.ts",
+      "exports": [
+        "DEFAULT_OPENAPI_ANALYSIS_LIMITS", "OPENAPI_ANALYSIS_ERROR_CODES", "OPENAPI_ANALYSIS_LIMIT_RANGES",
+        "OpenApiAnalysisError", "POLICY_CANDIDATE_GENERATOR_VERSION", "POLICY_CANDIDATE_PROFILES",
+        "explainOpenApiPathPrefixMapping", "formatOpenApiInspectionJson", "formatOpenApiInspectionText",
+        "generatePolicyCandidate", "inspectOpenApi", "isPathWithinWorkspace", "isResolvedOpenApiGraph",
+        "loadOpenApiDocument", "normalizeOpenApiOperations", "resolveJsonPointer", "resolveJsonPointerValue",
+        "resolveOpenApiRefPath", "resolveOpenApiReferences", "serializeResolvedOpenApiGraph",
+        "validateOpenApiAnalysisLimits"
+      ]
+    },
+    "./recommendation": {
+      "status": "stable",
+      "release": "additive",
+      "require": "./recommendation/index.js",
+      "types": "./recommendation/index.d.ts",
+      "exports": ["applySafetyMargin", "recommendRequestLimits"]
+    },
+    "./source-analysis": {
+      "status": "experimental",
+      "release": "additive",
+      "require": "./source-analysis/index.js",
+      "types": "./source-analysis/index.d.ts",
+      "exports": [
+        "DEFAULT_SOURCE_ANALYSIS_LIMITS", "SOURCE_ANALYZER_CAPABILITY_NAMES", "SOURCE_ANALYZER_CAPABILITY_STATUSES",
+        "SOURCE_ANALYZER_DIAGNOSTIC_CODES", "SOURCE_ANALYZER_LOG_CODES", "SourceAnalyzerContractError",
+        "SourceAnalyzerRegistry", "runSourceAnalyzer", "validateSourceAnalysisLimits", "validateSourceAnalyzerPlugin"
+      ],
+      "limit": "programmatic/static only; no app execution or enforcement proof"
+    },
+    "./source/nestjs": {
+      "status": "experimental",
+      "release": "additive",
+      "require": "./source/nestjs/index.js",
+      "types": "./source/nestjs/index.d.ts",
+      "exports": ["EMPTY_NESTJS_AUTH_CONFIG", "NESTJS_AUTH_KINDS", "createNestJsSourceAnalyzer", "nestJsSourceAnalyzer", "validateNestJsAuthConfig"],
+      "limit": "programmatic/static only; no app execution or enforcement proof"
+    },
+    "./bin/cli": {
+      "status": "stable",
+      "release": "existing",
+      "file": "bin/cli.js",
+      "exports": []
+    },
+    "./bin/cli.js": {
+      "status": "stable",
+      "release": "existing",
+      "file": "bin/cli.js",
+      "exports": []
+    }
+  },
+  "schemas": [
+    { "path": "schemas/security-ir-v1.schema.json", "status": "stable", "release": "additive" },
+    { "path": "schemas/openapi-inspection-v1.schema.json", "status": "stable", "release": "additive" },
+    { "path": "schemas/finding-v1.schema.json", "status": "stable", "release": "additive" },
+    { "path": "schemas/finding-exceptions-v1.schema.json", "status": "stable", "release": "additive" },
+    { "path": "schemas/contract-diff-report-v1.schema.json", "status": "stable", "release": "additive" },
+    { "path": "schemas/nestjs-source-analysis-options.schema.json", "status": "experimental", "release": "additive" }
+  ],
+  "bins": { "cdn-security": "bin/cli.js" },
+  "requiredPackageFiles": [
+    "README.md", "README.ja.md", "LICENSE", "docs/api-manifest.json", "docs/quickstart.md", "docs/quickstart.ja.md",
+    "docs/openapi-integration.md", "docs/openapi-integration.ja.md", "docs/programmatic-api.md", "docs/programmatic-api.ja.md",
+    "examples/openapi/openapi.yaml", "examples/nestjs-contract/run-analysis.cjs", "examples/github-actions/contract-diff.yml"
+  ],
+  "internalPaths": [
+    { "path": "bin/commands/", "reason": "CLI implementation, not a public programmatic entrypoint" },
+    { "path": "reporters/", "reason": "package implementation consumed through contract APIs" },
+    { "path": "scripts/", "reason": "compiler and release tooling; not a public API" }
+  ]
+}

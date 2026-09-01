@@ -1,9 +1,33 @@
 const assert = require('assert');
+const childProcess = require('child_process');
 const fs = require('fs');
+const os = require('os');
 const path = require('path');
 
 const repoRoot = path.join(__dirname, '..');
 const api = require(path.join(repoRoot, 'lib'));
+
+type ManifestEntrypoint = {
+  status: 'stable' | 'experimental' | 'internal';
+  release: 'existing' | 'additive';
+  require?: string;
+  types?: string;
+  file?: string;
+  exports: string[];
+};
+
+type PackageManifest = {
+  schemaVersion: number;
+  packageVersion: string;
+  packageVersionSource: string;
+  entrypoints: Record<string, ManifestEntrypoint>;
+  schemas: Array<{ path: string; status: ManifestEntrypoint['status']; release: ManifestEntrypoint['release'] }>;
+  bins: Record<string, string>;
+  requiredPackageFiles: string[];
+  internalPaths: Array<{ path: string; reason: string }>;
+};
+
+const manifest = require(path.join(repoRoot, 'docs', 'api-manifest.json')) as PackageManifest;
 
 function test(name: string, fn: () => void) {
   try {
@@ -86,6 +110,76 @@ test('package metadata exposes typed root api and bounded exports', () => {
     './schemas/nestjs-source-analysis-options.schema.json',
   );
   assert.strictEqual(pkg.exports['./bin/cli.js'], './bin/cli.js');
+});
+
+test('machine-readable package manifest matches exports, files, schemas, and bins', () => {
+  const pkg = require(path.join(repoRoot, 'package.json'));
+  assert.strictEqual(manifest.schemaVersion, 1);
+  assert.strictEqual(manifest.packageVersion, pkg.version);
+  assert.strictEqual(manifest.packageVersionSource, 'package.json');
+
+  const manifestEntrypoints = Object.keys(manifest.entrypoints).sort();
+  const exportEntrypoints = Object.keys(pkg.exports)
+    .filter((key) => !key.startsWith('./schemas/'))
+    .sort();
+  assert.deepStrictEqual(manifestEntrypoints, exportEntrypoints);
+
+  for (const [entrypoint, declaration] of Object.entries(manifest.entrypoints)) {
+    assert.ok(['stable', 'experimental', 'internal'].includes(declaration.status));
+    assert.ok(['existing', 'additive'].includes(declaration.release));
+    const actual = pkg.exports[entrypoint];
+    const resolvePackageFile = (file: string) => path.join(repoRoot, file.replace(/^\.\//u, ''));
+    if (typeof actual === 'string') {
+      if (!declaration.file) throw new Error(`${entrypoint} manifest file is missing`);
+      assert.strictEqual(actual, `./${declaration.file}`);
+      assert.ok(fs.existsSync(resolvePackageFile(declaration.file)), `${entrypoint} file is missing`);
+      continue;
+    }
+    if (!declaration.require || !declaration.types) {
+      throw new Error(`${entrypoint} manifest require/types are missing`);
+    }
+    assert.strictEqual(actual.require, declaration.require);
+    assert.strictEqual(actual.types, declaration.types);
+    assert.ok(fs.existsSync(resolvePackageFile(declaration.require)), `${entrypoint} require file is missing`);
+    assert.ok(fs.existsSync(resolvePackageFile(declaration.types)), `${entrypoint} types file is missing`);
+    const actualKeys = Object.keys(require(resolvePackageFile(actual.require))).sort();
+    assert.deepStrictEqual(actualKeys, [...declaration.exports].sort(), `${entrypoint} export keys drifted`);
+  }
+
+  const schemaExportKeys = Object.keys(pkg.exports)
+    .filter((key) => key.startsWith('./schemas/'))
+    .sort();
+  const manifestSchemaKeys = manifest.schemas.map((schema: { path: string }) => `./${schema.path}`).sort();
+  assert.deepStrictEqual(manifestSchemaKeys, schemaExportKeys);
+  for (const schema of manifest.schemas) {
+    assert.ok(['stable', 'experimental', 'internal'].includes(schema.status));
+    assert.ok(['existing', 'additive'].includes(schema.release));
+    assert.ok(fs.existsSync(path.join(repoRoot, schema.path)), `${schema.path} is missing`);
+  }
+
+  assert.deepStrictEqual(manifest.bins, pkg.bin);
+  for (const file of manifest.requiredPackageFiles) {
+    assert.ok(fs.existsSync(path.join(repoRoot, file)), `${file} is missing from the source package`);
+  }
+  for (const internal of manifest.internalPaths) {
+    assert.ok(internal.path && internal.reason);
+    assert.ok(!Object.keys(pkg.exports).some((key) => key.startsWith(`./${internal.path}`)));
+  }
+});
+
+test('public imports are side-effect free from an unrelated cwd', () => {
+  const importPaths = Object.values(manifest.entrypoints)
+    .filter((entrypoint) => entrypoint.require)
+    .map((entrypoint) => path.join(repoRoot, entrypoint.require!.replace(/^\.\//u, '')));
+  const script = `for (const file of ${JSON.stringify(importPaths)}) require(file);`;
+  const result = childProcess.spawnSync(process.execPath, ['-e', script], {
+    cwd: os.tmpdir(),
+    env: { PATH: process.env.PATH || '' },
+    encoding: 'utf8',
+  });
+  assert.strictEqual(result.status, 0, result.stderr);
+  assert.strictEqual(result.stdout, '');
+  assert.strictEqual(result.stderr, '');
 });
 
 test('phase subpath exports expose public compiler contracts', () => {

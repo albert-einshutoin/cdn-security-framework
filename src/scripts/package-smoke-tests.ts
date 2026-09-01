@@ -110,6 +110,7 @@ function assertPackageContents(pack: PackResult) {
     'package.json',
     'README.md',
     'LICENSE',
+    'docs/api-manifest.json',
     'bin/cli.js',
     'bin/cli.d.ts',
     'bin/commands/openapi-inspect.js',
@@ -211,6 +212,10 @@ function assertPackageContents(pack: PackResult) {
     'policy/archetypes/microservice-origin.yml',
   ].forEach((filePath) => assertPackedFile(files, filePath));
   assertExecutable(files, 'bin/cli.js');
+  const forbidden = /(^|\/)(?:\.env(?:\..*)?|coverage(?:\/|$)|junit[^/]*|tmp(?:\/|$)|.*\.map$|.*\.(?:pem|key|p12|pfx))$/iu;
+  for (const file of pack.files) {
+    assert.ok(!forbidden.test(file.path), `npm package must not include ${file.path}`);
+  }
 }
 
 function smokeInstalledPackage(tarballPath: string) {
@@ -240,7 +245,9 @@ function smokeInstalledPackage(tarballPath: string) {
     const apiSmoke = `
       const assert = require('assert');
       const path = require('path');
+      const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const pkg = require(${JSON.stringify(packageName)});
+      const manifest = require(path.join(pkgRoot, 'docs', 'api-manifest.json'));
       const contract = require(${JSON.stringify(`${packageName}/contract`)});
       const securityIr = require(${JSON.stringify(`${packageName}/contract/security-ir`)});
       const schema = require(${JSON.stringify(`${packageName}/schemas/security-ir-v1.schema.json`)});
@@ -254,6 +261,7 @@ function smokeInstalledPackage(tarballPath: string) {
       const sourceAnalysis = require(${JSON.stringify(`${packageName}/source-analysis`)});
       const nestjs = require(${JSON.stringify(`${packageName}/source/nestjs`)});
       assert.strictEqual(typeof pkg.compile, 'function');
+      assert.strictEqual(manifest.packageVersion, require(path.join(pkgRoot, 'package.json')).version);
       assert.strictEqual(typeof pkg.lintPolicy, 'function');
       assert.strictEqual(typeof contract.createSecurityContract, 'function');
       assert.strictEqual(typeof contract.projectPolicyToAllowedSurface, 'function');
@@ -279,7 +287,6 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof sourceAnalysis.runSourceAnalyzer, 'function');
       assert.strictEqual(typeof nestjs.createNestJsSourceAnalyzer, 'function');
       assert.strictEqual(typeof nestjs.validateNestJsAuthConfig, 'function');
-      const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const result = pkg.lintPolicy({
         policyPath: path.join(pkgRoot, 'policy', 'base.yml'),
         cwd: process.cwd(),

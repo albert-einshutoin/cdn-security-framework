@@ -19,6 +19,21 @@ Historically, the only integration path was the CLI. CI systems had to capture s
 
 The CLI (`bin/cli.js`) now delegates to these same functions. If a bug shows up in the CLI, the API sees it too — and vice versa.
 
+## Package contract and stability
+
+The machine-readable [package/API manifest](api-manifest.json) is the source for
+entrypoint, declaration, schema, bin, and required-example inventory. Existing
+root/phase APIs and the CLI are **stable**. Contract, OpenAPI, and recommendation
+entrypoints are **stable additive** surfaces. The `source-analysis` and
+`source/nestjs` entrypoints are **experimental**: they are programmatic/static,
+may change in a minor release, and never prove application runtime enforcement.
+Implementation directories such as `bin/commands/`, `reporters/`, and `scripts/`
+are package internals, even when their files are present in the tarball.
+
+Importing an API module must be side-effect free: it must not read a policy,
+write output, print to stdout/stderr, or terminate the process. Use the CLI for
+the explicit Generate → Diff → Review → Apply workflow.
+
 ## Scope note
 
 The compiler is split into parser, validator, and emitter phase modules. `lintPolicy()` runs parser + validator fully in-process. `compile()` uses those phase boundaries and the emitter phase still delegates to the existing target scripts where necessary to preserve generated output compatibility.
