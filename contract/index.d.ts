@@ -7,7 +7,7 @@ export * from './route-relation';
 export * from './drift';
 export * from './security-ir';
 export { renderFindingsAsSarif, renderUnifiedContractDiffSarif, SARIF_ERROR_CODES, SarifReportError, type SarifLog, type SarifReportErrorCode, type UnifiedContractDiffSarifOptions, } from '../reporters/sarif';
-export { renderContractDiffGitHubSummary } from '../reporters/github-summary';
+export { renderContractDiffGitHubSummary, renderUnifiedGitHubSummary, type UnifiedGitHubSummaryExecutionStatus, type UnifiedGitHubSummaryOptions, } from '../reporters/github-summary';
 export { renderUnifiedContractDiffText, type UnifiedContractDiffTextOptions } from '../reporters/text';
 export { JSON_REPORT_ERROR_CODES, JsonReportError, renderUnifiedContractDiffJson, type JsonReportErrorCode, type UnifiedContractDiffJsonOptions, } from '../reporters/json';
 export { CONTRACT_DIFF_FAIL_ON, ContractDiffInputError, contractDiffExitCode, diffSecurityContracts, formatContractDiffJson, formatContractDiffText, type ContractDiffFailOn, type ContractDiffReportV1, type ContractDiffSummaryV1, type DiffSecurityContractsOptions, } from './contract-diff';
