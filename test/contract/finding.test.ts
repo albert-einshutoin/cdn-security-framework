@@ -126,8 +126,16 @@ describe('Finding Contract v1', () => {
         'Authorization: Bearer message-secret',
         'Cookie: sid=first-secret; refresh=second-secret',
         'Basic basic-secret',
+        'Bearer first-secret, bearer-second-secret',
+        'Basic first-basic-secret; basic-second-secret',
+        'Negotiate first-negotiate-secret, negotiate-second-secret',
         'Digest username="user", response="digest-secret"',
+        'Digest raw-digest-secret',
+        'AWS4-HMAC-SHA256 raw-aws-secret',
+        'Hawk raw-hawk-secret',
+        'Signature raw-signature-secret',
         'Negotiate negotiate-secret',
+        'Analyzer detail sk-proj-syntheticvalue123 ghp_syntheticvalue12345678',
         'AWS4-HMAC-SHA256 Credential=aws-secret, Signature=aws-signature-secret',
         'Authorization: Digest username="user",\n response="folded-lf-secret"',
         'Authorization: Digest username="user",\r\n signature="folded-crlf-secret"',
@@ -158,12 +166,28 @@ describe('Finding Contract v1', () => {
       'query-secret', 'visible-secret', 'raw-secret', 'uri-secret', 'first-secret',
       'second-secret', 'token-secret', 'password-secret',
       'alpha beta', 'json-secret', 'basic-secret', 'digest-secret', 'negotiate-secret',
+      'bearer-second-secret', 'first-basic-secret', 'basic-second-secret',
+      'first-negotiate-secret', 'negotiate-second-secret',
+      'raw-digest-secret', 'raw-aws-secret', 'raw-hawk-secret', 'raw-signature-secret',
+      'sk-proj-syntheticvalue123', 'ghp_syntheticvalue12345678',
       'aws-secret', 'aws-signature-secret',
       'folded-lf-secret', 'folded-crlf-secret',
     ]) {
       expect(serialized).not.toContain(secret);
     }
     expect(serialized).toContain('[REDACTED]');
+  });
+
+  test.each([
+    'gho_syntheticvalue12345678',
+    'ghu_syntheticvalue12345678',
+    'ghs_syntheticvalue12345678',
+    'ghr_syntheticvalue12345678',
+    'ghs_APPID.eyJhbGciOiJIUzI1NiJ9.signature',
+  ])('redacts GitHub token format %s', (token) => {
+    const finding = createFinding({ ...baseInput, message: `Analyzer detail ${token}` });
+
+    expect(finding.message).toBe('Analyzer detail [REDACTED]');
   });
 
   test('rejects invalid runtime fields and bounds deeply nested values', () => {
@@ -192,6 +216,12 @@ describe('Finding Contract v1', () => {
       actual: `password="${'secret '.repeat(3_000)}"`,
     });
     expect(String(boundarySecret.actual)).not.toContain('secret');
+
+    const boundaryProviderToken = createFinding({
+      ...baseInput,
+      actual: `${'x'.repeat(16_374)} sk-proj-syntheticvalue1234567890`,
+    });
+    expect(String(boundaryProviderToken.actual)).not.toContain('sk-proj-s');
 
     const manySensitiveKeys = Object.fromEntries(
       Array.from({ length: 10_100 }, (_, index) => [`token${index}`, `value-${index}`]),

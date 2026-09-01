@@ -28,9 +28,10 @@ const RULE_ID_PATTERN = /^SC-[A-Z][A-Z0-9]*-[0-9]{3}$/;
 const MAX_REDACTION_DEPTH = 32;
 const MAX_REDACTION_NODES = 10_000;
 const MAX_REDACTED_STRING_LENGTH = 16_384;
+const REDACTION_LOOKAHEAD = 256;
 function redactString(value) {
     const truncated = value.length > MAX_REDACTED_STRING_LENGTH;
-    const bounded = value.slice(0, MAX_REDACTED_STRING_LENGTH);
+    const bounded = value.slice(0, MAX_REDACTED_STRING_LENGTH + REDACTION_LOOKAHEAD);
     const redacted = (0, sensitive_text_1.redactSensitiveText)(bounded);
     return `${redacted.slice(0, MAX_REDACTED_STRING_LENGTH)}${truncated ? '[TRUNCATED]' : ''}`;
 }

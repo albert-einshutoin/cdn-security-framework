@@ -18,12 +18,14 @@ const MAX_VALUE_DEPTH = 8;
 const MAX_VALUE_NODES = 256;
 const MAX_ARRAY_ITEMS = 32;
 const MAX_OBJECT_KEYS = 32;
+const REDACTION_LOOKAHEAD = 256;
+
 function compareText(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function terminalText(value: string): string {
-  const boundedInput = value.slice(0, MAX_FIELD_LENGTH);
+  const boundedInput = value.slice(0, MAX_FIELD_LENGTH + REDACTION_LOOKAHEAD);
   const bounded = redactSensitiveText(boundedInput).slice(0, MAX_FIELD_LENGTH);
   return `${bounded}${value.length > MAX_FIELD_LENGTH ? '[TRUNCATED]' : ''}`
     .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, (character) => (
