@@ -21,6 +21,12 @@ docs/SELF-REVIEW.md
 /bin/*.js
 /bin/*.d.ts
 /bin/commands/
+/contract/
+/openapi/
+/recommendation/
+/reporters/
+/source-analysis/
+/source/
 /scripts/*.js
 /scripts/*.d.ts
 /scripts/lib/
