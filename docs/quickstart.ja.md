@@ -4,6 +4,11 @@
 
 このフレームワークを最短で動かす手順です: インストール → 初期化 → ポリシー編集 → ビルド → デプロイ。
 
+プロダクト境界と release status は [Version roadmap](ROADMAP.ja.md) が正本です。
+OpenAPI 経路は review 用の入力であり、policy を自動デプロイするものではありません。
+宣言済み API contract をレビューに含める場合は [OpenAPI 導入ガイド](openapi-integration.ja.md)
+を参照してください。
+
 ## 1. インストールと初期化
 
 ```bash
@@ -18,6 +23,10 @@ npx cdn-security init
 
 Cognito JWT API、署名付き download、Cloudflare GraphQL など用途別の
 copyable snippet が必要な場合は [ポリシーレシピ](./recipes.ja.md) を参照してください。
+
+Experimental な NestJS source analyzer は programmatic な静的解析です。
+application を起動せず、Guard の enforcement も証明しません。metadata を review に
+使う前に [NestJS Source Analysis](source-analysis-nestjs.ja.md) を確認してください。
 
 ## 2. ポリシー編集とビルド
 

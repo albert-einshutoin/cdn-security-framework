@@ -4,6 +4,44 @@ Release scope と capability status の正本は[version roadmap](./ROADMAP.ja.m
 
 本フレームワークは **"Policy → Compile → Runtime"** の三層構造で設計されています。
 
+## プロダクト境界と Evidence
+
+本プロダクトは **Application-aware Edge Security Compiler** です。
+アプリケーションが宣言した意図とレビュー済み policy を provider 別の Edge / WAF
+artifact に変換します。CDN / WAF の動作やアプリケーション認証認可を再実装しません。
+運用の流れは **Generate → Diff → Review → Apply** です。
+
+4つの独立した Truth を分離して扱います。
+
+| Truth | Evidence | 何を示せるか |
+| --- | --- | --- |
+| Declared | OpenAPI | contract が公開すると宣言したもの |
+| Implemented | Source AST / Source IR | 対応済み source syntax が宣言するもの |
+| Allowed | Policy と CDN/WAF 設定 | security policy が許可するもの |
+| Observed | Runtime evidence | deploy 済み system が実際に出力・受理したもの |
+
+どの Truth も別の Truth の証明とは扱いません。未対応・partial な解析は推測で
+補完せず、review 用 finding として報告します。
+
+### Capability status
+
+| Capability | Status | Interface | Limit |
+| --- | --- | --- | --- |
+| OpenAPI inspect | Implemented | CLI/API | local refs only |
+| OpenAPI policy candidate | Implemented | CLI/API | review-only; never auto-applied |
+| OpenAPI↔Policy drift | Implemented | CLI/JSON/SARIF/GHA | no source needed |
+| NestJS Source Analyzer core | Experimental/Implemented core | Programmatic | no app execution; metadata is not enforcement proof |
+| Source-aware contract diff CLI | Planned v1.6 | — | — |
+| Runtime Evidence v1 | Planned v1.8 | — | — |
+| Policy Composition | Planned v1.9 | — | — |
+| LSP/VS Code | Planned v2.1 | — | — |
+
+対応済み interface は [OpenAPI 導入ガイド](openapi-integration.ja.md)、
+[NestJS Source Analysis](source-analysis-nestjs.ja.md)、[CLI リファレンス](cli.ja.md)、
+[プログラマティック API](programmatic-api.ja.md) を参照してください。
+Source-aware contract diff CLI は v1.6 planned のままで、現行 NestJS analyzer は
+programmatic かつ static のみです。
+
 ---
 
 ## 全体フロー
@@ -120,7 +158,7 @@ flowchart TB
 3. **Defense in Depth** – Edge + WAF + App
 4. **Portable Security** – CDN に依存しない
 
-計画中のSecurity Compiler比較はDeclared、Implemented、Allowed、Observed APIを対象とし、
+Security Compiler比較はDeclared、Implemented、Allowed、Observed APIを対象とし、
 いずれか1つを常に正とは扱いません。詳細は
 [ADR 0003: Security ContractのTrust Model](adr/0003-security-contract-trust-model.ja.md)を参照してください。
 

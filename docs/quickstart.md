@@ -4,6 +4,11 @@
 
 This guide walks you through getting this framework running in the shortest path: install → init → edit policy → build → deploy.
 
+For the product boundary and release status, see the [version roadmap](ROADMAP.md).
+The OpenAPI path is review input, not an automatic policy deployment: use the
+[OpenAPI integration guide](openapi-integration.md) when a declared API contract
+is part of the review.
+
 ## 1. Install and init
 
 ```bash
@@ -18,6 +23,10 @@ Recommended first path: `npx cdn-security init --platform aws --archetype spa-st
 
 For copyable end-to-end snippets such as Cognito JWT APIs, signed downloads, or
 Cloudflare GraphQL, see [Policy recipes](./recipes.md).
+
+The experimental NestJS source analyzer is programmatic and static. It does not
+start the application or prove Guard enforcement; see the [NestJS source analysis
+guide](source-analysis-nestjs.md) before using its metadata in a review.
 
 ## 2. Edit policy and build
 
