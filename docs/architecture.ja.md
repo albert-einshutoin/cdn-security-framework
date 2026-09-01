@@ -1,5 +1,7 @@
 ## アーキテクチャ概要
 
+Release scope と capability status の正本は[version roadmap](./ROADMAP.ja.md)です。
+
 本フレームワークは **"Policy → Compile → Runtime"** の三層構造で設計されています。
 
 ---

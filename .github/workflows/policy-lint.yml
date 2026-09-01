@@ -243,6 +243,9 @@ jobs:
       - name: Generated boundary
         run: npm run test:generated-boundary
 
+      - name: Documentation sync
+        run: npm run test:docs
+
       - name: API contract
         run: npm run test:api-contract
 
@@ -301,6 +304,9 @@ jobs:
 
       - name: Generated boundary
         run: npm run test:generated-boundary
+
+      - name: Documentation sync
+        run: npm run test:docs
 
       - name: API contract
         run: npm run test:api-contract

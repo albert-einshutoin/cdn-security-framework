@@ -1,5 +1,8 @@
 ## Architecture Overview
 
+The [version roadmap](./ROADMAP.md) is the canonical source for release scope
+and capability status.
+
 This framework is designed with a three-layer structure: **"Policy → Compile → Runtime"**.
 
 ---

@@ -2,6 +2,9 @@
 
 > **言語:** [English](./README.md) · 日本語
 
+現行の Release Train、互換性 gate、Implemented / Experimental / Planned の境界は
+[version roadmap](./docs/ROADMAP.ja.md) を参照してください。
+
 ## 概要
 
 **CDN Security Framework** は、CloudFront / CloudFront Functions / Lambda@Edge / Cloudflare Workers など、
