@@ -94,12 +94,18 @@ function safeUri(uri) {
     }
 }
 function normalizedEvidenceUri(evidence) {
+    let normalized;
     try {
-        return safeUri(evidence.uri);
+        normalized = safeUri(evidence.uri);
     }
     catch {
         throw new SarifReportError('SARIF_LOCATION_INVALID', 'Finding evidence URI is not workspace-relative.');
     }
+    const decoded = normalized.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex) => (String.fromCharCode(Number.parseInt(hex, 16))));
+    if ((0, sensitive_text_1.hasUnsafeSensitiveText)(decoded)) {
+        throw new SarifReportError('SARIF_PRIVACY_VIOLATION', 'Finding evidence URI contains sensitive data.');
+    }
+    return normalized;
 }
 function normalizedEvidencePointer(evidence) {
     return evidence.pointer?.trim() ?? '';
@@ -584,7 +590,12 @@ function renderUnifiedContractDiffSarif(report, options = {}) {
             accountArrayItem(unifiedText(rawCode), analyzerDiagnosticCodes.size - 1);
         }
         const truncated = findings.length < allFindings.length
-            || allFindings.some((finding) => unifiedEvidence(finding.evidence).length > maxRelatedLocations + 1);
+            || allFindings.some((finding) => {
+                const evidence = unifiedEvidence(finding.evidence);
+                const primary = (PRIMARY_SOURCE_ORDER[finding.ruleId] ?? [])
+                    .flatMap((source) => evidence.filter((item) => item.source === source))[0];
+                return evidence.length > maxRelatedLocations + (primary ? 1 : 0);
+            });
         let notificationCount = 0;
         const accountNotification = (id, text) => {
             const notification = { descriptor: { id }, message: { text } };

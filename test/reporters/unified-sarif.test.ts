@@ -111,6 +111,20 @@ describe('Unified contract SARIF adapter', () => {
       .toThrowError(/SARIF_OUTPUT_LIMIT_EXCEEDED/);
   });
 
+  test('rejects percent-encoded provider tokens in evidence URIs', () => {
+    const input = report();
+    const seed = input.findings[0];
+    input.findings = [createFinding({
+      ...seed,
+      evidence: [{
+        ...seed.evidence[0],
+        uri: 'artifacts/ghp%5Fsyntheticvalue12345678.txt',
+      }],
+    })];
+
+    expect(() => renderUnifiedContractDiffSarif(input)).toThrowError(/SARIF_PRIVACY_VIOLATION/);
+  });
+
   test('enforces the output byte limit before materializing every result', () => {
     const input = report();
     const seed = input.findings[0];
@@ -262,6 +276,11 @@ describe('Unified contract SARIF adapter', () => {
   test.each([
     'Analyzer detail sk-proj-syntheticvalue123',
     'Analyzer detail ghp_syntheticvalue12345678',
+    'Analyzer detail gho_syntheticvalue12345678',
+    'Analyzer detail ghu_syntheticvalue12345678',
+    'Analyzer detail ghs_syntheticvalue12345678',
+    'Analyzer detail ghr_syntheticvalue12345678',
+    'Analyzer detail ghs_APPID.eyJhbGciOiJIUzI1NiJ9.signature',
     '"token": "raw-secret"',
     'Digest username="user", response="digest-secret"',
     'Digest raw-digest-secret',
@@ -315,6 +334,24 @@ describe('Unified contract SARIF adapter', () => {
     expect(result.locations).toBeUndefined();
     expect(result.relatedLocations?.[0].physicalLocation.artifactLocation.uri)
       .toBe('runtime/events.json');
+  });
+
+  test('reports truncation when runtime-only evidence exceeds the related location limit', () => {
+    const input = report();
+    const seed = input.findings[0];
+    input.findings = [createFinding({
+      ...seed,
+      evidence: [
+        { ...seed.evidence[0], source: 'runtime', uri: 'runtime/first.json', pointer: '/events/0' },
+        { ...seed.evidence[0], source: 'runtime', uri: 'runtime/second.json', pointer: '/events/1' },
+      ],
+    })];
+
+    const output = renderUnifiedContractDiffSarif(input, { maxRelatedLocations: 1 });
+    const notifications = output.runs[0].invocations?.[0].toolExecutionNotifications ?? [];
+    expect(notifications.some(({ descriptor }) => descriptor.id === 'SARIF_OUTPUT_TRUNCATED')).toBe(true);
+    expect(output.runs[0].results[0].locations).toBeUndefined();
+    expect(output.runs[0].results[0].relatedLocations).toHaveLength(1);
   });
 
   test('deduplicates evidence after URI normalization', () => {

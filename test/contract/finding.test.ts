@@ -178,6 +178,18 @@ describe('Finding Contract v1', () => {
     expect(serialized).toContain('[REDACTED]');
   });
 
+  test.each([
+    'gho_syntheticvalue12345678',
+    'ghu_syntheticvalue12345678',
+    'ghs_syntheticvalue12345678',
+    'ghr_syntheticvalue12345678',
+    'ghs_APPID.eyJhbGciOiJIUzI1NiJ9.signature',
+  ])('redacts GitHub token format %s', (token) => {
+    const finding = createFinding({ ...baseInput, message: `Analyzer detail ${token}` });
+
+    expect(finding.message).toBe('Analyzer detail [REDACTED]');
+  });
+
   test('rejects invalid runtime fields and bounds deeply nested values', () => {
     expect(() => createFinding({ ...baseInput, severity: 'critical' } as unknown as FindingInputV1))
       .toThrow('invalid Finding fields');

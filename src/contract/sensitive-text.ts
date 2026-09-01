@@ -3,7 +3,7 @@ export const SENSITIVE_KEY_PATTERN = /(?:authorization|proxy[-_]?authorization|c
 const AUTH_SCHEME_PREFIX = /\b(?:Basic|Bearer|Digest|Negotiate|AWS4-HMAC-SHA256|Hawk|Signature)\s+/gi;
 const ASSIGNMENT_PREFIX = /(?<![?&])["']?\b(?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|x-api-key|api[-_]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|token|password|secret)\b["']?\s*[:=]\s*["']?/gi;
 const QUERY_PREFIX = /[?&][^=\s&#]+=/g;
-const PROVIDER_TOKEN_PATTERN = /\b(?:sk-(?:proj-)?|ghp_|github_pat_|AKIA|(?:sk|pk)_)[A-Za-z0-9_-]{8,}/i;
+const PROVIDER_TOKEN_PATTERN = /\b(?:sk-(?:proj-)?|gh[opsur]_|github_pat_|AKIA|(?:sk|pk)_)[A-Za-z0-9_.-]{8,}/i;
 const REDACTED_MARKER = '[REDACTED]';
 
 function isJsonContinuation(value: string): boolean {
@@ -90,5 +90,5 @@ export function redactSensitiveText(value: string): string {
     .replace(/(["'](?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|token|password|secret)["']\s*:\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^,}\r\n]*)/gi, '$1"[REDACTED]"')
     .replace(/\b(authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|token|password|secret)\s*[:=]\s*[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*/gi, '$1=[REDACTED]')
     .replace(/\b(Basic|Bearer|Digest|Negotiate|AWS4-HMAC-SHA256|Hawk|Signature)\s+[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*/gi, '$1 [REDACTED]')
-    .replace(/\b(?:sk-(?:proj-)?|ghp_|github_pat_|AKIA|(?:sk|pk)_)[A-Za-z0-9_-]{8,}/gi, REDACTED_MARKER);
+    .replace(/\b(?:sk-(?:proj-)?|gh[opsur]_|github_pat_|AKIA|(?:sk|pk)_)[A-Za-z0-9_.-]{8,}/gi, REDACTED_MARKER);
 }
