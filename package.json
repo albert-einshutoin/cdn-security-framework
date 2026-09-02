@@ -73,7 +73,7 @@
     "types:gen": "json2ts -i policy/schema.json -o src/types/policy.d.ts --unknownAny",
     "test:types": "npm run build:ts && node scripts/check-generated-types.js",
     "test:generated-boundary": "npm run build:ts && node scripts/check-generated-boundary.js",
-    "test:docs": "npm run build:ts && node scripts/check-docs-sync.js",
+    "test:docs": "npm run build:ts && node scripts/docs-sync-unit-tests.js && node scripts/check-docs-sync.js",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "build": "npm run build:ts && node scripts/compile.js",
     "benchmark:compiler": "node scripts/benchmark-compiler.js",
