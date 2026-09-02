@@ -69,7 +69,7 @@ GitHub Actions でも、`main` への push/PR で同じゲートを実行しま�
 ## リポジトリ構成
 
 - `src/` - TypeScript ソース。CLI、コンパイラ、ライブラリ、テストのロジックはここを編集します。
-- `bin/`, `lib/`, `scripts/`, `parser/`, `validator/`, `emitter/` - `npm run build:ts` が出力する compiled JavaScript と `.d.ts` の package artifact。直接編集しないでください。
+- `bin/`, `lib/`, `scripts/`, `parser/`, `validator/`, `emitter/`, `contract/`, `openapi/`, `recommendation/`, `reporters/`, `source-analysis/`, `source/` - `npm run build:ts` が出力する compiled JavaScript と `.d.ts` の package artifact。直接編集しないでください。
 - `docs/` – アーキテクチャ、脅威モデル、判断マトリクス、クイックスタート（英語 + `.ja`）。
 - `policy/` – YAML ポリシー。`profiles/` にプロファイル（例: `balanced.yml`）を配置。
 - `templates/` - compiler が deploy 可能な edge code を生成するために使う runtime template。
@@ -81,13 +81,14 @@ GitHub Actions でも、`main` への push/PR で同じゲートを実行しま�
 
 ## ソースと生成物
 
-正となる実装ソースは `src/**/*.ts`、`templates/` 配下の runtime template、policy/docs です。root 配下の JavaScript は、npm 利用者が TypeScript build なしで package を実行できるようにするため、また checkout 直後の CLI smoke test を成立させるために commit しています。
+正となる実装ソースは `src/**/*.ts`、`templates/` 配下の runtime template、policy/docs です。`bin/`, `lib/`, `scripts/`, `parser/`, `validator/`, `emitter/`, `contract/`, `openapi/`, `recommendation/`, `reporters/`, `source-analysis/`, `source/` 配下の root JavaScript と `.d.ts` は `npm run build:ts` の生成物であり、commit しません。`prepare` が `npm ci` / `npm install` 後に生成するため、clean checkoutから再現できます。
 
 TypeScript ソースを変更するときは:
 
 1. 対応する `src/` 配下のファイルを編集します。
 2. `npm run build:ts` を実行します。
-3. package surface に含まれる artifact が変わる場合は、`src/**/*.ts` と生成された artifact（`scripts/*.js`, `lib/*.js` など）の両方を commit します。
+3. `npm run test:generated-boundary` で生成された package artifact がtrackedになっていないことを確認します。
+4. `src/**/*.ts` と、意図した policy/docs/template/golden だけを commit します。
 
 生成済み JavaScript や `.d.ts` を直接編集しないでください。`.gitattributes` では package artifact、golden fixture、coverage output、生成型定義を generated として扱い、GitHub の言語統計が手書きソースをより正確に表すようにしています。
 
