@@ -63,9 +63,19 @@ function versions(content: string): string[] {
   return [...new Set(content.match(VERSION_PATTERN) ?? [])].sort();
 }
 
+export function isRepositoryPath(
+  repoRoot: string,
+  targetPath: string,
+  pathApi: Pick<typeof path, 'relative' | 'isAbsolute' | 'sep'> = path,
+): boolean {
+  const relative = pathApi.relative(repoRoot, targetPath);
+  return relative !== '..' && !relative.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(relative);
+}
+
 function checkLocalLinks(repoRoot: string, relativePath: string, content: string): void {
   for (const target of localLinks(content)) {
     const targetPath = path.resolve(path.dirname(path.join(repoRoot, relativePath)), target);
+    if (!isRepositoryPath(repoRoot, targetPath)) throw new Error(`${relativePath} links outside repository: ${target}`);
     if (!fs.existsSync(targetPath)) throw new Error(`${relativePath} links to missing file: ${target}`);
   }
 }
@@ -135,8 +145,16 @@ export function checkDocsSync(repoRoot: string): void {
   }
   assertIncludes(roadmapEn, 'Implemented', 'English implementation status');
   assertIncludes(roadmapJa, 'Implemented', 'Japanese implementation status');
+  assertIncludes(roadmapEn, '| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental |', 'English Source Analyzer status');
+  assertIncludes(roadmapJa, '| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental |', 'Japanese Source Analyzer status');
+  assertIncludes(roadmapEn, '| Source-aware standard CLI | Planned v1.6.0 |', 'English Source-aware CLI status');
+  assertIncludes(roadmapJa, '| Source-aware standard CLI | Planned v1.6.0 |', 'Japanese Source-aware CLI status');
+  assertIncludes(roadmapEn, '| v1.5 release preparation | No-Go / product decision blocked | [#544]', 'English v1.5 release status');
+  assertIncludes(roadmapJa, '| v1.5 release preparation | No-Go / product decision blocked | [#544]', 'Japanese v1.5 release status');
   assertIncludes(roadmapEn, '#555', 'English compatibility gate link');
   assertIncludes(roadmapJa, '#555', 'Japanese compatibility gate link');
+  assertIncludes(roadmapEn, '[#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) owns the major-or-scope decision |', 'English product decision owner');
+  assertIncludes(roadmapJa, '[#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) が major / scope 判断を担当 |', 'Japanese product decision owner');
   assertIncludes(roadmapEn, '#571', 'English release issue link');
   assertIncludes(roadmapJa, '#571', 'Japanese release issue link');
 }

@@ -3,7 +3,7 @@
 import { execFileSync } from 'node:child_process';
 import path from 'node:path';
 
-const GENERATED_ROOTS = [
+const KNOWN_GENERATED_ROOTS = new Set([
   'bin',
   'contract',
   'emitter',
@@ -16,10 +16,34 @@ const GENERATED_ROOTS = [
   'source',
   'source-analysis',
   'validator',
-] as const;
+]);
+
+// These paths are intentionally authored JavaScript/type artifacts, not tsc
+// output. Keep the prefixes narrow so a stale artifact in docs/ or CI cannot
+// be smuggled into the package by adding a new generated root.
+const AUTHORED_ARTIFACT_PREFIXES = [
+  'examples/nestjs-contract/run-analysis.cjs',
+  'examples/nestjs-contract/stubs/nestjs-common/',
+  'runtimes/',
+  'templates/',
+  'tests/golden/',
+];
 
 const GENERATED_FILE = /\.(?:[cm]?js|d\.ts|map)$/u;
-const GENERATED_ROOT = new RegExp(`^(?:${GENERATED_ROOTS.join('|')})(?:/|$)`, 'u');
+
+export function isGeneratedPackageArtifact(
+  filePath: string,
+  generatedRoots: ReadonlySet<string> = KNOWN_GENERATED_ROOTS,
+): boolean {
+  const normalized = filePath.replace(/[\\/]+/gu, '/');
+  if (TRACKED_GENERATED_EXCEPTIONS.has(normalized)) return false;
+  if (!GENERATED_FILE.test(normalized)) return false;
+  const root = normalized.split('/', 1)[0];
+  const isAuthoredArtifact = AUTHORED_ARTIFACT_PREFIXES.some(
+    (prefix) => prefix.endsWith('/') ? normalized.startsWith(prefix) : normalized === prefix,
+  );
+  return generatedRoots.has(root) || !isAuthoredArtifact;
+}
 
 // src/types/policy.d.ts is intentionally tracked: json2ts regenerates the
 // source-side contract consumed by TypeScript and the generated status is
@@ -28,16 +52,20 @@ export const TRACKED_GENERATED_EXCEPTIONS = new Map([
   ['src/types/policy.d.ts', 'schema-derived source contract'],
 ]);
 
-export function isGeneratedPackageArtifact(filePath: string): boolean {
-  const normalized = filePath.replace(/[\\/]+/gu, '/');
-  return GENERATED_ROOT.test(normalized) && GENERATED_FILE.test(normalized);
-}
-
 export function findGeneratedBoundaryViolations(filePaths: readonly string[]): string[] {
+  const generatedRoots = new Set(KNOWN_GENERATED_ROOTS);
+  for (const filePath of filePaths) {
+    const normalized = filePath.replace(/[\\/]+/gu, '/');
+    if (!normalized.startsWith('src/')) continue;
+    const sourcePath = normalized.slice('src/'.length);
+    if (!sourcePath.includes('/') || /\.d\.ts$/u.test(sourcePath)) continue;
+    generatedRoots.add(sourcePath.split('/', 1)[0]);
+  }
+
   return filePaths
     .map((filePath) => filePath.replace(/[\\/]+/gu, '/'))
     .filter((filePath) => !TRACKED_GENERATED_EXCEPTIONS.has(filePath))
-    .filter(isGeneratedPackageArtifact)
+    .filter((filePath) => isGeneratedPackageArtifact(filePath, generatedRoots))
     .sort();
 }
 

@@ -38,7 +38,7 @@ and an absent guard is not proof of public access.
 | Declared ↔ allowed drift (#285–#293) | Implemented | Exceptions, deterministic reports, SARIF, GitHub Actions |
 | NestJS Source Analyzer core (#294–#300) | Implemented / Experimental | Programmatic static analysis; no application execution |
 | Source-aware standard CLI | Planned v1.6.0 | Current CLI does not load application source automatically |
-| v1.5 release preparation | In progress / compatibility-blocked | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529), [#555](https://github.com/albert-einshutoin/cdn-security-framework/issues/555) |
+| v1.5 release preparation | No-Go / product decision blocked | [#544](https://github.com/albert-einshutoin/cdn-security-framework/issues/544) rejected Stable v1.5.0; [#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) owns the major-or-scope decision |
 
 `Implemented` means code, acceptance evidence, and package/docs evidence
 exist. `Experimental` means the interface is reachable but compatibility is
@@ -48,7 +48,7 @@ not yet guaranteed.
 
 | Version | Release epic | Outcome | Entry condition | Status |
 | --- | --- | --- | --- | --- |
-| v1.5.0 | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) | Productize the existing OpenAPI ↔ Policy Contract Foundation and release/package/docs hardening | Entry, evidence, compatibility, package, security, and RC reviews | **Blocked: #555 found breaking policy compatibility candidates** |
+| v1.5.0 | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) | Productize the existing OpenAPI ↔ Policy Contract Foundation and release/package/docs hardening | Entry, evidence, compatibility, package, security, and RC reviews | **NO-GO: #544 rejected the current Stable scope; #1013 decision pending** |
 | v1.6.0 | `V160-REL-000` | Source-aware Contract Diff MVP in CLI/CI/Public API | v1.5 post-release review | Planned |
 | v1.7.0 | `V170-REL-000` | Pilot-driven accuracy, onboarding, and monorepo hardening | v1.6 post-release review | Planned |
 | v1.8.0 | `V180-REL-000` | Runtime Evidence preview | v1.7 post-release review | Planned |
@@ -88,10 +88,12 @@ Every version follows the same gates:
 6. Release Issue/PR contract ([#571](https://github.com/albert-einshutoin/cdn-security-framework/issues/571)).
 7. Version bump, tag, and publish only after an explicit RC decision; then post-release review.
 
-For v1.5, #555 records that a schema validator tightening and AWS CSP nonce
-fail-closed change reject some previously valid v1.4 policies. The release
-must be reclassified as a major release or narrowed before a v1.5.0 release PR
-may bump the version.
+For v1.5, #544 records **NO-GO** for the current Stable scope after #555 found
+that a schema validator tightening and AWS CSP nonce fail-closed change reject
+some previously valid v1.4 policies. [#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013)
+must choose a major reclassification or a safely narrowed scope. After that
+decision, a new RC Gate must reach `GO` before [#571](https://github.com/albert-einshutoin/cdn-security-framework/issues/571)
+may create a release PR or bump the version.
 
 ## 7. Status definitions
 

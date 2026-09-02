@@ -37,7 +37,7 @@ finding として返します。Runtime に観測がないことは route 削除
 | Declared ↔ allowed drift (#285–#293) | Implemented | exception、決定論的 report、SARIF、GitHub Actions |
 | NestJS Source Analyzer core (#294–#300) | Implemented / Experimental | programmatic static analysis。application は実行しない |
 | Source-aware standard CLI | Planned v1.6.0 | 現在の CLI は application source を自動読込しない |
-| v1.5 release preparation | In progress / compatibility-blocked | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529)、[#555](https://github.com/albert-einshutoin/cdn-security-framework/issues/555) |
+| v1.5 release preparation | No-Go / product decision blocked | [#544](https://github.com/albert-einshutoin/cdn-security-framework/issues/544) が Stable v1.5.0 を棄却し、[#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) が major / scope 判断を担当 |
 
 `Implemented` は code、acceptance evidence、package/docs evidence が揃った状態です。
 `Experimental` は interface に到達できるが compatibility を保証しない状態です。
@@ -46,7 +46,7 @@ finding として返します。Runtime に観測がないことは route 削除
 
 | Version | Release epic | Outcome | Entry condition | Status |
 | --- | --- | --- | --- | --- |
-| v1.5.0 | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) | 既実装の OpenAPI ↔ Policy Contract Foundation と release/package/docs hardening を productize | Entry、evidence、compatibility、package、security、RC review | **Blocked: #555 が breaking な policy compatibility 候補を検出** |
+| v1.5.0 | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) | 既実装の OpenAPI ↔ Policy Contract Foundation と release/package/docs hardening を productize | Entry、evidence、compatibility、package、security、RC review | **NO-GO: #544 が現行 Stable scope を棄却し、#1013 の判断待ち** |
 | v1.6.0 | `V160-REL-000` | CLI / CI / Public API の Source-aware Contract Diff MVP | v1.5 post-release review | Planned |
 | v1.7.0 | `V170-REL-000` | pilot 駆動の accuracy、onboarding、monorepo hardening | v1.6 post-release review | Planned |
 | v1.8.0 | `V180-REL-000` | Runtime Evidence preview | v1.7 post-release review | Planned |
@@ -86,10 +86,12 @@ flowchart LR
 6. Release Issue / PR contract（[#571](https://github.com/albert-einshutoin/cdn-security-framework/issues/571)）。
 7. Version bump、tag、publish は明示された RC decision の後だけに行い、その後 post-release review を行います。
 
-v1.5 について #555 は、過去に有効だった v1.4 policy を拒否する schema
-validator の厳格化と AWS CSP nonce fail-closed 化を記録しています。v1.5.0 の
-release PR が version を上げる前に、major release へ再判定するか scope を縮小する
-必要があります。
+v1.5 について #544 は **NO-GO** を記録しています。#555 で、過去に有効だった
+v1.4 policy を拒否する schema validator の厳格化と AWS CSP nonce fail-closed 化が
+確認されたためです。[#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013)
+で major release への再判定または安全な scope 縮小を決め、その後の RC Gate が
+`GO` になるまで、[#571](https://github.com/albert-einshutoin/cdn-security-framework/issues/571)
+の release PR 作成と version bump を開始しません。
 
 ## 7. Status の定義
 
