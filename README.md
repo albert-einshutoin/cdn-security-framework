@@ -7,6 +7,9 @@
 [![coverage ≥ 80%](https://img.shields.io/badge/coverage-%E2%89%A580%25%20lines-brightgreen)](./.github/workflows/policy-lint.yml)
 [![SLSA v1 provenance](https://img.shields.io/badge/SLSA-v1%20provenance-blue)](./docs/supply-chain.md)
 
+See the [version roadmap](./docs/ROADMAP.md) for the current release train,
+compatibility gates, and implemented/experimental/planned boundaries.
+
 **CDN Security Framework** is a **security design and implementation framework** that can be used across major CDN edge execution environments such as CloudFront, CloudFront Functions, Lambda@Edge, and Cloudflare Workers.
 
 The goal is simple.
