@@ -96,12 +96,12 @@ export function checkDocsSync(repoRoot: string): void {
   assertIncludes(roadmapJa, '| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental |', 'Japanese Source Analyzer status');
   assertIncludes(roadmapEn, '| Source-aware standard CLI | Planned v1.6.0 |', 'English Source-aware CLI status');
   assertIncludes(roadmapJa, '| Source-aware standard CLI | Planned v1.6.0 |', 'Japanese Source-aware CLI status');
-  assertIncludes(roadmapEn, '| v1.5 release preparation | No-Go / product decision blocked |', 'English v1.5 release status');
-  assertIncludes(roadmapJa, '| v1.5 release preparation | No-Go / product decision blocked |', 'Japanese v1.5 release status');
+  assertIncludes(roadmapEn, '| v1.5 release preparation | No-Go / product decision blocked | [#544]', 'English v1.5 release status');
+  assertIncludes(roadmapJa, '| v1.5 release preparation | No-Go / product decision blocked | [#544]', 'Japanese v1.5 release status');
   assertIncludes(roadmapEn, '#555', 'English compatibility gate link');
   assertIncludes(roadmapJa, '#555', 'Japanese compatibility gate link');
-  assertIncludes(roadmapEn, '#1013', 'English product decision link');
-  assertIncludes(roadmapJa, '#1013', 'Japanese product decision link');
+  assertIncludes(roadmapEn, '[#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) owns the major-or-scope decision |', 'English product decision owner');
+  assertIncludes(roadmapJa, '[#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) が major / scope 判断を担当 |', 'Japanese product decision owner');
   assertIncludes(roadmapEn, '#571', 'English release issue link');
   assertIncludes(roadmapJa, '#571', 'Japanese release issue link');
 }
