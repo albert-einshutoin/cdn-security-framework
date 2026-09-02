@@ -7,6 +7,8 @@ import path from 'node:path';
 type ArtifactTree = { aggregateSha256: string; files: Array<{ path: string; sha256: string; size: number }> };
 type MatrixReport = {
   schemaVersion: number;
+  status: 'pass' | 'fail';
+  failureCode?: 'validation_failed';
   nodeVersion: string;
   packageVersion: string;
   checks: Record<string, boolean>;
@@ -17,10 +19,11 @@ type MatrixReport = {
 
 type ComparisonReport = {
   schemaVersion: 1;
-  status: 'pass';
+  status: 'pass' | 'fail';
+  failureCode?: 'comparison_failed';
   packageVersion: string;
   nodeVersions: string[];
-  checks: { apiExports: true; schemas: true; artifacts: true; examples: true };
+  checks: { apiExports: boolean; schemas: boolean; artifacts: boolean; examples: boolean };
   artifactDigests: { aws: string; cloudflare: string };
 };
 
@@ -28,8 +31,20 @@ function parseArgs(argv: string[]): { input: string; output: string } {
   let input = 'reports/release-matrix';
   let output = 'reports/release-matrix-summary.json';
   for (let index = 0; index < argv.length; index += 1) {
-    if (argv[index] === '--input') { input = argv[index + 1]; index += 1; continue; }
-    if (argv[index] === '--output') { output = argv[index + 1]; index += 1; continue; }
+    if (argv[index] === '--input') {
+      const next = argv[index + 1];
+      if (!next || next.startsWith('-')) throw new Error('--input requires a directory');
+      input = next;
+      index += 1;
+      continue;
+    }
+    if (argv[index] === '--output') {
+      const next = argv[index + 1];
+      if (!next || next.startsWith('-')) throw new Error('--output requires a path');
+      output = next;
+      index += 1;
+      continue;
+    }
     if (argv[index] === '--help' || argv[index] === '-h') {
       console.log('Usage: node scripts/release-matrix-compare.js [--input <dir>] [--output <path>]');
       process.exit(0);
@@ -53,11 +68,26 @@ function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function main(): void {
-  const { input, output } = parseArgs(process.argv.slice(2));
+function writeFailureSummary(output: string): void {
+  const outputPath = path.resolve(process.cwd(), output);
+  const result: ComparisonReport = {
+    schemaVersion: 1,
+    status: 'fail',
+    failureCode: 'comparison_failed',
+    packageVersion: 'unknown',
+    nodeVersions: [],
+    checks: { apiExports: false, schemas: false, artifacts: false, examples: false },
+    artifactDigests: { aws: '', cloudflare: '' },
+  };
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, `${JSON.stringify(result, null, 2)}\n`);
+}
+
+function main(input: string, output: string): void {
   const reports = readReports(input);
   const first = reports[0];
   if (reports.some((report) => report.schemaVersion !== 1)) throw new Error('matrix report schema version drifted');
+  if (reports.some((report) => report.status !== 'pass')) throw new Error('a matrix validation failed');
   const nodeMajors = reports.map((report) => Number.parseInt(report.nodeVersion.split('.')[0], 10)).sort((a, b) => a - b);
   if (!sameJson(nodeMajors, [20, 22, 24])) throw new Error(`unexpected Node matrix: ${nodeMajors.join(', ')}`);
   if (reports.some((report) => report.packageVersion !== first.packageVersion)) throw new Error('package version differs across Node matrix');
@@ -85,9 +115,17 @@ function main(): void {
   console.log(`[release-matrix] PASS: ${result.nodeVersions.join(', ')}`);
 }
 
+let output = 'reports/release-matrix-summary.json';
 try {
-  main();
+  const args = parseArgs(process.argv.slice(2));
+  output = args.output;
+  main(args.input, output);
 } catch (error: unknown) {
+  try {
+    writeFailureSummary(output);
+  } catch {
+    // Preserve the original failure when the requested report path is unavailable.
+  }
   console.error('[release-matrix] FAIL:', error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 }

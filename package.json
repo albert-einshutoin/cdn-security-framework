@@ -81,7 +81,7 @@
     "benchmark:openapi:ci": "node scripts/benchmark-openapi.js --profile ci",
     "benchmark:source-analysis": "npm run build:ts && node scripts/benchmark-source-analysis.js --profile full",
     "benchmark:source-analysis:ci": "node scripts/benchmark-source-analysis.js --profile ci",
-    "test:release-matrix": "npm run build:ts && node scripts/release-matrix-check.js",
+    "test:release-matrix": "npm run build:ts && node scripts/release-matrix-unit-tests.js && node scripts/release-matrix-check.js",
     "test:release-matrix-compare": "npm run build:ts && node scripts/release-matrix-compare.js",
     "build:test-fixtures": "npm run build:ts && node scripts/compile.js --policy policy/base.yml --out-dir dist",
     "lint:policy": "npm run build:ts && node scripts/policy-lint.js",

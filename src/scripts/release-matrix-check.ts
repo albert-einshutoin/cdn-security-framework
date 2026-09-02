@@ -18,6 +18,8 @@ type ArtifactTree = {
 
 type MatrixReport = {
   schemaVersion: 1;
+  status: 'pass' | 'fail';
+  failureCode?: 'validation_failed';
   nodeVersion: string;
   packageVersion: string;
   checks: {
@@ -42,7 +44,9 @@ function parseArgs(argv: string[]): { output: string } {
   let output = 'reports/release-matrix.json';
   for (let index = 0; index < argv.length; index += 1) {
     if (argv[index] === '--output') {
-      output = argv[index + 1];
+      const next = argv[index + 1];
+      if (!next || next.startsWith('-')) throw new Error('--output requires a path');
+      output = next;
       index += 1;
       continue;
     }
@@ -104,8 +108,40 @@ function ensureExampleFiles(): void {
   }
 }
 
-function main(): void {
-  const { output } = parseArgs(process.argv.slice(2));
+function packageVersion(): string {
+  try {
+    return (JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version: string }).version;
+  } catch {
+    return 'unknown';
+  }
+}
+
+function writeFailureReport(output: string): void {
+  const outputPath = path.resolve(repoRoot, output);
+  const emptyTree: ArtifactTree = { aggregateSha256: '', files: [] };
+  const report: MatrixReport = {
+    schemaVersion: 1,
+    status: 'fail',
+    failureCode: 'validation_failed',
+    nodeVersion: process.versions.node,
+    packageVersion: packageVersion(),
+    checks: {
+      cliVersion: false,
+      cliHelp: false,
+      openApiExample: false,
+      sourceExample: false,
+      awsBuild: false,
+      cloudflareBuild: false,
+    },
+    apiExports: {},
+    schemaDigests: {},
+    artifacts: { aws: emptyTree, cloudflare: emptyTree },
+  };
+  fs.mkdirSync(path.dirname(outputPath), { recursive: true });
+  fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);
+}
+
+function main(output: string): void {
   const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version: string };
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Manifest;
   const env: NodeJS.ProcessEnv = {
@@ -167,6 +203,7 @@ function main(): void {
 
     const report: MatrixReport = {
       schemaVersion: 1,
+      status: 'pass',
       nodeVersion: process.versions.node,
       packageVersion: pkg.version,
       checks: {
@@ -190,9 +227,22 @@ function main(): void {
   }
 }
 
+const requestedArgs = process.argv.slice(2);
+const outputIndex = requestedArgs.indexOf('--output');
+const requestedOutput = outputIndex >= 0 ? requestedArgs[outputIndex + 1] : undefined;
+let output = requestedOutput && !requestedOutput.startsWith('-')
+  ? requestedOutput
+  : 'reports/release-matrix.json';
 try {
-  main();
+  const args = parseArgs(requestedArgs);
+  output = args.output;
+  main(output);
 } catch (error: unknown) {
+  try {
+    writeFailureReport(output);
+  } catch {
+    // Preserve the original failure when the requested report path is unavailable.
+  }
   console.error('[release-matrix] FAIL:', error instanceof Error ? error.message : String(error));
   process.exitCode = 1;
 }
