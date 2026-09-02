@@ -53,9 +53,19 @@ function versions(content: string): string[] {
   return [...new Set(content.match(VERSION_PATTERN) ?? [])].sort();
 }
 
+export function isRepositoryPath(
+  repoRoot: string,
+  targetPath: string,
+  pathApi: Pick<typeof path, 'relative' | 'isAbsolute' | 'sep'> = path,
+): boolean {
+  const relative = pathApi.relative(repoRoot, targetPath);
+  return relative !== '..' && !relative.startsWith(`..${pathApi.sep}`) && !pathApi.isAbsolute(relative);
+}
+
 function checkLocalLinks(repoRoot: string, relativePath: string, content: string): void {
   for (const target of localLinks(content)) {
     const targetPath = path.resolve(path.dirname(path.join(repoRoot, relativePath)), target);
+    if (!isRepositoryPath(repoRoot, targetPath)) throw new Error(`${relativePath} links outside repository: ${target}`);
     if (!fs.existsSync(targetPath)) throw new Error(`${relativePath} links to missing file: ${target}`);
   }
 }
