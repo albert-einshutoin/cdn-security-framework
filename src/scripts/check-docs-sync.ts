@@ -92,10 +92,16 @@ export function checkDocsSync(repoRoot: string): void {
   assertIncludes(readmeJa, './docs/ROADMAP.ja.md', 'Japanese README roadmap link');
   assertIncludes(architectureEn, './ROADMAP.md', 'English architecture roadmap link');
   assertIncludes(architectureJa, './ROADMAP.ja.md', 'Japanese architecture roadmap link');
-  assertIncludes(roadmapEn, 'Implemented', 'English implementation status');
-  assertIncludes(roadmapJa, 'Implemented', 'Japanese implementation status');
+  assertIncludes(roadmapEn, '| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental |', 'English Source Analyzer status');
+  assertIncludes(roadmapJa, '| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental |', 'Japanese Source Analyzer status');
+  assertIncludes(roadmapEn, '| Source-aware standard CLI | Planned v1.6.0 |', 'English Source-aware CLI status');
+  assertIncludes(roadmapJa, '| Source-aware standard CLI | Planned v1.6.0 |', 'Japanese Source-aware CLI status');
+  assertIncludes(roadmapEn, '| v1.5 release preparation | No-Go / product decision blocked |', 'English v1.5 release status');
+  assertIncludes(roadmapJa, '| v1.5 release preparation | No-Go / product decision blocked |', 'Japanese v1.5 release status');
   assertIncludes(roadmapEn, '#555', 'English compatibility gate link');
   assertIncludes(roadmapJa, '#555', 'Japanese compatibility gate link');
+  assertIncludes(roadmapEn, '#1013', 'English product decision link');
+  assertIncludes(roadmapJa, '#1013', 'Japanese product decision link');
   assertIncludes(roadmapEn, '#571', 'English release issue link');
   assertIncludes(roadmapJa, '#571', 'Japanese release issue link');
 }
