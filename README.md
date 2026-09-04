@@ -18,6 +18,41 @@ The goal is simple.
 
 **Recommended first path:** start with `npx cdn-security init --platform aws --archetype spa-static-site --force`, build the generated policy, then wire the AWS CloudFront Function and WAF Terraform outputs into your existing infrastructure. Cloudflare Workers is also supported, but the AWS + Terraform path is the most complete first deployment path today.
 
+## Product Surface and Release Status
+
+**CDN Security Framework** is an **Application-aware Edge Security Compiler**.
+It turns declared application intent and a reviewed security policy into
+provider-specific edge and WAF artifacts. It does not reimplement a CDN, WAF,
+bot-management service, or application authorization layer.
+
+The product workflow is **Generate → Diff → Review → Apply**. Findings are
+deterministic wherever the input is supported, and an omitted or unsupported
+comparison is reported rather than guessed. OpenAPI, source analysis, policy,
+and runtime evidence are separate truths; none is proof of the others.
+
+### Capability status
+
+| Capability | Status | Interface | Limit |
+| --- | --- | --- | --- |
+| OpenAPI inspect | Implemented | CLI/API | local refs only |
+| OpenAPI policy candidate | Implemented | CLI/API | review-only; never auto-applied |
+| OpenAPI↔Policy drift | Implemented | CLI/JSON/SARIF/GHA | no source needed |
+| NestJS Source Analyzer core | Experimental/Implemented core | Programmatic | no app execution; metadata is not enforcement proof |
+| Source-aware contract diff CLI | Planned v1.6 | — | — |
+| Runtime Evidence v1 | Planned v1.8 | — | — |
+| Policy Composition | Planned v1.9 | — | — |
+| LSP/VS Code | Planned v2.1 | — | — |
+
+For the runnable paths, see the [OpenAPI integration guide](docs/openapi-integration.md),
+[NestJS source analysis guide](docs/source-analysis-nestjs.md),
+[CLI reference](docs/cli.md), and [Programmatic API](docs/programmatic-api.md).
+The [version roadmap](docs/ROADMAP.md) is the release-status source of truth.
+
+The framework does not claim that a generated artifact is fully secure, that a
+Guard or analyzer result proves runtime enforcement, or that an unsupported
+provider control is available. Review generated candidates and provider
+capability findings before applying them.
+
 ---
 
 ## Why This Framework Is Needed
@@ -78,8 +113,8 @@ This framework addresses these with **"policy-driven" + "runtime separation"**.
     bin/cli.ts             # TypeScript source for the CLI
     scripts/               # TypeScript source for compilers, tests, and tools
     lib/                   # TypeScript source for public library APIs
-  bin/
-    cli.js                 # Compiled package artifact: CLI entry (npx cdn-security)
+  bin/                    # Generated package artifacts; do not edit or commit
+    cli.js                 # Generated CLI entry (npx cdn-security)
   docs/
     architecture.md
     quickstart.md
@@ -87,8 +122,8 @@ This framework addresses these with **"policy-driven" + "runtime separation"**.
   policy/
     security.yml / base.yml
     profiles/
-  scripts/
-    compile.js             # Compiled from src/scripts/*.ts
+  scripts/                # Generated from src/scripts/*.ts; do not edit or commit
+    compile.js
     compile-cloudflare.js
     compile-infra.js
     policy-lint.js
@@ -111,7 +146,9 @@ The authoritative source for package code lives under `src/**/*.ts`. `npm run bu
 See [IaC integration](docs/iac.md) for Terraform / CloudFormation / CDK / WAF usage.
 
 ### Operational docs
+- [Quick start](docs/quickstart.md) — install, policy build, contract review, and deployment boundary
 - [OpenAPI integration](docs/openapi-integration.md) — inspect an API contract, generate a review-only policy candidate, and understand safety limits
+- [NestJS source analysis](docs/source-analysis-nestjs.md) — experimental programmatic source metadata with an explicit no-execution boundary
 - [CLI reference](docs/cli.md) — `init` / `build` / `emit-waf` / `doctor` / `readiness` / `capabilities` / `explain` / `diff` / `migrate`
 - [Programmatic API](docs/programmatic-api.md) — `require('cdn-security-framework')` for CI / IaC integration
 - [Compiler strictness](docs/compiler-strictness.md) — phase contracts, strict checks, and remaining dynamic areas
@@ -232,7 +269,16 @@ Use the generated files in `dist/edge/` with Terraform, CDK, or your CDN console
 
 ---
 
-## What This Framework Provides
+## Product Core and Generated Security Controls
+
+### Product core
+
+* Reviewable policy and schema validation
+* OpenAPI inspection, review-only policy candidates, and OpenAPI↔Policy drift findings
+* Programmatic API for CI / IaC integration
+* Deterministic provider capability diagnostics and generated artifact diffs
+
+### Generated security controls (maintenance surface)
 
 * Block unwanted HTTP methods
 * Early Path Traversal blocking

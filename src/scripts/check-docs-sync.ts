@@ -5,6 +5,16 @@ import path from 'node:path';
 
 const RELEASE_VERSIONS = ['v1.5.0', 'v1.6.0', 'v1.7.0', 'v1.8.0', 'v1.9.0', 'v2.0.0', 'v2.1.0'];
 const VERSION_PATTERN = /\bv\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\b/gu;
+const CAPABILITY_ROWS = [
+  ['OpenAPI inspect', 'Implemented', 'CLI/API', 'local refs only'],
+  ['OpenAPI policy candidate', 'Implemented', 'CLI/API', 'review-only; never auto-applied'],
+  ['OpenAPI↔Policy drift', 'Implemented', 'CLI/JSON/SARIF/GHA', 'no source needed'],
+  ['NestJS Source Analyzer core', 'Experimental/Implemented core', 'Programmatic', 'no app execution; metadata is not enforcement proof'],
+  ['Source-aware contract diff CLI', 'Planned v1.6', '—', '—'],
+  ['Runtime Evidence v1', 'Planned v1.8', '—', '—'],
+  ['Policy Composition', 'Planned v1.9', '—', '—'],
+  ['LSP/VS Code', 'Planned v2.1', '—', '—'],
+] as const;
 const ROADMAP_EN_HEADINGS = [
   '## 1. Product thesis',
   '## 2. Four truths and evidence',
@@ -70,6 +80,28 @@ function checkLocalLinks(repoRoot: string, relativePath: string, content: string
   }
 }
 
+function checkCapabilityTable(content: string, label: string): void {
+  const marker = '### Capability status';
+  const start = content.indexOf(marker);
+  if (start < 0) throw new Error(`${label} is missing: ${marker}`);
+  const afterMarker = content.slice(start + marker.length);
+  const nextSection = afterMarker.search(/\n## /u);
+  const section = nextSection < 0 ? afterMarker : afterMarker.slice(0, nextSection);
+  const rows = [...section.matchAll(/^\| ([^|]+) \| ([^|]+) \| ([^|]+) \| ([^|]+) \|$/gmu)]
+    .filter((match) => match[1] !== 'Capability' && match[1] !== '---');
+  if (rows.length !== CAPABILITY_ROWS.length) {
+    throw new Error(`${label} capability row count is ${rows.length}; expected ${CAPABILITY_ROWS.length}`);
+  }
+  for (const [capability, status, interfaceName, limit] of CAPABILITY_ROWS) {
+    if (!rows.some((row) => row[1] === capability
+      && row[2] === status
+      && row[3] === interfaceName
+      && row[4] === limit)) {
+      throw new Error(`${label} capability row is missing or changed: ${capability} / ${status} / ${interfaceName} / ${limit}`);
+    }
+  }
+}
+
 export function checkDocsSync(repoRoot: string): void {
   const roadmapEn = read(repoRoot, 'docs/ROADMAP.md');
   const roadmapJa = read(repoRoot, 'docs/ROADMAP.ja.md');
@@ -102,6 +134,17 @@ export function checkDocsSync(repoRoot: string): void {
   assertIncludes(readmeJa, './docs/ROADMAP.ja.md', 'Japanese README roadmap link');
   assertIncludes(architectureEn, './ROADMAP.md', 'English architecture roadmap link');
   assertIncludes(architectureJa, './ROADMAP.ja.md', 'Japanese architecture roadmap link');
+  for (const [label, content] of [
+    ['English README', readmeEn],
+    ['Japanese README', readmeJa],
+    ['English architecture', architectureEn],
+    ['Japanese architecture', architectureJa],
+  ] as const) {
+    assertIncludes(content, 'Application-aware Edge Security Compiler', `${label} product positioning`);
+    checkCapabilityTable(content, label);
+  }
+  assertIncludes(roadmapEn, 'Implemented', 'English implementation status');
+  assertIncludes(roadmapJa, 'Implemented', 'Japanese implementation status');
   assertIncludes(roadmapEn, '| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental |', 'English Source Analyzer status');
   assertIncludes(roadmapJa, '| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental |', 'Japanese Source Analyzer status');
   assertIncludes(roadmapEn, '| Source-aware standard CLI | Planned v1.6.0 |', 'English Source-aware CLI status');

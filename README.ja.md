@@ -17,6 +17,40 @@
 
 **最初に推奨する導入ルート:** `npx cdn-security init --platform aws --archetype spa-static-site --force` から始め、生成された policy を build し、AWS CloudFront Function と WAF Terraform 出力を既存 IaC に組み込みます。Cloudflare Workers も対応していますが、現時点で最初の本番導入パスとして最も揃っているのは AWS + Terraform です。
 
+## プロダクト境界とリリース状態
+
+**CDN Security Framework** は **Application-aware Edge Security Compiler** です。
+アプリケーションが宣言した意図とレビュー済みの security policy を、provider
+別の Edge / WAF artifact に変換します。CDN、WAF、bot-management service、
+アプリケーションの認証認可層そのものを再実装するものではありません。
+
+プロダクトの流れは **Generate → Diff → Review → Apply** です。対応済み入力では
+deterministic finding を優先し、未対応または比較不能な部分は推測せず報告します。
+OpenAPI、source analysis、policy、runtime evidence は別々の Truth であり、どれか
+1つが他の証明になるわけではありません。
+
+### Capability status
+
+| Capability | Status | Interface | Limit |
+| --- | --- | --- | --- |
+| OpenAPI inspect | Implemented | CLI/API | local refs only |
+| OpenAPI policy candidate | Implemented | CLI/API | review-only; never auto-applied |
+| OpenAPI↔Policy drift | Implemented | CLI/JSON/SARIF/GHA | no source needed |
+| NestJS Source Analyzer core | Experimental/Implemented core | Programmatic | no app execution; metadata is not enforcement proof |
+| Source-aware contract diff CLI | Planned v1.6 | — | — |
+| Runtime Evidence v1 | Planned v1.8 | — | — |
+| Policy Composition | Planned v1.9 | — | — |
+| LSP/VS Code | Planned v2.1 | — | — |
+
+実行可能な導入手順は [OpenAPI 導入ガイド](docs/openapi-integration.ja.md)、
+[NestJS Source Analysis](docs/source-analysis-nestjs.ja.md)、
+[CLI リファレンス](docs/cli.ja.md)、[プログラマティック API](docs/programmatic-api.ja.md)
+を参照してください。[Version roadmap](docs/ROADMAP.ja.md) が release status の正本です。
+
+生成 artifact が完全に安全であること、Guard や Analyzer の結果が runtime の
+enforcement を証明すること、未対応 provider の control が利用できることは主張しません。
+candidate と provider capability finding は適用前にレビューしてください。
+
 ---
 
 ## なぜこのフレームワークが必要か
@@ -79,16 +113,16 @@
     bin/cli.ts             # CLI の TypeScript ソース
     scripts/               # compiler / test / tool の TypeScript ソース
     lib/                   # public library API の TypeScript ソース
-  bin/
-    cli.js                 # compiled package artifact: CLI エントリ (npx cdn-security)
+  bin/                    # 生成 package artifact。編集・commitしない
+    cli.js                 # 生成 CLI エントリ (npx cdn-security)
   docs/
     quickstart.md
     policy-runtime-sync.md
   policy/
     security.yml / base.yml
     profiles/
-  scripts/
-    compile.js             # src/scripts/*.ts から compile された artifact
+  scripts/                # src/scripts/*.ts から生成。編集・commitしない
+    compile.js
     compile-cloudflare.js
     compile-infra.js
     policy-lint.js
@@ -111,7 +145,9 @@ package code の正となるソースは `src/**/*.ts` です。root 配下の J
 Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.md) を参照。
 
 ### 運用ドキュメント
+- [クイックスタート](docs/quickstart.ja.md) — install、policy build、contract review、デプロイ境界
 - [OpenAPI導入ガイド](docs/openapi-integration.ja.md) — API contractのinspect、review専用Policy Candidate生成、安全上の制約
+- [NestJS Source Analysis](docs/source-analysis-nestjs.ja.md) — appを実行しないexperimentalなprogrammatic source metadata
 - [CLI リファレンス](docs/cli.ja.md) — `init` / `build` / `emit-waf` / `doctor` / `readiness` / `capabilities` / `explain` / `diff` / `migrate`
 - [プログラマティック API](docs/programmatic-api.ja.md) — `require('cdn-security-framework')` で CI / IaC から直接呼び出し
 - [Compiler strictness](docs/compiler-strictness.ja.md) — phase contract、strict check、残る dynamic area
@@ -222,7 +258,16 @@ CloudFront Functions の static token gate は生成 artifact に焼き込まれ
 
 ---
 
-## このフレームでできること
+## Product Core と生成 Security Control
+
+### Product core
+
+* レビュー可能な policy と schema validation
+* OpenAPI inspect、review 専用 policy candidate、OpenAPI↔Policy drift finding
+* CI / IaC から利用する programmatic API
+* deterministic な provider capability 診断と生成 artifact の diff
+
+### 生成 security control（maintenance surface）
 
 * 不要メソッド遮断
 * Path Traversal 早期遮断
