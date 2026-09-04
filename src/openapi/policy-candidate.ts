@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 
-import type { SecurityContractV1 } from '../contract';
+import type { SecurityContractV1 } from '../contract/security-ir';
+import { securityContractSemanticDigest } from '../contract/semantic-digest';
 import { recommendRequestLimits, type RecommendationCandidate } from '../recommendation';
 
 export const POLICY_CANDIDATE_GENERATOR_VERSION = 1 as const;
@@ -257,7 +258,7 @@ export function generatePolicyCandidate(
       },
       profile: options.profile,
       sourceDigest: options.sourceDigest,
-      irDigest: digest(contract),
+      irDigest: securityContractSemanticDigest(contract),
       candidateDigest: digest(policy),
       appliedRecommendations: applied,
       omittedRecommendations: omitted,

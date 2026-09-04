@@ -25,7 +25,8 @@ import {
   type FindingSeverity,
   type SecurityFindingV1,
 } from './finding';
-import { serializeSecurityContract, type SecurityContractCapabilitiesV1 } from './security-ir';
+import type { SecurityContractCapabilitiesV1 } from './security-ir';
+import { securityContractSemanticDigest } from './semantic-digest';
 import { renderUnifiedContractDiffJson } from '../reporters/json';
 import { renderUnifiedContractDiffText } from '../reporters/text';
 
@@ -448,7 +449,7 @@ function execute(options: DiffSecurityContractsOptions): ContractDiffExecution {
     report: {
       schemaVersion: 1,
       inputDigests: {
-        openapi: digest(serializeSecurityContract(inspection.report.contract)),
+        openapi: securityContractSemanticDigest(inspection.report.contract),
         policy: policyDigest,
         exceptions: exceptionsDigest,
       },
