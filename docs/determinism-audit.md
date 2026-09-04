@@ -1,8 +1,8 @@
 # Deterministic output audit
 
 `npm run test:determinism` is the release audit for the current contract and
-report formats. It executes the same supported fixtures twice and requires
-byte-identical output for:
+report formats. It executes the same LF fixtures in two distinct workspace
+roots and requires byte-identical output for:
 
 - OpenAPI inspection and the review-only policy candidate (including metadata);
 - the NestJS Source Analyzer composition example;
@@ -10,6 +10,13 @@ byte-identical output for:
 - JSON, SARIF, and GitHub Summary contract-diff reports; and
 - Finding instance IDs and sorted finding order when evidence/object order or
   message text changes without changing semantic identity.
+
+It also repeats Finding identity checks 100 times, compares Windows and POSIX
+path separators, and reruns the OpenAPI, policy, and generated-artifact checks
+with CRLF inputs. The CRLF report comparison ignores only byte-derived digests,
+instance IDs, and byte sizes; all other semantic output must remain equal.
+Contract reports include one active and one expired exception so JSON, SARIF,
+and GitHub Summary suppression and governance output are compared together.
 
 The audit also inventories the 49 committed golden files, checks workspace-
 relative paths, and rejects secret-like literals, absolute home/temp paths, and
@@ -22,11 +29,12 @@ for a semantic review. The audit has no implicit update mode. A golden change
 must be a separate, reviewed diff with its changed output explained; do not
 regenerate fixtures merely to make CI green.
 
-Run locally with non-production fixture values:
+The audit runs child processes with a minimal environment and overrides these
+three variables with fixed, non-production fixture values so its digests never
+depend on runner secrets: `EDGE_ADMIN_TOKEN`, `ORIGIN_SECRET`, and `JWT_SECRET`.
+The report must be a direct child of `reports/`; symlink and hard-link targets
+are rejected.
 
 ```bash
-EDGE_ADMIN_TOKEN=determinism-token-not-for-deploy \
-ORIGIN_SECRET=determinism-origin-not-for-deploy \
-JWT_SECRET=determinism-jwt-not-for-deploy \
 npm run test:determinism -- --output reports/determinism-audit.json
 ```
