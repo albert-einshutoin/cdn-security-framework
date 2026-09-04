@@ -11,6 +11,7 @@ type ManifestEntrypoint = {
   status: 'stable' | 'experimental' | 'internal';
   release: 'existing' | 'additive';
   require?: string;
+  default?: string;
   types?: string;
   file?: string;
   exports: string[];
@@ -138,7 +139,9 @@ test('machine-readable package manifest matches exports, files, schemas, and bin
     if (!declaration.require || !declaration.types) {
       throw new Error(`${entrypoint} manifest require/types are missing`);
     }
+    assert.deepStrictEqual(Object.keys(actual).sort(), ['default', 'require', 'types']);
     assert.strictEqual(actual.require, declaration.require);
+    assert.strictEqual(actual.default, declaration.default);
     assert.strictEqual(actual.types, declaration.types);
     assert.ok(fs.existsSync(resolvePackageFile(declaration.require)), `${entrypoint} require file is missing`);
     assert.ok(fs.existsSync(resolvePackageFile(declaration.types)), `${entrypoint} types file is missing`);

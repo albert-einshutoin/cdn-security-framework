@@ -7,6 +7,7 @@
       "status": "stable",
       "release": "existing",
       "require": "./lib/index.js",
+      "default": "./lib/index.js",
       "types": "./lib/index.d.ts",
       "exports": ["compile", "emitWaf", "lintPolicy", "migratePolicy", "runDoctor"]
     },
@@ -14,6 +15,7 @@
       "status": "stable",
       "release": "existing",
       "require": "./emitter/index.js",
+      "default": "./emitter/index.js",
       "types": "./emitter/index.d.ts",
       "exports": ["compileArtifacts", "listInfraArtifacts", "resolveAbsolute"]
     },
@@ -21,6 +23,7 @@
       "status": "stable",
       "release": "existing",
       "require": "./parser/index.js",
+      "default": "./parser/index.js",
       "types": "./parser/index.d.ts",
       "exports": ["parsePolicyFile"]
     },
@@ -28,6 +31,7 @@
       "status": "stable",
       "release": "existing",
       "require": "./validator/index.js",
+      "default": "./validator/index.js",
       "types": "./validator/index.d.ts",
       "exports": ["formatAjvErrors", "validateCorsCredentials", "validatePolicy"]
     },
@@ -35,6 +39,7 @@
       "status": "stable",
       "release": "additive",
       "require": "./contract/index.js",
+      "default": "./contract/index.js",
       "types": "./contract/index.d.ts",
       "exports": [
         "AUTH_SCHEME_KINDS", "CAPABILITY_LEVELS", "CONTRACT_DIFF_FAIL_ON", "CONTRACT_SOURCES",
@@ -56,6 +61,7 @@
       "status": "stable",
       "release": "additive",
       "require": "./contract/security-ir.js",
+      "default": "./contract/security-ir.js",
       "types": "./contract/security-ir.d.ts",
       "exports": ["AUTH_SCHEME_KINDS", "CAPABILITY_LEVELS", "CONTRACT_SOURCES", "EXPOSURES", "VALUE_TYPES", "createSecurityContract", "serializeSecurityContract"]
     },
@@ -63,6 +69,7 @@
       "status": "stable",
       "release": "additive",
       "require": "./openapi/index.js",
+      "default": "./openapi/index.js",
       "types": "./openapi/index.d.ts",
       "exports": [
         "DEFAULT_OPENAPI_ANALYSIS_LIMITS", "OPENAPI_ANALYSIS_ERROR_CODES", "OPENAPI_ANALYSIS_LIMIT_RANGES",
@@ -78,6 +85,7 @@
       "status": "stable",
       "release": "additive",
       "require": "./recommendation/index.js",
+      "default": "./recommendation/index.js",
       "types": "./recommendation/index.d.ts",
       "exports": ["applySafetyMargin", "recommendRequestLimits"]
     },
@@ -85,6 +93,7 @@
       "status": "experimental",
       "release": "additive",
       "require": "./source-analysis/index.js",
+      "default": "./source-analysis/index.js",
       "types": "./source-analysis/index.d.ts",
       "exports": [
         "DEFAULT_SOURCE_ANALYSIS_LIMITS", "SOURCE_ANALYZER_CAPABILITY_NAMES", "SOURCE_ANALYZER_CAPABILITY_STATUSES",
@@ -97,6 +106,7 @@
       "status": "experimental",
       "release": "additive",
       "require": "./source/nestjs/index.js",
+      "default": "./source/nestjs/index.js",
       "types": "./source/nestjs/index.d.ts",
       "exports": ["EMPTY_NESTJS_AUTH_CONFIG", "NESTJS_AUTH_KINDS", "createNestJsSourceAnalyzer", "nestJsSourceAnalyzer", "validateNestJsAuthConfig"],
       "limit": "programmatic/static only; no app execution or enforcement proof"
@@ -126,7 +136,8 @@
   "requiredPackageFiles": [
     "README.md", "README.ja.md", "LICENSE", "docs/api-manifest.json", "docs/quickstart.md", "docs/quickstart.ja.md",
     "docs/openapi-integration.md", "docs/openapi-integration.ja.md", "docs/programmatic-api.md", "docs/programmatic-api.ja.md",
-    "examples/openapi/openapi.yaml", "examples/nestjs-contract/run-analysis.cjs", "examples/github-actions/contract-diff.yml"
+    "examples/openapi/openapi.yaml", "examples/nestjs-contract/run-analysis.cjs", "examples/github-actions/contract-diff.yml",
+    "types/policy.d.ts"
   ],
   "internalPaths": [
     { "path": "bin/commands/", "reason": "CLI implementation, not a public programmatic entrypoint" },
