@@ -120,6 +120,7 @@
     "node": ">=20.17.0"
   },
   "dependencies": {
+    "@types/node": "^26.0.1",
     "acorn": "^8.16.0",
     "ajv": "^8.20.0",
     "commander": "^14.0.3",
@@ -157,6 +158,7 @@
     "scripts/policy-lint.js",
     "scripts/policy-lint.d.ts",
     "scripts/lib/",
+    "types/",
     "templates/",
     "examples/README.md",
     "examples/README.ja.md",
@@ -190,7 +192,6 @@
   },
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
-    "@types/node": "^26.0.1",
     "c8": "^11.0.0",
     "json-schema-to-typescript": "^15.0.4",
     "vitest": "^4.1.7"

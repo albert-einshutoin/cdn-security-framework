@@ -216,7 +216,15 @@ function assertPackageContents(pack: PackResult) {
   ].forEach((filePath) => assertPackedFile(files, filePath));
   packageManifest.requiredPackageFiles.forEach((filePath) => assertPackedFile(files, filePath));
   assertExecutable(files, 'bin/cli.js');
-  const forbidden = /(^|\/)(?:\.env(?:\..*)?|coverage(?:\/.*)?|junit[^/]*|tmp(?:\/.*)?|.*\.map$|.*\.(?:pem|key|p12|pfx))$/iu;
+  const forbidden = /(^|\/)(?:\.env(?:\..*)?|\.npmrc|credentials(?:\.[^/]*)?|[^/]*(?:secret|token)[^/]*\.(?:conf(?:ig)?|ini|json|toml|txt|ya?ml)|id_(?:dsa|ecdsa|ed25519|rsa)(?:\.pub)?|coverage(?:\/.*)?|\.nyc_output(?:\/.*)?|test-results(?:\/.*)?|junit[^/]*|(?:\.?tmp|temp)(?:\.[^/]*)?(?:\/.*)?|.*\.map|.*\.(?:cer|crt|der|jks|key|keystore|p12|pem|pfx|temp|tmp))$/iu;
+  for (const filePath of [
+    '.env.production', '.npmrc', 'credentials.json', 'id_ed25519', 'coverage/lcov.info',
+    '.nyc_output/out.json', 'test-results/result.xml', 'tmp/out', 'dist/index.js.map', 'certs/server.crt',
+    'docs/client-secret.json', 'examples/api-token.txt', 'scripts/cache.tmp', 'docs/temp.json',
+  ]) {
+    assert.ok(forbidden.test(filePath), `forbidden package path must be rejected: ${filePath}`);
+  }
+  assert.ok(!forbidden.test('docs/runbooks/secret-rotation.md'));
   for (const file of pack.files) {
     assert.ok(!forbidden.test(file.path), `npm package must not include ${file.path}`);
   }
@@ -299,6 +307,37 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(result.ok, true, result.errors.join('\\n'));
     `;
     run(process.execPath, ['-e', apiSmoke], { cwd: installDir, stdio: 'inherit' });
+
+    fs.writeFileSync(path.join(installDir, 'consumer.ts'), `
+      import { compile } from '${packageName}';
+      import { compileArtifacts } from '${packageName}/emitter';
+      import { parsePolicyFile } from '${packageName}/parser';
+      import { validatePolicy } from '${packageName}/validator';
+      import { createSecurityContract } from '${packageName}/contract';
+      import { serializeSecurityContract } from '${packageName}/contract/security-ir';
+      import { inspectOpenApi } from '${packageName}/openapi';
+      import { recommendRequestLimits } from '${packageName}/recommendation';
+      import { runSourceAnalyzer } from '${packageName}/source-analysis';
+      import { createNestJsSourceAnalyzer } from '${packageName}/source/nestjs';
+      void [compile, compileArtifacts, parsePolicyFile, validatePolicy, createSecurityContract,
+        serializeSecurityContract, inspectOpenApi, recommendRequestLimits, runSourceAnalyzer,
+        createNestJsSourceAnalyzer];
+    `);
+    fs.writeFileSync(path.join(installDir, 'tsconfig.json'), JSON.stringify({
+      compilerOptions: {
+        module: 'Node16',
+        moduleResolution: 'Node16',
+        noEmit: true,
+        strict: true,
+        target: 'ES2022',
+        types: ['node'],
+      },
+      files: ['consumer.ts'],
+    }));
+    run(process.execPath, [
+      path.join(installDir, 'node_modules', 'typescript', 'bin', 'tsc'),
+      '--project', path.join(installDir, 'tsconfig.json'),
+    ], { cwd: installDir, stdio: 'inherit' });
 
     const nestReport = JSON.parse(run(process.execPath, [
       path.join(installedRoot, 'examples', 'nestjs-contract', 'run-analysis.cjs'),
