@@ -9,6 +9,9 @@ const yaml = require('js-yaml');
 
 const repoRoot = path.join(__dirname, '..');
 const packageName = require(path.join(repoRoot, 'package.json')).name;
+const packageManifest = require(path.join(repoRoot, 'docs', 'api-manifest.json')) as {
+  requiredPackageFiles: string[];
+};
 
 type PackedFile = {
   path: string;
@@ -110,6 +113,7 @@ function assertPackageContents(pack: PackResult) {
     'package.json',
     'README.md',
     'LICENSE',
+    'docs/api-manifest.json',
     'bin/cli.js',
     'bin/cli.d.ts',
     'bin/commands/openapi-inspect.js',
@@ -210,7 +214,20 @@ function assertPackageContents(pack: PackResult) {
     'policy/archetypes/admin-panel.yml',
     'policy/archetypes/microservice-origin.yml',
   ].forEach((filePath) => assertPackedFile(files, filePath));
+  packageManifest.requiredPackageFiles.forEach((filePath) => assertPackedFile(files, filePath));
   assertExecutable(files, 'bin/cli.js');
+  const forbidden = /(^|\/)(?:\.env(?:\..*)?|\.npmrc|credentials(?:\.[^/]*)?|[^/]*(?:secret|token)[^/]*\.(?:conf(?:ig)?|ini|json|toml|txt|ya?ml)|id_(?:dsa|ecdsa|ed25519|rsa)(?:\.pub)?|coverage(?:\/.*)?|\.nyc_output(?:\/.*)?|test-results(?:\/.*)?|junit[^/]*|(?:\.?tmp|temp)(?:\.[^/]*)?(?:\/.*)?|.*\.map|.*\.(?:cer|crt|der|jks|key|keystore|p12|pem|pfx|temp|tmp))$/iu;
+  for (const filePath of [
+    '.env.production', '.npmrc', 'credentials.json', 'id_ed25519', 'coverage/lcov.info',
+    '.nyc_output/out.json', 'test-results/result.xml', 'tmp/out', 'dist/index.js.map', 'certs/server.crt',
+    'docs/client-secret.json', 'examples/api-token.txt', 'scripts/cache.tmp', 'docs/temp.json',
+  ]) {
+    assert.ok(forbidden.test(filePath), `forbidden package path must be rejected: ${filePath}`);
+  }
+  assert.ok(!forbidden.test('docs/runbooks/secret-rotation.md'));
+  for (const file of pack.files) {
+    assert.ok(!forbidden.test(file.path), `npm package must not include ${file.path}`);
+  }
 }
 
 function smokeInstalledPackage(tarballPath: string) {
@@ -240,7 +257,9 @@ function smokeInstalledPackage(tarballPath: string) {
     const apiSmoke = `
       const assert = require('assert');
       const path = require('path');
+      const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const pkg = require(${JSON.stringify(packageName)});
+      const manifest = require(path.join(pkgRoot, 'docs', 'api-manifest.json'));
       const contract = require(${JSON.stringify(`${packageName}/contract`)});
       const securityIr = require(${JSON.stringify(`${packageName}/contract/security-ir`)});
       const schema = require(${JSON.stringify(`${packageName}/schemas/security-ir-v1.schema.json`)});
@@ -254,6 +273,7 @@ function smokeInstalledPackage(tarballPath: string) {
       const sourceAnalysis = require(${JSON.stringify(`${packageName}/source-analysis`)});
       const nestjs = require(${JSON.stringify(`${packageName}/source/nestjs`)});
       assert.strictEqual(typeof pkg.compile, 'function');
+      assert.strictEqual(manifest.packageVersion, require(path.join(pkgRoot, 'package.json')).version);
       assert.strictEqual(typeof pkg.lintPolicy, 'function');
       assert.strictEqual(typeof contract.createSecurityContract, 'function');
       assert.strictEqual(typeof contract.projectPolicyToAllowedSurface, 'function');
@@ -279,7 +299,6 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof sourceAnalysis.runSourceAnalyzer, 'function');
       assert.strictEqual(typeof nestjs.createNestJsSourceAnalyzer, 'function');
       assert.strictEqual(typeof nestjs.validateNestJsAuthConfig, 'function');
-      const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const result = pkg.lintPolicy({
         policyPath: path.join(pkgRoot, 'policy', 'base.yml'),
         cwd: process.cwd(),
@@ -288,6 +307,37 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(result.ok, true, result.errors.join('\\n'));
     `;
     run(process.execPath, ['-e', apiSmoke], { cwd: installDir, stdio: 'inherit' });
+
+    fs.writeFileSync(path.join(installDir, 'consumer.ts'), `
+      import { compile } from '${packageName}';
+      import { compileArtifacts } from '${packageName}/emitter';
+      import { parsePolicyFile } from '${packageName}/parser';
+      import { validatePolicy } from '${packageName}/validator';
+      import { createSecurityContract } from '${packageName}/contract';
+      import { serializeSecurityContract } from '${packageName}/contract/security-ir';
+      import { inspectOpenApi } from '${packageName}/openapi';
+      import { recommendRequestLimits } from '${packageName}/recommendation';
+      import { runSourceAnalyzer } from '${packageName}/source-analysis';
+      import { createNestJsSourceAnalyzer } from '${packageName}/source/nestjs';
+      void [compile, compileArtifacts, parsePolicyFile, validatePolicy, createSecurityContract,
+        serializeSecurityContract, inspectOpenApi, recommendRequestLimits, runSourceAnalyzer,
+        createNestJsSourceAnalyzer];
+    `);
+    fs.writeFileSync(path.join(installDir, 'tsconfig.json'), JSON.stringify({
+      compilerOptions: {
+        module: 'Node16',
+        moduleResolution: 'Node16',
+        noEmit: true,
+        strict: true,
+        target: 'ES2022',
+        types: ['node'],
+      },
+      files: ['consumer.ts'],
+    }));
+    run(process.execPath, [
+      path.join(installDir, 'node_modules', 'typescript', 'bin', 'tsc'),
+      '--project', path.join(installDir, 'tsconfig.json'),
+    ], { cwd: installDir, stdio: 'inherit' });
 
     const nestReport = JSON.parse(run(process.execPath, [
       path.join(installedRoot, 'examples', 'nestjs-contract', 'run-analysis.cjs'),

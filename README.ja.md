@@ -150,6 +150,7 @@ Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.
 - [NestJS Source Analysis](docs/source-analysis-nestjs.ja.md) — appを実行しないexperimentalなprogrammatic source metadata
 - [CLI リファレンス](docs/cli.ja.md) — `init` / `build` / `emit-waf` / `doctor` / `readiness` / `capabilities` / `explain` / `diff` / `migrate`
 - [プログラマティック API](docs/programmatic-api.ja.md) — `require('cdn-security-framework')` で CI / IaC から直接呼び出し
+- [Package/API manifest](docs/api-manifest.json) — entrypoint、schema、bin、package file contract の機械可読 inventory
 - [Compiler strictness](docs/compiler-strictness.ja.md) — phase contract、strict check、残る dynamic area
 - [アーキタイプ](docs/archetypes.ja.md) — アプリ形状別プリセット（SPA / REST API / 管理画面 / マイクロサービス）
 - [ポリシーレシピ](docs/recipes.ja.md) — Cognito API、SPA、管理画面、署名付き download、Cloudflare GraphQL の copyable snippet

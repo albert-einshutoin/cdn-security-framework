@@ -151,6 +151,7 @@ See [IaC integration](docs/iac.md) for Terraform / CloudFormation / CDK / WAF us
 - [NestJS source analysis](docs/source-analysis-nestjs.md) — experimental programmatic source metadata with an explicit no-execution boundary
 - [CLI reference](docs/cli.md) — `init` / `build` / `emit-waf` / `doctor` / `readiness` / `capabilities` / `explain` / `diff` / `migrate`
 - [Programmatic API](docs/programmatic-api.md) — `require('cdn-security-framework')` for CI / IaC integration
+- [Package/API manifest](docs/api-manifest.json) — machine-readable entrypoint, schema, bin, and package-file contract
 - [Compiler strictness](docs/compiler-strictness.md) — phase contracts, strict checks, and remaining dynamic areas
 - [Archetypes](docs/archetypes.md) — app-shaped policy presets (SPA, REST API, admin, microservice)
 - [Policy recipes](docs/recipes.md) — copyable snippets for Cognito APIs, SPAs, admin panels, signed downloads, and Cloudflare GraphQL
