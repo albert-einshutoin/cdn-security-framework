@@ -2,18 +2,19 @@
 
 Release workflow は Node 20.17.0、Node 22、Node 24 で package を検証します。
 `full-validation` は Node 24 で完全な `npm run test:ci` gate を実行し、同じ matrix
-で generated-boundary、documentation、API contract、packed install、CLI、OpenAPI、
-NestJS example、AWS/Cloudflare build を実行します。
+で API contract、packed install、direct/npx CLI、OpenAPI、NestJS example、
+AWS/Cloudflare build を各 Node で実行します。3 version は1つのjob内で順次実行し、
+failed-job再実行でも比較入力をすべて再生成します。
 
-各 matrix job は `schemaVersion: 1` の JSON report を作成します。含めるのは次だけです。
+各 Node check は `schemaVersion: 1` の JSON report を作成します。含めるのは次だけです。
 
 - Node / package version
 - public export key と schema digest
-- CLI と代表 example の pass/fail
+- pass/fail、skipされたcheck名、failure stage
 - 相対 generated-file path、size、SHA-256 digest
 
-`full-release-matrix-audit` は3つの report を必須とし、Node major、package version、
-API export、schema、example check、生成 artifact digest の差分で失敗します。report は
+`full-release-matrix` は3つの report を必須とし、Node 20.17 floor、Node line、package version、
+API export、schema、check、生成 artifact digest の差分で失敗します。report は
 GitHub Actions artifact として30日保存し、環境変数、absolute path、OpenAPI source、
 生成 runtime 本文は含めません。
 

@@ -16,20 +16,29 @@ type ArtifactTree = {
   files: Array<{ path: string; sha256: string; size: number }>;
 };
 
+const checkNames = [
+  'apiContract',
+  'packageSmoke',
+  'cliVersion',
+  'cliHelp',
+  'apiExports',
+  'schemas',
+  'openApiExample',
+  'sourceExample',
+  'awsBuild',
+  'cloudflareBuild',
+] as const;
+type CheckName = typeof checkNames[number];
+
 type MatrixReport = {
   schemaVersion: 1;
   status: 'pass' | 'fail';
   failureCode?: 'validation_failed';
+  failureStage?: 'arguments' | 'validation' | CheckName;
   nodeVersion: string;
   packageVersion: string;
-  checks: {
-    cliVersion: boolean;
-    cliHelp: boolean;
-    openApiExample: boolean;
-    sourceExample: boolean;
-    awsBuild: boolean;
-    cloudflareBuild: boolean;
-  };
+  checks: Record<CheckName, boolean>;
+  skippedChecks: CheckName[];
   apiExports: Record<string, string[]>;
   schemaDigests: Record<string, string>;
   artifacts: { aws: ArtifactTree; cloudflare: ArtifactTree };
@@ -74,6 +83,18 @@ function runCli(args: string[], env: NodeJS.ProcessEnv): { stdout: string; stder
   return { stdout: result.stdout, stderr: result.stderr };
 }
 
+function runNpmScript(script: string, env: NodeJS.ProcessEnv): void {
+  const command = process.platform === 'win32' ? 'npm.cmd' : 'npm';
+  const result = childProcess.spawnSync(command, ['run', script], {
+    cwd: repoRoot,
+    env,
+    encoding: 'utf8',
+    stdio: 'inherit',
+  });
+  if (result.error) throw result.error;
+  if (result.status !== 0) throw new Error(`${script} exited with status ${result.status}`);
+}
+
 function sha256File(filePath: string): string {
   return `sha256:${crypto.createHash('sha256').update(fs.readFileSync(filePath)).digest('hex')}`;
 }
@@ -116,32 +137,41 @@ function packageVersion(): string {
   }
 }
 
-function writeFailureReport(output: string): void {
-  const outputPath = path.resolve(repoRoot, output);
+function createReport(): MatrixReport {
   const emptyTree: ArtifactTree = { aggregateSha256: '', files: [] };
-  const report: MatrixReport = {
+  return {
     schemaVersion: 1,
     status: 'fail',
     failureCode: 'validation_failed',
     nodeVersion: process.versions.node,
     packageVersion: packageVersion(),
-    checks: {
-      cliVersion: false,
-      cliHelp: false,
-      openApiExample: false,
-      sourceExample: false,
-      awsBuild: false,
-      cloudflareBuild: false,
-    },
+    checks: Object.fromEntries(checkNames.map((name) => [name, false])) as Record<CheckName, boolean>,
+    skippedChecks: [...checkNames],
     apiExports: {},
     schemaDigests: {},
     artifacts: { aws: emptyTree, cloudflare: emptyTree },
   };
+}
+
+function writeReport(output: string, report: MatrixReport): void {
+  const outputPath = path.resolve(repoRoot, output);
   fs.mkdirSync(path.dirname(outputPath), { recursive: true });
   fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);
 }
 
-function main(output: string): void {
+function runCheck<T>(report: MatrixReport, name: CheckName, check: () => T): T {
+  report.skippedChecks = report.skippedChecks.filter((entry) => entry !== name);
+  try {
+    const result = check();
+    report.checks[name] = true;
+    return result;
+  } catch (error: unknown) {
+    report.failureStage = name;
+    throw error;
+  }
+}
+
+function main(output: string, report: MatrixReport): void {
   const pkg = JSON.parse(fs.readFileSync(packageJsonPath, 'utf8')) as { version: string };
   const manifest = JSON.parse(fs.readFileSync(manifestPath, 'utf8')) as Manifest;
   const env: NodeJS.ProcessEnv = {
@@ -151,76 +181,81 @@ function main(output: string): void {
     JWT_SECRET: process.env.JWT_SECRET || 'release-matrix-jwt-not-for-deploy',
   };
 
-  const version = runCli(['--version'], env).stdout.trim();
-  if (version !== pkg.version) throw new Error(`CLI version ${version} does not match package ${pkg.version}`);
-  const help = runCli(['--help'], env).stdout;
-  for (const command of ['build', 'openapi', 'contract', 'migrate']) {
-    if (!help.includes(command)) throw new Error(`CLI help is missing ${command}`);
-  }
-  ensureExampleFiles();
+  runCheck(report, 'apiContract', () => runNpmScript('test:api-contract', env));
+  runCheck(report, 'packageSmoke', () => runNpmScript('test:package', env));
 
-  const apiExports: Record<string, string[]> = {};
-  for (const [entrypoint, declaration] of Object.entries(manifest.entrypoints)) {
-    if (!declaration.require) continue;
-    const modulePath = path.join(repoRoot, declaration.require.replace(/^\.\//u, ''));
-    apiExports[entrypoint] = Object.keys(require(modulePath)).sort();
-    if (JSON.stringify(apiExports[entrypoint]) !== JSON.stringify([...declaration.exports].sort())) {
-      throw new Error(`API export drift detected for ${entrypoint}`);
+  runCheck(report, 'cliVersion', () => {
+    const version = runCli(['--version'], env).stdout.trim();
+    if (version !== pkg.version) throw new Error(`CLI version ${version} does not match package ${pkg.version}`);
+  });
+  runCheck(report, 'cliHelp', () => {
+    const help = runCli(['--help'], env).stdout;
+    for (const command of ['build', 'openapi', 'contract', 'migrate']) {
+      if (!help.includes(command)) throw new Error(`CLI help is missing ${command}`);
     }
-  }
+  });
 
-  const schemaDigests: Record<string, string> = {};
-  for (const schema of manifest.schemas) schemaDigests[schema.path] = sha256File(path.join(repoRoot, schema.path));
+  report.apiExports = runCheck(report, 'apiExports', () => {
+    const apiExports: Record<string, string[]> = {};
+    for (const [entrypoint, declaration] of Object.entries(manifest.entrypoints)) {
+      if (!declaration.require) continue;
+      const modulePath = path.join(repoRoot, declaration.require.replace(/^\.\//u, ''));
+      apiExports[entrypoint] = Object.keys(require(modulePath)).sort();
+      if (JSON.stringify(apiExports[entrypoint]) !== JSON.stringify([...declaration.exports].sort())) {
+        throw new Error(`API export drift detected for ${entrypoint}`);
+      }
+    }
+    return apiExports;
+  });
 
-  // OpenAPI output is required to stay under its workspace root; keep this
-  // ephemeral build directory inside the repository and remove it below.
+  report.schemaDigests = runCheck(report, 'schemas', () => {
+    const schemaDigests: Record<string, string> = {};
+    for (const schema of manifest.schemas) schemaDigests[schema.path] = sha256File(path.join(repoRoot, schema.path));
+    return schemaDigests;
+  });
+
   const tempRoot = fs.mkdtempSync(path.join(repoRoot, '.release-matrix-'));
   try {
-    const openApiReport = path.join(tempRoot, 'openapi-inspection.json');
-    runCli([
-      'openapi', 'inspect', '--input', path.join(repoRoot, 'examples/openapi/openapi.yaml'),
-      '--workspace-root', repoRoot, '--json', '--out', openApiReport,
-    ], env);
-    const inspection = JSON.parse(fs.readFileSync(openApiReport, 'utf8')) as { schemaVersion: number; summary?: { operationCount?: number } };
-    if (inspection.schemaVersion !== 1 || inspection.summary?.operationCount !== 5) {
-      throw new Error('OpenAPI example report is not the expected v1 fixture');
-    }
+    runCheck(report, 'openApiExample', () => {
+      ensureExampleFiles();
+      const openApiReport = path.join(tempRoot, 'openapi-inspection.json');
+      runCli([
+        'openapi', 'inspect', '--input', path.join(repoRoot, 'examples/openapi/openapi.yaml'),
+        '--workspace-root', repoRoot, '--json', '--out', openApiReport,
+      ], env);
+      const inspection = JSON.parse(fs.readFileSync(openApiReport, 'utf8')) as { schemaVersion: number; summary?: { operationCount?: number } };
+      if (inspection.schemaVersion !== 1 || inspection.summary?.operationCount !== 5) {
+        throw new Error('OpenAPI example report is not the expected v1 fixture');
+      }
+    });
 
-    const sourceExample = childProcess.spawnSync(process.execPath, [
-      path.join(repoRoot, 'examples/nestjs-contract/run-analysis.cjs'),
-    ], { cwd: repoRoot, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
-    if (sourceExample.error) throw sourceExample.error;
-    if (sourceExample.status !== 0) throw new Error(`NestJS example failed: ${sourceExample.stderr.trim()}`);
-    const sourceReport = JSON.parse(sourceExample.stdout) as { schemaVersion: number; operations?: unknown[] };
-    if (sourceReport.schemaVersion !== 1 || sourceReport.operations?.length !== 6) {
-      throw new Error('NestJS example report is not the expected v1 fixture');
-    }
+    runCheck(report, 'sourceExample', () => {
+      const sourceExample = childProcess.spawnSync(process.execPath, [
+        path.join(repoRoot, 'examples/nestjs-contract/run-analysis.cjs'),
+      ], { cwd: repoRoot, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] });
+      if (sourceExample.error) throw sourceExample.error;
+      if (sourceExample.status !== 0) throw new Error(`NestJS example failed: ${sourceExample.stderr.trim()}`);
+      const sourceReport = JSON.parse(sourceExample.stdout) as { schemaVersion: number; operations?: unknown[] };
+      if (sourceReport.schemaVersion !== 1 || sourceReport.operations?.length !== 6) {
+        throw new Error('NestJS example report is not the expected v1 fixture');
+      }
+    });
 
     const awsRoot = path.join(tempRoot, 'aws');
     const cloudflareRoot = path.join(tempRoot, 'cloudflare');
-    runCli(['build', '--policy', path.join(repoRoot, 'policy/base.yml'), '--out-dir', awsRoot], env);
-    runCli(['build', '--target', 'cloudflare', '--policy', path.join(repoRoot, 'policy/base.yml'), '--out-dir', cloudflareRoot], env);
+    report.artifacts.aws = runCheck(report, 'awsBuild', () => {
+      runCli(['build', '--policy', path.join(repoRoot, 'policy/base.yml'), '--out-dir', awsRoot], env);
+      return hashTree(awsRoot);
+    });
+    report.artifacts.cloudflare = runCheck(report, 'cloudflareBuild', () => {
+      runCli(['build', '--target', 'cloudflare', '--policy', path.join(repoRoot, 'policy/base.yml'), '--out-dir', cloudflareRoot], env);
+      return hashTree(cloudflareRoot);
+    });
 
-    const report: MatrixReport = {
-      schemaVersion: 1,
-      status: 'pass',
-      nodeVersion: process.versions.node,
-      packageVersion: pkg.version,
-      checks: {
-        cliVersion: true,
-        cliHelp: true,
-        openApiExample: true,
-        sourceExample: true,
-        awsBuild: true,
-        cloudflareBuild: true,
-      },
-      apiExports,
-      schemaDigests,
-      artifacts: { aws: hashTree(awsRoot), cloudflare: hashTree(cloudflareRoot) },
-    };
-    const outputPath = path.resolve(repoRoot, output);
-    fs.mkdirSync(path.dirname(outputPath), { recursive: true });
-    fs.writeFileSync(outputPath, `${JSON.stringify(report, null, 2)}\n`);
+    report.status = 'pass';
+    delete report.failureCode;
+    delete report.failureStage;
+    writeReport(output, report);
     console.log(`[release-matrix] OK: ${process.versions.node}`);
   } finally {
     fs.rmSync(tempRoot, { recursive: true, force: true });
@@ -233,13 +268,17 @@ const requestedOutput = outputIndex >= 0 ? requestedArgs[outputIndex + 1] : unde
 let output = requestedOutput && !requestedOutput.startsWith('-')
   ? requestedOutput
   : 'reports/release-matrix.json';
+const report = createReport();
+let parsedArgs = false;
 try {
   const args = parseArgs(requestedArgs);
+  parsedArgs = true;
   output = args.output;
-  main(output);
+  main(output, report);
 } catch (error: unknown) {
+  report.failureStage ||= parsedArgs ? 'validation' : 'arguments';
   try {
-    writeFailureReport(output);
+    writeReport(output, report);
   } catch {
     // Preserve the original failure when the requested report path is unavailable.
   }

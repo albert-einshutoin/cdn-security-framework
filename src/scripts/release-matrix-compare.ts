@@ -9,9 +9,11 @@ type MatrixReport = {
   schemaVersion: number;
   status: 'pass' | 'fail';
   failureCode?: 'validation_failed';
+  failureStage?: string;
   nodeVersion: string;
   packageVersion: string;
   checks: Record<string, boolean>;
+  skippedChecks: string[];
   apiExports: Record<string, string[]>;
   schemaDigests: Record<string, string>;
   artifacts: { aws: ArtifactTree; cloudflare: ArtifactTree };
@@ -21,11 +23,31 @@ type ComparisonReport = {
   schemaVersion: 1;
   status: 'pass' | 'fail';
   failureCode?: 'comparison_failed';
+  failureStage?: string;
   packageVersion: string;
   nodeVersions: string[];
   checks: { apiExports: boolean; schemas: boolean; artifacts: boolean; examples: boolean };
   artifactDigests: { aws: string; cloudflare: string };
 };
+
+const requiredChecks = [
+  'apiContract',
+  'packageSmoke',
+  'cliVersion',
+  'cliHelp',
+  'apiExports',
+  'schemas',
+  'openApiExample',
+  'sourceExample',
+  'awsBuild',
+  'cloudflareBuild',
+].sort();
+
+class ComparisonFailure extends Error {
+  constructor(readonly stage: string, message: string) {
+    super(message);
+  }
+}
 
 function parseArgs(argv: string[]): { input: string; output: string } {
   let input = 'reports/release-matrix';
@@ -56,11 +78,19 @@ function parseArgs(argv: string[]): { input: string; output: string } {
 
 function readReports(input: string): MatrixReport[] {
   const inputPath = path.resolve(process.cwd(), input);
-  if (!fs.existsSync(inputPath) || !fs.statSync(inputPath).isDirectory()) throw new Error(`matrix report directory is missing: ${input}`);
+  if (!fs.existsSync(inputPath) || !fs.statSync(inputPath).isDirectory()) {
+    throw new ComparisonFailure('reportCollection', `matrix report directory is missing: ${input}`);
+  }
   const reports = fs.readdirSync(inputPath).filter((file) => file.endsWith('.json')).sort().map((file) => {
-    return JSON.parse(fs.readFileSync(path.join(inputPath, file), 'utf8')) as MatrixReport;
+    try {
+      return JSON.parse(fs.readFileSync(path.join(inputPath, file), 'utf8')) as MatrixReport;
+    } catch {
+      throw new ComparisonFailure('reportSchema', `matrix report is not valid JSON: ${file}`);
+    }
   });
-  if (reports.length !== 3) throw new Error(`expected 3 Node matrix reports, found ${reports.length}`);
+  if (reports.length !== 3) {
+    throw new ComparisonFailure('reportCollection', `expected 3 Node matrix reports, found ${reports.length}`);
+  }
   return reports;
 }
 
@@ -68,12 +98,13 @@ function sameJson(left: unknown, right: unknown): boolean {
   return JSON.stringify(left) === JSON.stringify(right);
 }
 
-function writeFailureSummary(output: string): void {
+function writeFailureSummary(output: string, failureStage: string): void {
   const outputPath = path.resolve(process.cwd(), output);
   const result: ComparisonReport = {
     schemaVersion: 1,
     status: 'fail',
     failureCode: 'comparison_failed',
+    failureStage,
     packageVersion: 'unknown',
     nodeVersions: [],
     checks: { apiExports: false, schemas: false, artifacts: false, examples: false },
@@ -86,17 +117,37 @@ function writeFailureSummary(output: string): void {
 function main(input: string, output: string): void {
   const reports = readReports(input);
   const first = reports[0];
-  if (reports.some((report) => report.schemaVersion !== 1)) throw new Error('matrix report schema version drifted');
-  if (reports.some((report) => report.status !== 'pass')) throw new Error('a matrix validation failed');
-  const nodeMajors = reports.map((report) => Number.parseInt(report.nodeVersion.split('.')[0], 10)).sort((a, b) => a - b);
-  if (!sameJson(nodeMajors, [20, 22, 24])) throw new Error(`unexpected Node matrix: ${nodeMajors.join(', ')}`);
-  if (reports.some((report) => report.packageVersion !== first.packageVersion)) throw new Error('package version differs across Node matrix');
-  if (reports.some((report) => Object.values(report.checks).some((value) => value !== true))) throw new Error('a matrix example/check did not pass');
-  if (reports.some((report) => !sameJson(report.apiExports, first.apiExports))) throw new Error('API exports differ across Node matrix');
-  if (reports.some((report) => !sameJson(report.schemaDigests, first.schemaDigests))) throw new Error('schema digests differ across Node matrix');
+  if (reports.some((report) => report.schemaVersion !== 1)) {
+    throw new ComparisonFailure('reportSchema', 'matrix report schema version drifted');
+  }
+  const failedReport = reports.find((report) => report.status !== 'pass');
+  if (failedReport) {
+    const stage = failedReport.failureStage ? `matrixValidation.${failedReport.failureStage}` : 'matrixValidation';
+    throw new ComparisonFailure(stage, `matrix validation failed on Node ${failedReport.nodeVersion}`);
+  }
+  const nodeVersions = reports.map((report) => report.nodeVersion);
+  const nodeMajors = nodeVersions.map((version) => Number.parseInt(version.split('.')[0], 10)).sort((a, b) => a - b);
+  if (!nodeVersions.includes('20.17.0') || !sameJson(nodeMajors, [20, 22, 24])) {
+    throw new ComparisonFailure('nodeVersions', `unexpected Node matrix: ${nodeVersions.join(', ')}`);
+  }
+  if (reports.some((report) => report.packageVersion !== first.packageVersion)) {
+    throw new ComparisonFailure('packageVersion', 'package version differs across Node matrix');
+  }
+  if (reports.some((report) => !Array.isArray(report.skippedChecks)
+    || report.skippedChecks.length > 0
+    || !sameJson(Object.keys(report.checks).sort(), requiredChecks)
+    || Object.values(report.checks).some((value) => value !== true))) {
+    throw new ComparisonFailure('checks', 'a matrix example/check did not pass or was skipped');
+  }
+  if (reports.some((report) => !sameJson(report.apiExports, first.apiExports))) {
+    throw new ComparisonFailure('apiExports', 'API exports differ across Node matrix');
+  }
+  if (reports.some((report) => !sameJson(report.schemaDigests, first.schemaDigests))) {
+    throw new ComparisonFailure('schemas', 'schema digests differ across Node matrix');
+  }
   if (reports.some((report) => report.artifacts.aws.aggregateSha256 !== first.artifacts.aws.aggregateSha256
     || report.artifacts.cloudflare.aggregateSha256 !== first.artifacts.cloudflare.aggregateSha256)) {
-    throw new Error('generated artifact digests differ across Node matrix');
+    throw new ComparisonFailure('artifacts', 'generated artifact digests differ across Node matrix');
   }
   const result: ComparisonReport = {
     schemaVersion: 1,
@@ -122,7 +173,7 @@ try {
   main(args.input, output);
 } catch (error: unknown) {
   try {
-    writeFailureSummary(output);
+    writeFailureSummary(output, error instanceof ComparisonFailure ? error.stage : 'arguments');
   } catch {
     // Preserve the original failure when the requested report path is unavailable.
   }

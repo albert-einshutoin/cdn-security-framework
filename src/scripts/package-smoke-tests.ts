@@ -349,6 +349,18 @@ function smokeInstalledPackage(tarballPath: string) {
     const cliPath = path.join(installDir, 'node_modules', '.bin', 'cdn-security');
     const version = run(cliPath, ['--version'], { cwd: installDir }).trim();
     assert.strictEqual(version, require(path.join(repoRoot, 'package.json')).version);
+    const npxCommand = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+    const npxHelp = run(npxCommand, ['--no-install', 'cdn-security', '--help'], { cwd: installDir });
+    for (const command of ['build', 'openapi', 'contract', 'migrate']) {
+      assert.ok(npxHelp.includes(command), `npx CLI help must include ${command}`);
+    }
+    const invalidCli = childProcess.spawnSync(cliPath, ['--definitely-invalid-option'], {
+      cwd: installDir,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
+    assert.strictEqual(invalidCli.error, undefined);
+    assert.notStrictEqual(invalidCli.status, 0, 'invalid CLI input must exit nonzero');
     const openApiPath = path.join(installedRoot, 'examples', 'openapi', 'openapi.yaml');
     fs.mkdirSync(path.join(installDir, 'reports'));
     run(cliPath, [
