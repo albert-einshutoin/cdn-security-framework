@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "inputDigests": {
-    "openapi": "sha256:b0746306e64401e0d7aab6fca3aefd591a862e32325415fb55fee8897c431f94",
+    "openapi": "sha256:d64629bacb657da3373788f90172264345d99cff4c136271b10d767b9489702c",
     "policy": "sha256:87a4fa1463a6c734ffe66e8e29db236d858004da164396ba5b8f87c47cd2c2e9",
     "exceptions": null
   },

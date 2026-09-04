@@ -11,7 +11,8 @@
 
 Finding identity は100回反復し、Windows / POSIX の path separator も比較します。さらに
 OpenAPI、policy、生成 artifact を CRLF input で再実行します。CRLF report の比較で除外するのは
-byte 由来の digest、instance ID、byte size だけで、それ以外の semantic output は一致必須です。
+OpenAPI source / evidence の raw byte digest、それから派生する instance ID、byte size だけです。
+semantic digest と、それ以外の semantic output は一致必須です。
 contract report には有効な exception と期限切れ exception を1件ずつ含め、JSON / SARIF /
 GitHub Summary の suppression と governance output を一緒に比較します。
 

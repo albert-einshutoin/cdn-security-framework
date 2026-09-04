@@ -167,10 +167,9 @@ describe('cdn-security openapi generate-policy', () => {
     const firstMetadata = metadata(first);
     const secondMetadata = metadata(second);
     expect(firstMetadata.sourceDigest).not.toBe(secondMetadata.sourceDigest);
+    expect(firstMetadata.irDigest).toBe(secondMetadata.irDigest);
     delete firstMetadata.sourceDigest;
     delete secondMetadata.sourceDigest;
-    delete firstMetadata.irDigest;
-    delete secondMetadata.irDigest;
     expect(firstMetadata).toEqual(secondMetadata);
   });
 

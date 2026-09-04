@@ -10,6 +10,7 @@ import {
   type SecurityContractInputV1,
   type ValueConstraintsV1,
 } from '../../src/contract/security-ir';
+import { securityContractSemanticDigest } from '../../src/contract/semantic-digest';
 import {
   canonicalizePath,
   createRouteKey,
@@ -283,6 +284,20 @@ describe('Security IR v1', () => {
     expect(serializeSecurityContract(createSecurityContract(reversed)))
       .toBe(serializeSecurityContract(first));
     expect(serializeSecurityContract(first)).not.toContain('generatedAt');
+  });
+
+  test('semantic digest ignores provenance bytes but preserves contract semantics', () => {
+    const first = createSecurityContract(baseInput);
+    const changedProvenance = structuredClone(baseInput);
+    changedProvenance.operations[0].provenance[0].digest = 'sha256:different-source-bytes';
+    expect(securityContractSemanticDigest(createSecurityContract(changedProvenance)))
+      .toBe(securityContractSemanticDigest(first));
+
+    const changedRoute = structuredClone(baseInput);
+    changedRoute.operations[0].path = '/different';
+    changedRoute.operations[0].routeKey = 'GET /different';
+    expect(securityContractSemanticDigest(createSecurityContract(changedRoute)))
+      .not.toBe(securityContractSemanticDigest(first));
   });
 
   test('does not retain raw source objects and rejects secret-like enum values', () => {

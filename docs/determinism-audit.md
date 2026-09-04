@@ -13,8 +13,9 @@ roots and requires byte-identical output for:
 
 It also repeats Finding identity checks 100 times, compares Windows and POSIX
 path separators, and reruns the OpenAPI, policy, and generated-artifact checks
-with CRLF inputs. The CRLF report comparison ignores only byte-derived digests,
-instance IDs, and byte sizes; all other semantic output must remain equal.
+with CRLF inputs. The CRLF report comparison ignores only raw OpenAPI source and
+evidence digests, instance IDs derived from them, and byte sizes; semantic
+digests and all other semantic output must remain equal.
 Contract reports include one active and one expired exception so JSON, SARIF,
 and GitHub Summary suppression and governance output are compared together.
 

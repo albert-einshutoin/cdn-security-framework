@@ -214,8 +214,11 @@ function writeAuditReport(output: string, content: string): void {
     throw new Error('audit report output must be a file directly inside reports');
   }
   fs.mkdirSync(lexicalRoot, { recursive: true });
+  const rootEntry = fs.lstatSync(lexicalRoot);
+  const realRepoRoot = fs.realpathSync(repoRoot);
   const realRoot = fs.realpathSync(lexicalRoot);
-  if (!within(fs.realpathSync(repoRoot), realRoot)) {
+  if (rootEntry.isSymbolicLink() || !rootEntry.isDirectory()
+    || realRoot !== path.join(realRepoRoot, 'reports')) {
     throw new Error('audit report output escaped reports');
   }
   const noFollow = fs.constants.O_NOFOLLOW;
@@ -248,9 +251,9 @@ function runPair(label: string, first: string, second: string, run: (outputPath:
   return true;
 }
 
-function withoutDigestIdentity(value: unknown, parentKey = ''): unknown {
+function withoutByteIdentity(value: unknown, parentKey = ''): unknown {
   if (Array.isArray(value)) {
-    const items = value.map((child) => withoutDigestIdentity(child));
+    const items = value.map((child) => withoutByteIdentity(child));
     if (parentKey === 'findings' || parentKey === 'suppressedFindings' || parentKey === 'exceptionDiagnostics') {
       items.sort((left, right) => {
         const a = JSON.stringify(left);
@@ -261,15 +264,17 @@ function withoutDigestIdentity(value: unknown, parentKey = ''): unknown {
     return items;
   }
   if (!value || typeof value !== 'object') return value;
+  const record = value as Record<string, unknown>;
   return Object.fromEntries(Object.entries(value).flatMap(([key, child]) => (
-    /digest/iu.test(key) || key === 'instanceId' || key === 'totalByteSize'
-      ? [] : [[key, withoutDigestIdentity(child, key)]]
+    key === 'sourceDigest' || key === 'instanceId' || key === 'totalByteSize'
+      || (key === 'digest' && record.source === 'openapi')
+      ? [] : [[key, withoutByteIdentity(child, key)]]
   )));
 }
 
 function assertSemanticJsonEqual(label: string, first: string, second: string): void {
-  const left = withoutDigestIdentity(JSON.parse(fs.readFileSync(first, 'utf8')));
-  const right = withoutDigestIdentity(JSON.parse(fs.readFileSync(second, 'utf8')));
+  const left = withoutByteIdentity(JSON.parse(fs.readFileSync(first, 'utf8')));
+  const right = withoutByteIdentity(JSON.parse(fs.readFileSync(second, 'utf8')));
   if (JSON.stringify(left) !== JSON.stringify(right)) throw new Error(`${label} semantic output drifted`);
 }
 
