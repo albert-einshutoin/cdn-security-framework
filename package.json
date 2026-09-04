@@ -194,7 +194,7 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "c8": "^11.0.0",
-    "json-schema-to-typescript": "^15.0.4",
+    "json-schema-to-typescript": "^16.0.0",
     "vitest": "^4.1.7"
   }
 }
