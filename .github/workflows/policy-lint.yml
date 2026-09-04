@@ -284,35 +284,81 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
-  full-package-smoke-matrix:
-    if: github.event_name != 'pull_request'
+  full-release-matrix:
+    if: always() && github.event_name != 'pull_request'
     needs: full-validation
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      max-parallel: 2
-      matrix:
-        node-version: ['20.17.0', '22', '24']
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
-      - name: Set up Node.js
+      - name: Set up Node.js 20.17.0
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ matrix.node-version }}
+          node-version: '20.17.0'
           cache: 'npm'
 
-      - name: Install dependencies
+      - name: Install dependencies on Node.js 20.17.0
+        id: node20_install
+        continue-on-error: true
         run: npm ci
 
-      - name: Generated boundary
-        run: npm run test:generated-boundary
+      - name: Validate release surface on Node.js 20.17.0
+        if: steps.node20_install.outcome == 'success'
+        continue-on-error: true
+        run: >-
+          npm run test:release-matrix --
+          --output reports/release-matrix/release-matrix-20.17.0.json
 
-      - name: Documentation sync
-        run: npm run test:docs
+      - name: Set up Node.js 22
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '22'
+          cache: 'npm'
 
-      - name: API contract
-        run: npm run test:api-contract
+      - name: Install dependencies on Node.js 22
+        id: node22_install
+        continue-on-error: true
+        run: npm ci
 
-      - name: Packed install smoke
-        run: npm run test:package
+      - name: Validate release surface on Node.js 22
+        if: steps.node22_install.outcome == 'success'
+        continue-on-error: true
+        run: >-
+          npm run test:release-matrix --
+          --output reports/release-matrix/release-matrix-22.json
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: 'npm'
+
+      - name: Install dependencies on Node.js 24
+        id: node24_install
+        continue-on-error: true
+        run: npm ci
+
+      - name: Validate release surface on Node.js 24
+        if: steps.node24_install.outcome == 'success'
+        continue-on-error: true
+        run: >-
+          npm run test:release-matrix --
+          --output reports/release-matrix/release-matrix-24.json
+
+      - name: Compare matrix API, schema, and artifact evidence
+        if: always()
+        run: >-
+          npm run test:release-matrix-compare --
+          --input reports/release-matrix
+          --output reports/release-matrix-summary.json
+
+      - name: Upload release matrix evidence
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: release-matrix-evidence-${{ github.run_attempt }}
+          path: |
+            reports/release-matrix/
+            reports/release-matrix-summary.json
+          if-no-files-found: error
+          retention-days: 30

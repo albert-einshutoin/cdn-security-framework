@@ -317,6 +317,7 @@ Use the generated files in `dist/edge/` with Terraform, CDK, or your CDN console
 * **CI workflows**:
   * `.github/workflows/policy-lint.yml`: selective PR validation with required shadow comparison; exhaustive validation on `main`, `release/**`, manual, and daily runs
   * `.github/workflows/release-npm.yml`: tag-driven publish workflow
+  * [Release compatibility matrix](docs/release-matrix.md): Node 20.17.0 / 22 / 24 evidence and cross-version digest comparison
 * **Release by tag**:
   1. Bump `package.json` version (example: `1.0.1`)
   2. Commit and push to `main`

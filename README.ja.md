@@ -304,6 +304,7 @@ CloudFront Functions の static token gate は生成 artifact に焼き込まれ
 * **CI ワークフロー**:
   * `.github/workflows/policy-lint.yml`: PRの選択的検証と必須shadow比較、`main`・`release/**`・手動・日次の完全検証
   * `.github/workflows/release-npm.yml`: タグ起点の npm 公開ワークフロー
+  * [Release compatibility matrix](docs/release-matrix.ja.md): Node 20.17.0 / 22 / 24 の証拠と cross-version digest 比較
 * **タグで公開する手順**:
   1. `package.json` の version を更新（例: `1.0.1`）
   2. `main` へコミット/プッシュ
