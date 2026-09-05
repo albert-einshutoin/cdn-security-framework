@@ -15,7 +15,7 @@ required environment variables, and verification commands.
 ## Cognito JWT API
 
 **Use when:** A JSON API is protected by AWS Cognito RS256 access tokens.
-**Primary target:** AWS CloudFront + Lambda@Edge origin-request, or Cloudflare Workers.
+**Primary target:** Cloudflare Workers. AWS JWT/signed URL builds are rejected; see [migration guidance](./auth.md).
 **Required env:** `ORIGIN_SECRET` only if you also enable `origin.auth`.
 
 ```yaml
@@ -84,9 +84,9 @@ Commands:
 
 ```bash
 npm run lint:policy -- policy/security.yml
-npx cdn-security capabilities --policy policy/security.yml --target aws
-npx cdn-security readiness --policy policy/security.yml --target aws --strict
-npx cdn-security build --policy policy/security.yml --target aws --out-dir dist
+npx cdn-security capabilities --policy policy/security.yml --target cloudflare
+npx cdn-security readiness --policy policy/security.yml --target cloudflare --strict
+npx cdn-security build --policy policy/security.yml --target cloudflare --out-dir dist
 ```
 
 Replace the Cognito region, user pool ID, and `firewall.jwks.allowed_hosts`
@@ -244,7 +244,7 @@ control. Rotate it through your CDN/IaC secret flow and pair it with SSO.
 
 **Use when:** Private files are served from an origin path and links should expire
 without exposing a long-lived bearer token.
-**Primary target:** AWS Lambda@Edge origin-request or Cloudflare Workers.
+**Primary target:** Cloudflare Workers. AWS JWT/signed URL builds are rejected; see [migration guidance](./auth.md).
 **Required env:** `URL_SIGNING_SECRET`; `ORIGIN_SECRET` if origin auth is enabled.
 
 ```yaml
@@ -310,9 +310,9 @@ Commands:
 export URL_SIGNING_SECRET=replace-with-url-signing-secret
 export ORIGIN_SECRET=replace-with-origin-hmac-secret
 npm run lint:policy -- policy/security.yml
-npx cdn-security readiness --policy policy/security.yml --target aws --strict
-npx cdn-security build --policy policy/security.yml --target aws --out-dir dist
-npm run test:runtime
+npx cdn-security readiness --policy policy/security.yml --target cloudflare --strict
+npx cdn-security build --policy policy/security.yml --target cloudflare --out-dir dist
+node scripts/cloudflare-runtime-tests.js
 ```
 
 `nonce_param` forwards `X-Signed-URL-Nonce` to the origin. The origin must enforce

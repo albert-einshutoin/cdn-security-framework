@@ -71,7 +71,7 @@ Edge / WAF / Origin のどのレイヤーが担当するかを明確にします
 |------|-------------|--------------|
 | /admin, /docs, /swagger への未認証アクセス | 簡易トークンゲート (401) | 機密操作はアプリで認証 |
 
-**フレームワーク**: Edge の auth_gate（静的トークン）。強固な認証は Origin または Lambda@Edge（JWT 等）。
+**フレームワーク**: Edge の auth_gate（静的トークン）。JWTにはCloudflare Workersまたは独立したviewer-request認証を使用。AWS JWT/署名URLはcache hitでorigin-request検証が省略されるためbuildを拒否。
 
 ---
 
@@ -100,15 +100,14 @@ Edge / WAF / Origin のどのレイヤーが担当するかを明確にします
 | 脅威 | Edge の責務 | WAF / Origin |
 |------|-------------|--------------|
 | クラウドメタデータ（`169.254.169.254`）、ループバック、RFC1918、リンクローカルを指す悪意ある／誤った `jwks_url` | ビルド時に拒否、ランタイムで再検証 | — |
-| JWKS ホストの DNS 解決先がクラウドメタデータ、ループバック、RFC1918、リンクローカル IP | Lambda@Edge は custom lookup で解決先を拒否。Cloudflare は RS256 build で `firewall.jwks.allowed_hosts` を必須化 | — |
-| JWKS ホストから内部エンドポイントへの攻撃者制御リダイレクト | 3xx レスポンスを拒否（Workers: `redirect: 'error'`、Lambda@Edge: 明示的な 3xx 拒否） | — |
+| JWKS ホストの DNS 解決先がクラウドメタデータ、ループバック、RFC1918、リンクローカル IP | Cloudflare は RS256 build で `firewall.jwks.allowed_hosts` を必須化 | — |
+| JWKS ホストから内部エンドポイントへの攻撃者制御リダイレクト | 3xx レスポンスを拒否（Workers: `redirect: 'error'`） | — |
 | ポリシーに明示的な allowlist がある場合、範囲外の IdP ホスト | ビルド時に `firewall.jwks.allowed_hosts` で拒否。Cloudflare RS256 build では必須 | — |
 | 過大な JWKS document / 病的な key set | cache / parse 前に上限で拒否（body 256 KiB、100 keys） | — |
 
 **フレームワーク**:
 - ビルド時バリデータ（`validateJwksUrl`）が `https://` 必須、userinfo / loopback / RFC1918 / リンクローカル / IPv4-mapped IPv6 を拒否し、設定時は `firewall.jwks.allowed_hosts` メンバーシップを強制。Cloudflare RS256 build では allowlist が必須。
 - ランタイムの `fetchJwks` が URL を再チェックし、3xx レスポンスを拒否し、JWKS body / key 件数に上限をかける。
-- Lambda@Edge の JWKS fetch は custom DNS lookup を使い、loopback / private / link-local の解決先を拒否。
 - 運用推奨: 本番環境では `firewall.jwks.allowed_hosts` を必ず設定し IdP ホスト名を固定する。
 
 ---
@@ -162,7 +161,7 @@ Edge / WAF / Origin のどのレイヤーが担当するかを明確にします
 | 壊れた IdP をリクエスト毎に叩き続ける | Negative cache（`firewall.jwks.negative_cache_sec`、既定 60 秒）で失敗直後の再取得をスキップ | — |
 | IdP 側でキー回転済みなのにエッジが旧 JWKS を使い続ける | `kid` ミス時に一度だけ無効化＋再取得 | — |
 
-**フレームワーク**: AWS（`templates/aws/origin-request.js`）と Cloudflare（`templates/cloudflare/index.ts`）の両方で 3 ウィンドウすべてを実装済み。挙動マトリクスは `docs/auth.ja.md` を参照。
+**フレームワーク**: Cloudflareでは3ウィンドウすべてを実装済み。AWS JWTゲートはcache hitでorigin-request認証が省略されるため生成前に拒否。挙動マトリクスは `docs/auth.ja.md` を参照。
 
 ---
 

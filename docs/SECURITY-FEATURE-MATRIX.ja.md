@@ -43,8 +43,8 @@
 |------|------|------|
 | **Basic 認証** | ✅ 対応 | `routes[].auth_gate.type: basic_auth` と `credentials_env` で設定。viewer-request で検証。 |
 | **トークン認証** | ✅ 対応 | `routes[].auth_gate.type: static_token` と `header`, `token_env` でパス別トークンゲート。 |
-| **署名付き URL** | ✅ 対応 | `routes[].auth_gate.type: signed_url` と `algorithm`, `secret_env`, `expires_param`, `signature_param`。Lambda@Edge / Cloudflare Workers に対応。 |
-| **JWT 検証** | ✅ 対応 | `routes[].auth_gate.type: jwt` と `algorithm` (RS256/HS256), `jwks_url`, `issuer`, `audience`。Lambda@Edge / Cloudflare Workers に対応。 |
+| **署名付き URL** | ✅ 対応 | `routes[].auth_gate.type: signed_url` と `algorithm`, `secret_env`, `expires_param`, `signature_param`。Cloudflare Workers のみ対応。AWSではcache hit時にorigin-request認証が省略されるためbuildを拒否。 |
+| **JWT 検証** | ✅ 対応 | `routes[].auth_gate.type: jwt` と `algorithm` (RS256/HS256), `jwks_url`, `issuer`, `audience`。Cloudflare Workers のみ対応。AWSではcache hit時にorigin-request認証が省略されるためbuildを拒否。 |
 
 ---
 

@@ -195,7 +195,8 @@ describe('Unified contract text reporter', () => {
       maxOutputBytes: 1_300,
     });
 
-    expect(output).toContain('1 additional finding(s) omitted by maxFindings.');
+    expect(renderUnifiedContractDiffText(report, { maxFindings: 1 }))
+      .toContain('1 additional finding(s) omitted by maxFindings.');
     expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(1_300);
     expect(output).toContain('[output truncated');
   });
@@ -266,7 +267,8 @@ describe('Unified contract text reporter', () => {
       OpenAPI digest: <digest>
       Policy digest: <digest>
       Exceptions digest: none
-      Omitted/unknown comparisons: 6
+      Omitted/unknown comparisons: 7
+        policy.auth.route_gates:partial
         policy.request.content_type:unsupported
         policy.request.graphql_guard:warning-only
         policy.request.header_limits:partial
@@ -281,10 +283,11 @@ describe('Unified contract text reporter', () => {
       Comparison:
         status: partial
         evaluated findings: 0
-        not evaluated: 6 comparison(s); absence of findings is not proof of no drift
+        not evaluated: 7 comparison(s); absence of findings is not proof of no drift
       Capabilities:
         OpenAPI: complete (complete=4)
-        Policy: unsupported (partial=1 unsupported=3 supported=7 warning-only=2)
+        Policy: unsupported (partial=2 unsupported=3 supported=6 warning-only=2)
+          policy.auth.route_gates: partial (partial coverage)
           policy.request.content_type: unsupported (not evaluated)
           policy.request.graphql_guard: warning-only (warning-only)
           policy.request.header_limits: partial (partial coverage)
@@ -297,7 +300,7 @@ describe('Unified contract text reporter', () => {
         evaluated=0 (no findings)
         (none)
       Limitations:
-        6 comparison(s) were omitted or are unknown.
+        7 comparison(s) were omitted or are unknown.
       "
     `);
   });

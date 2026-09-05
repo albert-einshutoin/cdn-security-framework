@@ -97,6 +97,8 @@ function handler(event) {
   // Prevents a caching proxy/browser from reusing an authenticated response across
   // identities. This is intentionally broader than `adminCacheControl` which only
   // fired for the first matching admin route.
+  // These viewer-facing headers do not disable CloudFront's internal cache or
+  // cause origin-request authentication to execute on a cache hit.
   if (RESPONSE_CFG.forceVaryAuth && isAuthPath) {
     set(h, "Cache-Control", "no-store, no-cache, must-revalidate, private");
     set(h, "Pragma", "no-cache");

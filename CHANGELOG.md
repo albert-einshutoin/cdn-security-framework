@@ -12,7 +12,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Security
 
 - Enforce the CloudFront Functions 10 KiB code limit after optimization and stop uploading secret-bearing AWS edge code as a workflow artifact.
-- Bake Lambda@Edge HS256, signed-URL, and origin-auth credentials at build time because Lambda@Edge does not support custom environment variables.
+- Bake Lambda@Edge origin-auth credentials at build time because Lambda@Edge does not support custom environment variables.
+- **Breaking:** Reject AWS `jwt` and `signed_url` builds because CloudFront cache hits skip their origin-request verifier. Readiness and capability/Allowed Surface reports now reflect this restriction. Cloudflare auth and AWS static/basic auth remain supported; see [migration guidance](docs/auth.md#aws-authentication-support-and-migration).
 - Reject unsupported AWS CSP nonces; Cloudflare now passes a cryptographic nonce to the origin before rendering and bounds response-DLP body reads.
 
 ### Fixed

@@ -73,7 +73,7 @@ CI と同じ runtime / unit / drift / security-baseline チェックを実行し
 生成された **`dist/edge/`** 内のファイルを Terraform / CDK や CDN コンソールでデプロイします。
 
 - AWS: CloudFront Function / Lambda@Edge の設定で `dist/edge/viewer-request.js`（および viewer-response.js が生成されていればそれも）を参照。
-- Cloudflare: `dist/edge/cloudflare/index.ts` を Workers としてデプロイ。
+- Cloudflare: `dist/edge/cloudflare/index.ts` を Workers としてデプロイ。JWT・署名URLゲートはCloudflareのみ対応し、AWSのbuildは拒否します。[認証の移行](./auth.ja.md#awsの認証対応範囲と移行)も確認してください。
 
 ## 6. 動作確認
 

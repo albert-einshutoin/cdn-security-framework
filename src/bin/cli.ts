@@ -10,6 +10,7 @@ const fs = require('fs');
 const pkgRoot = path.resolve(__dirname, '..');
 const { defaultPolicyPath } = require(path.join(pkgRoot, 'scripts', 'lib', 'policy-io.js'));
 const { errorMessage } = require(path.join(pkgRoot, 'scripts', 'lib', 'errors.js'));
+const { getAwsAuthGateUnsupportedReason } = require(path.join(pkgRoot, 'scripts', 'lib', 'auth-gate-validation.js'));
 
 async function main() {
   const dynamicImport = new Function('specifier', 'return import(specifier)');
@@ -2250,12 +2251,12 @@ const CAPABILITY_MATRIX: CapabilityEntry[] = [
     policyPaths: ['routes[].auth_gate.type=jwt'],
     support: {
       cloudfront_functions: 'unsupported',
-      lambda_edge: 'supported',
+      lambda_edge: 'unsupported',
       cloudflare_workers: 'supported',
       terraform_waf: 'unsupported',
     },
-    deploySupport: { aws: 'supported', cloudflare: 'supported' },
-    notes: 'HS256/RS256 JWT gates run in Lambda@Edge for AWS and in Workers for Cloudflare.',
+    deploySupport: { aws: 'unsupported', cloudflare: 'supported' },
+    notes: getAwsAuthGateUnsupportedReason('jwt'),
     configured: (policy: any) => routeAuthConfigured(policy, ['jwt']),
   },
   {
@@ -2265,12 +2266,12 @@ const CAPABILITY_MATRIX: CapabilityEntry[] = [
     policyPaths: ['routes[].auth_gate.type=signed_url'],
     support: {
       cloudfront_functions: 'unsupported',
-      lambda_edge: 'supported',
+      lambda_edge: 'unsupported',
       cloudflare_workers: 'supported',
       terraform_waf: 'unsupported',
     },
-    deploySupport: { aws: 'supported', cloudflare: 'supported' },
-    notes: 'Signed URL gates run where HMAC verification and origin request mutation are available.',
+    deploySupport: { aws: 'unsupported', cloudflare: 'supported' },
+    notes: getAwsAuthGateUnsupportedReason('signed_url'),
     configured: (policy: any) => routeAuthConfigured(policy, ['signed_url']),
   },
   {
@@ -2901,6 +2902,17 @@ function evaluateReadiness(
   }
 
   if (target === 'aws') {
+    const authReason = (policy.routes || [])
+      .map((route: any) => getAwsAuthGateUnsupportedReason(route.auth_gate?.type))
+      .find((reason: string | undefined) => reason !== undefined);
+    if (authReason) {
+      findings.push(readinessFinding(
+        'fail',
+        'target.aws.auth_gate.cache_unsafe',
+        authReason,
+        'Use a supported target or independently enforced viewer-request authentication; keep protection enabled.'
+      ));
+    }
     if (responseHeaders.csp_nonce === true) {
       findings.push(readinessFinding(
         'fail',
@@ -3333,6 +3345,18 @@ program
       archetype = archetype || answers.archetype;
     }
 
+    function rejectUnsupportedAwsStarter(content: string) {
+      if (platform !== 'aws') return;
+      const policy = require('js-yaml').load(content);
+      for (const route of policy.routes || []) {
+        const reason = getAwsAuthGateUnsupportedReason(route.auth_gate?.type);
+        if (reason) {
+          console.error('[ERROR]', reason);
+          process.exit(1);
+        }
+      }
+    }
+
     if (guided) {
       if (platform && !['aws', 'cloudflare'].includes(platform)) {
         console.error('[ERROR] Invalid --platform. Use aws or cloudflare.');
@@ -3455,6 +3479,7 @@ program
         deployment: opts.deployment || answers.deployment || 'build-only',
         project: opts.project || answers.project || `guided-${appShape}`,
       });
+      rejectUnsupportedAwsStarter(content);
       const destSecurity = path.join(policyDir, 'security.yml');
       if (!opts.force && fs.existsSync(destSecurity)) {
         console.error('[ERROR] policy/security.yml already exists. Use --force to overwrite.');
@@ -3488,8 +3513,9 @@ program
       process.exit(1);
     }
 
-    fs.mkdirSync(destStarterDir, { recursive: true });
     const content = fs.readFileSync(srcProfile, 'utf8');
+    rejectUnsupportedAwsStarter(content);
+    fs.mkdirSync(destStarterDir, { recursive: true });
     fs.writeFileSync(destSecurity, withYamlLanguageServerHint(content, './schema.json'), 'utf8');
     fs.writeFileSync(destStarter, withYamlLanguageServerHint(content, '../schema.json'), 'utf8');
     writeWranglerConfig(cwd, platform, content);
