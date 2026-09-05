@@ -70,7 +70,7 @@ This document organizes threats that this Edge Security Framework is designed to
 |--------|---------------------|---------------|
 | Unauthenticated access to /admin, /docs, /swagger | Simple token gate (401) | App-level auth for sensitive actions |
 
-**Framework**: Edge auth_gate (static token). For strong auth, use Origin or Lambda@Edge (e.g. JWT).
+**Framework**: Edge auth_gate (static token). For JWT, use Cloudflare Workers or independently enforced viewer-request authentication. AWS JWT/signed URL builds are rejected because cache hits skip origin-request checks.
 
 ---
 
@@ -99,15 +99,14 @@ This document organizes threats that this Edge Security Framework is designed to
 | Threat | Edge responsibility | WAF / Origin |
 |--------|---------------------|---------------|
 | Malicious or accidental `jwks_url` pointing at cloud metadata (`169.254.169.254`), loopback, RFC1918, or link-local ranges | Reject at build time and re-validate at runtime | — |
-| JWKS hostname resolves to cloud metadata, loopback, RFC1918, or link-local IPs | Lambda@Edge rejects the DNS result via a custom lookup; Cloudflare requires `firewall.jwks.allowed_hosts` for RS256 builds | — |
-| Attacker-controlled redirect from JWKS host to internal endpoint | Refuse 3xx responses (`redirect: 'error'` in Workers / explicit 3xx rejection in Lambda@Edge) | — |
+| JWKS hostname resolves to cloud metadata, loopback, RFC1918, or link-local IPs | Cloudflare requires `firewall.jwks.allowed_hosts` for RS256 builds | — |
+| Attacker-controlled redirect from JWKS host to internal endpoint | Refuse 3xx responses (`redirect: 'error'` in Workers) | — |
 | Out-of-scope IdP host when policy has an explicit allowlist | Reject at build time via `firewall.jwks.allowed_hosts`; required for Cloudflare RS256 builds | — |
 | Oversized JWKS document or pathological key set | Reject before caching/parsing beyond bounded limits (256 KiB body, 100 keys) | — |
 
 **Framework**:
 - Build-time validator (`validateJwksUrl`) enforces `https://`, rejects userinfo, loopback, RFC1918, link-local, IPv4-mapped IPv6, and `firewall.jwks.allowed_hosts` membership when configured. Cloudflare RS256 builds require the allowlist.
 - Runtime `fetchJwks` re-checks the URL, refuses any 3xx response, and caps JWKS body and key count.
-- Lambda@Edge JWKS fetches use a custom DNS lookup and reject loopback, private, and link-local resolution targets.
 - Recommended operator practice: always set `firewall.jwks.allowed_hosts` in production to pin the exact IdP hostname(s).
 
 ---
@@ -161,7 +160,7 @@ This document organizes threats that this Edge Security Framework is designed to
 | Edge hammers a broken IdP on every request | Negative cache (`firewall.jwks.negative_cache_sec`, default 60s) skips re-fetch after a failure | — |
 | Key rotation: new `kid` at IdP but edge keeps using old cached JWKS | On `kid`-miss, invalidate + refetch once before rejecting | — |
 
-**Framework**: JWKS fetch in AWS (`templates/aws/origin-request.js`) and Cloudflare (`templates/cloudflare/index.ts`) implements all three windows. See `docs/auth.md` for the behaviour matrix.
+**Framework**: Cloudflare JWKS fetch implements all three windows. AWS JWT gates are rejected before generation because cache hits skip origin-request authentication. See `docs/auth.md` for the behaviour matrix.
 
 ---
 

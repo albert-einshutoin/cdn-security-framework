@@ -51,7 +51,7 @@ The mapping from policy to generated code is implemented in `scripts/compile.js`
 | `request.limits`      | `CFG.maxQueryLength` etc.| Same                | Same                 |
 | `request.block.*`     | `CFG.blockPathContains`, `CFG.blockPathRegexes`, `CFG.uaDenyContains` | Same | Same                 |
 | `request.normalize.drop_query_keys` | `CFG.dropQueryKeys` | Same                | `CFG.dropQueryKeys`  |
-| `routes[].auth_gate`  | `CFG.authGates` (static_token / Basic) | JWT / Signed URL gate checks | `CFG.authGates` (Static token / Basic / JWT / Signed URL) |
+| `routes[].auth_gate`  | `CFG.authGates` (static_token / Basic) | Unsupported (build rejected) | `CFG.authGates` (Static token / Basic / JWT / Signed URL) |
 | `response_headers`    | `viewer-response.js`     | Origin response     | Response header set  |
 | `origin.auth`         | —                        | Inject custom header or HMAC signature | Inject custom header or HMAC signature to upstream fetch |
 

@@ -145,26 +145,6 @@ describe('current runtime route semantics', () => {
       .headers['cache-control']).toBeUndefined();
   });
 
-  test('AWS associates duplicate-name JWT gates with their original route by order', () => {
-    const input = policy();
-    input.routes = [
-      {
-        name: 'duplicate',
-        match: { path_prefixes: ['/one'] },
-        auth_gate: { type: 'jwt', algorithm: 'HS256', secret_env: 'FIRST_TOKEN' },
-      },
-      {
-        name: 'duplicate',
-        match: { path_prefixes: ['/two'] },
-        auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://id.example/jwks' },
-      },
-    ];
-    const { origin } = compileAws(input);
-    expect(origin.match(/"algorithm":\s*"(?:HS256|RS256)"/g)?.map(
-      (entry) => entry.replace(/\s/g, ''),
-    )).toEqual(['"algorithm":"HS256"', '"algorithm":"RS256"']);
-  });
-
   test('preserves method casing because runtimes compare configured values exactly', () => {
     const input = policy();
     (input.request as Record<string, unknown>).allow_methods = ['get'];
@@ -240,7 +220,7 @@ describe('Allowed Surface Model v1', () => {
         kind: 'static_token',
         typeSource: 'explicit',
         matching: {
-          aws: 'static-and-basic-in-policy-order-then-jwt-then-signed-url',
+          aws: 'static-and-basic-in-policy-order',
           cloudflare: 'all-matching-rules-in-policy-order',
         },
         preAuthBypassMethods: [],
@@ -268,7 +248,7 @@ describe('Allowed Surface Model v1', () => {
     });
     expect(projected.orderedRules[5].auth).not.toHaveProperty('effectiveAlgorithm');
     expect(projected.orderedRules[6].auth.verifiability).toEqual({
-      aws: 'enforced',
+      aws: 'unsupported-configuration',
       cloudflare: 'unsupported-configuration',
     });
     expect(projected.targetCapabilities.aws).toContainEqual({

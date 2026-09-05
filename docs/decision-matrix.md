@@ -28,7 +28,7 @@ Use this matrix to decide whether a control belongs in **Edge** (CloudFront Func
 | Query key normalization (drop utm_*, etc.) | ✓ | — | Edge: cache hygiene. |
 | Missing User-Agent block | ✓ | — | Edge: one header check. |
 | Static token gate (/admin) | ✓ | — | Edge: one header. Strong auth → Origin/Lambda@Edge. |
-| JWT / OIDC validation | — | — | Lambda@Edge or Origin. Not in CloudFront Functions. |
+| JWT / OIDC validation | — | — | Cloudflare Workers, or independently enforced viewer-request authentication. AWS JWT gate builds are rejected; origin-only checks miss cache hits. |
 | Security header injection | ✓ | — | Edge: response rewrite. |
 | OWASP CRS / SQLi, XSS in body | — | ✓ | WAF managed rules. |
 | CAPTCHA / challenge | — | ✓ | WAF / Bot Management. |
@@ -42,6 +42,6 @@ Use this matrix to decide whether a control belongs in **Edge** (CloudFront Func
 
 * **Edge**: Normalization, coarse blocking, header injection, simple token gate. No state, no body, minimal latency.
 * **WAF**: Rate limit, OWASP, Bot, CAPTCHA, body inspection, stateful rules.
-* **Origin / Lambda@Edge**: Strong auth (JWT), business rules, dynamic config.
+* **Origin / Lambda@Edge**: Business rules and dynamic config. Protected content also requires authentication before any cache lookup; generated AWS JWT/signed URL gates are unsupported.
 
 When in doubt: if it needs **state** or **body** or **complex logic**, put it in WAF or Origin, not in Edge Functions.

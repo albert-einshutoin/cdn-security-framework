@@ -12,7 +12,8 @@
 ### Security
 
 - 最適化後の CloudFront Functions 10 KiB 制限を強制し、secret を含み得る AWS edge code を workflow artifact に upload しないよう変更。
-- Lambda@Edge がカスタム環境変数を使えないため、HS256・署名付き URL・origin auth の credential を build 時に埋め込むよう修正。
+- Lambda@Edge がカスタム環境変数を使えないため、origin auth の credential を build 時に埋め込むよう修正。
+- **破壊的変更:** CloudFrontのcache hitではorigin-request認証が省略されるため、AWSの `jwt` / `signed_url` buildを拒否。readiness・capability・Allowed Surfaceにも制限を反映。Cloudflare認証とAWSのstatic/basic認証は引き続き対応。[移行手順](docs/auth.ja.md#awsの認証対応範囲と移行)を参照。
 - AWS の未対応 CSP nonce を拒否し、Cloudflare は暗号学的 nonce を origin 描画前に渡すとともに response DLP の本文読取量を制限。
 
 ### Fixed

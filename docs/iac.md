@@ -68,6 +68,11 @@ resource "aws_cloudfront_distribution" "main" {
 
 If you generate `dist/edge/origin-request.js`, zip it and use `aws_lambda_function` with `filename` or `s3_*`, then attach to CloudFront origin request.
 
+
+AWS JWT/signed URL gates are rejected at build time. Associating an origin-request
+Lambda does not authenticate cache hits. This compiler does not configure or
+verify CloudFront cache behaviors; see [auth migration](./auth.md#aws-authentication-support-and-migration).
+
 ---
 
 ## Terraform: WAF (Infra)

@@ -1,5 +1,9 @@
 # Signed URL Hardening
 
+
+Supported target: **Cloudflare Workers**. AWS builds reject signed URL gates because
+origin-request verification is skipped on cache hits. See [auth support and migration](./auth.md#aws-authentication-support-and-migration).
+
 ## Purpose
 
 The `signed_url` auth gate grants time-bounded access to a protected resource by binding a URL path and its signed query parameters to an HMAC-SHA256 signature. Without additional constraints, a signed URL can be replayed against sibling paths under the same prefix, or re-used repeatedly until it expires. This document covers two framework-level mitigations:

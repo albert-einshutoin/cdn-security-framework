@@ -684,57 +684,19 @@ test('validateAuthGates accepts missing static_token env with placeholder flag',
   });
 });
 
-test('build emits edge files with JWT, Signed URL, and origin auth config', () => {
+test('AWS build emits edge files with origin authentication and no viewer JWT gates', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
   try {
-    const policy = {
-      version: 1,
-      project: 'unit-build',
-      defaults: { mode: 'enforce' },
-      request: { allow_methods: ['GET'] },
-      response_headers: { hsts: 'max-age=1' },
-      routes: [
-        {
-          name: 'api',
-          match: { path_prefixes: ['/api'] },
-          auth_gate: {
-            type: 'jwt',
-            algorithm: 'HS256',
-            secret_env: 'JWT_SECRET',
-            issuer: 'issuer',
-            audience: 'aud',
-          },
-        },
-        {
-          name: 'assets',
-          match: { path_prefixes: ['/assets'] },
-          auth_gate: {
-            type: 'signed_url',
-            secret_env: 'URL_SIGNING_SECRET',
-            expires_param: 'exp',
-            signature_param: 'sig',
-          },
-        },
-      ],
-      origin: {
-        auth: {
-          type: 'custom_header',
-          header: 'X-Origin-Verify',
-          secret_env: 'ORIGIN_SECRET',
-        },
-      },
-    };
-
-    const outputs = build(policy, {
-      outDir: tmpDir,
-      rootDir: path.join(__dirname, '..'),
-    });
-
+    const outputs = build({
+      version: 1, request: { allow_methods: ['GET'] }, response_headers: {},
+      origin: { auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'ORIGIN_SECRET' } },
+    }, { outDir: tmpDir, env: { ORIGIN_SECRET: 'synthetic-origin-secret' } });
     assert.strictEqual(outputs.length, 3);
-    const originCode = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.ok(originCode.includes('"algorithm":"HS256"'));
-    assert.ok(originCode.includes('"type":"signed_url"'));
-    assert.ok(/originAuth:\s*\{"type":"custom_header"/.test(originCode));
+    const code = fs.readFileSync(path.join(tmpDir, 'edge/origin-request.js'), 'utf8');
+    assert.doesNotMatch(code, /jwtGates|checkJwtGates|fetchJwks/);
+    assert.doesNotMatch(code, /signedUrlGates|checkSignedUrlGates/);
+    assert.ok(code.includes('synthetic-origin-secret'));
+    assert.doesNotMatch(code, /process\.env\[/);
   } finally {
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
@@ -810,59 +772,16 @@ test('build defaults trustForwardedFor to false and emits empty allowedHosts whe
   }
 });
 
-test('build emits JWT gate with allowed_algorithms defaulting to configured algorithm and clock_skew_sec=30', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
-  try {
-    const policy = {
-      version: 1,
-      defaults: { mode: 'enforce' },
-      request: { allow_methods: ['GET'] },
-      response_headers: {},
-      routes: [{
-        name: 'api',
-        match: { path_prefixes: ['/api'] },
-        auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://example.com/jwks.json' },
-      }],
-    };
-
-    build(policy, { outDir: tmpDir, rootDir: path.join(__dirname, '..') });
-    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.ok(code.includes('"allowed_algorithms":["RS256"]'), 'default allowed_algorithms missing');
-    assert.ok(code.includes('"clock_skew_sec":30'), 'default clock_skew_sec missing');
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+test('shared JWT config defaults verifier algorithm and skew for Cloudflare', () => {
+  const cfg = buildJwtGateConfig({ algorithm: 'RS256' }, { prefixes: ['/api'] });
+  assert.deepStrictEqual(cfg.allowed_algorithms, ['RS256']);
+  assert.strictEqual(cfg.clock_skew_sec, 30);
 });
 
-test('build honors explicit allowed_algorithms matching the configured algorithm and filters alg=none', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
-  try {
-    const policy = {
-      version: 1,
-      defaults: { mode: 'enforce' },
-      request: { allow_methods: ['GET'] },
-      response_headers: {},
-      routes: [{
-        name: 'api',
-        match: { path_prefixes: ['/api'] },
-        auth_gate: {
-          type: 'jwt',
-          algorithm: 'RS256',
-          jwks_url: 'https://example.com/jwks.json',
-          allowed_algorithms: ['RS256', 'none'],
-          clock_skew_sec: 120,
-        },
-      }],
-    };
-    build(policy, { outDir: tmpDir, rootDir: path.join(__dirname, '..') });
-    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.ok(code.includes('"allowed_algorithms":["RS256"]'),
-      'allowed_algorithms should filter "none" and retain only the configured algorithm; got:\n' +
-        code.match(/"allowed_algorithms":[^,}]+/)?.[0]);
-    assert.ok(code.includes('"clock_skew_sec":120'));
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+test('shared JWT config filters none and keeps the configured algorithm', () => {
+  const cfg = buildJwtGateConfig({ algorithm: 'RS256', allowed_algorithms: ['RS256', 'none'], clock_skew_sec: 120 }, {});
+  assert.deepStrictEqual(cfg.allowed_algorithms, ['RS256']);
+  assert.strictEqual(cfg.clock_skew_sec, 120);
 });
 
 test('validateAuthGates rejects allowed_algorithms that include an alg the verifier cannot validate', () => {
@@ -897,62 +816,14 @@ test('validateAuthGates rejects allowed_algorithms that include an alg the verif
     /allowed_algorithms contains .*HS256.* but the gate only runs the "RS256" verifier/);
 });
 
-test('build filters cross-alg entries from emitted allowed_algorithms even when validateAuthGates is bypassed', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
-  try {
-    // Simulate a future call path that forgot to run validateAuthGates first.
-    // The emission must still never advertise an alg the verifier can't handle.
-    const policy = {
-      version: 1,
-      defaults: { mode: 'enforce' },
-      request: { allow_methods: ['GET'] },
-      response_headers: {},
-      routes: [{
-        name: 'api',
-        match: { path_prefixes: ['/api'] },
-        auth_gate: {
-          type: 'jwt',
-          algorithm: 'RS256',
-          jwks_url: 'https://example.com/jwks.json',
-          allowed_algorithms: ['HS256', 'ES256', 'none'],
-        },
-      }],
-    };
-    build(policy, { outDir: tmpDir, rootDir: path.join(__dirname, '..') });
-    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.ok(code.includes('"allowed_algorithms":["RS256"]'),
-      'emission must fall back to configured algorithm when no entry matches; got:\n' +
-        code.match(/"allowed_algorithms":[^,}]+/)?.[0]);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+test('shared JWT config excludes cross-algorithm entries', () => {
+  const cfg = buildJwtGateConfig({ algorithm: 'RS256', allowed_algorithms: ['HS256', 'ES256', 'none'] }, {});
+  assert.deepStrictEqual(cfg.allowed_algorithms, ['RS256']);
 });
 
-test('build clamps clock_skew_sec to 0..600', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
-  try {
-    const policy = {
-      version: 1,
-      defaults: { mode: 'enforce' },
-      request: { allow_methods: ['GET'] },
-      response_headers: {},
-      routes: [{
-        name: 'api',
-        match: { path_prefixes: ['/api'] },
-        auth_gate: {
-          type: 'jwt',
-          algorithm: 'HS256',
-          secret_env: 'JWT_SECRET',
-          clock_skew_sec: 99999,
-        },
-      }],
-    };
-    build(policy, { outDir: tmpDir, rootDir: path.join(__dirname, '..') });
-    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.ok(code.includes('"clock_skew_sec":600'), 'clock_skew_sec should clamp to 600');
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+test('shared JWT config clamps clock_skew_sec to 0..600', () => {
+  assert.strictEqual(buildJwtGateConfig({ clock_skew_sec: 99999 }, {}).clock_skew_sec, 600);
+  assert.strictEqual(buildJwtGateConfig({ clock_skew_sec: -1 }, {}).clock_skew_sec, 0);
 });
 
 test('hasFailOnPermissiveFlag detects the flag', () => {
@@ -1226,46 +1097,6 @@ test('optimizeCloudFrontFunction keeps handler callable and enforces the 10 KiB 
   assert.deepStrictEqual(handler({ request: { uri: '/' } }), { uri: '/' });
 });
 
-test('AWS build embeds Lambda@Edge secrets instead of relying on unsupported process.env', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-aws-baked-secrets-'));
-  try {
-    const policy = {
-      version: 1,
-      request: { allow_methods: ['GET'] },
-      response_headers: { hsts: 'max-age=1' },
-      routes: [
-        {
-          name: 'api',
-          match: { path_prefixes: ['/api'] },
-          auth_gate: { type: 'jwt', algorithm: 'HS256', secret_env: 'JWT_SECRET' },
-        },
-        {
-          name: 'download',
-          match: { path_prefixes: ['/download'] },
-          auth_gate: { type: 'signed_url', secret_env: 'URL_SIGNING_SECRET' },
-        },
-      ],
-      origin: {
-        auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'ORIGIN_SECRET' },
-      },
-    };
-    build(policy, {
-      outDir: tmpDir,
-      env: {
-        JWT_SECRET: 'jwt-build-secret',
-        URL_SIGNING_SECRET: 'url-build-secret',
-        ORIGIN_SECRET: 'origin-build-secret',
-      },
-    });
-    const code = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.ok(code.includes('jwt-build-secret'));
-    assert.ok(code.includes('url-build-secret'));
-    assert.ok(code.includes('origin-build-secret'));
-    assert.doesNotMatch(code, /process\.env\[/);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
-});
 
 test('warnWeakAwsCspNonce stays silent when csp_nonce is disabled', () => {
   const captured: string[] = [];
@@ -1275,131 +1106,30 @@ test('warnWeakAwsCspNonce stays silent when csp_nonce is disabled', () => {
   assert.strictEqual(captured.length, 0);
 });
 
-test('build emits signed_url gate with exact_path and nonce_param fields', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-signed-'));
-  try {
-    const policy = {
-      version: 1,
-      request: { allow_methods: ['GET'] },
-      response_headers: {},
-      routes: [
-        {
-          name: 'one-time',
-          match: { path_prefixes: ['/api/download/report.pdf'] },
-          auth_gate: {
-            type: 'signed_url',
-            secret_env: 'URL_SIGNING_SECRET',
-            exact_path: true,
-            nonce_param: 'nonce',
-          },
-        },
-      ],
-    };
-    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
-    const origin = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.match(origin, /"exact_path":true/);
-    assert.match(origin, /"nonce_param":"nonce"/);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+test('shared signed URL config preserves exact path and nonce', () => {
+  const cfg = buildSignedUrlGateConfig({ exact_path: true, nonce_param: 'nonce' }, {});
+  assert.strictEqual(cfg.exact_path, true);
+  assert.strictEqual(cfg.nonce_param, 'nonce');
 });
 
-test('build defaults exact_path=false and nonce_param="" when unspecified', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-signed-def-'));
-  try {
-    const policy = {
-      version: 1,
-      request: { allow_methods: ['GET'] },
-      response_headers: {},
-      routes: [
-        {
-          name: 'legacy',
-          match: { path_prefixes: ['/assets'] },
-          auth_gate: { type: 'signed_url', secret_env: 'URL_SIGNING_SECRET' },
-        },
-      ],
-    };
-    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
-    const origin = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.match(origin, /"exact_path":false/);
-    assert.match(origin, /"nonce_param":""/);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+test('shared signed URL config defaults exact path and nonce', () => {
+  const cfg = buildSignedUrlGateConfig({}, {});
+  assert.strictEqual(cfg.exact_path, false);
+  assert.strictEqual(cfg.nonce_param, '');
 });
 
-test('build emits jwksStaleIfErrorSec and jwksNegativeCacheSec defaults', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-jwks-default-'));
-  try {
-    const policy = {
-      version: 1,
-      request: { allow_methods: ['GET'] },
-      response_headers: {},
-      routes: [
-        {
-          name: 'api',
-          match: { path_prefixes: ['/api'] },
-          auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://idp.example.com/jwks.json' },
-        },
-      ],
-    };
-    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
-    const origin = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.match(origin, /jwksStaleIfErrorSec:\s*3600/);
-    assert.match(origin, /jwksNegativeCacheSec:\s*60/);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+test('shared JWKS cache config defaults stale and negative windows', () => {
+  assert.deepStrictEqual(buildJwksCacheCfg({}), { staleIfErrorSec: 3600, negativeCacheSec: 60 });
 });
 
-test('build honors firewall.jwks.stale_if_error_sec and negative_cache_sec', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-jwks-custom-'));
-  try {
-    const policy = {
-      version: 1,
-      request: { allow_methods: ['GET'] },
-      response_headers: {},
-      firewall: { jwks: { stale_if_error_sec: 7200, negative_cache_sec: 120 } },
-      routes: [
-        {
-          name: 'api',
-          match: { path_prefixes: ['/api'] },
-          auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://idp.example.com/jwks.json' },
-        },
-      ],
-    };
-    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
-    const origin = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.match(origin, /jwksStaleIfErrorSec:\s*7200/);
-    assert.match(origin, /jwksNegativeCacheSec:\s*120/);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+test('shared JWKS cache config honors configured windows', () => {
+  assert.deepStrictEqual(buildJwksCacheCfg({ firewall: { jwks: { stale_if_error_sec: 7200, negative_cache_sec: 120 } } }),
+    { staleIfErrorSec: 7200, negativeCacheSec: 120 });
 });
 
-test('build clamps jwks.stale_if_error_sec and negative_cache_sec to bounds', () => {
-  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-jwks-clamp-'));
-  try {
-    const policy = {
-      version: 1,
-      request: { allow_methods: ['GET'] },
-      response_headers: {},
-      firewall: { jwks: { stale_if_error_sec: 999999, negative_cache_sec: 99999 } },
-      routes: [
-        {
-          name: 'api',
-          match: { path_prefixes: ['/api'] },
-          auth_gate: { type: 'jwt', algorithm: 'RS256', jwks_url: 'https://idp.example.com/jwks.json' },
-        },
-      ],
-    };
-    build(policy, { outDir: tmpDir, allowPlaceholderToken: true });
-    const origin = fs.readFileSync(path.join(tmpDir, 'edge', 'origin-request.js'), 'utf8');
-    assert.match(origin, /jwksStaleIfErrorSec:\s*86400/);
-    assert.match(origin, /jwksNegativeCacheSec:\s*600/);
-  } finally {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-  }
+test('shared JWKS cache config clamps windows', () => {
+  assert.deepStrictEqual(buildJwksCacheCfg({ firewall: { jwks: { stale_if_error_sec: 999999, negative_cache_sec: 99999 } } }),
+    { staleIfErrorSec: 86400, negativeCacheSec: 600 });
 });
 
 test('viewer-request uses fixed-pad constant-time compare (no length short-circuit)', () => {
@@ -1482,27 +1212,23 @@ test('response_headers: authProtectedPrefixes is union of every auth gate prefix
           name: 'api',
           match: { path_prefixes: ['/api'] },
           auth_gate: {
-            type: 'jwt', algorithm: 'RS256',
-            jwks_url: 'https://idp.example.com/jwks.json',
+            type: 'static_token', token_env: 'ADMIN_TOKEN',
           },
         },
         {
           name: 'dl',
           match: { path_prefixes: ['/download'] },
           auth_gate: {
-            type: 'signed_url', secret_env: 'URL_SIGNING_SECRET',
-            exact_path: true, nonce_param: 'nonce',
+            type: 'basic_auth', credentials_env: 'BASIC_AUTH_CREDS',
           },
         },
       ],
     };
-    process.env.ADMIN_TOKEN = 'test';
-    build(policy, { outDir: tmpDir });
+    build(policy, { outDir: tmpDir, env: { ADMIN_TOKEN: 'test', BASIC_AUTH_CREDS: 'dXNlcjpwYXNz' } });
     const resp = fs.readFileSync(path.join(tmpDir, 'edge', 'viewer-response.js'), 'utf8');
     assert.match(resp, /authProtectedPrefixes: \["\/admin","\/docs","\/api","\/download"\]/);
     assert.match(resp, /forceVaryAuth: true/);
   } finally {
-    delete process.env.ADMIN_TOKEN;
     fs.rmSync(tmpDir, { recursive: true, force: true });
   }
 });

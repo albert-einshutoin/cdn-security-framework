@@ -5,7 +5,7 @@ import {
   buildRequestCfgBase,
   buildResponseCfgBase,
 } from '../scripts/lib/edge-cfg';
-import { validateAuthGateStructure } from '../scripts/lib/auth-gate-validation';
+import { getAwsAuthGateUnsupportedReason, validateAuthGateStructure } from '../scripts/lib/auth-gate-validation';
 
 export type AllowedSurfaceTarget = 'aws' | 'cloudflare';
 export type AllowedCapabilityStatus = 'supported' | 'partial' | 'unsupported' | 'warning-only';
@@ -122,7 +122,7 @@ export interface AllowedRouteRuleV1 {
     kind: AuthKind;
     typeSource: 'absent' | 'explicit' | 'compiler-default';
     matching: {
-      aws: 'static-and-basic-in-policy-order-then-jwt-then-signed-url';
+      aws: 'static-and-basic-in-policy-order';
       cloudflare: 'all-matching-rules-in-policy-order';
     };
     exactPath: boolean;
@@ -172,7 +172,7 @@ const TARGET_CAPABILITIES: AllowedSurfaceModelV1['targetCapabilities'] = {
     { id: 'request.header_limits', status: 'partial' },
     { id: 'request.content_type', status: 'unsupported' },
     { id: 'request.path_normalization', status: 'supported' },
-    { id: 'auth.route_gates', status: 'supported' },
+    { id: 'auth.route_gates', status: 'partial' },
     { id: 'routes.response.cache_control', status: 'supported' },
     { id: 'response.security_headers', status: 'supported' },
     { id: 'response.csp_nonce', status: 'unsupported' },
@@ -269,7 +269,8 @@ function authVerifiability(
   const awsErrors = validateAuthGateStructure(policy, route);
   const cloudflareErrors = validateAuthGateStructure(policy, route, { requireJwksAllowedHosts: true });
   return {
-    aws: runtimeUnsupported || awsErrors.length > 0 ? 'unsupported-configuration' : 'enforced',
+    aws: getAwsAuthGateUnsupportedReason(kind) || runtimeUnsupported || awsErrors.length > 0
+      ? 'unsupported-configuration' : 'enforced',
     cloudflare: runtimeUnsupported || cloudflareErrors.length > 0
       ? 'unsupported-configuration'
       : 'enforced',
@@ -461,7 +462,7 @@ export function projectPolicyToAllowedSurface(
           kind: authKind,
           typeSource: typeSource(route),
           matching: {
-            aws: 'static-and-basic-in-policy-order-then-jwt-then-signed-url',
+            aws: 'static-and-basic-in-policy-order',
             cloudflare: 'all-matching-rules-in-policy-order',
           },
           exactPath: authKind === 'signed_url' && gate?.exact_path === true,
