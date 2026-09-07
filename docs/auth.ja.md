@@ -45,7 +45,7 @@ AWSのJWT/署名URL対応を再開するには、viewerごとの認証と配信�
 
 | ウィンドウ | デフォルト | 範囲 | 意味 |
 |---|---|---|---|
-| Fresh（フレッシュ） | 600 秒（AWS）/ `cache_ttl_sec`（Cloudflare） | — | フェッチせずキャッシュを返す |
+| Fresh（フレッシュ） | `cache_ttl_sec`（Cloudflare） | — | フェッチせずキャッシュを返す |
 | Stale-if-error（障害時スタレ） | 3600 秒 | 0..86400 | リフレッシュ失敗時、直近の正常キーを返し続ける |
 | Negative cache（陰性キャッシュ） | 60 秒 | 0..600 | リフレッシュ失敗時、このウィンドウ内は再取得しない |
 
@@ -65,7 +65,7 @@ Cloudflare Workers 向け build では、RS256 JWT ゲートがある場合
 解決先を検査できないため、コンパイラが JWKS ホストを build 時に固定する。
 
 JWKS レスポンスは parse / cache の前に 256 KiB、100 keys で上限をかける。
-RS256 では両 runtime とも `kid` 一致、`kty: RSA` 必須、かつ JWK の
+RS256 では Cloudflare Workers runtime が `kid` 一致、`kty: RSA` 必須、かつ JWK の
 `alg` が省略または `RS256` の key を選択する。矛盾する `alg` を持つ
 JWK は無視する。受け入れる token algorithm の権威は JWT header の
 algorithm allowlist のまま。
