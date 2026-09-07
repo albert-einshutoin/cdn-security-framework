@@ -16,7 +16,8 @@ required environment variables, and verification commands.
 
 **Use when:** A JSON API is protected by AWS Cognito RS256 access tokens.
 **Primary target:** Cloudflare Workers. AWS JWT/signed URL builds are rejected; see [migration guidance](./auth.md).
-**Required env:** `ORIGIN_SECRET` only if you also enable `origin.auth`.
+**Required env:** `CLOUDFLARE_LOGPUSH_DESTINATION`, plus `ORIGIN_SECRET` only if
+`origin.auth` is enabled.
 
 ```yaml
 version: 1
@@ -72,21 +73,20 @@ firewall:
     rate_limit: 1000
     managed_rules:
       - AWSManagedRulesCommonRuleSet
-      - AWSManagedRulesKnownBadInputsRuleSet
-      - AWSManagedRulesIPReputationList
     logging:
       enabled: true
-      destination_arn_env: WAF_LOG_DESTINATION_ARN
+      destination_arn_env: CLOUDFLARE_LOGPUSH_DESTINATION
       redacted_fields: [authorization, cookie]
 ```
 
 Commands:
 
 ```bash
+export CLOUDFLARE_LOGPUSH_DESTINATION=s3://replace-with-logpush-destination
 npm run lint:policy -- policy/security.yml
 npx cdn-security capabilities --policy policy/security.yml --target cloudflare
 npx cdn-security readiness --policy policy/security.yml --target cloudflare --strict
-npx cdn-security build --policy policy/security.yml --target cloudflare --out-dir dist
+npx cdn-security build --policy policy/security.yml --target cloudflare --out-dir dist --fail-on-waf-approximation
 ```
 
 Replace the Cognito region, user pool ID, and `firewall.jwks.allowed_hosts`
@@ -245,7 +245,8 @@ control. Rotate it through your CDN/IaC secret flow and pair it with SSO.
 **Use when:** Private files are served from an origin path and links should expire
 without exposing a long-lived bearer token.
 **Primary target:** Cloudflare Workers. AWS JWT/signed URL builds are rejected; see [migration guidance](./auth.md).
-**Required env:** `URL_SIGNING_SECRET`; `ORIGIN_SECRET` if origin auth is enabled.
+**Required env:** `URL_SIGNING_SECRET`, `CLOUDFLARE_LOGPUSH_DESTINATION`; plus
+`ORIGIN_SECRET` if origin auth is enabled.
 
 ```yaml
 version: 1
@@ -301,7 +302,10 @@ firewall:
     rate_limit: 1000
     managed_rules:
       - AWSManagedRulesCommonRuleSet
-      - AWSManagedRulesKnownBadInputsRuleSet
+    logging:
+      enabled: true
+      destination_arn_env: CLOUDFLARE_LOGPUSH_DESTINATION
+      redacted_fields: [authorization, cookie]
 ```
 
 Commands:
@@ -309,9 +313,10 @@ Commands:
 ```bash
 export URL_SIGNING_SECRET=replace-with-url-signing-secret
 export ORIGIN_SECRET=replace-with-origin-hmac-secret
+export CLOUDFLARE_LOGPUSH_DESTINATION=s3://replace-with-logpush-destination
 npm run lint:policy -- policy/security.yml
 npx cdn-security readiness --policy policy/security.yml --target cloudflare --strict
-npx cdn-security build --policy policy/security.yml --target cloudflare --out-dir dist
+npx cdn-security build --policy policy/security.yml --target cloudflare --out-dir dist --fail-on-waf-approximation
 node scripts/cloudflare-runtime-tests.js
 ```
 
