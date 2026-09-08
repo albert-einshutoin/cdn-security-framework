@@ -14,8 +14,9 @@ target 前提、認証方式、必要な環境変数、検証コマンドまで�
 ## Cognito JWT API
 
 **用途:** AWS Cognito の RS256 access token で JSON API を保護する。
-**主 target:** AWS CloudFront + Lambda@Edge origin-request、または Cloudflare Workers。
-**必要 env:** `origin.auth` も有効化する場合のみ `ORIGIN_SECRET`。
+**主 target:** Cloudflare Workers。AWS JWT/署名付きURLのビルドは拒否されます。[移行手順](./auth.ja.md)を参照してください。
+**必要 env:** `CLOUDFLARE_LOGPUSH_DESTINATION`。`origin.auth` も有効化する場合は
+`ORIGIN_SECRET` も必要です。
 
 ```yaml
 version: 1
@@ -71,21 +72,20 @@ firewall:
     rate_limit: 1000
     managed_rules:
       - AWSManagedRulesCommonRuleSet
-      - AWSManagedRulesKnownBadInputsRuleSet
-      - AWSManagedRulesIPReputationList
     logging:
       enabled: true
-      destination_arn_env: WAF_LOG_DESTINATION_ARN
+      destination_arn_env: CLOUDFLARE_LOGPUSH_DESTINATION
       redacted_fields: [authorization, cookie]
 ```
 
 コマンド:
 
 ```bash
+export CLOUDFLARE_LOGPUSH_DESTINATION=s3://replace-with-logpush-destination
 npm run lint:policy -- policy/security.yml
-npx cdn-security capabilities --policy policy/security.yml --target aws
-npx cdn-security readiness --policy policy/security.yml --target aws --strict
-npx cdn-security build --policy policy/security.yml --target aws --out-dir dist
+npx cdn-security capabilities --policy policy/security.yml --target cloudflare
+npx cdn-security readiness --policy policy/security.yml --target cloudflare --strict
+npx cdn-security build --policy policy/security.yml --target cloudflare --out-dir dist --fail-on-waf-approximation
 ```
 
 Cognito の region、user pool ID、`firewall.jwks.allowed_hosts` を必ず
@@ -242,8 +242,9 @@ CDN/IaC の secret flow で rotate し、SSO と併用してください。
 ## Signed Download URLs
 
 **用途:** private file を origin path から配信し、長期 bearer token ではなく期限付きリンクで保護する。
-**主 target:** AWS Lambda@Edge origin-request または Cloudflare Workers。
-**必要 env:** `URL_SIGNING_SECRET`。origin auth を有効化する場合は `ORIGIN_SECRET`。
+**主 target:** Cloudflare Workers。AWS JWT/署名付きURLのビルドは拒否されます。[移行手順](./auth.ja.md)を参照してください。
+**必要 env:** `URL_SIGNING_SECRET`、`CLOUDFLARE_LOGPUSH_DESTINATION`。origin auth を
+有効化する場合は `ORIGIN_SECRET` も必要です。
 
 ```yaml
 version: 1
@@ -299,7 +300,10 @@ firewall:
     rate_limit: 1000
     managed_rules:
       - AWSManagedRulesCommonRuleSet
-      - AWSManagedRulesKnownBadInputsRuleSet
+    logging:
+      enabled: true
+      destination_arn_env: CLOUDFLARE_LOGPUSH_DESTINATION
+      redacted_fields: [authorization, cookie]
 ```
 
 コマンド:
@@ -307,10 +311,11 @@ firewall:
 ```bash
 export URL_SIGNING_SECRET=replace-with-url-signing-secret
 export ORIGIN_SECRET=replace-with-origin-hmac-secret
+export CLOUDFLARE_LOGPUSH_DESTINATION=s3://replace-with-logpush-destination
 npm run lint:policy -- policy/security.yml
-npx cdn-security readiness --policy policy/security.yml --target aws --strict
-npx cdn-security build --policy policy/security.yml --target aws --out-dir dist
-npm run test:runtime
+npx cdn-security readiness --policy policy/security.yml --target cloudflare --strict
+npx cdn-security build --policy policy/security.yml --target cloudflare --out-dir dist --fail-on-waf-approximation
+node scripts/cloudflare-runtime-tests.js
 ```
 
 `nonce_param` は `X-Signed-URL-Nonce` を origin に転送します。単回利用の保証は

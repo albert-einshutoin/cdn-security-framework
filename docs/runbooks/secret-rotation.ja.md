@@ -6,7 +6,7 @@
 
 | 環境変数 | 用途 | ローテーション区分 |
 | --- | --- | --- |
-| `JWT_SECRET` | HS256 JWT ゲート | AWS はコールド、Cloudflare は協調切替 |
+| `JWT_SECRET` | HS256 JWT ゲート | Cloudflareのみ、協調切替 |
 | `JWKS_URL` / kid | RS256 JWT ゲート | ホット（新 kid を公開 → 待機 → 旧 kid 撤去） |
 | `URL_SIGNING_SECRET` | 署名付き URL ゲート | コールド（発行済み URL は無効化） |
 | `EDGE_ADMIN_TOKEN` | `static_token` ゲート | コールド（ビルド時に `dist/edge/` へ焼き付け） |
@@ -28,7 +28,7 @@ HS256 は対称共有鍵です。発行側と検証側が揃って切替える�
    ```
    例：`JWT_SECRET_V2`。
 3. HS256 は単一 secret 受理のため、**協調切替時間を決めます**。漏洩でなければ V1 の長期 token 発行を止め、有効期限切れを待ちます。
-4. `JWT_SECRET` の値と発行側を V2 に切替え、AWS は `origin-request.js` を再ビルド・再デプロイします。Cloudflare も発行側と Worker secret を協調して切替えます。
+4. `JWT_SECRET` の値と発行側を V2 に切替え、Cloudflare Worker secretを協調して切替えます。AWSのJWT buildは未対応です。[認証の移行](../auth.ja.md#awsの認証対応範囲と移行)を参照してください。
 5. V2 canary を直ちに確認し、伝搬後に V1 を撤去します。重複受理が必須なら事前に RS256/JWKS へ移行してください。
 
 ### 検証
@@ -62,7 +62,7 @@ RS256 は非対称鍵で、`kid` クレームと JWKS エンドポイントを�
 ### 手順
 1. **猶予ウィンドウ**を `max(signed_url.default_ttl, メール配信ウィンドウ)` で決定。72 時間が一般的な下限です。
 2. 漏洩でなければ V1 URL の新規発行を止め、猶予ウィンドウ分待機します。
-3. `URL_SIGNING_SECRET` と発行側を切替え、AWS は再ビルド・再デプロイ、Cloudflare は Worker secret を同じ切替時間内に更新します。
+3. `URL_SIGNING_SECRET` と発行側を切替え、Cloudflare Worker secretを同じ切替時間内に更新します。AWSの署名URL buildは未対応です。
 4. 新規 URL を検証後、旧値を撤去します。現在は旧新 signed-URL secret の同時受理に未対応です。
 
 ### 漏洩時の強制切替

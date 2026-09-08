@@ -1,5 +1,12 @@
 import { normalizeStringList } from './value-normalize';
 
+export function getAwsAuthGateUnsupportedReason(authType: unknown): string | undefined {
+  if (authType !== 'jwt' && authType !== 'signed_url') return undefined;
+  return 'AWS JWT and signed_url auth gates are unsupported: origin-request authentication is skipped on CloudFront cache hits. '
+    + 'Viewer-response no-store headers cannot prevent this. Use Cloudflare Workers or an independently enforced viewer-request authentication layer; '
+    + 'do not remove authentication merely to make the build pass.';
+}
+
 const JWKS_DISALLOWED_HOSTNAMES = new Set([
   'localhost',
   'ip6-localhost',

@@ -24,9 +24,6 @@ const {
   buildAuthGateBase,
   buildRequestCfgBase,
   buildResponseCfgBase,
-  buildJwksCacheCfg,
-  buildJwtGateConfig,
-  buildSignedUrlGateConfig,
 } = require('./edge-cfg');
 const {
   parseArgs: parseArgsIo,
@@ -44,6 +41,7 @@ const {
 const {
   validateAuthGateStructure,
   validateJwksUrl,
+  getAwsAuthGateUnsupportedReason,
 } = require('./auth-gate-validation') as typeof import('./auth-gate-validation');
 
 const repoRoot = path.join(__dirname, '..', '..');
@@ -381,6 +379,16 @@ function warnUnsupportedGraphqlGuard(policy: any, target: string, options: any =
 }
 
 function build(policy: any, options: any = {}) {
+  // This emitter does not own CloudFront cache behaviors. Refuse origin-only
+  // auth before any writes, including calls that bypass CLI validation.
+  const authErrors: string[] = [];
+  for (const [index, route] of (policy.routes || []).entries()) {
+    const reason = getAwsAuthGateUnsupportedReason(route.auth_gate?.type);
+    if (reason) authErrors.push(`routes[${index}].auth_gate: ${reason}`);
+  }
+  if (authErrors.length > 0) {
+    throw new PolicyValidationError(authErrors.join('\n'), authErrors);
+  }
   const rootDir = options.rootDir || repoRoot;
   const outDir = options.outDir || path.join(rootDir, 'dist');
   const env = options.env || process.env;
@@ -461,34 +469,10 @@ function build(policy: any, options: any = {}) {
   const outPathResponse = path.join(distDir, 'viewer-response.js');
   fs.writeFileSync(outPathResponse, codeResponse, 'utf8');
 
-  const authRoutes = (policy.routes || []).filter((route: any) => route.auth_gate);
-  const jwtRoutes = authRoutes.filter((route: any) => (route.auth_gate.type || 'static_token') === 'jwt');
-  const signedUrlRoutes = authRoutes.filter((route: any) => route.auth_gate.type === 'signed_url');
-  const jwtGates = authGates.filter((g) => g.type === 'jwt').map((g, index) => {
-    const route = jwtRoutes[index];
-    const gate = route?.auth_gate || {};
-    const compiled = buildJwtGateConfig(gate, g);
-    return {
-      ...compiled,
-      // Lambda@Edge does not support custom environment variables. Secrets
-      // therefore become deployment credentials and must be rebuilt/rotated
-      // with the function artifact.
-      secret: gate.secret_env ? (env[gate.secret_env] || '') : '',
-    };
-  });
-
-  const signedUrlGates = authGates.filter((g) => g.type === 'signed_url').map((g, index) => {
-    const route = signedUrlRoutes[index];
-    const gate = route?.auth_gate || {};
-    const compiled = buildSignedUrlGateConfig(gate, g);
-    return { ...compiled, secret: gate.secret_env ? (env[gate.secret_env] || '') : '' };
-  });
-
   const rawOriginAuth = (policy.origin || {}).auth || null;
   const originAuth = rawOriginAuth
     ? { ...rawOriginAuth, secret: rawOriginAuth.secret_env ? (env[rawOriginAuth.secret_env] || '') : '' }
     : null;
-  const jwksCache = buildJwksCacheCfg(policy);
   const defaults = policy.defaults || {};
   const trustForwardedFor = requestBase.trustForwardedFor;
 
@@ -497,11 +481,7 @@ function build(policy: any, options: any = {}) {
     mode: defaults.mode || 'enforce',
     maxHeaderSize: requestBase.maxHeaderSize,
     trustForwardedFor,
-    jwtGates,
-    signedUrlGates,
     originAuth,
-    jwksStaleIfErrorSec: jwksCache.staleIfErrorSec,
-    jwksNegativeCacheSec: jwksCache.negativeCacheSec,
     obs: requestBase.obs,
   });
 

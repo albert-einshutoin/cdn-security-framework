@@ -915,20 +915,20 @@ test('CLI authoring DX: init --guided non-interactive applies defaults without o
       cli, 'init',
       '--guided',
       '--app-shape', 'rest-api',
-      '--auth', 'jwt',
+      '--auth', 'static_token',
       '--waf', 'strict',
       '--force',
     ], {
       cwd: tmp,
       encoding: 'utf8',
-      env: process.env,
+      env: { ...process.env, EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy' },
       input: '',
     });
     assert.strictEqual(result.status, 0, `guided init defaults failed: ${result.stderr}`);
     const raw = fs.readFileSync(path.join(tmp, 'policy', 'security.yml'), 'utf8');
     const policy = require('js-yaml').load(raw);
     assert.strictEqual(policy.project, 'guided-rest-api');
-    assert.strictEqual(policy.metadata.description, 'Guided setup: rest-api on aws, auth=jwt, deployment=build-only.');
+    assert.strictEqual(policy.metadata.description, 'Guided setup: rest-api on aws, auth=static_token, deployment=build-only.');
     assert.deepStrictEqual(policy.routes[0].match.path_prefixes, ['/api/']);
     assert.deepStrictEqual(policy.response_headers.cors.allow_origins, ['https://app.example.com']);
     assert.deepStrictEqual(policy.firewall.waf.managed_rules, [
@@ -954,7 +954,7 @@ test('CLI authoring DX: init --guided non-interactive applies defaults without o
     ], {
       cwd: tmp,
       encoding: 'utf8',
-      env: process.env,
+      env: { ...process.env, EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy' },
     });
     assert.strictEqual(readiness.status, 0, `guided default policy readiness failed: ${readiness.stderr}`);
   } finally {
@@ -1504,7 +1504,7 @@ test('CLI authoring DX: WAF recommendations infer all built-in archetype shapes'
         ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
       }),
     });
-    assert.strictEqual(result.status, 0, `${shape} readiness failed: ${result.stderr}`);
+    assert.strictEqual(result.status, shape === 'rest-api' ? 1 : 0, `${shape} readiness failed: ${result.stderr}`);
     const report = JSON.parse(result.stdout);
     assert.strictEqual(report.wafRecommendations.inferredAppShape, shape);
     assert.strictEqual(report.wafRecommendations.recommendations.length, 1);

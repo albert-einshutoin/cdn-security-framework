@@ -116,7 +116,7 @@
           "exactPath": false,
           "kind": "static_token",
           "matching": {
-            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "aws": "static-and-basic-in-policy-order",
             "cloudflare": "all-matching-rules-in-policy-order"
           },
           "preAuthBypassCondition": "none",
@@ -214,7 +214,7 @@
         },
         {
           "id": "auth.route_gates",
-          "status": "supported"
+          "status": "partial"
         },
         {
           "id": "routes.response.cache_control",
@@ -434,7 +434,7 @@
         },
         {
           "id": "auth.route_gates",
-          "status": "supported"
+          "status": "partial"
         },
         {
           "id": "routes.response.cache_control",
@@ -640,7 +640,7 @@
           "exactPath": false,
           "kind": "jwt",
           "matching": {
-            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "aws": "static-and-basic-in-policy-order",
             "cloudflare": "all-matching-rules-in-policy-order"
           },
           "preAuthBypassCondition": "allowed-cors-origin-preflight",
@@ -649,7 +649,7 @@
           ],
           "typeSource": "explicit",
           "verifiability": {
-            "aws": "enforced",
+            "aws": "unsupported-configuration",
             "cloudflare": "enforced"
           }
         },
@@ -748,7 +748,7 @@
         },
         {
           "id": "auth.route_gates",
-          "status": "supported"
+          "status": "partial"
         },
         {
           "id": "routes.response.cache_control",
@@ -960,7 +960,7 @@
         },
         {
           "id": "auth.route_gates",
-          "status": "supported"
+          "status": "partial"
         },
         {
           "id": "routes.response.cache_control",
@@ -1160,7 +1160,7 @@
           "exactPath": false,
           "kind": "static_token",
           "matching": {
-            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "aws": "static-and-basic-in-policy-order",
             "cloudflare": "all-matching-rules-in-policy-order"
           },
           "preAuthBypassCondition": "none",
@@ -1262,7 +1262,7 @@
         },
         {
           "id": "auth.route_gates",
-          "status": "supported"
+          "status": "partial"
         },
         {
           "id": "routes.response.cache_control",
@@ -1462,7 +1462,7 @@
           "exactPath": false,
           "kind": "static_token",
           "matching": {
-            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "aws": "static-and-basic-in-policy-order",
             "cloudflare": "all-matching-rules-in-policy-order"
           },
           "preAuthBypassCondition": "none",
@@ -1564,7 +1564,7 @@
         },
         {
           "id": "auth.route_gates",
-          "status": "supported"
+          "status": "partial"
         },
         {
           "id": "routes.response.cache_control",
@@ -1772,7 +1772,7 @@
           "exactPath": false,
           "kind": "static_token",
           "matching": {
-            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "aws": "static-and-basic-in-policy-order",
             "cloudflare": "all-matching-rules-in-policy-order"
           },
           "preAuthBypassCondition": "none",
@@ -1882,7 +1882,7 @@
         },
         {
           "id": "auth.route_gates",
-          "status": "supported"
+          "status": "partial"
         },
         {
           "id": "routes.response.cache_control",
@@ -2086,7 +2086,7 @@
           "exactPath": false,
           "kind": "static_token",
           "matching": {
-            "aws": "static-and-basic-in-policy-order-then-jwt-then-signed-url",
+            "aws": "static-and-basic-in-policy-order",
             "cloudflare": "all-matching-rules-in-policy-order"
           },
           "preAuthBypassCondition": "none",
@@ -2192,7 +2192,7 @@
         },
         {
           "id": "auth.route_gates",
-          "status": "supported"
+          "status": "partial"
         },
         {
           "id": "routes.response.cache_control",

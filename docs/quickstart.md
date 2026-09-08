@@ -73,7 +73,7 @@ Runs runtime, unit, drift, and security-baseline checks used by CI.
 
 Use the generated files in **`dist/edge/`** with Terraform, CDK, or your CDN console:
 
-- **AWS**: Reference `dist/edge/viewer-request.js` and `dist/edge/viewer-response.js` in your CloudFront Function config. Reference `dist/edge/origin-request.js` in your Lambda@Edge config (required for JWT and Signed URL auth gates).
+- **AWS**: Reference `dist/edge/viewer-request.js` and `dist/edge/viewer-response.js` in your CloudFront Function config. Reference `dist/edge/origin-request.js` in your Lambda@Edge config (for origin access-control headers; JWT and signed URL gates are Cloudflare-only).
 - **Cloudflare**: Deploy `dist/edge/cloudflare/index.ts` with Wrangler (`wrangler deploy`).
 
 ## 6. Verify behavior

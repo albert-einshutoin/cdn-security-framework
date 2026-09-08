@@ -4,6 +4,33 @@ This document covers runtime behaviour of the four auth-gate types
 (`static_token`, `basic_auth`, `jwt`, `signed_url`) with focus on
 cache lifecycle and timing-oracle resistance.
 
+
+## AWS authentication support and migration
+
+AWS builds reject `jwt` and `signed_url` gates, including in monitor mode and with
+`--allow-placeholder-token`. Their origin-request verifier is skipped on
+CloudFront cache hits. Viewer-response `no-store`/`Vary` headers cannot disable
+CloudFront's internal cache; a cache policy with positive minimum TTL can even
+override origin `no-store`. The compiler does not own or verify distribution
+cache behaviors, so an operator assertion cannot make this configuration safe.
+
+Use Cloudflare Workers for these gates, or migrate to an independently enforced
+viewer-request authentication layer before removing the old gate. Keep protected
+traffic blocked during migration and invalidate previously cached protected
+responses after correcting the deployed configuration. Rebuilding alone does not
+repair an existing deployment. Do not remove authentication just to pass build.
+AWS `static_token`/`basic_auth` still authenticate before cache lookup; origin
+authentication headers remain available for origin access control.
+
+This is a breaking restriction for the next 2.0 release. Package/schema versions
+are not changed by this fix. Restoring AWS JWT/signed URL support requires a
+verified per-viewer authentication/deployment contract; there is no bypass flag.
+The AWS JWT/JWKS and signed URL implementations have been removed from the generated origin-request template.
+The JWT/JWKS sections below describe Cloudflare Workers.
+
+See [AWS trigger order](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-cloudfront-trigger-events.html)
+and [cache policies](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-cache-policies.html).
+
 ## Admin Token / Basic Auth Comparison
 
 Both `static_token` and `basic_auth` gates verify the presented credential
@@ -28,7 +55,7 @@ cache windows are maintained:
 
 | Window | Default | Bound | Meaning |
 |---|---|---|---|
-| Fresh | 600 s (AWS) / `cache_ttl_sec` (Cloudflare) | — | Serve from cache without fetching |
+| Fresh | `cache_ttl_sec` (Cloudflare) | — | Serve from cache without fetching |
 | Stale-if-error | 3600 s | 0..86400 | After refresh fails, keep serving last-known keys |
 | Negative cache | 60 s | 0..600 | After refresh fails, skip re-fetching for this window |
 
@@ -45,12 +72,10 @@ firewall:
 
 For Cloudflare Worker builds, `firewall.jwks.allowed_hosts` is required when
 any RS256 JWT gate is configured. Workers cannot inspect DNS resolution targets
-before `fetch`, so the compiler pins JWKS hosts at build time. Lambda@Edge also
-uses the allowlist when present and additionally rejects DNS-resolved JWKS IPs
-in loopback, private, or link-local ranges at runtime.
+before `fetch`, so the compiler pins JWKS hosts at build time.
 
 JWKS responses are capped at 256 KiB and 100 keys before parsing/caching.
-For RS256, both runtimes select JWKs by matching `kid`, requiring
+For RS256, the Cloudflare Workers runtime selects JWKs by matching `kid`, requiring
 `kty: RSA`, and accepting either an omitted `alg` field or `alg: RS256`.
 JWKs with a conflicting `alg` are ignored; the JWT header algorithm allowlist
 remains the authority for accepted token algorithms.

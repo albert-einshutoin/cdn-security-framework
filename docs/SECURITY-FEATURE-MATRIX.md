@@ -41,8 +41,8 @@ This document maps **which security-related YAML settings are supported** by cat
 |---------|--------|-------|
 | **Basic auth** | Supported | `routes[].auth_gate.type: basic_auth` with `credentials_env`. Edge template in viewer-request. |
 | **Token auth** | Supported | `routes[].auth_gate.type: static_token` with `header` and `token_env` for path-based token gate. |
-| **Signed URL** | Supported | `routes[].auth_gate.type: signed_url` with `algorithm`, `secret_env`, `expires_param`, `signature_param`. Supported on Lambda@Edge and Cloudflare Workers. |
-| **JWT validation** | Supported | `routes[].auth_gate.type: jwt` with `algorithm` (RS256/HS256), `jwks_url`, `issuer`, `audience`. Supported on Lambda@Edge and Cloudflare Workers. |
+| **Signed URL** | Supported | `routes[].auth_gate.type: signed_url` with `algorithm`, `secret_env`, `expires_param`, `signature_param`. Cloudflare Workers only; AWS builds reject this gate because cache hits skip origin-request authentication. |
+| **JWT validation** | Supported | `routes[].auth_gate.type: jwt` with `algorithm` (RS256/HS256), `jwks_url`, `issuer`, `audience`. Cloudflare Workers only; AWS builds reject this gate because cache hits skip origin-request authentication. |
 
 ---
 

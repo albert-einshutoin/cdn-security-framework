@@ -3,7 +3,8 @@
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const { execFileSync } = require('child_process');
+const { execFileSync, spawnSync } = require('child_process');
+const assert = require('assert');
 
 const repoRoot = path.join(__dirname, '..');
 
@@ -44,6 +45,7 @@ const scenarios = [
   },
   {
     name: 'archetype:rest-api',
+    awsUnsupported: true,
     policyPath: path.join(repoRoot, 'policy', 'archetypes', 'rest-api.yml'),
     goldenDir: path.join(repoRoot, 'tests', 'golden', 'archetypes', 'rest-api'),
   },
@@ -63,9 +65,10 @@ type DriftScenario = {
   name: string;
   policyPath: string;
   goldenDir: string;
+  awsUnsupported?: boolean;
 };
 
-function runBuild(policyPath: string, outDir: string) {
+function runBuild(policyPath: string, outDir: string, awsUnsupported = false) {
   // Golden fixtures must not vary with the operator's shell. These values are
   // intentionally non-production test credentials and are stable inputs now
   // that AWS Lambda@Edge secrets are baked into its deployable artifact.
@@ -74,11 +77,20 @@ function runBuild(policyPath: string, outDir: string) {
     EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy',
     ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy',
   };
-  execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile.js'), '--policy', policyPath, '--out-dir', outDir], {
-    cwd: repoRoot,
-    stdio: 'inherit',
-    env: fixtureEnv,
+  if (awsUnsupported) {
+    const result = spawnSync(process.execPath,
+      [path.join(repoRoot, 'scripts', 'compile.js'), '--policy', policyPath, '--out-dir', outDir],
+      { cwd: repoRoot, env: fixtureEnv, encoding: 'utf8' });
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stderr, /cache/i);
+    assert.strictEqual(fs.existsSync(path.join(outDir, 'edge')), false);
+  } else {
+    execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile.js'), '--policy', policyPath, '--out-dir', outDir], {
+      cwd: repoRoot,
+      stdio: 'inherit',
+      env: fixtureEnv,
   });
+  }
   execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile-cloudflare.js'), '--policy', policyPath, '--out-dir', outDir], {
     cwd: repoRoot,
     stdio: 'inherit',
@@ -107,9 +119,10 @@ function compareScenario(scenario: DriftScenario) {
   let failed = false;
 
   try {
-    runBuild(scenario.policyPath, tmpDir);
+    runBuild(scenario.policyPath, tmpDir, scenario.awsUnsupported);
 
     for (const rel of expectedFiles) {
+      if (scenario.awsUnsupported && rel.startsWith('edge/') && !rel.startsWith('edge/cloudflare/')) continue;
       const generated = readOrNull(path.join(tmpDir, rel));
       const golden = readOrNull(path.join(scenario.goldenDir, rel));
 

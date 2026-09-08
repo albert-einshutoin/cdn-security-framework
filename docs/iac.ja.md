@@ -68,6 +68,11 @@ resource "aws_cloudfront_distribution" "main" {
 
 `dist/edge/origin-request.js` を生成している場合は、zip にして `aws_lambda_function` の `filename` または `s3_*` で指定し、CloudFront の origin request にアタッチします。
 
+
+AWSのJWT/署名URLゲートはbuild時に拒否します。origin-request Lambdaを関連付けても
+cache hit時は認証されません。このcompilerはCloudFrontのcache behaviorを管理・検証しません。
+[認証の移行手順](./auth.ja.md#awsの認証対応範囲と移行)を参照してください。
+
 ---
 
 ## Terraform: WAF（Infra）

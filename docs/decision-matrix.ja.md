@@ -28,7 +28,7 @@
 | クエリキー正規化（utm_* 等除去） | ✓ | — | Edge: キャッシュの健全性。 |
 | User-Agent 欠落ブロック | ✓ | — | Edge: 1 ヘッダー検査。 |
 | 静的トークンゲート（/admin） | ✓ | — | Edge: 1 ヘッダー。強固な認証は Origin/Lambda@Edge。 |
-| JWT / OIDC 検証 | — | — | Lambda@Edge または Origin。CloudFront Functions では不可。 |
+| JWT / OIDC 検証 | — | — | Cloudflare Workersまたは独立したviewer-request認証。AWS JWT gateのbuildは拒否。originだけの検証はcache hitで省略される。 |
 | セキュリティヘッダー付与 | ✓ | — | Edge: レスポンス書き換え。 |
 | OWASP CRS / ボディの SQLi, XSS | — | ✓ | WAF マネージドルール。 |
 | CAPTCHA / チャレンジ | — | ✓ | WAF / Bot Management。 |
@@ -42,6 +42,6 @@
 
 * **Edge**: 正規化、粗いブロック、ヘッダー付与、簡易トークンゲート。状態なし・ボディなし・最小レイテンシ。
 * **WAF**: レート制限、OWASP、Bot、CAPTCHA、ボディ検査、ステートフルルール。
-* **Origin / Lambda@Edge**: 強固な認証（JWT）、業務ルール、動的設定。
+* **Origin / Lambda@Edge**: 業務ルール、動的設定。保護対象はcache参照前の認証も必要。生成するAWS JWT/署名URLゲートは未対応。
 
 迷ったら: **状態** や **ボディ** や **複雑なロジック** が必要なら Edge Functions ではなく WAF または Origin に配置する。

@@ -44,7 +44,7 @@
       { "id": "request.header_limits", "status": "partial" },
       { "id": "request.content_type", "status": "unsupported" },
       { "id": "request.path_normalization", "status": "supported" },
-      { "id": "auth.route_gates", "status": "supported" },
+      { "id": "auth.route_gates", "status": "partial" },
       { "id": "routes.response.cache_control", "status": "supported" },
       { "id": "response.security_headers", "status": "supported" },
       { "id": "response.csp_nonce", "status": "unsupported" },
@@ -54,6 +54,7 @@
   },
   "analyzerDiagnostics": [],
   "omittedComparisons": [
+    "policy.auth.route_gates:partial",
     "policy.request.content_type:unsupported",
     "policy.request.graphql_guard:warning-only",
     "policy.request.header_limits:partial",

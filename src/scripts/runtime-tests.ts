@@ -580,36 +580,6 @@ viewerFailed += viewerResponseCorsResult.failed;
 // Section 2: origin-request.js tests (Lambda@Edge)
 // =========================================================================
 
-// Helper: create HS256 JWT
-const HS256_SECRET = 'test-secret-for-runtime-tests-32b';
-
-function createHS256Jwt(payload: unknown, secret: string) {
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const enc = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base64')
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-  const headerB64 = enc(header);
-  const payloadB64 = enc(payload);
-  const sig = crypto.createHmac('sha256', secret)
-    .update(headerB64 + '.' + payloadB64)
-    .digest('base64')
-    .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-  return headerB64 + '.' + payloadB64 + '.' + sig;
-}
-
-function createRS256Jwt(payload: unknown, kid = 'test-key') {
-  const header = { alg: 'RS256', typ: 'JWT', kid };
-  const enc = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base64url');
-  return enc(header) + '.' + enc(payload) + '.signature';
-}
-
-function createSignedRS256Jwt(payload: unknown, privateKey: any, kid = 'test-key') {
-  const header = { alg: 'RS256', typ: 'JWT', kid };
-  const enc = (obj: unknown) => Buffer.from(JSON.stringify(obj)).toString('base64url');
-  const data = enc(header) + '.' + enc(payload);
-  const signature = crypto.sign('sha256', Buffer.from(data), privateKey).toString('base64url');
-  return data + '.' + signature;
-}
-
 // Build Lambda@Edge event format
 function buildLambdaEdgeEvent(uri: string, headers: HeaderMap = {}, querystring = '', method = 'GET') {
   const h = headers || {};
@@ -662,12 +632,8 @@ function compileOriginTemplate(cfgCode: string, deps: any = {}): any {
 
   const wrappedCode = '(function(deps) {\n' +
     'const crypto = deps.crypto || require("crypto");\n' +
-    'const dns = deps.dns || require("dns");\n' +
-    'const https = deps.https || require("https");\n' +
     originCode
-      .replace("const crypto = require('crypto');", '')
-      .replace("const dns = require('dns');", '')
-      .replace("const https = require('https');", '') +
+      .replace("const crypto = require('crypto');", '') +
     '\nreturn exports.handler;\n' +
     '})';
 
@@ -679,294 +645,11 @@ function compileOriginTemplate(cfgCode: string, deps: any = {}): any {
   }
 }
 
-// Helper: create signed URL query string
-const SIGNED_URL_SECRET = 'test-signing-secret-for-urls-32b';
-
-function createSignedUrlParams(uri: string, expiresSec: number, secret: string) {
-  const signData = canonicalSignedUrlPayload(uri, [['exp', String(expiresSec)]]);
-  const sig = crypto.createHmac('sha256', secret)
-    .update(signData)
-    .digest('base64url');
-  return 'exp=' + expiresSec + '&sig=' + sig;
-}
-
-function createSignedUrlWithNonce(uri: string, expiresSec: number, secret: string, nonce: string) {
-  const signData = canonicalSignedUrlPayload(uri, [['exp', String(expiresSec)], ['nonce', nonce]]);
-  const sig = crypto.createHmac('sha256', secret)
-    .update(signData)
-    .digest('base64url');
-  return 'exp=' + expiresSec + '&nonce=' + nonce + '&sig=' + sig;
-}
-
-function createSignedUrlWithQuery(uri: string, params: Array<[string, string]>, secret: string) {
-  const signData = canonicalSignedUrlPayload(uri, params);
-  const sig = crypto.createHmac('sha256', secret)
-    .update(signData)
-    .digest('base64url');
-  return params
-    .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
-    .join('&') + '&sig=' + sig;
-}
-
-function canonicalSignedUrlPayload(uri: string, params: Array<[string, string]>) {
-  const query = params
-    .slice()
-    .sort((a, b) => a[0] === b[0] ? a[1].localeCompare(b[1]) : a[0].localeCompare(b[0]))
-    .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value))
-    .join('&');
-  return query ? uri + '?' + query : uri;
-}
-
 async function runOriginRequestTests() {
-  const testSecret = HS256_SECRET;
-  process.env.JWT_TEST_SECRET = testSecret;
-  process.env.URL_SIGNING_SECRET = SIGNED_URL_SECRET;
-
-  const originCfgCode = [
-    'const CFG = {',
-    '  project: "test",',
-    '  mode: "enforce",',
-    '  maxHeaderSize: 0,',
-    '  jwtGates: [{',
-    '    name: "api",',
-    '    protectedPrefixes: ["/api"],',
-    '    type: "jwt",',
-    '    algorithm: "HS256",',
-    '    jwks_url: "",',
-    '    issuer: "test-issuer",',
-    '    audience: "test-audience",',
-    '    secret_env: "JWT_TEST_SECRET",',
-    `    secret: ${JSON.stringify(testSecret)}`,
-    '  }],',
-    '  signedUrlGates: [{',
-    '    name: "assets",',
-    '    protectedPrefixes: ["/assets"],',
-    '    type: "signed_url",',
-    '    algorithm: "HMAC-SHA256",',
-    '    secret_env: "URL_SIGNING_SECRET",',
-    `    secret: ${JSON.stringify(SIGNED_URL_SECRET)},`,
-    '    expires_param: "exp",',
-    '    signature_param: "sig",',
-    '    exact_path: false,',
-    '    nonce_param: ""',
-    '  }, {',
-    '    name: "one-time-download",',
-    '    protectedPrefixes: ["/download/report.pdf"],',
-    '    type: "signed_url",',
-    '    algorithm: "HMAC-SHA256",',
-    '    secret_env: "URL_SIGNING_SECRET",',
-    `    secret: ${JSON.stringify(SIGNED_URL_SECRET)},`,
-    '    expires_param: "exp",',
-    '    signature_param: "sig",',
-    '    exact_path: true,',
-    '    nonce_param: "nonce"',
-    '  }],',
-    '  originAuth: null',
-    '};',
-  ].join('\n');
-
-  originHandler = compileOriginTemplate(originCfgCode);
-  if (!originHandler) return 1;
-
-  const nowSec = Math.floor(Date.now() / 1000);
-
+  originHandler = compileOriginTemplate('const CFG = { mode: "enforce", maxHeaderSize: 0, originAuth: null };');
+  if (!originHandler) return { failed: 1, total: 1 };
   const originCases: RuntimeCase[] = [
-    // --- Pass-through ---
-    ['origin: GET / pass-through',
-      buildLambdaEdgeEvent('/'),
-      'allow'],
-
-    // --- JWT HS256 tests ---
-    ['origin: GET /api/data no auth',
-      buildLambdaEdgeEvent('/api/data'),
-      '401'],
-
-    ['origin: GET /api/data valid JWT',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer ' + createHS256Jwt({
-          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
-          exp: nowSec + 3600, nbf: nowSec - 60,
-        }, testSecret),
-      }),
-      'allow'],
-
-    ['origin: GET /api/data expired JWT',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer ' + createHS256Jwt({
-          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
-          exp: nowSec - 100,
-        }, testSecret),
-      }),
-      '401'],
-
-    ['origin: GET /api/data bad signature',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer ' + createHS256Jwt({
-          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
-          exp: nowSec + 3600,
-        }, 'wrong-secret'),
-      }),
-      '401'],
-
-    ['origin: GET /api/data wrong issuer',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer ' + createHS256Jwt({
-          sub: 'user1', iss: 'wrong-issuer', aud: 'test-audience',
-          exp: nowSec + 3600,
-        }, testSecret),
-      }),
-      '401'],
-
-    ['origin: GET /api/data wrong audience',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer ' + createHS256Jwt({
-          sub: 'user1', iss: 'test-issuer', aud: 'wrong-audience',
-          exp: nowSec + 3600,
-        }, testSecret),
-      }),
-      '401'],
-
-    ['origin: GET /api/data future nbf',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer ' + createHS256Jwt({
-          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
-          exp: nowSec + 7200, nbf: nowSec + 3600,
-        }, testSecret),
-      }),
-      '401'],
-
-    ['origin: GET /api/data malformed token',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer not-a-jwt',
-      }),
-      '401'],
-
-    ['origin: GET /api/data JWT missing exp rejected',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer ' + createHS256Jwt({
-          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
-        }, testSecret),
-      }),
-      '401'],
-
-    // alg confusion: alg=none must be rejected
-    ['origin: GET /api/data alg=none rejected',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer ' + (function () {
-          const header = { alg: 'none', typ: 'JWT' };
-          const payload = { sub: 'user', iss: 'test-issuer', aud: 'test-audience', exp: nowSec + 3600 };
-          const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64')
-            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-          return enc(header) + '.' + enc(payload) + '.';
-        })(),
-      }),
-      '401'],
-
-    // alg confusion: alg=RS256 on an HS256 gate must be rejected (wrong alg,
-    // before any signature math runs).
-    ['origin: GET /api/data alg=RS256 on HS256 gate rejected',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer ' + (function () {
-          const header = { alg: 'RS256', typ: 'JWT' };
-          const payload = { sub: 'user', iss: 'test-issuer', aud: 'test-audience', exp: nowSec + 3600 };
-          const enc = (o: unknown) => Buffer.from(JSON.stringify(o)).toString('base64')
-            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-          const data = enc(header) + '.' + enc(payload);
-          const sig = crypto.createHmac('sha256', testSecret).update(data).digest('base64')
-            .replace(/\+/g, '-').replace(/\//g, '_').replace(/=/g, '');
-          return data + '.' + sig;
-        })(),
-      }),
-      '401'],
-
-    // Clock skew: token expired 15s ago is still accepted with default 30s skew
-    ['origin: GET /api/data just-expired JWT accepted within clock skew',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer ' + createHS256Jwt({
-          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
-          exp: nowSec - 15,
-        }, testSecret),
-      }),
-      'allow'],
-
-    // Clock skew: token expired way beyond skew is still rejected
-    ['origin: GET /api/data long-expired JWT rejected past clock skew',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer ' + createHS256Jwt({
-          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
-          exp: nowSec - 600,
-        }, testSecret),
-      }),
-      '401'],
-
-    // Clock skew: token valid-from 15s in future is still accepted
-    ['origin: GET /api/data near-future nbf accepted within clock skew',
-      buildLambdaEdgeEvent('/api/data', {
-        'Authorization': 'Bearer ' + createHS256Jwt({
-          sub: 'user1', iss: 'test-issuer', aud: 'test-audience',
-          exp: nowSec + 3600, nbf: nowSec + 15,
-        }, testSecret),
-      }),
-      'allow'],
-
-    // --- Signed URL tests ---
-    ['origin: GET /assets/file.png valid signed URL',
-      buildLambdaEdgeEvent('/assets/file.png', {},
-        createSignedUrlParams('/assets/file.png', nowSec + 3600, SIGNED_URL_SECRET)),
-      'allow'],
-
-    ['origin: GET /assets/file.png expired signed URL',
-      buildLambdaEdgeEvent('/assets/file.png', {},
-        createSignedUrlParams('/assets/file.png', nowSec - 100, SIGNED_URL_SECRET)),
-      '403'],
-
-    ['origin: GET /assets/file.png bad signature',
-      buildLambdaEdgeEvent('/assets/file.png', {},
-        createSignedUrlParams('/assets/file.png', nowSec + 3600, 'wrong-secret')),
-      '403'],
-
-    ['origin: GET /assets/file.png rejects unsigned extra query selector',
-      buildLambdaEdgeEvent('/assets/file.png', {},
-        createSignedUrlParams('/assets/file.png', nowSec + 3600, SIGNED_URL_SECRET) + '&file=other.png'),
-      '403'],
-
-    ['origin: GET /assets/file.png accepts signed extra query selector',
-      buildLambdaEdgeEvent('/assets/file.png', {},
-        createSignedUrlWithQuery('/assets/file.png', [
-          ['exp', String(nowSec + 3600)],
-          ['file', 'allowed.png'],
-        ], SIGNED_URL_SECRET)),
-      'allow'],
-
-    ['origin: GET /assets/file.png missing sig params',
-      buildLambdaEdgeEvent('/assets/file.png', {}, 'foo=bar'),
-      '403'],
-
-    ['origin: GET /other/file not protected by signed URL',
-      buildLambdaEdgeEvent('/other/file', {}, ''),
-      'allow'],
-
-    // --- exact_path: reject sibling-path replay ---
-    ['origin: exact_path rejects sibling path with valid signature for /download/report.pdf',
-      buildLambdaEdgeEvent('/download/leaked.pdf', {},
-        createSignedUrlWithNonce('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET, 'nonce-0123456789abcdef')),
-      'allow'],
-
-    // --- nonce_param required: accept when present, reject when missing ---
-    ['origin: exact_path + nonce accepts well-formed one-time URL',
-      buildLambdaEdgeEvent('/download/report.pdf', {},
-        createSignedUrlWithNonce('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET, 'nonce-0123456789abcdef')),
-      'allow'],
-
-    ['origin: exact_path + nonce rejects when nonce missing',
-      buildLambdaEdgeEvent('/download/report.pdf', {},
-        createSignedUrlParams('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET)),
-      '403'],
-
-    ['origin: exact_path + nonce rejects short/invalid nonce',
-      buildLambdaEdgeEvent('/download/report.pdf', {},
-        createSignedUrlWithNonce('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET, 'short')),
-      '403'],
+    ['origin: GET / pass-through', buildLambdaEdgeEvent('/'), 'allow'],
   ];
 
   let originFailed = 0;
@@ -1015,300 +698,9 @@ async function runOriginRequestTests() {
     console.log('OK: origin strips hop-by-hop smuggling headers');
   }
 
-  // Nonce forwarding: successful signed_url verification must set
-  // X-Signed-URL-Nonce on the forwarded request.
-  const nonceVal = 'nonce-0123456789abcdef';
-  const nonceEvent = buildLambdaEdgeEvent('/download/report.pdf', {},
-    createSignedUrlWithNonce('/download/report.pdf', nowSec + 3600, SIGNED_URL_SECRET, nonceVal));
-  const nonceResult = await originHandler(nonceEvent);
-  const nonceHeader = nonceResult && nonceResult.headers && nonceResult.headers['x-signed-url-nonce'];
-  const nonceOk = Array.isArray(nonceHeader) && nonceHeader[0] && nonceHeader[0].value === nonceVal;
-  if (!nonceOk) {
-    console.error('FAIL: origin should forward X-Signed-URL-Nonce, got=',
-      nonceResult && nonceResult.headers && nonceResult.headers['x-signed-url-nonce']);
-    originFailed++;
-  } else {
-    console.log('OK: origin forwards X-Signed-URL-Nonce header to origin');
-  }
-
-  const extraAsserts = 3;
+  const extraAsserts = 2;
   console.log('--- origin-request (enforce): ' + (originCases.length + extraAsserts - originFailed) + '/' + (originCases.length + extraAsserts) + ' passed ---');
   return { failed: originFailed, total: originCases.length + extraAsserts };
-}
-
-async function runOriginJwtSecretFailClosedTests() {
-  delete process.env.__MISSING_JWT_SECRET_FOR_TEST__;
-  const cfgCode = [
-    'const CFG = {',
-    '  project: "test",',
-    '  mode: "enforce",',
-    '  maxHeaderSize: 0,',
-    '  jwtGates: [{',
-    '    name: "api",',
-    '    protectedPrefixes: ["/api"],',
-    '    type: "jwt",',
-    '    algorithm: "HS256",',
-    '    jwks_url: "",',
-    '    issuer: "test-issuer",',
-    '    audience: "test-audience",',
-    '    secret_env: "__MISSING_JWT_SECRET_FOR_TEST__"',
-    '  }],',
-    '  signedUrlGates: [],',
-    '  originAuth: null,',
-    '  trustForwardedFor: false,',
-    '  obs: { logFormat: "json", correlationHeader: "" }',
-    '};',
-  ].join('\n');
-
-  const jwtHandler = compileOriginTemplate(cfgCode);
-  if (!jwtHandler) return { failed: 1, total: 1 };
-
-  const previous = originHandler;
-  originHandler = jwtHandler;
-  const nowSec = Math.floor(Date.now() / 1000);
-  const emptySecretToken = createHS256Jwt({
-    sub: 'user1',
-    iss: 'test-issuer',
-    aud: 'test-audience',
-    exp: nowSec + 3600,
-  }, '');
-  const ok = await runAsyncCase(
-    'origin: missing HS256 JWT secret rejects empty-secret token',
-    buildLambdaEdgeEvent('/api/data', {
-      Authorization: 'Bearer ' + emptySecretToken,
-    }),
-    '503',
-  );
-  originHandler = previous;
-
-  console.log('--- origin-request jwt secret fail-closed: ' + (ok ? 1 : 0) + '/1 passed ---');
-  return { failed: ok ? 0 : 1, total: 1 };
-}
-
-function makeDnsLookup(address: string) {
-  return {
-    lookup: (_hostname: string, _options: any, callback: any) => {
-      process.nextTick(() => callback(null, address, address.includes(':') ? 6 : 4));
-    },
-  };
-}
-
-function makeJwksHttps(body: string, calls: any[]) {
-  return {
-    get: (rawUrl: string, options: any, callback: any) => {
-      calls.push({ rawUrl });
-      const req = new EventEmitter();
-      req.setTimeout = () => req;
-      req.destroy = () => req;
-
-      process.nextTick(() => {
-        const lookup = options && options.lookup;
-        const host = new URL(rawUrl).hostname;
-        const sendResponse = () => {
-          const res = new EventEmitter();
-          res.statusCode = 200;
-          res.resume = () => undefined;
-          callback(res);
-          process.nextTick(() => {
-            res.emit('data', Buffer.from(body));
-            res.emit('end');
-          });
-        };
-        if (typeof lookup === 'function') {
-          lookup(host, {}, (err: Error | null) => {
-            if (err) {
-              req.emit('error', err);
-              return;
-            }
-            sendResponse();
-          });
-          return;
-        }
-        sendResponse();
-      });
-
-      return req;
-    },
-  };
-}
-
-async function runOriginJwksHardeningTests() {
-  const nowSec = Math.floor(Date.now() / 1000);
-  const token = createRS256Jwt({
-    sub: 'user1',
-    iss: 'test-issuer',
-    aud: 'test-audience',
-    exp: nowSec + 3600,
-  });
-  const cfgCode = [
-    'const CFG = {',
-    '  project: "test",',
-    '  mode: "enforce",',
-    '  maxHeaderSize: 0,',
-    '  jwtGates: [{',
-    '    name: "api",',
-    '    protectedPrefixes: ["/api"],',
-    '    type: "jwt",',
-    '    algorithm: "RS256",',
-    '    jwks_url: "https://idp.example.com/jwks.json",',
-    '    issuer: "test-issuer",',
-    '    audience: "test-audience",',
-    '    secret_env: ""',
-    '  }],',
-    '  signedUrlGates: [],',
-    '  originAuth: null,',
-    '  trustForwardedFor: false,',
-    '  obs: { logFormat: "json", correlationHeader: "" }',
-    '};',
-  ].join('\n');
-
-  const cases = [
-    {
-      name: 'origin: RS256 JWKS DNS resolving to metadata IP is rejected',
-      dns: makeDnsLookup('169.254.169.254'),
-      body: JSON.stringify({ keys: [] }),
-    },
-    {
-      name: 'origin: RS256 JWKS DNS resolving to CGNAT range is rejected',
-      dns: makeDnsLookup('100.64.0.1'),
-      body: JSON.stringify({ keys: [] }),
-    },
-    {
-      name: 'origin: RS256 JWKS DNS resolving to multicast/reserved range is rejected',
-      dns: makeDnsLookup('224.0.0.1'),
-      body: JSON.stringify({ keys: [] }),
-    },
-    {
-      name: 'origin: RS256 JWKS oversized response is rejected',
-      dns: makeDnsLookup('93.184.216.34'),
-      body: JSON.stringify({ keys: [], padding: 'a'.repeat((256 * 1024) + 1) }),
-    },
-    {
-      name: 'origin: RS256 JWKS with too many keys is rejected',
-      dns: makeDnsLookup('93.184.216.34'),
-      body: JSON.stringify({
-        keys: Array.from({ length: 101 }, (_value, i) => ({
-          kid: 'key-' + i,
-          kty: 'RSA',
-          alg: 'RS256',
-          n: 'sXch7EoJ89XcP_Gyo-t6fA',
-          e: 'AQAB',
-        })),
-      }),
-    },
-  ];
-
-  let failed = 0;
-  const previous = originHandler;
-  for (const c of cases) {
-    const calls: any[] = [];
-    const handlerForCase = compileOriginTemplate(cfgCode, {
-      dns: c.dns,
-      https: makeJwksHttps(c.body, calls),
-    });
-    if (!handlerForCase) {
-      console.error('FAIL:', c.name, '| failed to compile origin template');
-      failed++;
-      continue;
-    }
-    originHandler = handlerForCase;
-    const ok = await runAsyncCase(
-      c.name,
-      buildLambdaEdgeEvent('/api/data', { Authorization: 'Bearer ' + token }),
-      '401',
-    );
-    if (!ok || calls.length !== 1) {
-      if (ok) console.error('FAIL:', c.name, '| expected exactly one JWKS fetch, got', calls.length);
-      failed++;
-    }
-  }
-  originHandler = previous;
-
-  console.log('--- origin-request jwks hardening: ' + (cases.length - failed) + '/' + cases.length + ' passed ---');
-  return { failed, total: cases.length };
-}
-
-async function runOriginRs256JwkAlgSelectionTests() {
-  const { publicKey, privateKey } = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
-  const nowSec = Math.floor(Date.now() / 1000);
-  const token = createSignedRS256Jwt({
-    sub: 'user1',
-    iss: 'test-issuer',
-    aud: 'test-audience',
-    exp: nowSec + 3600,
-  }, privateKey);
-  const publicJwk = publicKey.export({ format: 'jwk' });
-  const cfgCode = [
-    'const CFG = {',
-    '  project: "test",',
-    '  mode: "enforce",',
-    '  maxHeaderSize: 0,',
-    '  jwtGates: [{',
-    '    name: "api",',
-    '    protectedPrefixes: ["/api"],',
-    '    type: "jwt",',
-    '    algorithm: "RS256",',
-    '    jwks_url: "https://idp.example.com/jwks.json",',
-    '    issuer: "test-issuer",',
-    '    audience: "test-audience",',
-    '    secret_env: ""',
-    '  }],',
-    '  signedUrlGates: [],',
-    '  originAuth: null,',
-    '  trustForwardedFor: false,',
-    '  obs: { logFormat: "json", correlationHeader: "" }',
-    '};',
-  ].join('\n');
-
-  const cases = [
-    {
-      name: 'origin: RS256 accepts matching RSA JWK with omitted alg',
-      key: { ...publicJwk, kid: 'test-key' },
-      expected: 'allow',
-      fetches: 1,
-    },
-    {
-      name: 'origin: RS256 accepts matching RSA JWK with alg=RS256',
-      key: { ...publicJwk, kid: 'test-key', alg: 'RS256' },
-      expected: 'allow',
-      fetches: 1,
-    },
-    {
-      name: 'origin: RS256 rejects matching kid with conflicting JWK alg',
-      key: { ...publicJwk, kid: 'test-key', alg: 'HS256' },
-      expected: '401',
-      fetches: 2,
-    },
-  ];
-
-  let failed = 0;
-  const previous = originHandler;
-  for (const c of cases) {
-    const calls: any[] = [];
-    const handlerForCase = compileOriginTemplate(cfgCode, {
-      dns: makeDnsLookup('93.184.216.34'),
-      https: makeJwksHttps(JSON.stringify({ keys: [c.key] }), calls),
-    });
-    if (!handlerForCase) {
-      console.error('FAIL:', c.name, '| failed to compile origin template');
-      failed++;
-      continue;
-    }
-    originHandler = handlerForCase;
-    const ok = await runAsyncCase(
-      c.name,
-      buildLambdaEdgeEvent('/api/data', { Authorization: 'Bearer ' + token }),
-      c.expected,
-    );
-    if (!ok || calls.length !== c.fetches) {
-      if (ok) console.error('FAIL:', c.name, '| expected', c.fetches, 'JWKS fetch(es), got', calls.length);
-      failed++;
-    }
-  }
-  originHandler = previous;
-
-  console.log('--- origin-request rs256 jwk alg selection: ' + (cases.length - failed) + '/' + cases.length + ' passed ---');
-  return { failed, total: cases.length };
 }
 
 async function runOriginAuthFailClosedTests() {
@@ -1317,8 +709,6 @@ async function runOriginAuthFailClosedTests() {
     '  project: "test",',
     '  mode: "monitor",',
     '  maxHeaderSize: 0,',
-    '  jwtGates: [],',
-    '  signedUrlGates: [],',
     '  originAuth: { type: "custom_header", header: "X-Origin-Verify", secret_env: "__MISSING_ORIGIN_SECRET_FOR_TEST__" },',
     '  trustForwardedFor: false,',
     '  obs: { logFormat: "json", correlationHeader: "" }',
@@ -1349,8 +739,6 @@ async function runOriginAuthHmacTests() {
     '  project: "test",',
     '  mode: "enforce",',
     '  maxHeaderSize: 0,',
-    '  jwtGates: [],',
-    '  signedUrlGates: [],',
     '  originAuth: {',
     '    type: "hmac_signature",',
     '    secret_env: "ORIGIN_HMAC_TEST_SECRET",',
@@ -1390,8 +778,6 @@ async function runOriginAuthHmacTests() {
     '  project: "test",',
     '  mode: "enforce",',
     '  maxHeaderSize: 0,',
-    '  jwtGates: [],',
-    '  signedUrlGates: [],',
     '  originAuth: {',
     '    type: "hmac_signature",',
     '    secret_env: "ORIGIN_HMAC_TEST_SECRET",',
@@ -1482,70 +868,6 @@ async function runOriginAuthHmacTests() {
   return { failed: 4 - passed, total: 4 };
 }
 
-// Monitor mode tests: blocking checks should pass through
-async function runMonitorModeTests() {
-  const testSecret = HS256_SECRET;
-  process.env.JWT_TEST_SECRET = testSecret;
-  process.env.URL_SIGNING_SECRET = SIGNED_URL_SECRET;
-
-  const monitorCfgCode = [
-    'const CFG = {',
-    '  project: "test",',
-    '  mode: "monitor",',
-    '  maxHeaderSize: 100,',
-    '  jwtGates: [{',
-    '    name: "api",',
-    '    protectedPrefixes: ["/api"],',
-    '    type: "jwt",',
-    '    algorithm: "HS256",',
-    '    jwks_url: "",',
-    '    issuer: "test-issuer",',
-    '    audience: "test-audience",',
-    '    secret_env: "JWT_TEST_SECRET",',
-    `    secret: ${JSON.stringify(testSecret)}`,
-    '  }],',
-    '  signedUrlGates: [{',
-    '    name: "assets",',
-    '    protectedPrefixes: ["/assets"],',
-    '    type: "signed_url",',
-    '    algorithm: "HMAC-SHA256",',
-    '    secret_env: "URL_SIGNING_SECRET",',
-    `    secret: ${JSON.stringify(SIGNED_URL_SECRET)},`,
-    '    expires_param: "exp",',
-    '    signature_param: "sig"',
-    '  }],',
-    '  originAuth: null',
-    '};',
-  ].join('\n');
-
-  const monitorHandler = compileOriginTemplate(monitorCfgCode);
-  if (!monitorHandler) return { failed: 1, total: 1 };
-
-  originHandler = monitorHandler;
-
-  const nowSec = Math.floor(Date.now() / 1000);
-
-  const monitorCases: RuntimeCase[] = [
-    // Auth gates fail closed even in monitor mode.
-    ['monitor: GET /api/data invalid JWT still blocked',
-      buildLambdaEdgeEvent('/api/data'),
-      '401'],
-
-    ['monitor: GET /assets/file.png expired signed URL still blocked',
-      buildLambdaEdgeEvent('/assets/file.png', {},
-        createSignedUrlParams('/assets/file.png', nowSec - 100, SIGNED_URL_SECRET)),
-      '403'],
-  ];
-
-  let monitorFailed = 0;
-  for (const [name, event, expected] of monitorCases) {
-    if (!(await runAsyncCase(name, event, expected))) monitorFailed++;
-  }
-
-  console.log('--- origin-request (monitor): ' + (monitorCases.length - monitorFailed) + '/' + monitorCases.length + ' passed ---');
-  return { failed: monitorFailed, total: monitorCases.length };
-}
-
 // Error boundary test: handler should return 502 on unexpected error
 async function runErrorBoundaryTests() {
   const badCfgCode = [
@@ -1553,8 +875,6 @@ async function runErrorBoundaryTests() {
     '  project: "test",',
     '  mode: "enforce",',
     '  maxHeaderSize: 0,',
-    '  jwtGates: [],',
-    '  signedUrlGates: [],',
     '  originAuth: null',
     '};',
   ].join('\n');
@@ -1582,8 +902,6 @@ async function runOriginAllowSamplingTests() {
     '  project: "sampling-test",',
     '  mode: "enforce",',
     '  maxHeaderSize: 0,',
-    '  jwtGates: [],',
-    '  signedUrlGates: [],',
     '  originAuth: null,',
     `  obs: { logFormat: "json", correlationHeader: "traceparent", sampleRate: ${sampleRate}, auditLogAuth: false, auditHashSub: false }`,
     '};',
@@ -1667,18 +985,6 @@ async function main() {
   totalFailed += enforceResult.failed;
   totalTests += enforceResult.total;
 
-  const jwtSecretResult = await runOriginJwtSecretFailClosedTests();
-  totalFailed += jwtSecretResult.failed;
-  totalTests += jwtSecretResult.total;
-
-  const jwksHardeningResult = await runOriginJwksHardeningTests();
-  totalFailed += jwksHardeningResult.failed;
-  totalTests += jwksHardeningResult.total;
-
-  const rs256JwkAlgResult = await runOriginRs256JwkAlgSelectionTests();
-  totalFailed += rs256JwkAlgResult.failed;
-  totalTests += rs256JwkAlgResult.total;
-
   const originAuthResult = await runOriginAuthFailClosedTests();
   totalFailed += originAuthResult.failed;
   totalTests += originAuthResult.total;
@@ -1686,10 +992,6 @@ async function main() {
   const originAuthHmacResult = await runOriginAuthHmacTests();
   totalFailed += originAuthHmacResult.failed;
   totalTests += originAuthHmacResult.total;
-
-  const monitorResult = await runMonitorModeTests();
-  totalFailed += monitorResult.failed;
-  totalTests += monitorResult.total;
 
   const errorResult = await runErrorBoundaryTests();
   totalFailed += errorResult.failed;

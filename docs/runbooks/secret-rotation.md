@@ -6,7 +6,7 @@ This runbook covers rotating the four secrets the framework consumes at build an
 
 | Env var | Consumer | Rotation class |
 | --- | --- | --- |
-| `JWT_SECRET` | HS256 JWT gate | Cold on AWS; coordinated cutover on Cloudflare |
+| `JWT_SECRET` | HS256 JWT gate | Cloudflare only; coordinated cutover |
 | `JWKS_URL` / kids | RS256 JWT gate | Hot (publish new kid, wait, revoke) |
 | `URL_SIGNING_SECRET` | Signed URL gate | Cold; already-issued URLs are invalidated |
 | `EDGE_ADMIN_TOKEN` | `static_token` gate | Cold (baked into `dist/edge/` at build time) |
@@ -28,7 +28,7 @@ HS256 is a symmetric shared secret. Rotation requires issuer + verifier to swap 
    ```
    Upload to your secret store with a new key, e.g. `JWT_SECRET_V2`.
 3. **Schedule a coordinated cutoff** because an HS256 gate accepts one secret. Stop issuing long-lived V1 tokens and wait for their TTL where possible.
-4. **Update the existing `JWT_SECRET` value**, switch the issuer to V2, then rebuild and deploy AWS `origin-request.js`. Cloudflare reads the runtime secret, but the issuer and Worker secret still need a coordinated cutover.
+4. **Update the existing `JWT_SECRET` value**, switch the issuer to V2, and update the Cloudflare Worker secret in the same coordinated cutover. AWS JWT builds are unsupported; see [auth migration](../auth.md#aws-authentication-support-and-migration).
 5. **Verify** V2 canaries immediately and revoke V1 after propagation. If verifier-side overlap is mandatory, migrate the gate to RS256/JWKS before rotating.
 
 ### Verification
@@ -62,7 +62,7 @@ Signed URLs embed a signature computed at issue time. Rotating the secret invali
 ### Procedure
 1. **Decide a grace window** equal to `max(signed_url.default_ttl, email_delivery_window)`. 72h is a common floor.
 2. **Stop issuing V1 URLs** and wait for the grace window if the old secret is not compromised.
-3. **Replace** `URL_SIGNING_SECRET`, update the issuer, then rebuild/deploy AWS or update the Cloudflare Worker secret in one coordinated window.
+3. **Replace** `URL_SIGNING_SECRET`, update the issuer, and update the Cloudflare Worker secret in one coordinated window. AWS signed URL builds are unsupported.
 4. **Verify** a newly issued URL and revoke the old value. The framework currently cannot accept old and new signed-URL secrets simultaneously.
 
 ### Hard cutoff for a compromise
