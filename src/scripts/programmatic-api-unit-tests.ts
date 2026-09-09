@@ -768,36 +768,78 @@ test('CLI authoring DX: playground emits AWS + Cloudflare fixture decisions', ()
 test('CLI authoring DX: analyze surfaces low-frequency block candidates', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'analyze-'));
   const logPath = path.join(tmp, 'monitor.jsonl');
+  const urlAuthSentinel = ['ISSUE1020_URL_', 'PASS', 'WORD'].join('');
+  const sentinels = [
+    'ISSUE1020_SYNTHETIC_SECRET',
+    'ISSUE1020_QUERY_SECRET',
+    'ISSUE1020_HASH',
+    'ISSUE1020_CREDENTIAL',
+    'ISSUE1020_RAW_RECORD',
+    urlAuthSentinel,
+  ];
   const lines = [
     { event: 'block', block_reason: 'bad_method', method: 'POST', status: 405, uri: '/api/data', target: 'aws', policy_route: '/api/data' },
+    {
+      event: 'block',
+      block_reason: 'credential=ISSUE1020_SYNTHETIC_SECRET',
+      method: 'POST',
+      status: 401,
+      uri: [
+        'https://',
+        'alice',
+        ':',
+        urlAuthSentinel,
+        '@example.test/login?token=ISSUE1020_QUERY_SECRET#ISSUE1020_HASH',
+      ].join(''),
+      target: 'aws',
+      policy_route: '/login?api_key=ISSUE1020_CREDENTIAL',
+      credential: 'ISSUE1020_CREDENTIAL',
+      raw_record: 'ISSUE1020_RAW_RECORD',
+    },
     { event: 'block', block_reason: 'bad_method', method: 'PUT', status: 405, uri: '/api/data', target: 'aws', policy_route: '/api/data' },
     { event: 'block', block_reason: 'path_traversal', method: 'GET', status: 404, uri: '/assets/../etc/passwd', target: 'cloudflare', policy_route: '/assets' },
     { event: 'monitor', block_reason: 'path_traversal', method: 'GET', status: 200, uri: '/assets/favicon.ico', target: 'aws', policy_route: '/assets' },
     { eventName: 'blocked', block_reason: 'token_replay', method: 'POST', status: 200, uri: '/api/login', target: 'aws', policy_route: '/api/login' },
-    { outcome: 'monitoring', reason: 'slow_path_probe', method: 'GET', status: 200, uri: '/search', target: 'cloudflare', policy_route: '/search' },
+    {
+      outcome: 'monitoring',
+      reason: 'slow_path_probe',
+      method: 'GET',
+      status: 200,
+      uri: '/search?q=ISSUE1020_QUERY_SECRET#ISSUE1020_HASH',
+      target: 'cloudflare',
+      policy_route: '/search#ISSUE1020_HASH',
+      raw_record: 'ISSUE1020_RAW_RECORD',
+    },
   ];
-  fs.writeFileSync(logPath, lines.map((row) => JSON.stringify(row)).join('\n') + '\n', 'utf8');
+  fs.writeFileSync(
+    logPath,
+    `${lines.map((row) => JSON.stringify(row)).join('\n')}\n{"event":"block","raw_record":"ISSUE1020_RAW_RECORD"`,
+    'utf8',
+  );
 
   try {
     const { spawnSync } = require('child_process');
     const cli = path.join(repoRoot, 'bin', 'cli.js');
-    const result: any = spawnSync(process.execPath, [
+    const run = (extraArgs: string[]) => spawnSync(process.execPath, [
       cli, 'analyze',
       '--input', logPath,
       '--min-count', '2',
       '--top', '10',
-      '--json',
+      ...extraArgs,
     ], {
       encoding: 'utf8',
       env: process.env,
     });
-    assert.strictEqual(result.status, 0, `analyze failed: ${result.stderr}`);
-    const report = JSON.parse(result.stdout);
-    assert.strictEqual(report.summary.totalLines, 6);
-    assert.strictEqual(report.summary.parsedLines, 6);
-    assert.strictEqual(report.summary.unparseableLines, 0);
-    assert.strictEqual(report.summary.analyzedEvents, 6);
-    assert.strictEqual(report.summary.blockEvents, 4);
+    const jsonResult: any = run(['--json']);
+    const textResult: any = run([]);
+    assert.strictEqual(jsonResult.status, 0, `analyze JSON failed: ${jsonResult.stderr}`);
+    assert.strictEqual(textResult.status, 0, `analyze text failed: ${textResult.stderr}`);
+    const report = JSON.parse(jsonResult.stdout);
+    assert.strictEqual(report.summary.totalLines, 8);
+    assert.strictEqual(report.summary.parsedLines, 7);
+    assert.strictEqual(report.summary.unparseableLines, 1);
+    assert.strictEqual(report.summary.analyzedEvents, 7);
+    assert.strictEqual(report.summary.blockEvents, 5);
     assert.strictEqual(report.summary.monitorEvents, 2);
     assert.strictEqual(report.byBlockReason['bad_method']?.count, 2);
     assert.strictEqual(report.byPolicyRoute['/api/data']?.count, 2);
@@ -812,6 +854,30 @@ test('CLI authoring DX: analyze surfaces low-frequency block candidates', () => 
     const tokenReplay = report.candidates.find((x: any) => x.blockReason === 'token_replay' && x.policyRoute === '/api/login');
     assert.ok(tokenReplay, 'missing eventName fallback candidate');
     assert.strictEqual(report.byBlockReason['slow_path_probe']?.count, 1);
+    assert.ok(['monitor.jsonl', '[external]'].includes(report.summary.input));
+    assert.strictEqual(report.byBlockReason['credential=[REDACTED]']?.count, 1);
+    assert.strictEqual(report.byPolicyRoute['/login']?.count, 1);
+    assert.ok(report.candidates.some((x: any) => x.policyRoute === '/login' && x.blockReason === 'credential=[REDACTED]'));
+    for (const output of [jsonResult.stdout, jsonResult.stderr, textResult.stdout, textResult.stderr]) {
+      assert.ok(!output.includes(tmp), 'leaked absolute input path');
+      assert.ok(!output.includes('?'), 'leaked query');
+      assert.ok(!output.includes('#'), 'leaked hash');
+      for (const sentinel of sentinels) assert.ok(!output.includes(sentinel), `leaked ${sentinel}`);
+    }
+
+    const missingPath = path.join(tmp, 'ISSUE1020_RAW_RECORD.jsonl');
+    const missing: any = spawnSync(process.execPath, [cli, 'analyze', '--input', missingPath], {
+      cwd: tmp,
+      encoding: 'utf8',
+      env: process.env,
+    });
+    assert.strictEqual(missing.status, 1);
+    assert.ok(missing.stderr.includes('analyze: input file not found'));
+    assert.ok(!missing.stderr.includes(tmp), 'leaked absolute error input path');
+    for (const sentinel of sentinels) {
+      assert.ok(!missing.stdout.includes(sentinel), `leaked ${sentinel} to error stdout`);
+      assert.ok(!missing.stderr.includes(sentinel), `leaked ${sentinel} to error stderr`);
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
