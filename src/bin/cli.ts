@@ -1733,9 +1733,11 @@ function asNumber(value: unknown): number | null {
 }
 
 function normalizeAnalyzeText(value: string, stripQueryHash = false): string {
-  const normalized = value.trim().replace(/\\/g, '/');
+  const normalized = value.trim();
   const withoutQueryHash = stripQueryHash ? normalized.split(/[?#]/, 1)[0] : normalized;
   return redactSensitiveText(withoutQueryHash)
+    // Preserve escaped quotes until sensitive values have been removed.
+    .replace(/\\/g, '/')
     .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ')
     .trim();
 }

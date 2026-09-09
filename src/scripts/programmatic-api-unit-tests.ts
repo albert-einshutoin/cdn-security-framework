@@ -782,7 +782,7 @@ test('CLI authoring DX: analyze surfaces low-frequency block candidates', () => 
     {
       event: 'block',
       block_reason: 'credential=ISSUE1020_SYNTHETIC_SECRET',
-      method: 'POST',
+      method: JSON.stringify({ credential: 'prefix"ISSUE1020_CREDENTIAL' }),
       status: 401,
       uri: [
         'https://',
