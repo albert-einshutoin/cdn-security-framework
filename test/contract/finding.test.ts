@@ -13,6 +13,7 @@ import {
   sortFindings,
   type FindingInputV1,
 } from '../../src/contract';
+import { hasUnsafeSensitiveText, redactSensitiveText } from '../../src/contract/sensitive-text';
 
 const baseInput: FindingInputV1 = {
   ruleId: 'SC-INVENTORY-001',
@@ -120,6 +121,7 @@ describe('Finding Contract v1', () => {
   });
 
   test('redacts sensitive headers and query values before returning a Finding', () => {
+    const urlWithUserInfo = ['https://', 'alice', ':', 'credential-url-secret', '@example.test/login'].join('');
     const finding = createFinding({
       ...baseInput,
       message: [
@@ -135,6 +137,8 @@ describe('Finding Contract v1', () => {
         'Hawk raw-hawk-secret',
         'Signature raw-signature-secret',
         'Negotiate negotiate-secret',
+        'credential=credential-secret',
+        `URL ${urlWithUserInfo}`,
         'Analyzer detail sk-proj-syntheticvalue123 ghp_syntheticvalue12345678',
         'AWS4-HMAC-SHA256 Credential=aws-secret, Signature=aws-signature-secret',
         'Authorization: Digest username="user",\n response="folded-lf-secret"',
@@ -169,6 +173,8 @@ describe('Finding Contract v1', () => {
       'bearer-second-secret', 'first-basic-secret', 'basic-second-secret',
       'first-negotiate-secret', 'negotiate-second-secret',
       'raw-digest-secret', 'raw-aws-secret', 'raw-hawk-secret', 'raw-signature-secret',
+      'credential-secret',
+      'credential-url-secret',
       'sk-proj-syntheticvalue123', 'ghp_syntheticvalue12345678',
       'aws-secret', 'aws-signature-secret',
       'folded-lf-secret', 'folded-crlf-secret',
@@ -176,6 +182,12 @@ describe('Finding Contract v1', () => {
       expect(serialized).not.toContain(secret);
     }
     expect(serialized).toContain('[REDACTED]');
+  });
+
+  test('accepts redacted single-quoted object continuations', () => {
+    const redacted = redactSensitiveText("{'credential':'credential-single-secret','status':'failed'}");
+    expect(redacted).toBe("{'credential':'[REDACTED]','status':'failed'}");
+    expect(hasUnsafeSensitiveText(redacted)).toBe(false);
   });
 
   test.each([
