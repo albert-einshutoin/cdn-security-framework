@@ -1,5 +1,19 @@
 export const SENSITIVE_KEY_PATTERN = /(?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|api[-_]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|token|secret|password)/i;
 
+export function isSensitiveField(key: string, value: unknown): boolean {
+  if (SENSITIVE_KEY_PATTERN.test(key)) return true;
+  if (!/^credentials?$/i.test(key)) return false;
+  // Authentication findings carry a descriptor, never the credential value.
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return true;
+  const descriptor = value as Record<string, unknown>;
+  return Object.keys(descriptor).length !== 2
+    || !Object.prototype.hasOwnProperty.call(descriptor, 'location')
+    || !Object.prototype.hasOwnProperty.call(descriptor, 'names')
+    || (descriptor.location !== 'header' && descriptor.location !== 'query')
+    || !Array.isArray(descriptor.names)
+    || !descriptor.names.every((name) => typeof name === 'string');
+}
+
 const AUTH_SCHEME_PREFIX = /\b(?:Basic|Bearer|Digest|Negotiate|AWS4-HMAC-SHA256|Hawk|Signature)\s+/gi;
 const ASSIGNMENT_PREFIX = /(?<![?&])["']?\b(?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|x-api-key|api[-_]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|credentials?|token|password|secret)\b["']?\s*[:=]\s*["']?/gi;
 const QUERY_PREFIX = /[?&][^=\s&#]+=/g;

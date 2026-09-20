@@ -878,6 +878,17 @@ test('CLI authoring DX: analyze surfaces low-frequency block candidates', () => 
       assert.ok(!missing.stdout.includes(sentinel), `leaked ${sentinel} to error stdout`);
       assert.ok(!missing.stderr.includes(sentinel), `leaked ${sentinel} to error stderr`);
     }
+
+    for (const extraArgs of [[], ['--json']]) {
+      const unreadable = spawnSync(process.execPath, [cli, 'analyze', '--input', tmp, ...extraArgs], {
+        cwd: tmp,
+        encoding: 'utf8',
+        env: process.env,
+      });
+      assert.strictEqual(unreadable.status, 1);
+      assert.strictEqual(unreadable.stdout, '');
+      assert.strictEqual(unreadable.stderr.trim(), '[ERROR] analyze: input could not be read');
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
