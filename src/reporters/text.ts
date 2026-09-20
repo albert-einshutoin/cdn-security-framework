@@ -2,7 +2,7 @@ import type { AllowedCapabilityStatus } from '../contract/allowed-surface';
 import type { ContractDiffReportV1 } from '../contract/contract-diff';
 import type { FindingEvidenceV1, SecurityFindingV1 } from '../contract/finding';
 import { sortFindings } from '../contract/finding-order';
-import { redactSensitiveText, SENSITIVE_KEY_PATTERN } from '../contract/sensitive-text';
+import { isSensitiveField, redactSensitiveText } from '../contract/sensitive-text';
 import type { CapabilityLevelV1, SecurityContractCapabilitiesV1 } from '../contract/security-ir';
 
 export interface UnifiedContractDiffTextOptions {
@@ -64,12 +64,10 @@ function safeValue(value: unknown, state: SafeValueState, depth: number): unknow
     return '[REDACTED_UNREADABLE]';
   }
   for (const key of keys.slice(0, MAX_OBJECT_KEYS)) {
-    if (SENSITIVE_KEY_PATTERN.test(key)) {
-      output[terminalText(key)] = '[REDACTED]';
-      continue;
-    }
     try {
-      output[terminalText(key)] = safeValue((value as Record<string, unknown>)[key], state, depth + 1);
+      const child = (value as Record<string, unknown>)[key];
+      output[terminalText(key)] = isSensitiveField(key, child)
+        ? '[REDACTED]' : safeValue(child, state, depth + 1);
     } catch {
       output[terminalText(key)] = '[REDACTED_UNREADABLE]';
     }
@@ -80,7 +78,9 @@ function safeValue(value: unknown, state: SafeValueState, depth: number): unknow
 
 function safeValueText(value: unknown): string {
   try {
-    return terminalText(JSON.stringify(safeValue(value, { nodes: 0, seen: new WeakSet<object>() }, 0)) ?? 'null');
+    // Values and keys are sanitized before serialization; re-masking JSON erases descriptors.
+    const serialized = JSON.stringify(safeValue(value, { nodes: 0, seen: new WeakSet<object>() }, 0)) ?? 'null';
+    return `${serialized.slice(0, MAX_FIELD_LENGTH)}${serialized.length > MAX_FIELD_LENGTH ? '[TRUNCATED]' : ''}`;
   } catch {
     return '[REDACTED_UNSERIALIZABLE]';
   }

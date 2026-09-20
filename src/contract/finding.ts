@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { redactSensitiveText, SENSITIVE_KEY_PATTERN } from './sensitive-text';
+import { isSensitiveField, redactSensitiveText } from './sensitive-text';
 
 export const FINDING_SEVERITIES = ['error', 'warning', 'info'] as const;
 export const FINDING_CONFIDENCES = ['deterministic', 'high-confidence', 'heuristic'] as const;
@@ -123,7 +123,7 @@ function redactValue(
       break;
     }
     const child = (value as Record<string, unknown>)[key];
-    if (SENSITIVE_KEY_PATTERN.test(key)) {
+    if (isSensitiveField(key, child)) {
       state.nodes += 1;
       output[key] = '[REDACTED]';
     } else {

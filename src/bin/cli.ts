@@ -4,6 +4,8 @@
  * Commands: init (scaffold policy YAML), build (compile policy → dist)
  */
 
+import { redactSensitiveText } from '../contract/sensitive-text';
+
 const path = require('path');
 const fs = require('fs');
 
@@ -1730,15 +1732,33 @@ function asNumber(value: unknown): number | null {
   return null;
 }
 
+function normalizeAnalyzeText(value: string, stripQueryHash = false): string {
+  const normalized = value.trim();
+  const withoutQueryHash = stripQueryHash ? normalized.split(/[?#]/, 1)[0] : normalized;
+  return redactSensitiveText(withoutQueryHash)
+    // Preserve escaped quotes until sensitive values have been removed.
+    .replace(/\\/g, '/')
+    .replace(/[\p{Cc}\p{Cf}\p{Zl}\p{Zp}]/gu, ' ')
+    .trim();
+}
+
+function normalizeAnalyzeInput(cwd: string, inputPath: string): string {
+  const relative = path.relative(cwd, inputPath).replace(/\\/g, '/');
+  if (!relative || relative === '..' || relative.startsWith('../') || path.isAbsolute(relative)) {
+    return '[external]';
+  }
+  return normalizeAnalyzeText(relative, true) || '[input]';
+}
+
 function normalizePolicyRoute(value: string | null): string {
   if (!value) {
     return 'unknown';
   }
-  const trimmed = value.trim();
-  if (!trimmed) {
+  const normalized = normalizeAnalyzeText(value, true);
+  if (!normalized) {
     return 'unknown';
   }
-  return trimmed.startsWith('/') ? trimmed : `/${trimmed}`;
+  return normalized.startsWith('/') ? normalized : `/${normalized}`;
 }
 
 function normalizeEvent(value: unknown): string {
@@ -1764,20 +1784,20 @@ function parseAnalyzeRecord(row: unknown): AnalyzeEvent | null {
     return null;
   }
   const record = row as Record<string, unknown>;
-  const method = asString((record as any).method)
+  const method = normalizeAnalyzeText(asString((record as any).method)
     || asString((record as any).httpRequest?.method)
     || asString((record as any).request?.method)
-    || 'UNKNOWN';
+    || 'UNKNOWN', true) || 'UNKNOWN';
   const rawEvent = asString((record as any).event) !== null
     ? (record as any).event
     : asString((record as any).eventName) !== null
       ? (record as any).eventName
       : (record as any).outcome;
   const event = normalizeEvent(rawEvent);
-  const blockReason = asString((record as any).block_reason)
+  const blockReason = normalizeAnalyzeText(asString((record as any).block_reason)
     || asString((record as any).blockReason)
     || asString((record as any).reason)
-    || 'unclassified';
+    || 'unclassified', true) || 'unclassified';
 
   const uri = normalizePolicyRoute(
     asString((record as any).uri)
@@ -1795,11 +1815,11 @@ function parseAnalyzeRecord(row: unknown): AnalyzeEvent | null {
       || uri,
   );
 
-  const target = asString((record as any).target)
+  const target = normalizeAnalyzeText(asString((record as any).target)
     || asString((record as any).platform)
     || asString((record as any).provider)
     || asString((record as any).runtime)
-    || 'unknown';
+    || 'unknown', true) || 'unknown';
 
   const status = asNumber((record as any).status) || asNumber((record as any).statusCode) || 0;
   if (status < 0 || status > 999999) {
@@ -1878,7 +1898,7 @@ function runAnalyze(opts: AnalyzeLogOptions): AnalyzeReport {
     throw new Error('analyze: --input is required');
   }
   if (!fs.existsSync(inputPath)) {
-    throw new Error(`analyze: input file not found: ${inputPath}`);
+    throw new Error('analyze: input file not found');
   }
 
   const minCount = Number(opts.minCount);
@@ -1890,8 +1910,13 @@ function runAnalyze(opts: AnalyzeLogOptions): AnalyzeReport {
     throw new Error('analyze: --top must be a positive integer');
   }
 
-  const report = buildEmptyAnalyzeReport(inputPath, Math.floor(minCount), Math.floor(top));
-  const text = fs.readFileSync(inputPath, 'utf8');
+  const report = buildEmptyAnalyzeReport(normalizeAnalyzeInput(cwd, inputPath), Math.floor(minCount), Math.floor(top));
+  let text: string;
+  try {
+    text = fs.readFileSync(inputPath, 'utf8');
+  } catch {
+    throw new Error('analyze: input could not be read');
+  }
   const lines = text.split(/\r?\n/);
   const candidateMap: Record<string, {
     policyRoute: string;
@@ -3956,7 +3981,7 @@ program
         printAnalyzeReport(report);
       }
     } catch (e: unknown) {
-      console.error('[ERROR]', errorMessage(e));
+      console.error('[ERROR]', normalizeAnalyzeText(errorMessage(e), true));
       process.exit(1);
     }
   });

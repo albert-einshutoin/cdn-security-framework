@@ -1,7 +1,21 @@
 export const SENSITIVE_KEY_PATTERN = /(?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|api[-_]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|token|secret|password)/i;
 
+export function isSensitiveField(key: string, value: unknown): boolean {
+  if (SENSITIVE_KEY_PATTERN.test(key)) return true;
+  if (!/^credentials?$/i.test(key)) return false;
+  // Authentication findings carry a descriptor, never the credential value.
+  if (value === null || typeof value !== 'object' || Array.isArray(value)) return true;
+  const descriptor = value as Record<string, unknown>;
+  return Object.keys(descriptor).length !== 2
+    || !Object.prototype.hasOwnProperty.call(descriptor, 'location')
+    || !Object.prototype.hasOwnProperty.call(descriptor, 'names')
+    || (descriptor.location !== 'header' && descriptor.location !== 'query')
+    || !Array.isArray(descriptor.names)
+    || !descriptor.names.every((name) => typeof name === 'string');
+}
+
 const AUTH_SCHEME_PREFIX = /\b(?:Basic|Bearer|Digest|Negotiate|AWS4-HMAC-SHA256|Hawk|Signature)\s+/gi;
-const ASSIGNMENT_PREFIX = /(?<![?&])["']?\b(?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|x-api-key|api[-_]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|token|password|secret)\b["']?\s*[:=]\s*["']?/gi;
+const ASSIGNMENT_PREFIX = /(?<![?&])["']?\b(?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|x-api-key|api[-_]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|credentials?|token|password|secret)\b["']?\s*[:=]\s*["']?/gi;
 const QUERY_PREFIX = /[?&][^=\s&#]+=/g;
 const PROVIDER_TOKEN_PATTERN = /\b(?:sk-(?:proj-)?|gh[opsur]_|github_pat_|AKIA|(?:sk|pk)_)[A-Za-z0-9_.-]{8,}/i;
 const REDACTED_MARKER = '[REDACTED]';
@@ -13,7 +27,15 @@ function isJsonContinuation(value: string): boolean {
     JSON.parse(`{"__redacted__":"value"${suffix}`);
     return true;
   } catch {
-    return false;
+    const normalized = suffix.replace(/'((?:\\.|[^'\\\r\n])*)'/g, (_match, content: string) => (
+      JSON.stringify(content.replace(/\\'/g, "'"))
+    ));
+    try {
+      JSON.parse(`{"__redacted__":"value"${normalized}`);
+      return true;
+    } catch {
+      return false;
+    }
   }
 }
 
@@ -86,9 +108,13 @@ export function hasUnsafeSensitiveText(value: string): boolean {
 
 export function redactSensitiveText(value: string): string {
   return value
+    .replace(/(\b[A-Za-z][A-Za-z0-9+.-]*:\/\/)[^\/?#\s]*@/g, '$1')
     .replace(/([?&][^=\s&#]+)=([^&#\s]*)/g, '$1=[REDACTED]')
-    .replace(/(["'](?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|token|password|secret)["']\s*:\s*)(?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^,}\r\n]*)/gi, '$1"[REDACTED]"')
-    .replace(/\b(authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|token|password|secret)\s*[:=]\s*[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*/gi, '$1=[REDACTED]')
+    .replace(/(["'](?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|credentials?|token|password|secret)["']\s*:\s*)((?:"(?:\\.|[^"\\\r\n])*"|'(?:\\.|[^'\\\r\n])*'|[^,}\r\n]*))/gi, (_match, prefix: string, rawValue: string) => {
+      const quote = rawValue.startsWith("'") ? "'" : '"';
+      return `${prefix}${quote}[REDACTED]${quote}`;
+    })
+    .replace(/\b(authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|x-api-key|api[_-]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|credentials?|token|password|secret)\s*[:=]\s*[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*/gi, '$1=[REDACTED]')
     .replace(/\b(Basic|Bearer|Digest|Negotiate|AWS4-HMAC-SHA256|Hawk|Signature)\s+[^\r\n]*(?:\r?\n[ \t]+[^\r\n]*)*/gi, '$1 [REDACTED]')
     .replace(/\b(?:sk-(?:proj-)?|gh[opsur]_|github_pat_|AKIA|(?:sk|pk)_)[A-Za-z0-9_.-]{8,}/gi, REDACTED_MARKER);
 }

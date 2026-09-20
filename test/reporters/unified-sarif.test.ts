@@ -1,6 +1,10 @@
 import { describe, expect, test, vi } from 'vitest';
 
 import { createFinding, type ContractDiffReportV1 } from '../../src/contract';
+import { hasUnsafeSensitiveText } from '../../src/contract/sensitive-text';
+import { renderUnifiedContractDiffJson } from '../../src/reporters/json';
+import { renderUnifiedContractDiffText } from '../../src/reporters/text';
+import { renderContractDiffGitHubSummary } from '../../src/reporters/github-summary';
 import {
   SarifReportError,
   renderUnifiedContractDiffSarif,
@@ -61,6 +65,58 @@ function report(): ContractDiffReportV1 {
 }
 
 describe('Unified contract SARIF adapter', () => {
+  test.each([
+    "{'credential':'ISSUE1020_VALUE','status':'failed'}",
+    "{'credential':'prefix\\'ISSUE1020_VALUE','status':'failed','count':2}",
+    '{"credentials":"prefix\\"ISSUE1020_VALUE","status":"failed","count":2}',
+    "{'credential':'ISSUE1020_VALUE','status':'can\\'t authenticate'}",
+    `{"credential":"ISSUE1020_VALUE","status":"can't authenticate"}`,
+    "{'credential':'ISSUE1020_VALUE','password':'ISSUE1020_SECOND','status':'failed'}",
+  ])('renders sanitized credential text through every reporter: %s', (message) => {
+    const input = report();
+    input.inputDigests = { openapi: `sha256:${'a'.repeat(64)}`, policy: `sha256:${'b'.repeat(64)}`, exceptions: null };
+    const actual = [
+      { kind: 'apiKey', credential: { location: 'header', names: ['x-client-key'] } },
+      { kind: 'apiKey', credential: { location: 'query', names: ['client-key'] } },
+      { kind: 'unknown', credentialStatus: 'unknown-v1-field' },
+    ];
+    const finding = createFinding({ ...input.findings[0], title: message, message, actual });
+    input.findings = [finding];
+    expect(finding.actual).toEqual(actual);
+    expect(hasUnsafeSensitiveText(finding.message)).toBe(false);
+    const sarif = renderUnifiedContractDiffSarif(input);
+    expect(sarif.runs[0].results[0].message.text).toBe(finding.message);
+    const json = renderUnifiedContractDiffJson(input);
+    expect(JSON.parse(json).findings[0].actual).toEqual(actual);
+    const text = renderUnifiedContractDiffText(input);
+    for (const descriptor of ['header', 'query', 'x-client-key', 'client-key', 'unknown-v1-field']) {
+      expect(text).toContain(descriptor);
+    }
+    for (const output of [JSON.stringify(sarif), json, text, renderContractDiffGitHubSummary(input)]) {
+      expect(output).not.toContain('ISSUE1020_VALUE');
+      expect(output).not.toContain('ISSUE1020_SECOND');
+      expect(output).toContain('[REDACTED]');
+    }
+  });
+
+  test.each([
+    'ISSUE1020_RAW_VALUE',
+    { value: 'ISSUE1020_RAW_VALUE' },
+    ['ISSUE1020_RAW_VALUE'],
+    { location: 'header', names: ['x-client-key'], value: 'ISSUE1020_RAW_VALUE' },
+  ])('masks credential values without treating them as descriptors', (credential) => {
+    const input = report();
+    input.inputDigests = { openapi: `sha256:${'a'.repeat(64)}`, policy: `sha256:${'b'.repeat(64)}`, exceptions: null };
+    const finding = createFinding({ ...input.findings[0], actual: { credential } });
+    input.findings = [finding];
+    expect(finding.actual).toEqual({ credential: '[REDACTED]' });
+    for (const output of [renderUnifiedContractDiffJson(input), renderUnifiedContractDiffText(input)]) {
+      expect(output).not.toContain('ISSUE1020_RAW_VALUE');
+    }
+    input.findings = [{ ...finding, actual: { credential } }];
+    expect(renderUnifiedContractDiffText(input)).not.toContain('ISSUE1020_RAW_VALUE');
+  });
+
   test('selects source primary, deduplicates related locations, and preserves order', () => {
     const input = report();
     const first = renderUnifiedContractDiffSarif(input);
