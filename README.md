@@ -209,7 +209,7 @@ The Quickstart also covers Cloudflare JWT `init --guided`, playground authentica
 
 ### 5. Deploy boundary
 
-`dist/edge/` holds runtime code and `dist/infra/` holds IaC fragments. Review the [IaC guide](docs/iac.md) before handing them to your Terraform/CDK/CDN workflow. Build does not deploy. Never deploy synthetic-token/placeholder artifacts; production needs a separately reviewed build with production secrets.
+With the example’s `--out-dir dist/aws`, runtime code is in `dist/aws/edge/` and IaC fragments are in `dist/aws/infra/`. Without that option the defaults are `dist/edge/` and `dist/infra/`. Review the [IaC guide](docs/iac.md) before handing them to your Terraform/CDK/CDN workflow. Build does not deploy. Never deploy synthetic-token/placeholder artifacts; production needs a separately reviewed build with production secrets.
 
 ## Product Core and Generated Security Controls
 

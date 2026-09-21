@@ -208,7 +208,7 @@ node node_modules/cdn-security-framework/scripts/policy-lint.js policy/security.
 
 ### 5. デプロイ境界
 
-`dist/edge/`はruntime、`dist/infra/`はIaC断片です。[IaC手順](docs/iac.ja.md)を確認し、operatorのTerraform/CDK/CDN workflowへreview後に引き渡します。build自体はdeployしません。synthetic token/placeholder artifactを本番利用せず、適用前に本番用secretで別途build・reviewしてください。
+この例の`--out-dir dist/aws`では`dist/aws/edge/`がruntime、`dist/aws/infra/`がIaC断片です。このoptionを省略した既定の出力先は`dist/edge/`と`dist/infra/`です。[IaC手順](docs/iac.ja.md)を確認し、operatorのTerraform/CDK/CDN workflowへreview後に引き渡します。build自体はdeployしません。synthetic token/placeholder artifactを本番利用せず、適用前に本番用secretで別途build・reviewしてください。
 
 ## Product Core と生成 Security Control
 
