@@ -36,9 +36,9 @@ finding として返します。Runtime に観測がないことは route 削除
 | Area | Status | Evidence / boundary |
 | --- | --- | --- |
 | Released package | v1.4.0 | [v1.4.0 tag](https://github.com/albert-einshutoin/cdn-security-framework/releases/tag/v1.4.0) |
-| Contract / trust foundation (#271–#275) | Implemented | [Contract tests](../test/contract/) / [Public contract](./programmatic-api.ja.md) |
-| OpenAPI-aware policy (#276–#284) | Implemented | [OpenAPI tests](../test/openapi/) / [OpenAPI guide](./openapi-integration.ja.md) |
-| Declared ↔ allowed drift (#285–#293) | Implemented | [Drift tests](../test/contract/contract-drift.test.ts) / [Reporters](../test/reporters/) |
+| Contract / trust foundation (#271–#275) | Implemented | [Contract tests](https://github.com/albert-einshutoin/cdn-security-framework/tree/111f995bd35d3b24bdd1ee7dd72c35bce19f9170/test/contract/) / [Public contract](./programmatic-api.ja.md) |
+| OpenAPI-aware policy (#276–#284) | Implemented | [OpenAPI tests](https://github.com/albert-einshutoin/cdn-security-framework/tree/111f995bd35d3b24bdd1ee7dd72c35bce19f9170/test/openapi/) / [OpenAPI guide](./openapi-integration.ja.md) |
+| Declared ↔ allowed drift (#285–#293) | Implemented | [Drift tests](https://github.com/albert-einshutoin/cdn-security-framework/tree/111f995bd35d3b24bdd1ee7dd72c35bce19f9170/test/contract/contract-drift.test.ts) / [Reporters](https://github.com/albert-einshutoin/cdn-security-framework/tree/111f995bd35d3b24bdd1ee7dd72c35bce19f9170/test/reporters/) |
 | NestJS Source Analyzer core (#294–#300) | Implemented / Experimental | [Source guide](./source-analysis-nestjs.ja.md); programmatic/static only |
 | Source-aware standard CLI | Planned v2.1.0 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) |
 | Policy schema 2 / migration | Implemented on main / unpublished | [#1023](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023) / [PR #1033](https://github.com/albert-einshutoin/cdn-security-framework/pull/1033) |
