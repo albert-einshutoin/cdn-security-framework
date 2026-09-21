@@ -218,19 +218,51 @@ npx cdn-security analyze --input /path/to/monitor.jsonl
 npx cdn-security analyze --input /path/to/monitor.jsonl --min-count 3 --top 10 --json
 ```
 
-`analyze` accepts monitor logs in JSON Lines format and aggregates by route/reason to support migration from monitor mode to enforce.
+`analyze` reads JSONL without modifying the input. It groups valid records by route/reason and surfaces low-frequency block candidates; it does not decide whether a policy is safe or apply changes.
 
-- `--input` required: log file path (JSONL)
-- `--min-count` minimum event count for low-frequency candidates (default `5`)
-- `--top` max number of printed/exported per-group samples (default `20`)
-- `--json` prints machine-readable report
+- `--input`: required JSONL file path.
+- `--min-count`: inclusive upper count threshold for block candidates (default `5`, rounded down).
+- `--top`: maximum candidates and samples per candidate (default `20`, rounded down).
+- `--json`: one JSON document with a final newline on stdout; otherwise a text report.
 
-It reports:
+Each nonblank line must be an object with an explicit own `event`, `eventName`, or `outcome`. Values are trimmed and case-insensitive: `allow`/`pass`/`passed` → `pass`, `block`/`blocked` → `block`, `monitor`/`monitoring`/`logged` → `monitor`; `audit`, `error`, `challenge`, and `challenge_report` retain their meaning. Every supplied event alias must be valid and agree. Status alone never implies an event, and a challenge with status 403 is not a block.
 
-- summary lines (parsed/unparsed/analyzed)
-- by block reason (event count + route counts)
-- by policy route (reason and target distribution)
-- low-frequency candidates (`count <= --min-count`) for `block` events
+If any outer event alias exists, the outer record is selected even when its value is invalid. Otherwise, an own `message` must contain a JSON string encoding an object with an event alias. Only one layer is decoded; outer metadata is not merged and there is no fallback to another record.
+
+Supplied auxiliary string fields must be nonempty strings before privacy normalization. All supplied aliases are validated, then the first is selected in this order:
+
+| Field | Alias priority |
+| --- | --- |
+| method | `method`, `httpRequest.method`, `request.method` |
+| URI | `uri`, `path`, `request.uri`, `request.path`, `httpRequest.uri`, `httpRequest.path` |
+| policy route | `policy_route`, `policyRoute`, `route`, `request.route`; URI only when all are absent |
+| target | `target`, `platform`, `provider`, `runtime` |
+| reason | `block_reason`, `blockReason`, `reason` |
+
+Present `request`/`httpRequest` containers must be objects, not arrays or null. Both `status` and `statusCode` are validated before selecting the first: a safe integer number, or a trimmed decimal-digit string, representing 0 or 100–599. Explicit 0 does not fall back. Missing method/status/target/reason display as `UNKNOWN`/0/`unknown`/`unclassified`. Missing URI/route, including a selected value made empty by privacy normalization, stays distinct internally and displays as `unknown`. An explicit `unknown` route becomes `/unknown`. Blocks with no real route count in the summary but cannot become route candidates.
+
+All valid events contribute to route/reason groups. Only explicit canonical block/monitor events increment their respective counters. Candidates contain block events with a real route and `count <= --min-count`, sorted by count then route, preserving input order for ties. Credentials, URL userinfo, query/fragment and unsafe path text are normalized before grouping; diagnostics contain no raw records or argument values.
+
+| `summary.inputStatus` | Meaning | Exit | stderr (one line) |
+| --- | --- | --- | --- |
+| `complete` | All nonblank records valid | 0 | empty |
+| `partial` | Valid and invalid records mixed; report contains the valid portion | 1 | `[WARN] ANALYZE_INPUT_PARTIAL` |
+| `invalid` | Nonblank records exist, none valid | 1 | `[ERROR] ANALYZE_INPUT_INVALID` |
+| `empty` | No nonblank records | 1 | `[WARN] ANALYZE_INPUT_EMPTY` |
+
+Exit 0 means input processing completed; it is not a security approval. Nonzero input status still emits a complete report. `totalLines = parsedLines + unparseableLines` counts nonblank lines; `analyzedEvents = parsedLines` counts valid records. JSON includes `diagnostics` and text includes `input_status` and a `diagnostics` JSON line. Diagnostics contain `total`, `counts` (all codes below, in this order, including zero), the first 20 `{line, code}` examples using physical 1-based line numbers (blank lines included), and `omitted`.
+
+1. `ANALYZE_JSON_SYNTAX`: invalid outer JSON.
+2. `ANALYZE_RECORD_TYPE`: outer value is not an object.
+3. `ANALYZE_EVENT_MISSING`: no event alias or message.
+4. `ANALYZE_EVENT_VALUE`: event alias is not a nonempty string.
+5. `ANALYZE_EVENT_UNKNOWN`: unrecognized event value.
+6. `ANALYZE_EVENT_ALIAS_CONFLICT`: aliases disagree.
+7. `ANALYZE_NESTED_MESSAGE`: invalid one-layer message envelope.
+8. `ANALYZE_FIELD_VALUE`: invalid auxiliary field/container.
+9. `ANALYZE_STATUS_VALUE`: invalid status.
+
+Each rejected line produces one diagnostic: JSON/object and record selection first, then event type/known value/agreement, containers (`request`, then `httpRequest`), string fields in the table order, and status. Fatal errors emit no report (stdout empty), exit 1, and a fixed stderr line: `[ERROR] ANALYZE_INPUT_NOT_FOUND`, `[ERROR] ANALYZE_INPUT_READ_FAILED`, or `[ERROR] ANALYZE_ARGUMENT_INVALID` (including missing/unknown options). `analyze --help` retains normal help and exit 0.
 
 ## `emit-waf`
 
