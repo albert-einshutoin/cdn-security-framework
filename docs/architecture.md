@@ -128,10 +128,9 @@ Responsibilities:
 
 ```mermaid
 flowchart TB
-  P[Security Policy
-(YAML)] --> C[Compiler]
+  P["Security Policy (YAML)"] --> C[Compiler]
   C --> CF[CloudFront Functions]
-  C --> LE[Lambda@Edge]
+  C --> LAM["Lambda@Edge"]
   C --> CW[Cloudflare Workers]
 ```
 
