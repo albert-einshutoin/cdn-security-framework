@@ -6,10 +6,10 @@
 
 ## スコープ
 
-* **Edge セキュリティレイヤー** は、WAF や Origin に届く前にリクエストをブロックまたは正規化します。安全に運用するには、以下を把握することが望ましいです：
+* **Edge セキュリティレイヤー** は、設定されたイベントでリクエストをブロックまたは正規化します。安全に運用するには、以下を把握することが望ましいです：
   * ブロックされたリクエスト数とその理由（メソッド、パストラバーサル、UA、クエリ、管理ゲート）。
   * レスポンスにセキュリティヘッダーが付与されているか。
-* ここでは **推奨** するログフィールドとメトリクス次元を定義します。ランタイム側または CDN のログ（CloudFront アクセスログ、Workers 分析など）で実装してください。
+* 下記の生成runtimeログと、利用者が別途構築する集約・メトリクスを区別します。カウンタ名やmetric filterをcompilerが自動作成するわけではありません。
 
 ---
 
@@ -28,7 +28,7 @@
 | `uri` | URI パス（既定ではクエリを除く） | `/admin` |
 | `correlation_id` | 設定した相関ヘッダーの値（無ければ origin で採番） | `00-4bf9...-01` |
 
-監査イベント（`audit_log_auth: true`）は追加で:
+CloudflareのJWT/signed_url成功監査（`audit_log_auth: true`）は追加で以下を出します。AWSではこれらの認証設定をbuild時に拒否し、originログで代替しません:
 
 | フィールド | 説明 |
 |------------|------|
@@ -56,9 +56,9 @@ observability:
 
 ### 相関 ID 伝播
 
-Lambda@Edge / Worker は受信リクエストに `correlation_id_header` が無いとき自動採番（`crypto.randomUUID` / `crypto.getRandomValues`）して origin への転送ヘッダに付与します。これにより Edge / WAF / Origin のログを同一 ID で串刺しできます。
+Lambda@Edge / Worker は受信リクエストに `correlation_id_header` が無いとき自動採番（`crypto.randomUUID` / `crypto.getRandomValues`）して origin への転送ヘッダに付与します。転送後の下流ログはこのIDで関連付けられますが、後から採番したIDが先行するviewer/WAFログにも存在するとは限りません。
 
-allow のサンプリング判定は決定論的です。受信時の相関 ID があればそれを使い、無ければリクエストメソッドと URI パスを使います。Lambda@Edge / Worker は相関 ID の自動採番前にこのキーを確定するため、同じ method/path の再試行は同じサンプルバケットに入ります。`sample_rate: 0` は allow ログを無効化し、`1` はすべての許可リクエストを記録します。block / monitor / audit / error はサンプリングしません。
+allow のサンプリング判定は決定論的です。受信時の相関 ID があればそれを使い、無ければリクエストメソッドと URI パスを使います。Lambda@Edge / Worker は相関 ID の自動採番前にこのキーを確定するため、同じ method/path の再試行は同じサンプルバケットに入ります。`sample_rate: 0` は allow ログを無効化し、`1` はそのfunctionが到達した許可判定をすべて出力対象にします。全viewer requestの観測や配送成功の保証ではありません。block / monitor / audit / error はサンプリングしません。
 
 ---
 
@@ -90,9 +90,18 @@ allow のサンプリング判定は決定論的です。受信時の相関 ID �
 
 ## 実装上の注意
 
-* **CloudFront Functions**: ログ API はない。CloudFront アクセスログを利用するか、レスポンスにデバッグ用ヘッダー（例: `x-edge-block-reason`）を付与する。本番でセンシティブな場合は本番では外す。同一 Behavior で Lambda@Edge を使う場合はそちらでログ送信も可。
-* **Lambda@Edge**: `console.log`（または自前ロガー）で `block_reason` と `status_code` を含む JSON を出力し、CloudWatch Logs に送り、メトリクスフィルタで集計する。
-* **Cloudflare Workers**: `console.log` または Workers 分析 / カスタムメトリクスを利用。デバッグ用に `x-edge-block-reason` ヘッダーを付与する場合は任意。
+* **CloudFront Functions**: `console.log()`を含むLIVE functionの実トラフィック実行では、CloudWatch Logsへ出力されます。cache behaviorのfunctionログは`us-east-1`の`/aws/cloudfront/function/<FunctionName>`です。テスト実行のログはテスト結果に含まれ、CloudWatchへの配送とは異なります。[AWS: Edge function logs](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/edge-functions-logs.html)
+* `console.log`は任意の外部ログAPIへ直接HTTP送信できるという意味ではありません。CloudFront Functionsのnetworkアクセスは制限され、ログは10KBで切り詰められます。[AWS: CloudFront Functions restrictions](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cloudfront-function-restrictions.html)
+* **同じcache behaviorの組合せ**: 各event typeへのedge function関連付けは1つです。CloudFront FunctionsとLambda@Edgeをviewer-request/viewer-responseに混在できません。一方、CloudFront FunctionsのviewerイベントとLambda@Edgeのorigin-request/origin-responseの組合せは許可されます。[AWS: all edge-function restrictions](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/edge-function-restrictions-all.html)
+* **originの観測範囲**: origin-requestはoriginへ転送するときだけ、origin-responseはoriginから応答を受けたときだけ実行されます。cache hitでは実行されず、origin-request functionが応答を生成した場合もorigin-responseは実行されません。originログを全viewer requestの記録として扱わないでください。[AWS: trigger events](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-cloudfront-trigger-events.html)
+* **Lambda@Edge**: 現行origin-request templateも`console.log`を使います。CloudWatchログは実行されたRegionで確認します。runtimeの`status`等を使ったmetric filter・集約は利用者が別途構築するものです。
+* **Cloudflare Workers**: 現行Workerの`console.log`と、利用者が設定するanalytics/metricsの集約を区別してください。認証情報や内部判断を露出するdebug headerを本番の推奨既定にはしません。
+
+### 配送と完全性
+
+Edge functionログはbest-effort配送で、遅延・欠落があり得ます。ログにないことはリクエストがなかった証明ではありません。関数の実行条件、sampling、ログの上限と配送を別々に確認し、完全なリクエスト台帳や請求照合の代用にしないでください。[AWS: delivery limits](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/edge-functions-logs.html)
+
+実装照合（2026-09-22、main `111f995bd35d3b24bdd1ee7dd72c35bce19f9170`）: `templates/aws/viewer-request.js`、`templates/aws/origin-request.js`、`templates/cloudflare/index.ts`の`logEvent`とsampling。ここでruntime/logging機能を追加していません。
 
 ---
 
