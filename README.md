@@ -30,6 +30,8 @@ deterministic wherever the input is supported, and an omitted or unsupported
 comparison is reported rather than guessed. OpenAPI, source analysis, policy,
 and runtime evidence are separate truths; none is proof of the others.
 
+Published: 1.4.0. On 2026-09-22 main implements and validates schema2 and explicit migration; 2.0.0 remains unpublished and before RC GO. [Evidence](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249).
+
 ### Capability status
 
 | Capability | Status | Interface | Limit |
@@ -38,10 +40,10 @@ and runtime evidence are separate truths; none is proof of the others.
 | OpenAPI policy candidate | Implemented | CLI/API | review-only; never auto-applied |
 | OpenAPI↔Policy drift | Implemented | CLI/JSON/SARIF/GHA | no source needed |
 | NestJS Source Analyzer core | Experimental/Implemented core | Programmatic | no app execution; metadata is not enforcement proof |
-| Source-aware contract diff CLI | Planned v1.6 | — | — |
-| Runtime Evidence v1 | Planned v1.8 | — | — |
-| Policy Composition | Planned v1.9 | — | — |
-| LSP/VS Code | Planned v2.1 | — | — |
+| Source-aware contract diff CLI | Planned v2.1 | — | — |
+| Runtime Evidence v1 | Planned v2.3 | — | — |
+| Policy Composition | Planned v2.4 | — | — |
+| LSP/VS Code | Planned v3.1 | — | — |
 
 For the runnable paths, see the [OpenAPI integration guide](docs/openapi-integration.md),
 [NestJS source analysis guide](docs/source-analysis-nestjs.md),

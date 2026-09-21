@@ -3,17 +3,17 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
-const RELEASE_VERSIONS = ['v1.5.0', 'v1.6.0', 'v1.7.0', 'v1.8.0', 'v1.9.0', 'v2.0.0', 'v2.1.0'];
+const RELEASE_VERSIONS = ['v2.0.0', 'v2.1.0', 'v2.2.0', 'v2.3.0', 'v2.4.0', 'v3.0.0', 'v3.1.0'];
 const VERSION_PATTERN = /\bv\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\b/gu;
 const CAPABILITY_ROWS = [
   ['OpenAPI inspect', 'Implemented', 'CLI/API', 'local refs only'],
   ['OpenAPI policy candidate', 'Implemented', 'CLI/API', 'review-only; never auto-applied'],
   ['OpenAPI↔Policy drift', 'Implemented', 'CLI/JSON/SARIF/GHA', 'no source needed'],
   ['NestJS Source Analyzer core', 'Experimental/Implemented core', 'Programmatic', 'no app execution; metadata is not enforcement proof'],
-  ['Source-aware contract diff CLI', 'Planned v1.6', '—', '—'],
-  ['Runtime Evidence v1', 'Planned v1.8', '—', '—'],
-  ['Policy Composition', 'Planned v1.9', '—', '—'],
-  ['LSP/VS Code', 'Planned v2.1', '—', '—'],
+  ['Source-aware contract diff CLI', 'Planned v2.1', '—', '—'],
+  ['Runtime Evidence v1', 'Planned v2.3', '—', '—'],
+  ['Policy Composition', 'Planned v2.4', '—', '—'],
+  ['LSP/VS Code', 'Planned v3.1', '—', '—'],
 ] as const;
 const ROADMAP_EN_HEADINGS = [
   '## 1. Product thesis',
@@ -147,14 +147,16 @@ export function checkDocsSync(repoRoot: string): void {
   assertIncludes(roadmapJa, 'Implemented', 'Japanese implementation status');
   assertIncludes(roadmapEn, '| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental |', 'English Source Analyzer status');
   assertIncludes(roadmapJa, '| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental |', 'Japanese Source Analyzer status');
-  assertIncludes(roadmapEn, '| Source-aware standard CLI | Planned v1.6.0 |', 'English Source-aware CLI status');
-  assertIncludes(roadmapJa, '| Source-aware standard CLI | Planned v1.6.0 |', 'Japanese Source-aware CLI status');
-  assertIncludes(roadmapEn, '| v1.5 release preparation | No-Go / product decision blocked | [#544]', 'English v1.5 release status');
-  assertIncludes(roadmapJa, '| v1.5 release preparation | No-Go / product decision blocked | [#544]', 'Japanese v1.5 release status');
-  assertIncludes(roadmapEn, '#555', 'English compatibility gate link');
-  assertIncludes(roadmapJa, '#555', 'Japanese compatibility gate link');
-  assertIncludes(roadmapEn, '[#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) owns the major-or-scope decision |', 'English product decision owner');
-  assertIncludes(roadmapJa, '[#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) が major / scope 判断を担当 |', 'Japanese product decision owner');
+  assertIncludes(roadmapEn, '| Source-aware standard CLI | Planned v2.1.0 |', 'English Source-aware CLI status');
+  assertIncludes(roadmapJa, '| Source-aware standard CLI | Planned v2.1.0 |', 'Japanese Source-aware CLI status');
+  for (const [label, roadmap] of [['English', roadmapEn], ['Japanese', roadmapJa]] as const) {
+    assertIncludes(roadmap, '| v2.0 release preparation | Operational hardening / not RC GO |', `${label} release status`);
+    assertIncludes(roadmap, 'Decision A', `${label} accepted major decision`);
+    assertIncludes(roadmap, '| Policy schema 2 / migration | Implemented on main / unpublished |', `${label} schema2 status`);
+    for (const issue of [529, 531, 533, 534, 536, 537, 539, 541, 542, 895, 571, 545, 1013]) {
+      assertIncludes(roadmap, `https://github.com/albert-einshutoin/cdn-security-framework/issues/${issue})`, `${label} canonical issue`);
+    }
+  }
   assertIncludes(roadmapEn, '#571', 'English release issue link');
   assertIncludes(roadmapJa, '#571', 'Japanese release issue link');
 }

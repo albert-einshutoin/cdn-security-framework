@@ -14,6 +14,8 @@ CDN、WAF、DDoS、bot、CAPTCHA engine 自体を再実装しません。Product
 **Generate → Diff → Review → Apply** です。AI は finding の説明だけを行い、
 Allow / Block / Severity / Exit を決定しません。
 
+上記はProductの方向です。現在の比較経路とPlannedの境界は次の状態表を参照してください。
+
 ## 2. 4つの Truth と Evidence
 
 | View | Source | 意味 |
@@ -29,69 +31,57 @@ finding として返します。Runtime に観測がないことは route 削除
 
 ## 3. 現行リリースと main の状態
 
+状態確認: **2026-09-22**、main `111f995bd35d3b24bdd1ee7dd72c35bce19f9170`。[main検証](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249)。schema2はmain実装済みですが未公開です。公開済み1.4.0、package表示1.4.0、次期目標2.0.0を区別します。
+
 | Area | Status | Evidence / boundary |
 | --- | --- | --- |
-| 公開 package | v1.4.0 | [v1.4.0 tag](https://github.com/albert-einshutoin/cdn-security-framework/releases/tag/v1.4.0) |
-| Contract / trust foundation (#271–#275) | Implemented | Finding、Security IR、parser/resource/privacy 境界 |
-| OpenAPI-aware policy (#276–#284) | Implemented | safe loader、ref、normalization、inspect、review-only candidate |
-| Declared ↔ allowed drift (#285–#293) | Implemented | exception、決定論的 report、SARIF、GitHub Actions |
-| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental | programmatic static analysis。application は実行しない |
-| Source-aware standard CLI | Planned v1.6.0 | 現在の CLI は application source を自動読込しない |
-| v1.5 release preparation | No-Go / product decision blocked | [#544](https://github.com/albert-einshutoin/cdn-security-framework/issues/544) が Stable v1.5.0 を棄却し、[#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) が major / scope 判断を担当 |
-
-`Implemented` は code、acceptance evidence、package/docs evidence が揃った状態です。
-`Experimental` は interface に到達できるが compatibility を保証しない状態です。
+| Released package | v1.4.0 | [v1.4.0 tag](https://github.com/albert-einshutoin/cdn-security-framework/releases/tag/v1.4.0) |
+| Contract / trust foundation (#271–#275) | Implemented | [Contract tests](../test/contract/) / [Public contract](./programmatic-api.ja.md) |
+| OpenAPI-aware policy (#276–#284) | Implemented | [OpenAPI tests](../test/openapi/) / [OpenAPI guide](./openapi-integration.ja.md) |
+| Declared ↔ allowed drift (#285–#293) | Implemented | [Drift tests](../test/contract/contract-drift.test.ts) / [Reporters](../test/reporters/) |
+| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental | [Source guide](./source-analysis-nestjs.ja.md); programmatic/static only |
+| Source-aware standard CLI | Planned v2.1.0 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) |
+| Policy schema 2 / migration | Implemented on main / unpublished | [#1023](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023) / [PR #1033](https://github.com/albert-einshutoin/cdn-security-framework/pull/1033) |
+| v2.0 release preparation | Operational hardening / not RC GO | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) / [#895](https://github.com/albert-einshutoin/cdn-security-framework/issues/895) |
 
 ## 4. Version Release Train
 
-| Version | Release epic | Outcome | Entry condition | Status |
-| --- | --- | --- | --- | --- |
-| v1.5.0 | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) | 既実装の OpenAPI ↔ Policy Contract Foundation と release/package/docs hardening を productize | Entry、evidence、compatibility、package、security、RC review | **NO-GO: #544 が現行 Stable scope を棄却し、#1013 の判断待ち** |
-| v1.6.0 | `V160-REL-000` | CLI / CI / Public API の Source-aware Contract Diff MVP | v1.5 post-release review | Planned |
-| v1.7.0 | `V170-REL-000` | pilot 駆動の accuracy、onboarding、monorepo hardening | v1.6 post-release review | Planned |
-| v1.8.0 | `V180-REL-000` | Runtime Evidence preview | v1.7 post-release review | Planned |
-| v1.9.0 | `V190-REL-000` | Policy governance / composition preview | v1.8 post-release review | Planned |
-| v2.0.0 | `V200-REL-000` | Application-aware Security Compiler GA と stable public contract | v1.9 post-release review | Planned |
-| v2.1.0 | `V210-REL-000` | LSP / VS Code editor feedback loop | v2.0 post-release review | Planned |
+| Version | Release epic | Outcome / must-have | Entry condition | Non-goals | Status |
+| --- | --- | --- | --- | --- | --- |
+| v2.0.0 | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) | Contract Foundation / schema 2 / 安全なmigration | [#541](https://github.com/albert-einshutoin/cdn-security-framework/issues/541) / [#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) Decision A | Source CLI / Runtime / Composition / Editor | Operational hardening |
+| v2.1.0 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) | Source-aware Contract Diff MVP | [#545](https://github.com/albert-einshutoin/cdn-security-framework/issues/545) | Runtime / Composition / Editor | Planned |
+| v2.2.0 | [#533](https://github.com/albert-einshutoin/cdn-security-framework/issues/533) | 精度 / onboarding / monorepo改善 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) 公開後評価 | New analyzers/providers | Planned |
+| v2.3.0 | [#534](https://github.com/albert-einshutoin/cdn-security-framework/issues/534) | Runtime Evidence Preview | [#533](https://github.com/albert-einshutoin/cdn-security-framework/issues/533) 公開後評価 | Automatic enforcement | Planned |
+| v2.4.0 | [#536](https://github.com/albert-einshutoin/cdn-security-framework/issues/536) | Policy Governance Preview | [#534](https://github.com/albert-einshutoin/cdn-security-framework/issues/534) 公開後評価 | Silent baseline weakening | Planned |
+| v3.0.0 | [#537](https://github.com/albert-einshutoin/cdn-security-framework/issues/537) | GA public contract | [#536](https://github.com/albert-einshutoin/cdn-security-framework/issues/536) 公開後評価 | Editor extension | Planned |
+| v3.1.0 | [#539](https://github.com/albert-einshutoin/cdn-security-framework/issues/539) | Editor連携 | [#537](https://github.com/albert-einshutoin/cdn-security-framework/issues/537) 公開後評価 | Automatic apply/deploy | Planned |
 
-v1.5 の scope に新しい product feature は追加しません。Source-aware CLI、
-Runtime Evidence、Policy Composition、LSP/VS Code、新しい analyzer、CDN/WAF
-feature はこの release の外に置きます。
+公開日を約束しません。各Epicがscope・受入条件の正本です。旧V150等のIDは履歴のまま残します。
 
 ## 5. Version dependency graph
 
 ```mermaid
 flowchart LR
-  V150["v1.5 Contract Foundation"] --> V160["v1.6 Source-aware MVP"]
-  V160 --> V170["v1.7 Accuracy Hardening"]
-  V170 --> V180["v1.8 Runtime Evidence"]
-  V180 --> V190["v1.9 Policy Governance"]
-  V190 --> V200["v2.0 GA"]
-  V200 --> V210["v2.1 Editor"]
-  R["#176 Enabling refactor"] -. enables .-> V160
-  R -. enables .-> V200
-  P["#167 Policy governance"] --> V190
-  E["#301 Runtime evidence"] --> V180
+  CF["2.0 Contract Foundation"] --> SA["2.1 Source-aware MVP"]
+  SA --> ACC["2.2 Accuracy / Onboarding"]
+  ACC --> RT["2.3 Runtime Evidence"]
+  RT --> GOV["2.4 Policy Governance"]
+  GOV --> GA["3.0 GA public contract"]
+  GA --> ED["3.1 Editor"]
+  REF["#176 Enabling refactor"] -. enables .-> SA
+  REF -. enables .-> GA
 ```
 
 ## 6. Review cadence と release gate
 
-全 Version は同じ gate を通します。
+1. Entry / evidence review: [#541](https://github.com/albert-einshutoin/cdn-security-framework/issues/541).
+2. Current candidate audits: [#887](https://github.com/albert-einshutoin/cdn-security-framework/issues/887), [#889](https://github.com/albert-einshutoin/cdn-security-framework/issues/889), [#891](https://github.com/albert-einshutoin/cdn-security-framework/issues/891), [#890](https://github.com/albert-einshutoin/cdn-security-framework/issues/890), [#1024](https://github.com/albert-einshutoin/cdn-security-framework/issues/1024).
+3. Midpoint / implementation-status review: [#542](https://github.com/albert-einshutoin/cdn-security-framework/issues/542).
+4. RC GO/NO-GO: [#895](https://github.com/albert-einshutoin/cdn-security-framework/issues/895).
+5. Version change / release preparation / separately approved publication: [#571](https://github.com/albert-einshutoin/cdn-security-framework/issues/571).
+6. Post-release outcome review: [#545](https://github.com/albert-einshutoin/cdn-security-framework/issues/545).
 
-1. Entry / evidence review（[#541](https://github.com/albert-einshutoin/cdn-security-framework/issues/541)）。
-2. Compatibility / implementation audit（[#553](https://github.com/albert-einshutoin/cdn-security-framework/issues/553)、[#555](https://github.com/albert-einshutoin/cdn-security-framework/issues/555)）。
-3. Repository、docs、API、Node/package、deterministic、security work（[#557](https://github.com/albert-einshutoin/cdn-security-framework/issues/557)、[#559](https://github.com/albert-einshutoin/cdn-security-framework/issues/559)、[#560](https://github.com/albert-einshutoin/cdn-security-framework/issues/560)、[#562](https://github.com/albert-einshutoin/cdn-security-framework/issues/562)、[#564](https://github.com/albert-einshutoin/cdn-security-framework/issues/564)、[#566](https://github.com/albert-einshutoin/cdn-security-framework/issues/566)、[#568](https://github.com/albert-einshutoin/cdn-security-framework/issues/568)）。
-4. Midpoint status review（[#542](https://github.com/albert-einshutoin/cdn-security-framework/issues/542)）。
-5. RC Go / No-Go review（[#544](https://github.com/albert-einshutoin/cdn-security-framework/issues/544)）。
-6. Release Issue / PR contract（[#571](https://github.com/albert-einshutoin/cdn-security-framework/issues/571)）。
-7. Version bump、tag、publish は明示された RC decision の後だけに行い、その後 post-release review を行います。
-
-v1.5 について #544 は **NO-GO** を記録しています。#555 で、過去に有効だった
-v1.4 policy を拒否する schema validator の厳格化と AWS CSP nonce fail-closed 化が
-確認されたためです。[#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013)
-で major release への再判定または安全な scope 縮小を決め、その後の RC Gate が
-`GO` になるまで、[#571](https://github.com/albert-einshutoin/cdn-security-framework/issues/571)
-の release PR 作成と version bump を開始しません。
+[#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) Decision Aはmajor再分類を確定済みです。Stable v1.5.0 NO-GO（[#544](https://github.com/albert-einshutoin/cdn-security-framework/issues/544)）と旧監査[#555](https://github.com/albert-einshutoin/cdn-security-framework/issues/555)は履歴として保持し、新候補の受入を代用しません。#895のGO、#571のversion変更・release PR、tag/npm公開、Issue closeは別状態です。schema2のmain反映だけでは公開可能とは判断しません。
 
 ## 7. Status の定義
 
@@ -109,9 +99,9 @@ Issue を close しただけでは Status は変わりません。
 | --- | --- |
 | Cloudflare/auth と compiler test | 現行の implemented foundation / operational hardening |
 | Issue と docs の整合 | 現行の docs/status governance |
-| monitor/observability と multi-CDN parity | v1.7 accuracy / v1.8 Runtime Evidence |
-| overlay/inheritance と governance helper | v1.9 Policy Governance |
-| Stable API / provider 方針 | v2.0 GA |
+| monitor/observability と multi-CDN parity | v2.2 accuracy / v2.3 Runtime Evidence |
+| overlay/inheritance と governance helper | v2.4 Policy Governance |
+| Stable API / provider 方針 | v3.0 GA |
 | Rust/WASM と追加 CDN の調査 | Research backlog |
 
 旧 Track A–G は履歴の説明であり、別の release plan ではありません。

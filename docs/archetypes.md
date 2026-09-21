@@ -98,5 +98,5 @@ Adding a new archetype? See [How to add an archetype](#how-to-add-an-archetype) 
    # ...and compile-cloudflare.js, compile-infra.js, compile-cloudflare-waf.js
    ```
 4. Add the archetype to `scripts/check-drift.js` scenarios.
-5. Add a choice to the `init` wizard in `bin/cli.js`.
+5. Add a choice to the `init` wizard in `src/bin/cli.ts`.
 6. Document it in this file (EN + JA).
