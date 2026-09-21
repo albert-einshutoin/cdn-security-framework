@@ -19,7 +19,7 @@ target 前提、認証方式、必要な環境変数、検証コマンドまで�
 `ORIGIN_SECRET` も必要です。
 
 ```yaml
-version: 1
+version: 2
 project: cognito-api
 metadata:
   risk_level: strict
@@ -105,7 +105,7 @@ CloudFront または Cloudflare で配信する。
 **必要 env:** なし。
 
 ```yaml
-version: 1
+version: 2
 project: spa-static-site
 metadata:
   risk_level: balanced
@@ -169,7 +169,7 @@ Next.js が static export ではなく SSR の場合は、origin 側の cache-co
 **必要 env:** `EDGE_ADMIN_TOKEN`。
 
 ```yaml
-version: 1
+version: 2
 project: internal-admin
 metadata:
   risk_level: strict
@@ -247,7 +247,7 @@ CDN/IaC の secret flow で rotate し、SSO と併用してください。
 有効化する場合は `ORIGIN_SECRET` も必要です。
 
 ```yaml
-version: 1
+version: 2
 project: signed-downloads
 metadata:
   risk_level: strict
@@ -330,7 +330,7 @@ origin 側で Redis `SET NX` などを使って実装してください。
 **必要 env:** HMAC origin auth を有効化する場合は `ORIGIN_SECRET`。
 
 ```yaml
-version: 1
+version: 2
 project: cloudflare-graphql-api
 metadata:
   risk_level: strict

@@ -157,6 +157,7 @@ export function generatePolicyCandidate(
   }
   if (!/^sha256:[a-f0-9]{64}$/.test(options.sourceDigest)) throw new Error('invalid source digest');
 
+  if (options.profilePolicy.version !== 2) throw new Error('policy schema 2 is required');
   const policy = structuredClone(options.profilePolicy);
   const request = objectValue(policy.request);
   const limits = objectValue(request.limits);

@@ -110,6 +110,7 @@ type EmitWafOptions = {
 type MigrateOptions = {
   policy: string;
   to: string;
+  target?: string;
   write?: boolean;
 };
 
@@ -259,7 +260,9 @@ function resolvePolicyPath(cwd: string, explicitPath?: string | null): string {
 
 function loadPolicyDocument(policyPath: string) {
   const yaml = require('js-yaml');
-  return yaml.load(fs.readFileSync(policyPath, 'utf8'));
+  const policy = yaml.load(fs.readFileSync(policyPath, 'utf8'));
+  if (!policy || policy.version !== 2) throw new Error('Policy schema 2 is required; use migrate for v1.');
+  return policy;
 }
 
 function csvList(value?: string | null): string[] {
@@ -382,7 +385,7 @@ function routeAuthSummary(route: any): string {
 function renderPolicyVisualization(policyPath: string, target: CapabilityDeployTarget, options?: { format?: 'mermaid' | 'html' }) {
   const policy = loadPolicyDocument(policyPath);
   const policyName = policy && policy.project ? String(policy.project) : 'unnamed-policy';
-  const version = policy && Number(policy.version) ? String(policy.version) : '1';
+  const version = policy && Number(policy.version) ? String(policy.version) : '2';
   const routes = Array.isArray(policy && policy.routes) ? policy.routes : [];
   const controls = collectVisualizedCapabilities(policy, target);
   const requestedTargets: ('aws' | 'cloudflare')[] = target === 'all' ? ['aws', 'cloudflare'] : [target];
@@ -569,7 +572,7 @@ function renderGuidedPolicy(opts: {
     '# CI/CD secrets or Cloudflare Worker secrets; never commit secret values.',
     '# Docs: docs/cli.md#init, docs/auth.md, docs/runbooks/secret-rotation.md',
     '',
-    'version: 1',
+    'version: 2',
     `project: ${yamlString(opts.project)}`,
     '',
     'metadata:',
@@ -3652,37 +3655,22 @@ program
 
 program
   .command('migrate')
-  .description('Migrate a policy file between schema versions (stub — v1 is the only shipped version)')
-  .option('-p, --policy <path>', 'Policy file path to inspect', 'policy/security.yml')
-  .option('--to <version>', 'Target schema version', '1')
-  .option('--write', 'Write the migrated policy back in place (no-op on v1)')
+  .description('Preview explicit policy v1 to v2 migration; --write saves with a .v1.bak backup')
+  .configureOutput({ writeErr: () => {} })
+  .exitOverride()
+  .option('-p, --policy <path>', 'Policy file path', 'policy/security.yml')
+  .option('--to <version>', 'Target schema version (1 or 2; default 2)', '2')
+  .option('--target <target>', 'Explicit provider for nonce/JWT/signed_url: aws or cloudflare')
+  .option('--write', 'Save in place after validation; requires an absent <policy>.v1.bak')
   .action((opts: MigrateOptions) => {
     const { migratePolicy } = require(path.join(pkgRoot, 'lib'));
-    const cwd = process.cwd();
-    const policyPath = path.isAbsolute(opts.policy) ? opts.policy : path.join(cwd, opts.policy);
-
-    const result = migratePolicy({
-      policyPath,
-      toVersion: opts.to,
-      cwd,
-      write: !!opts.write,
-    });
-
-    if (result.fromVersion !== undefined) {
-      console.log('[INFO] Policy:', policyPath);
-      console.log('[INFO] Current schema version:', result.fromVersion);
-      console.log('[INFO] Target schema version: ', result.toVersion);
-    }
-
-    if (result.ok && result.noop) {
-      console.log('[OK] Already at target version — no migration needed.');
-      process.exit(0);
-    }
-
-    if (!result.ok) {
-      result.errors.forEach((e: string) => console.error('[ERROR]', e));
-      process.exit(result.reservedExit2 ? 2 : 1);
-    }
+    const result = migratePolicy({ policyPath: opts.policy, toVersion: opts.to, target: opts.target, write: !!opts.write });
+    if (!result.ok) result.errors.forEach((e: string) => console.error('[ERROR]', e));
+    else if (result.noop) console.log('[OK] Already at target version — no migration needed.');
+    else console.log(result.saved ? '[OK] MIGRATION_SAVED: schema 2; original policy retained in .v1.bak.'
+      : '[OK] MIGRATION_PREVIEW: version 1 -> 2; no files written.');
+    result.warnings.forEach((w: string) => console.error('[WARN]', w));
+    process.exitCode = result.exitCode;
   });
 
 try {
@@ -3699,6 +3687,9 @@ try {
   } else if (process.argv[2] === analyzeCommand.name() && commanderError.code?.startsWith('commander.')) {
     process.exitCode = commanderError.exitCode === 0 ? 0 : 1;
     if (process.exitCode) console.error('[ERROR] ANALYZE_ARGUMENT_INVALID');
+  } else if (process.argv[2] === 'migrate' && commanderError.code?.startsWith('commander.')) {
+    process.exitCode = commanderError.exitCode === 0 ? 0 : 1;
+    if (process.exitCode) console.error('[ERROR] MIGRATION_ARGUMENT_INVALID');
   } else throw error;
 }
 

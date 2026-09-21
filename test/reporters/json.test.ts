@@ -22,7 +22,7 @@ paths:
       responses:
         '200': { description: OK }
 `);
-  fs.writeFileSync(policyPath, `version: 1
+  fs.writeFileSync(policyPath, `version: 2
 defaults: { mode: enforce }
 request:
   allow_methods: [GET]

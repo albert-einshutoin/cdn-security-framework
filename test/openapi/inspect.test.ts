@@ -125,7 +125,7 @@ describe('cdn-security openapi inspect', () => {
     fs.mkdirSync(path.dirname(policy), { recursive: true });
     fs.mkdirSync(path.dirname(distSentinel), { recursive: true });
     fs.writeFileSync(input, JSON.stringify({ openapi: '3.1.0', paths: {} }));
-    fs.writeFileSync(policy, 'version: 1\n');
+    fs.writeFileSync(policy, 'version: 2\n');
     fs.writeFileSync(distSentinel, 'keep');
     const before = [input, policy, distSentinel].map((file) => fs.readFileSync(file, 'utf8'));
     const cli = path.join(process.cwd(), 'bin', 'cli.js');
@@ -195,7 +195,7 @@ describe('cdn-security openapi inspect', () => {
     const policyTarget = path.join(workspace, 'protected-policy');
     fs.mkdirSync(policyTarget);
     const policyTargetFile = path.join(policyTarget, 'security.yml');
-    fs.writeFileSync(policyTargetFile, 'version: 1\n');
+    fs.writeFileSync(policyTargetFile, 'version: 2\n');
     fs.symlinkSync('protected-policy', path.join(workspace, 'policy'), 'dir');
     const symlinkedPolicyOutput = childProcess.spawnSync(
       process.execPath,
@@ -206,7 +206,7 @@ describe('cdn-security openapi inspect', () => {
     );
     expect(symlinkedPolicyOutput.status).toBe(1);
     expect(symlinkedPolicyOutput.stderr).toContain('OPENAPI_OUTPUT_PROTECTED');
-    expect(fs.readFileSync(policyTargetFile, 'utf8')).toBe('version: 1\n');
+    expect(fs.readFileSync(policyTargetFile, 'utf8')).toBe('version: 2\n');
   });
 
   test('returns stable safe errors for invalid input and unsafe output paths', () => {

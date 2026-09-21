@@ -88,7 +88,7 @@ Adding a new archetype? See [How to add an archetype](#how-to-add-an-archetype) 
 
 ## How to add an archetype
 
-1. Create `policy/archetypes/<name>.yml`. Required: `version: 1`, `metadata.risk_level`, `metadata.description`. Fold use-case guidance into `description`.
+1. Create `policy/archetypes/<name>.yml`. Required: `version: 2`, `metadata.risk_level`, `metadata.description`. Fold use-case guidance into `description`.
 2. Lint: `npm run lint:policy -- policy/archetypes/<name>.yml`
 3. Generate the golden fixture:
    ```bash

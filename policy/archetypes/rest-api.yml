@@ -4,7 +4,7 @@
 # Threat focus: JWT bypass, CORS misconfiguration, method spoofing.
 # Base profile: balanced with API-specific hardening.
 
-version: 1
+version: 2
 project: example-rest-api
 
 metadata:

@@ -138,20 +138,28 @@ interface LintResult {
 
 ### `migratePolicy(opts)`
 
-Migrate a policy file between schema versions. v1 is the only shipped version today; a v1 → v1 call is a no-op with `{ ok: true, noop: true }`.
-
-**Output**
+Explicit v1→v2 adapter; defaults to preview and target version 2. No core fallback. `policy` is an intentional configuration artifact, not a redacted diagnostic. Valid same-version input is a validated noop. See [migration contract](./schema-migration.md).
 
 ```ts
-interface MigrateResult {
+interface MigratePolicyOptions {
+  policyPath?: string;
+  toVersion?: number | string; // default 2
+  target?: 'aws' | 'cloudflare'; // no implicit provider
+  write?: boolean; // default false; save requires absent <policy>.v1.bak
+  cwd?: string;
+}
+interface MigratePolicyResult {
   ok: boolean;
   errors: string[];
   warnings: string[];
-  fromVersion?: number | string;
-  toVersion?: number | string;
-  migrated?: unknown;
-  noop?: boolean;
-  reservedExit2?: boolean;  // CLI translates to exit 2
+  fromVersion: number | undefined;
+  toVersion: number;
+  migrated: boolean;
+  noop: boolean;
+  saved: boolean;
+  exitCode: 0 | 1 | 2;
+  policy?: unknown;
+  reservedExit2?: boolean;
 }
 ```
 

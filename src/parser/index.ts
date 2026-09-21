@@ -111,6 +111,7 @@ function loadPolicyFile(
   }
 
   const doc = raw as Record<string, unknown>;
+  if (doc.version !== 2) throw new Error('Policy schema 2 is required; use the explicit migrate command for v1.');
   const extendsPath = doc.extends;
   if (extendsPath === undefined) {
     const filtered = { ...doc };

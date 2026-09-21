@@ -22,7 +22,7 @@ npx cdn-security <subcommand> [options]
 | `explain` | レビューやオンボーディング向けにポリシーの要点を表示。 |
 | `visualize` | Mermaid/HTML のポリシー可視化を生成し、実装・監視・未対応・target別制御を明示。 |
 | `diff` | 生成物の drift または policy posture の差分を比較。 |
-| `migrate` | スキーマのバージョン間マイグレーション（現状 v1 のみの stub）。 |
+| `migrate` | v1→v2をpreview、または原本backup付きで明示保存。 |
 | `openapi inspect` | Policyやbuild出力を変更せず、ローカルOpenAPIのSecurity Contractを決定的なText/JSONで確認。 |
 | `openapi generate-policy` | 非破壊・review専用Policy Candidateとmeta sidecarを生成。 |
 | `contract diff` | OpenAPI宣言と有効Policyを比較し、Security Findingを出力。 |
@@ -444,24 +444,12 @@ npx cdn-security diff --semantic --baseline policy/security.previous.yml --polic
 ## `migrate`
 
 ```bash
-npx cdn-security migrate              # ドライラン
-npx cdn-security migrate --to 1       # v1 の場合は no-op
-npx cdn-security migrate --policy policy/security.yml --to 1 --write
+./node_modules/.bin/cdn-security migrate --policy policy/security.yml
+./node_modules/.bin/cdn-security migrate --policy policy/security.yml --target cloudflare --write
 ```
 
-ポリシーファイルのスキーマバージョンを検査または移行します。現状は v1 のみが出荷されているため、v1 → v1 は将来の migration path が登録されるまで読み取り専用の no-op です。
+未公開候補tarballの実行ファイルを使います。省略時の`--to 2`は検証したv1→v2変換をpreviewし、ファイルを書きません。provider依存設定には`--target aws|cloudflare`を明示し、buildのAWS既定値を推測利用しません。`--write`は検証後だけin-place保存し、元bytesを保持する未存在の同directory `<policy>.v1.bak`を必要とします。有効な同version入力は--writeでも再保存しないnoopです。
 
-フラグ:
+stdoutは固定preview/saved/noop summary、失敗診断は固定内容でstderrへ出します。Policy本文・秘密値・不要pathは表示しません。exit0は成功/noop、1は入力/I/O/downgrade失敗、2は未対応versionまたは手動判断必須です。difficultyのclampやauth/nonceの自動disableはしません。
 
-- `-p, --policy <path>` — 検査対象のポリシー（デフォルト `policy/security.yml`）
-- `--to <version>` — 移行先スキーマバージョン（デフォルト `1`）
-- `--write` — migration path が存在するとき、移行結果をその場で書き戻す
-
-出力:
-
-- ポリシーパスと現在/移行先スキーマバージョンを示す `[INFO]` 行
-- 移行不要時は `[OK] Already at target version — no migration needed.`
-
-移行先に既に到達している場合は exit `0` です。パースエラー、`version` 欠落、ダウングレード、その他の検証失敗は exit `1` です。この CLI に未登録の前方 migration は exit `2`（CLI のアップグレードが必要なケース用の予約コード）です。
-
-スキーマの SemVer 契約と非推奨ウィンドウについては [schema-migration.ja.md](./schema-migration.ja.md) を参照してください。
+設定保持・保存失敗・filesystem・rollbackの保証範囲は[schema migration](./schema-migration.ja.md)を参照してください。公開1.4.0はv1であり、候補packageのversionだけではv2契約を識別できません。

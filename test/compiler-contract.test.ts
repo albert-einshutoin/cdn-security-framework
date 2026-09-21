@@ -20,7 +20,7 @@ describe('compiler public contracts', () => {
     const result = validatePolicy({
       pkgRoot: process.cwd(),
       policy: {
-        version: 1,
+        version: 2,
         request: { allow_methods: ['GET'] },
         response_headers: {},
       },

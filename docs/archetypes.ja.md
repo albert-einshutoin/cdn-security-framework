@@ -88,7 +88,7 @@ npx cdn-security init --platform aws --archetype rest-api
 
 ## アーキタイプの追加手順
 
-1. `policy/archetypes/<name>.yml` を作成。必須項目：`version: 1`、`metadata.risk_level`、`metadata.description`。ユースケースガイダンスは `description` にまとめてください。
+1. `policy/archetypes/<name>.yml` を作成。必須項目：`version: 2`、`metadata.risk_level`、`metadata.description`。ユースケースガイダンスは `description` にまとめてください。
 2. lint：`npm run lint:policy -- policy/archetypes/<name>.yml`
 3. golden fixture を生成：
    ```bash

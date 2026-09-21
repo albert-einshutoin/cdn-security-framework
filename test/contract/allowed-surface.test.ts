@@ -66,7 +66,7 @@ function isAllowed(result: any): boolean {
 
 function policy(mode: 'enforce' | 'monitor' = 'enforce'): Record<string, unknown> {
   return {
-    version: 1,
+    version: 2,
     defaults: { mode },
     request: {
       allow_methods: ['GET'],

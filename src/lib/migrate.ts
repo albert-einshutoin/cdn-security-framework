@@ -1,158 +1,37 @@
-/**
- * Programmatic API: migratePolicy
- *
- * v1 is the only shipped schema, so this is a no-op for v1 → v1. Reports
- * structured errors for unknown targets, missing versions, and unregistered
- * migration paths. The CLI `migrate` subcommand translates this into exit
- * codes 0/1/2.
- *
- * Input:
- *   {
- *     policyPath: string,
- *     toVersion?: number | string,   // default: 1
- *     write?:     boolean,           // write migrated content when a migration exists
- *     cwd?:       string,
- *   }
- *
- * Output:
- *   {
- *     ok:          boolean,
- *     errors:      string[],
- *     warnings:    string[],
- *     fromVersion: number | undefined,
- *     toVersion:   number,
- *     migrated:    boolean,           // true iff a migration actually ran
- *     noop:        boolean,           // true iff already at target
- *     reservedExit2?: boolean,        // true for "no migration path registered" — CLI exits 2
- *   }
- */
-
-const fs = require('fs');
+import path from 'node:path';
+import { isDeepStrictEqual } from 'node:util';
+import type { MigratePolicyOptions, MigratePolicyResult } from './index';
+import { MigrationError, checkMigrationValue, MIGRATION_MAX_BYTES, migrationFailure, transformPolicy } from './migration-transform';
+import { readMigrationInput, saveMigration } from './migration-save';
 const yaml = require('js-yaml');
-const { resolveAbsolute } = require('../emitter');
-const { errorMessage } = require('../scripts/lib/errors');
 
-interface MigratePolicyOptions {
-  policyPath?: string;
-  toVersion?: number | string;
-  write?: boolean;
-  cwd?: string;
-}
-
-function migratePolicy(opts: MigratePolicyOptions = {}) {
-  opts = opts || {};
-  const cwd = opts.cwd || process.cwd();
-  const toVersionRaw = opts.toVersion === undefined ? 1 : opts.toVersion;
-  const toVersion = Number(toVersionRaw);
-
-  const warnings: string[] = [];
-
-  if (!opts.policyPath) {
-    return {
-      ok: false,
-      errors: ['policyPath is required'],
-      warnings,
-      fromVersion: undefined,
-      toVersion,
-      migrated: false,
-      noop: false,
-    };
-  }
-
-  const policyPath = resolveAbsolute(opts.policyPath, cwd);
-  if (!fs.existsSync(policyPath)) {
-    return {
-      ok: false,
-      errors: [`policy file not found: ${policyPath}`],
-      warnings,
-      fromVersion: undefined,
-      toVersion,
-      migrated: false,
-      noop: false,
-    };
-  }
-
-  if (Number.isNaN(toVersion)) {
-    return {
-      ok: false,
-      errors: [`toVersion must be a number. Got: ${toVersionRaw}`],
-      warnings,
-      fromVersion: undefined,
-      toVersion: NaN,
-      migrated: false,
-      noop: false,
-    };
-  }
-
-  let doc: any;
+export function parseMigrationYaml(content: string): unknown {
+  if (Buffer.byteLength(content) > MIGRATION_MAX_BYTES) throw new MigrationError('MIGRATION_RESOURCE_LIMIT');
   try {
-    doc = yaml.load(fs.readFileSync(policyPath, 'utf8'));
-  } catch (e: unknown) {
-    return {
-      ok: false,
-      errors: [`failed to parse policy YAML: ${errorMessage(e)}`],
-      warnings,
-      fromVersion: undefined,
-      toVersion,
-      migrated: false,
-      noop: false,
-    };
+    const value = yaml.load(content, { schema: yaml.JSON_SCHEMA, json: false, maxAliases: 50, maxDepth: 64 });
+    checkMigrationValue(value);
+    return value;
+  } catch (error) {
+    if (error instanceof MigrationError) throw error;
+    throw new MigrationError('MIGRATION_YAML_INVALID');
   }
-
-  const fromVersion = doc && doc.version;
-
-  if (fromVersion === undefined) {
-    return {
-      ok: false,
-      errors: ['Policy has no `version` field. Add `version: 1` and retry.'],
-      warnings,
-      fromVersion: undefined,
-      toVersion,
-      migrated: false,
-      noop: false,
-    };
-  }
-
-  if (fromVersion === toVersion) {
-    return {
-      ok: true,
-      errors: [],
-      warnings,
-      fromVersion,
-      toVersion,
-      migrated: false,
-      noop: true,
-    };
-  }
-
-  if (toVersion < fromVersion) {
-    return {
-      ok: false,
-      errors: ['Downgrade migrations are not supported.'],
-      warnings,
-      fromVersion,
-      toVersion,
-      migrated: false,
-      noop: false,
-    };
-  }
-
-  // Forward migrations are registered here when a new schema version ships.
-  // Contract: each step is a pure function (v_n policy) -> (v_n+1 policy).
-  // v1 is currently the only shipped schema, so there is nothing to run.
-  return {
-    ok: false,
-    errors: [
-      `No migration path from v${fromVersion} to v${toVersion} is registered in this CLI version.`,
-      'See docs/schema-migration.md for the migration policy and supported versions.',
-    ],
-    warnings,
-    fromVersion,
-    toVersion,
-    migrated: false,
-    noop: false,
-    reservedExit2: true,
-  };
 }
 
-module.exports = { migratePolicy };
+export function migratePolicy(opts: MigratePolicyOptions = {}): MigratePolicyResult {
+  try {
+    if (!opts || typeof opts !== 'object' || typeof opts.policyPath !== 'string' || !opts.policyPath.trim()
+      || (opts.write !== undefined && typeof opts.write !== 'boolean')
+      || (opts.cwd !== undefined && typeof opts.cwd !== 'string')) throw new MigrationError('MIGRATION_ARGUMENT_INVALID');
+    const input = path.resolve(opts.cwd ?? process.cwd(), opts.policyPath);
+    const source = readMigrationInput(input);
+    const result = transformPolicy(parseMigrationYaml(new TextDecoder('utf-8', { fatal: true }).decode(source.content)), opts.toVersion, opts.target);
+    if (!result.ok || result.noop || !opts.write) return result;
+    const serialized = yaml.dump(result.policy, { noRefs: true, sortKeys: false, lineWidth: -1 });
+    if (!isDeepStrictEqual(parseMigrationYaml(serialized), result.policy)) throw new MigrationError('MIGRATION_SERIALIZATION_INVALID');
+    const warnings = saveMigration(source, Buffer.from(serialized));
+    return { ...result, saved: true, warnings };
+  } catch (error: unknown) {
+    return error instanceof MigrationError ? migrationFailure(error.code, error.exitCode)
+      : migrationFailure('MIGRATION_IO_FAILED', 1);
+  }
+}

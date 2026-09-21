@@ -104,7 +104,7 @@ test('formatManagedRuleWarning: unsupported flags enabled: false in message', ()
 // ---- compiler stderr warnings ----
 
 const POLICY_EQUIVALENT = `
-version: 1
+version: 2
 project: parity-unit
 request:
   allow_methods: [GET]
@@ -118,7 +118,7 @@ firewall:
 `;
 
 const POLICY_APPROXIMATE = `
-version: 1
+version: 2
 project: parity-unit
 request:
   allow_methods: [GET]
@@ -132,7 +132,7 @@ firewall:
 `;
 
 const POLICY_UNSUPPORTED = `
-version: 1
+version: 2
 project: parity-unit
 request:
   allow_methods: [GET]
@@ -146,7 +146,7 @@ firewall:
 `;
 
 const POLICY_SCOPE_DOWN_UNTRANSLATED = `
-version: 1
+version: 2
 project: parity-unit
 request:
   allow_methods: [GET]
@@ -263,7 +263,7 @@ test('compiler: expression_cloudflare override suppresses the scope_down warning
 
 test('compiler: custom Cloudflare rules include geo, IP, UA, fingerprint, rate limit, and logging resources', () => {
   const policy = `
-version: 1
+version: 2
 project: cf-custom-test
 request:
   allow_methods: [GET]
@@ -344,7 +344,7 @@ firewall:
 
 test('compiler: BotControl managed rule emits approximation warning and bot fight setting', () => {
   const policy = `
-version: 1
+version: 2
 project: cf-bots-test
 request:
   allow_methods: [GET]

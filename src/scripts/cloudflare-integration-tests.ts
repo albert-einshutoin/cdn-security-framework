@@ -193,7 +193,7 @@ async function dispatch(worker: any, url: string, init: RequestInit = {}, env: R
 }
 
 const BASE_POLICY = `
-version: 1
+version: 2
 project: cf-integ
 defaults: { mode: enforce }
 request:

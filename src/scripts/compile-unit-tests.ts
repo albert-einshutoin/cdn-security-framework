@@ -688,7 +688,7 @@ test('AWS build emits edge files with origin authentication and no viewer JWT ga
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
   try {
     const outputs = build({
-      version: 1, request: { allow_methods: ['GET'] }, response_headers: {},
+      version: 2, request: { allow_methods: ['GET'] }, response_headers: {},
       origin: { auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'ORIGIN_SECRET' } },
     }, { outDir: tmpDir, env: { ORIGIN_SECRET: 'synthetic-origin-secret' } });
     assert.strictEqual(outputs.length, 3);
@@ -706,7 +706,7 @@ test('build emits blockPathContains and blockPathRegexes as RegExp literals', ()
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
   try {
     const policy = {
-      version: 1,
+      version: 2,
       project: 'unit-build',
       defaults: { mode: 'enforce' },
       request: {
@@ -734,7 +734,7 @@ test('build emits allowedHosts (lowercased) and trustForwardedFor in viewer CFG'
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
   try {
     const policy = {
-      version: 1,
+      version: 2,
       defaults: { mode: 'enforce' },
       request: {
         allow_methods: ['GET'],
@@ -758,7 +758,7 @@ test('build defaults trustForwardedFor to false and emits empty allowedHosts whe
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-'));
   try {
     const policy = {
-      version: 1,
+      version: 2,
       defaults: { mode: 'enforce' },
       request: { allow_methods: ['GET'] },
       response_headers: {},
@@ -786,7 +786,7 @@ test('shared JWT config filters none and keeps the configured algorithm', () => 
 
 test('validateAuthGates rejects allowed_algorithms that include an alg the verifier cannot validate', () => {
   const policy = {
-    version: 1,
+    version: 2,
     defaults: { mode: 'enforce' },
     request: { allow_methods: ['GET'] },
     response_headers: {},
@@ -1136,7 +1136,7 @@ test('viewer-request uses fixed-pad constant-time compare (no length short-circu
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-timing-'));
   try {
     const policy = {
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {},
       routes: [
@@ -1162,7 +1162,7 @@ test('constantTimeEqual (compiled) returns correct boolean for matches and misma
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-timing-fn-'));
   try {
     const policy = {
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {},
       routes: [
@@ -1199,7 +1199,7 @@ test('response_headers: authProtectedPrefixes is union of every auth gate prefix
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-resp-union-'));
   try {
     const policy = {
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET', 'POST'] },
       response_headers: {},
       routes: [
@@ -1237,7 +1237,7 @@ test('response_headers: force_vary_auth=false disables Vary/no-store override', 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-resp-off-'));
   try {
     const policy = {
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: { force_vary_auth: false },
       routes: [{
@@ -1260,7 +1260,7 @@ test('viewer-response CORS appends Vary Origin and preserves auth Vary tokens', 
   try {
     process.env.ADMIN_TOKEN = 'test-token';
     build({
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {
         cors: {
@@ -1313,7 +1313,7 @@ test('response_headers: emits COOP/COEP/CORP/Reporting-Endpoints when configured
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-resp-iso-'));
   try {
     const policy = {
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {
         coop: 'same-origin',
@@ -1338,7 +1338,7 @@ test('response_headers: csp_nonce=true emits substitution hook and Report-Only c
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-resp-csp-'));
   try {
     const policy = {
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {
         csp_nonce: true,
@@ -1363,7 +1363,7 @@ test('viewer-request CORS preflight includes Vary Origin', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-cors-vary-preflight-'));
   try {
     build({
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {
         cors: {
@@ -1397,7 +1397,7 @@ test('viewer-request CORS preflight includes Vary Origin', () => {
 test('request.limits.max_header_count defaults to 64 and is clamped to 1..500', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-hc-'));
   try {
-    const base = { version: 1, request: { allow_methods: ['GET'] }, response_headers: {}, routes: [] as any[] };
+    const base = { version: 2, request: { allow_methods: ['GET'] }, response_headers: {}, routes: [] as any[] };
 
     // Default
     build(base, { outDir: tmpDir, allowPlaceholderToken: true });
@@ -1430,7 +1430,7 @@ test('viewer-request enforces max_header_count with 431', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-hc-rt-'));
   try {
     build({
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'], limits: { max_header_count: 3 } },
       response_headers: {},
       routes: [],
@@ -1466,7 +1466,7 @@ test('viewer-request checks raw traversal before dot-segment normalization', () 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-raw-traversal-'));
   try {
     build({
-      version: 1,
+      version: 2,
       request: {
         allow_methods: ['GET'],
         block: { path_patterns: { contains: ['/../'] } },
@@ -1506,7 +1506,7 @@ test('response_headers.clear_site_data_paths emits directive + no-store on 2xx',
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-csd-'));
   try {
     build({
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {
         clear_site_data_paths: [' /logout ', '/session/end'],
@@ -1526,7 +1526,7 @@ test('response_headers.clear_site_data_types override honored', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-csd-t-'));
   try {
     build({
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {
         clear_site_data_paths: ['/logout'],
@@ -1545,7 +1545,7 @@ test('build: observability config injects with safe defaults when unset', () => 
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-default-'));
   try {
     build({
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {},
       routes: [],
@@ -1564,7 +1564,7 @@ test('build: observability honors configured log_format/correlation/audit fields
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-explicit-'));
   try {
     build({
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {},
       observability: {
@@ -1595,7 +1595,7 @@ test('build: observability clamps sample_rate to [0,1] range', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-clamp-'));
   try {
     build({
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {},
       observability: { sample_rate: 42 },
@@ -1613,7 +1613,7 @@ test('viewer-request: structured JSON block log includes status, block_reason, u
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-runtime-'));
   try {
     build({
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {},
       observability: { log_format: 'json', correlation_id_header: 'traceparent' },
@@ -1653,7 +1653,7 @@ test('viewer-request: allow sampling respects sample_rate without suppressing bl
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-unit-obs-allow-'));
   try {
     build({
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {},
       observability: { log_format: 'json', correlation_id_header: 'traceparent', sample_rate: 1 },
@@ -1688,7 +1688,7 @@ test('viewer-request: allow sampling respects sample_rate without suppressing bl
     assert.strictEqual(parsed.correlation_id, '00-viewer-allow-test-01');
 
     build({
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: {},
       observability: { log_format: 'json', correlation_id_header: 'traceparent', sample_rate: 0 },
@@ -1802,7 +1802,7 @@ test('origin-request refuses to forward origin-auth header when env is empty', (
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-test-origin-auth-'));
   try {
     const policy = {
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: { hsts: 'max-age=1' },
       origin: { auth: { type: 'custom_header', header: 'X-Origin-Verify', secret_env: 'ORIGIN_AUTH_TEST_NOT_SET' } },
@@ -1820,7 +1820,7 @@ test('build emits HMAC origin auth config for AWS origin-request', () => {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'compile-test-origin-hmac-'));
   try {
     const policy = {
-      version: 1,
+      version: 2,
       request: { allow_methods: ['GET'] },
       response_headers: { hsts: 'max-age=1' },
       origin: {

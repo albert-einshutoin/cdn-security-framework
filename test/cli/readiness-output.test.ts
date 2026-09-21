@@ -6,7 +6,7 @@ import { execFileSync, spawnSync } from 'node:child_process';
 import { expect, test } from 'vitest';
 
 const cli = path.resolve('bin/cli.js');
-const policyText = `version: 1
+const policyText = `version: 2
 project: readiness-output-test
 metadata: { risk_level: balanced }
 defaults: { mode: enforce }
