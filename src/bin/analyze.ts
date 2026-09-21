@@ -390,4 +390,3 @@ export function printAnalyzeReport(report: AnalyzeReport) {
     console.log('[analyze] Low-frequency candidates: none');
   }
 }
-
