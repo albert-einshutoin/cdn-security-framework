@@ -4,6 +4,8 @@
 
 `cdn-security` はポリシーのスキャフォールド、エッジランタイムへのコンパイル、インフラ設定の生成、環境診断までを担う単一のエントリーポイントです。
 
+このreferenceの前に[空consumerへの候補導入](quickstart.ja.md)を行ってください。公開1.4.0とschema2候補は別です。以下の`npx`表記は導入済みlocal binaryの実行を前提とし、未導入状態でregistry fallbackを使いません。初回導入例は明示的な`./node_modules/.bin/cdn-security`を使います。
+
 ```bash
 npx cdn-security <subcommand> [options]
 ```
@@ -113,10 +115,10 @@ runnable example、limit、review workflow、troubleshootingは
 ## `init`
 
 ```bash
-npx cdn-security init                                      # 対話形式
-npx cdn-security init --platform aws --profile balanced    # 非対話
-npx cdn-security init --platform aws --archetype rest-api  # アーキタイプ
-npx cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com
+./node_modules/.bin/cdn-security init                                      # 対話形式
+./node_modules/.bin/cdn-security init --platform aws --profile balanced    # 非対話
+./node_modules/.bin/cdn-security init --platform aws --archetype rest-api  # アーキタイプ
+./node_modules/.bin/cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com
 ```
 
 - `--profile` と `--archetype` は排他指定です。スターターはセキュリティ強度（プロファイル）かアプリ形状（アーキタイプ）のいずれか。
@@ -124,6 +126,8 @@ npx cdn-security init --guided --platform cloudflare --app-shape rest-api --auth
 - guided setup は CI / scaffold script 向けに `--app-shape`、`--auth`、`--admin-paths`、`--cors-origins`、`--waf`、`--geo-block`、`--ip-allowlist`、`--deployment`、`--project` でも非対話実行できます。
 - guided policy には secret 管理 docs へのコメントを入れます。secret 値は書かず、`EDGE_ADMIN_TOKEN`、`BASIC_AUTH_CREDS`、`URL_SIGNING_SECRET`、`WAF_LOG_DESTINATION_ARN` などの env var 名だけを参照します。
 - `--force` で既存の `policy/security.yml` を上書きします。
+
+既存入力を保持し、guided例は別の空directoryで実行します。JWTはCloudflare向けです。非TTYでの全flag例とlint/buildは[Quickstart](quickstart.ja.md#4-guided-setupとcloudflare-jwt)を参照してください。
 
 ## `build`
 
@@ -150,62 +154,27 @@ npx cdn-security build --fail-on-permissive   # metadata.risk_level == permissiv
 ## `playground`
 
 ```bash
-npx cdn-security playground                                      # 組み込みのサンプルケースを AWS+Cloudflare で実行
-npx cdn-security playground --target aws --json                   # JSON 形式で結果を取得
-npx cdn-security playground --policy policy/security.yml -f cases.json
-npx cdn-security playground --allow-placeholder-token --target all  # INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN を許可
+export EDGE_ADMIN_TOKEN=docs-fixture-token-not-for-deploy
+./node_modules/.bin/cdn-security playground --policy policy/security.yml --target aws --fixture cases.json --json
 ```
 
-`playground` は指定ポリシーを一時ディレクトリへコンパイルし、生成された runtime で fixture を実行します。各 fixture ごとに `pass|block`、HTTP `status`、`block_reason`、対象 target（`aws` / `cloudflare`）を出力します。
-
-入力形式:
-
-- `--fixture <path>` は以下のいずれかを受け取れます。
-  - `{ "fixtures": [ ... ] }`
-  - `[ ... ]`
-  - `{ "request": { ... } }`
-- 各 fixture は以下を受け取れます。
-  - `method`
-  - `path`
-  - `query`（文字列またはオブジェクト）
-  - `headers`
-  - `body`
-
-fixture 例:
+balanced profileをinit済みの空consumerが前提です。参照envはbuildに必要です。`--allow-placeholder-token`は非本番fixture専用であり、生成artifactを本番へ適用しません。
 
 ```json
 {
   "fixtures": [
-    { "name": "GET /", "request": { "method": "GET", "path": "/" } },
-    { "name": "PATCH blocked", "request": { "method": "PATCH", "path": "/" } },
-    { "name": "admin missing auth", "request": { "method": "GET", "path": "/admin", "headers": { "x-edge-token": "INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN" } } }
+    {"name":"public GET","request":{"method":"GET","path":"/","headers":{"user-agent":"docs-fixture"}}},
+    {"name":"PATCH rejected","request":{"method":"PATCH","path":"/","headers":{"user-agent":"docs-fixture"}}},
+    {"name":"admin missing token","request":{"method":"GET","path":"/admin","headers":{"user-agent":"docs-fixture"}}},
+    {"name":"admin valid synthetic token","request":{"method":"GET","path":"/admin","headers":{"user-agent":"docs-fixture","x-edge-token":"docs-fixture-token-not-for-deploy"}}},
+    {"name":"POST JSON","request":{"method":"POST","path":"/api/items","headers":{"user-agent":"docs-fixture","Content-Type":"application/json"},"body":{"name":"synthetic-item"}}}
   ]
 }
 ```
 
-`--json` を指定すると、次のような machine-readable 出力になります。
+上記を`cases.json`として保存。期待結果はCLI exit0、順に200/pass、405/block、401/block、200/pass、200/pass。POSTの`body`はJSONですが、AWS viewer-requestはbodyを検査しません。
 
-```json
-{
-  "policyPath": "/path/to/policy/security.yml",
-  "targets": [
-    {
-      "target": "aws",
-      "fixtures": [
-        {
-          "name": "GET /",
-          "decision": "pass",
-          "status": 200,
-          "block_reason": "",
-          "path": "/",
-          "method": "GET",
-          "query": ""
-        }
-      ]
-    }
-  ]
-}
-```
+fixture形式は配列、`{"fixtures":[...]}`、`{"request":{...}}`を受け、method/path/query/headers/bodyを指定できます。temporary buildを既存local runtime stubで実行し、JSONのtargets[].fixtures[]へdecision/status/block_reasonを返します。Cloudflare stubは外部fetchをorigin-okに置換し、組込み非本番env（EDGE_ADMIN_TOKENはINSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN）を使います。実JWKS取得や有効JWT検証の証拠にはしません。[Quickstart](quickstart.ja.md)にprovider別手順があります。
 
 ## `analyze`
 

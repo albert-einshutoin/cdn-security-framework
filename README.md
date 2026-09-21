@@ -16,7 +16,7 @@ The goal is simple.
 
 > **"Make CDN security reusable as a design philosophy, so anyone in the world can build a secure initial setup in a short time."**
 
-**Recommended first path:** start with `npx cdn-security init --platform aws --archetype spa-static-site --force`, build the generated policy, then wire the AWS CloudFront Function and WAF Terraform outputs into your existing infrastructure. Cloudflare Workers is also supported, but the AWS + Terraform path is the most complete first deployment path today.
+**First run:** follow the [candidate-tarball Quickstart](docs/quickstart.md) in an empty consumer. Distinguish published1.4.0 from the unpublished schema2 candidate by SHA/digest; preserve existing input.
 
 ## Product Surface and Release Status
 
@@ -164,111 +164,52 @@ See [IaC integration](docs/iac.md) for Terraform / CloudFormation / CDK / WAF us
 - [Selective CI testing](docs/selective-testing.md) — change-impact analysis, safe fallback, and shadow comparison operations
 - [ADR 0001: Plugin-safe emitter path](docs/adr/0001-plugin-safe-emitter-path.md) — bundler-backed prototype and migration criteria
 
+- [Origin authentication](docs/origin-auth.md)
+- [Signed URLs (Cloudflare)](docs/signed-urls.md)
+- [Threat model](docs/threat-model.md)
+- [Decision matrix](docs/decision-matrix.md)
+- [Observability](docs/observability.md)
+- [Changelog](CHANGELOG.md)
+
 ---
 
 ## Policy and Runtimes
 
 * **Policy** (`policy/security.yml` or `policy/base.yml`) is the **single source of truth**. Edit the policy to change blocking rules, headers, or route protection.
-* **Build** runs the CLI compiler: `npx cdn-security build` reads the policy, validates it, and generates **Edge Runtime** code into `dist/edge/*.js`. No manual sync of `CFG` or runtime config.
+* **Build** runs the CLI compiler: `./node_modules/.bin/cdn-security build` reads the policy, validates it, and generates **Edge Runtime** code into `dist/edge/*.js`. No manual sync of `CFG` or runtime config.
 * See [Policy and runtime sync](docs/policy-runtime-sync.md) for details and IaC usage.
 
 ---
 
-## Quick Start (5 minutes)
+## Quick Start
 
-### 1. Install
-
-```bash
-npm install --save-dev cdn-security-framework
-```
-
-### 2. Init (scaffold policy)
+Follow the [complete commands, fixtures and expected results](docs/quickstart.md), verifying the supplied candidate tarball SHA/digest. Unpublished-candidate installation differs from future published2.0.0 installation.
 
 ```bash
-npx cdn-security init
+# Set this to the verified tarball supplied with the candidate SHA and SHA-256.
+export CANDIDATE_TARBALL=/path/to/verified-candidate.tgz
+shasum -a 256 "$CANDIDATE_TARBALL"
+mkdir consumer
+cd consumer
+npm init -y
+npm install --save-dev "$CANDIDATE_TARBALL"
+./node_modules/.bin/cdn-security --help
 ```
 
-Answer the prompts. You can use the guided setup, start from a **profile** (`strict` / `balanced` / `permissive`), or choose an **archetype** (`spa-static-site`, `rest-api`, `admin-panel`, `microservice-origin`). Guided setup asks about app shape, CDN target, auth mode, CORS, WAF posture, and deployment intent.
-
-Or non-interactive: `npx cdn-security init --platform aws --profile balanced --force`
-Or with an archetype: `npx cdn-security init --platform aws --archetype rest-api --force`
-Or guided: `npx cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com --force`
-
-### 3. Edit and build
-
-Edit `policy/security.yml` as needed, then:
+### Init, lint and build
 
 ```bash
-# If your policy has a static_token auth gate, set the referenced build-time
-# secret first. The built-in base/admin examples use EDGE_ADMIN_TOKEN.
-export EDGE_ADMIN_TOKEN=replace-with-a-deploy-secret
-
-# AWS (default): generates viewer-request.js, viewer-response.js, origin-request.js
-npx cdn-security build
-
-# Cloudflare Workers: generates index.ts for Wrangler
-npx cdn-security build --target cloudflare
-
-# AWS + existing Terraform-managed Web ACL:
-# generate only rule groups (skip aws_wafv2_web_acl output)
-npx cdn-security build --rule-group-only
+./node_modules/.bin/cdn-security init --platform aws --profile balanced
+export EDGE_ADMIN_TOKEN=docs-fixture-token-not-for-deploy
+node node_modules/cdn-security-framework/scripts/policy-lint.js policy/security.yml
+./node_modules/.bin/cdn-security build --policy policy/security.yml --target aws --out-dir dist/aws
 ```
 
-This validates the policy and generates Edge Runtime code into `dist/edge/`.
-For non-production fixture builds, you can use
-`npx cdn-security build --allow-placeholder-token`, but never deploy artifacts
-that contain the placeholder token.
+The Quickstart also covers Cloudflare JWT `init --guided`, authenticated POST JSON playground fixtures, OpenAPI inspect→review-only candidate→contract diff, and migration preview/save/backup/rollback. JWT/signed_url are not AWS success examples.
 
-### 4. Test
+### 5. Deploy boundary
 
-```bash
-export EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy
-export ORIGIN_SECRET=ci-origin-secret-not-for-deploy
-
-npm run test:ci
-```
-
-Runs the single-Node CI quality gate, including audit, policy lint, build,
-runtime, unit, fuzz, integration, drift, security-baseline, coverage, and
-package smoke checks. It intentionally does not reproduce the GitHub Actions
-Node-version matrix; CI still runs package smoke on Node 20.17.0, 22, and 24.
-If you have a local `policy/security.yml`, `test:ci` lints and builds it first,
-then regenerates `policy/base.yml` fixtures for runtime and coverage tests.
-
-For focused local checks:
-
-```bash
-npm run test:runtime
-npm run test:unit
-npm run test:drift
-npm run test:security-baseline
-```
-
-`EDGE_ADMIN_TOKEN` is required by generated artifacts that include the built-in
-admin `static_token` gate. `ORIGIN_SECRET` is required by origin-auth fixture
-policies used by the broader drift/release checks.
-
-### 4.5 Diagnose (optional but recommended before first deploy)
-
-```bash
-npx cdn-security doctor
-npx cdn-security capabilities --policy policy/security.yml --target aws
-npx cdn-security explain
-```
-
-One-shot pass/fail report: Node version, policy parseability / schema version, every env var referenced by auth gates (`EDGE_ADMIN_TOKEN`, `JWT_SECRET`, `ORIGIN_SECRET`, ...), `dist/edge/` writability, and `npm ls` cleanliness. Writes `doctor-report.json` for CI capture. See [CLI reference](docs/cli.md) for details.
-Run it with the same env vars you will use for `build`, because CloudFront
-Functions bake static token gates into the generated artifact.
-
-`explain` prints a read-only policy posture summary for review and onboarding.
-
-`capabilities` prints the target support matrix and, with `--policy`, reports configured controls that are partial, unsupported, or warning-only for `aws` or `cloudflare`. Use `--json` for automation.
-
-### 5. Deploy
-
-Use the generated files in `dist/edge/` with Terraform, CDK, or your CDN console. Set `EDGE_ADMIN_TOKEN` in your environment or secrets for admin routes.
-
----
+`dist/edge/` holds runtime code and `dist/infra/` holds IaC fragments. Review the [IaC guide](docs/iac.md) before handing them to your Terraform/CDK/CDN workflow. Build does not deploy. Never deploy synthetic-token/placeholder artifacts; production needs a separately reviewed build with production secrets.
 
 ## Product Core and Generated Security Controls
 
@@ -313,7 +254,7 @@ Use the generated files in `dist/edge/` with Terraform, CDK, or your CDN console
 ## For maintainers (publishing to npm)
 
 * **package-lock.json**: Commit it so CI can run `npm ci`.
-* **dist/**: Ignored via `.gitignore`. Users run `npm run build` to generate `dist/edge/` and `dist/infra/`. For CI drift checks, run `npm run build` in CI and compare with policy (do not commit `dist/`).
+* **dist/**: Ignored via `.gitignore`. Consumers run `./node_modules/.bin/cdn-security build` to generate `dist/edge/` and `dist/infra/`. For CI drift checks, run `npm run build` in CI and compare with policy (do not commit `dist/`).
 * **CI workflows**:
   * `.github/workflows/policy-lint.yml`: selective PR validation with required shadow comparison; exhaustive validation on `main`, `release/**`, manual, and daily runs
   * `.github/workflows/release-npm.yml`: tag-driven publish workflow
