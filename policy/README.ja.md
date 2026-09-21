@@ -33,7 +33,7 @@ build は `policy/security.yml` を優先して参照し、なければ `policy/
 
 ```yml
 # policy/base.yml
-version: 1
+version: 2
 defaults:
   mode: monitor
 project: web-frontend

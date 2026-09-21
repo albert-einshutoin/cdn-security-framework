@@ -9,6 +9,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- **Breaking, unpublished candidate:** Policy schema 2 is canonical; v1 is accepted only by the explicit migration adapter. Migration defaults to preview, preserves configuration, requires manual decisions for difficulty 5/6 and unsupported AWS auth/nonce, and saves only with an original-byte backup. Package version remains 1.4.0 pending release GO. [Migration and rollback](docs/schema-migration.md).
+
 ### Security
 
 - Enforce the CloudFront Functions 10 KiB code limit after optimization and stop uploading secret-bearing AWS edge code as a workflow artifact.

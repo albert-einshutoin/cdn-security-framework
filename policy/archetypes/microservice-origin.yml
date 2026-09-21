@@ -4,7 +4,7 @@
 # Threat focus: direct-origin bypass, request smuggling, overly permissive methods.
 # Base profile: balanced with narrow method set and signed origin header.
 
-version: 1
+version: 2
 project: example-microservice-origin
 
 metadata:

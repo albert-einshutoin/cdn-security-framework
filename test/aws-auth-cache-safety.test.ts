@@ -26,7 +26,7 @@ function fixture(gate: unknown, mode: 'enforce' | 'monitor' = 'enforce') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aws-auth-cache-'));
   scratch.push(dir);
   const policy = {
-    version: 1,
+    version: 2,
     defaults: { mode },
     request: { allow_methods: ['GET'] },
     response_headers: {},

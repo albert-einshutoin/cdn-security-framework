@@ -33,7 +33,7 @@ For multi-service or environment-specific policy sets, keep shared policy in a b
 
 ```yml
 # policy/base.yml
-version: 1
+version: 2
 defaults:
   mode: monitor
 project: web-frontend

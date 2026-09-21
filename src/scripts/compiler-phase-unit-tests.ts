@@ -29,11 +29,11 @@ function mktmp(prefix = 'compiler-phase-') {
 test('parser phase: parses YAML without invoking validation or emission', () => {
   const tmp = mktmp();
   const policyPath = path.join(tmp, 'policy.yml');
-  fs.writeFileSync(policyPath, 'version: 1\nrequest:\n  allow_methods: [GET]\nresponse_headers: {}\n', 'utf8');
+  fs.writeFileSync(policyPath, 'version: 2\nrequest:\n  allow_methods: [GET]\nresponse_headers: {}\n', 'utf8');
   try {
     const result = parsePolicyFile({ policyPath });
     assert.strictEqual(result.ok, true);
-    assert.strictEqual(result.policy.version, 1);
+    assert.strictEqual(result.policy.version, 2);
     assert.deepStrictEqual(result.errors, []);
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -45,7 +45,7 @@ test('parser phase: resolves transitive extends with deep merge', () => {
   const globalPath = path.join(tmp, 'global.yml');
   const basePath = path.join(tmp, 'base.yml');
   const childPath = path.join(tmp, 'child.yml');
-  fs.writeFileSync(globalPath, `version: 1
+  fs.writeFileSync(globalPath, `version: 2
 defaults:
   mode: monitor
 request:
@@ -54,14 +54,15 @@ request:
     max_query_length: 1024
 response_headers:
   hsts: "max-age=31536000"\n`, 'utf8');
-  fs.writeFileSync(basePath, `version: 1
+  fs.writeFileSync(basePath, `version: 2
 extends: ./global.yml
 request:
   limits:
     max_query_params: 30
 response_headers:
   csp: "default-src 'self'"\n`, 'utf8');
-  fs.writeFileSync(childPath, `extends: ./base.yml
+  fs.writeFileSync(childPath, `version: 2
+extends: ./base.yml
 defaults:
   mode: enforce
 request:
@@ -85,8 +86,8 @@ test('parser phase: appends array entries from child to parent on inheritance', 
   const tmp = mktmp();
   const basePath = path.join(tmp, 'base.yml');
   const childPath = path.join(tmp, 'child.yml');
-  fs.writeFileSync(basePath, `version: 1\nrequest:\n  allow_methods: [GET]\nresponse_headers: {}\n`, 'utf8');
-  fs.writeFileSync(childPath, `version: 1\nextends: ./base.yml\nrequest:\n  allow_methods: [POST]\nresponse_headers: {}\n`, 'utf8');
+  fs.writeFileSync(basePath, `version: 2\nrequest:\n  allow_methods: [GET]\nresponse_headers: {}\n`, 'utf8');
+  fs.writeFileSync(childPath, `version: 2\nextends: ./base.yml\nrequest:\n  allow_methods: [POST]\nresponse_headers: {}\n`, 'utf8');
   try {
     const result = parsePolicyFile({ policyPath: childPath });
     assert.strictEqual(result.ok, true);
@@ -100,8 +101,8 @@ test('parser phase: merges nested objects with child overrides', () => {
   const tmp = mktmp();
   const basePath = path.join(tmp, 'base.yml');
   const childPath = path.join(tmp, 'child.yml');
-  fs.writeFileSync(basePath, `version: 1\nrequest:\n  limits:\n    max_query_length: 1024\n    max_query_params: 20\nresponse_headers: {}\n`, 'utf8');
-  fs.writeFileSync(childPath, `version: 1\nextends: ./base.yml\nrequest:\n  limits:\n    max_query_params: 30\n    max_uri_length: 2048\nresponse_headers: {}\n`, 'utf8');
+  fs.writeFileSync(basePath, `version: 2\nrequest:\n  limits:\n    max_query_length: 1024\n    max_query_params: 20\nresponse_headers: {}\n`, 'utf8');
+  fs.writeFileSync(childPath, `version: 2\nextends: ./base.yml\nrequest:\n  limits:\n    max_query_params: 30\n    max_uri_length: 2048\nresponse_headers: {}\n`, 'utf8');
   try {
     const result = parsePolicyFile({ policyPath: childPath });
     assert.strictEqual(result.ok, true);
@@ -117,8 +118,8 @@ test('parser phase: emits unreachable-key warning when scalar replaces subtree',
   const tmp = mktmp();
   const basePath = path.join(tmp, 'base.yml');
   const childPath = path.join(tmp, 'child.yml');
-  fs.writeFileSync(basePath, `version: 1\nrequest:\n  limits:\n    max_query_length: 1024\nresponse_headers: {}\n`, 'utf8');
-  fs.writeFileSync(childPath, `version: 1\nextends: ./base.yml\nrequest:\n  limits: null\nresponse_headers: {}\n`, 'utf8');
+  fs.writeFileSync(basePath, `version: 2\nrequest:\n  limits:\n    max_query_length: 1024\nresponse_headers: {}\n`, 'utf8');
+  fs.writeFileSync(childPath, `version: 2\nextends: ./base.yml\nrequest:\n  limits: null\nresponse_headers: {}\n`, 'utf8');
   try {
     const result = parsePolicyFile({ policyPath: childPath });
     assert.strictEqual(result.ok, true);
@@ -135,7 +136,7 @@ test('validator phase: validates an already-parsed policy without emitting files
     const result = validatePolicy({
       pkgRoot: repoRoot,
       policy: {
-        version: 1,
+        version: 2,
         request: { allow_methods: ['GET'] },
         response_headers: {},
       },

@@ -157,7 +157,7 @@ async function runGeneratedWorkerRequest(generated: string, request: any, option
 
 test('cloudflare compile injects jwt, signed_url, and origin auth config', () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cloudflare-auth-test
 request:
   allow_methods: ["GET", "HEAD"]
@@ -221,7 +221,7 @@ test('cloudflare template contains auth enforcement logic', () => {
 
 test('cloudflare blocks raw traversal before dot-segment normalization', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-raw-path-test
 request:
   allow_methods: ["GET"]
@@ -258,7 +258,7 @@ response_headers:
 
 test('cloudflare request anomaly guards block CRLF, malformed cookies, and double-encoded traversal', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-anomaly-guard-test
 request:
   allow_methods: ["GET"]
@@ -336,7 +336,7 @@ response_headers:
 
 test('cloudflare compile emits experimental challenge config', () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-challenge-test
 request:
   allow_methods: ["GET"]
@@ -362,7 +362,7 @@ firewall:
 
 test('cloudflare compile emits allowedHosts, trustForwardedFor, and JWT alg/skew fields', () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-hardening-test
 request:
   allow_methods: ["GET"]
@@ -397,7 +397,7 @@ routes:
 
 test('cloudflare RS256 JWT rejects oversized JWKS responses before origin fetch', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-jwks-cap-test
 request:
   allow_methods: ["GET"]
@@ -437,7 +437,7 @@ routes:
 
 test('cloudflare RS256 JWT rejects JWKS documents with too many keys', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-jwks-key-cap-test
 request:
   allow_methods: ["GET"]
@@ -482,7 +482,7 @@ routes:
 
 test('cloudflare RS256 JWT accepts omitted/matching JWK alg and rejects conflicting alg', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-jwk-alg-test
 request:
   allow_methods: ["GET"]
@@ -541,7 +541,7 @@ routes:
 
 test('cloudflare CORS appends Vary Origin for preflight and origin responses', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-cors-vary-test
 request:
   allow_methods: ["GET"]
@@ -602,7 +602,7 @@ routes:
 
 test('cloudflare graphql guard allows normal GraphQL POST', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-graphql-test
 request:
   allow_methods: ["POST"]
@@ -622,7 +622,7 @@ response_headers:
 
 test('cloudflare graphql guard blocks deep GraphQL POST', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-graphql-test
 request:
   allow_methods: ["POST"]
@@ -642,7 +642,7 @@ response_headers:
 
 test('cloudflare graphql guard blocks excessive aliases and repeated fields', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-graphql-test
 request:
   allow_methods: ["POST"]
@@ -666,7 +666,7 @@ response_headers:
 
 test('cloudflare graphql guard blocks malformed GraphQL body', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-graphql-test
 request:
   allow_methods: ["POST"]
@@ -686,7 +686,7 @@ response_headers:
 
 test('cloudflare graphql guard report mode logs and forwards violations', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-graphql-test
 request:
   allow_methods: ["POST"]
@@ -705,7 +705,7 @@ response_headers:
 
 test('cloudflare sample_rate 1 emits an allow decision', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-allow-sampling-test
 request:
   allow_methods: ["GET"]
@@ -740,7 +740,7 @@ observability:
 
 test('cloudflare sample_rate 0 suppresses allow logs but preserves block logs', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-zero-sampling-test
 request:
   allow_methods: ["GET"]
@@ -772,7 +772,7 @@ observability:
 
 test('cloudflare sampling is deterministic before correlation ID minting', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-stable-sampling-test
 request:
   allow_methods: ["GET"]
@@ -820,7 +820,7 @@ test('cloudflare compile fails when allowed_algorithms includes an alg the verif
   let caught: any;
   try {
     compileCloudflare(`
-version: 1
+version: 2
 project: cf-hardening-test
 request:
   allow_methods: ["GET"]
@@ -852,7 +852,7 @@ routes:
 
 test('cloudflare response DLP masks response body and headers', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-dlp-mask-test
 request:
   allow_methods: ["POST"]
@@ -887,7 +887,7 @@ response_dlp:
 
 test('cloudflare CSP nonce is generated before origin fetch and reused in the response policy', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-csp-nonce-test
 request:
   allow_methods: ["POST"]
@@ -906,7 +906,7 @@ response_headers:
 
 test('cloudflare response DLP uses a bounded stream reader instead of buffering clone.text()', () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-dlp-bounded-reader-test
 request:
   allow_methods: ["GET"]
@@ -925,7 +925,7 @@ response_dlp:
 
 test('cloudflare response DLP preserves whitespace-padded match lists for compatibility', () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-dlp-whitespace-compat-test
 request:
   allow_methods: ["GET"]
@@ -944,7 +944,7 @@ response_dlp:
 
 test('cloudflare response DLP blocks response body findings', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-dlp-block-test
 request:
   allow_methods: ["POST"]
@@ -967,7 +967,7 @@ response_dlp:
 
 test('cloudflare response DLP report-only logs but leaves response unchanged', async () => {
   const generated = compileCloudflare(`
-version: 1
+version: 2
 project: cf-dlp-report-test
 request:
   allow_methods: ["POST"]
@@ -991,7 +991,7 @@ test('cloudflare compile rejects unsafe response DLP custom regex', () => {
   let caught: any;
   try {
     compileCloudflare(`
-version: 1
+version: 2
 project: cf-dlp-redos-test
 request:
   allow_methods: ["GET"]
@@ -1014,7 +1014,7 @@ response_dlp:
 
 test('aws compile warns response DLP is unsupported for CloudFront Functions', () => {
   const result = compileAws(`
-version: 1
+version: 2
 project: aws-dlp-unsupported-test
 request:
   allow_methods: ["GET"]

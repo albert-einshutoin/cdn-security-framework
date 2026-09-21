@@ -50,7 +50,7 @@ function source(
 
 function policy(overrides: Partial<CDNSecurityFrameworkPolicy> = {}): CDNSecurityFrameworkPolicy {
   return {
-    version: 1,
+    version: 2,
     defaults: { mode: 'enforce' },
     request: { allow_methods: ['GET'], block: { header_missing: [] } },
     routes: [],

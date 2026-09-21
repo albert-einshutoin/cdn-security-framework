@@ -298,6 +298,7 @@ export function projectPolicyToAllowedSurface(
   policy: CDNSecurityFrameworkPolicy,
   options: ProjectAllowedSurfaceOptions,
 ): AllowedSurfaceModelV1 {
+  if (!policy || policy.version !== 2) throw new Error('policy schema 2 is required');
   const evidence = sourceEvidence(options);
   const routes = policy.routes || [];
   const request = buildRequestCfgBase(policy);

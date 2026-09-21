@@ -6,10 +6,10 @@
  */
 
 /**
- * Schema for policy/base.yml and policy/profiles/*.yml (v1)
+ * Schema for policy/base.yml and policy/profiles/*.yml (v2)
  */
 export interface CDNSecurityFrameworkPolicy {
-  version: 1;
+  version: 2;
   /**
    * Optional base policy path to extend. Path is resolved relative to the current policy file.
    */

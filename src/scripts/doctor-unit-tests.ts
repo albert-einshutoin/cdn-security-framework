@@ -43,7 +43,7 @@ const repoRoot = path.join(__dirname, '..');
 
 test('collectReferencedEnvVars: returns [] for policy without env refs', () => {
   const doc = {
-    version: 1,
+    version: 2,
     request: { allow_methods: ['GET'] },
     response_headers: {},
   };
@@ -126,7 +126,7 @@ test('checkNodeVersion: fail on unparseable version', () => {
 test('checkPolicyExists: pass when file exists', () => {
   const tmp = mktmp();
   const p = path.join(tmp, 'p.yml');
-  fs.writeFileSync(p, 'version: 1\n');
+  fs.writeFileSync(p, 'version: 2\n');
   try {
     assert.strictEqual(checkPolicyExists(p).status, 'pass');
   } finally {
@@ -148,7 +148,7 @@ test('checkPolicyExists: fail when file missing', () => {
 test('checkPolicyParses: pass on valid yaml object', () => {
   const tmp = mktmp();
   const p = path.join(tmp, 'p.yml');
-  fs.writeFileSync(p, 'version: 1\nrequest:\n  allow_methods: [GET]\n');
+  fs.writeFileSync(p, 'version: 2\nrequest:\n  allow_methods: [GET]\n');
   try {
     const parsed = tryParsePolicy(p);
     assert.ok(parsed.ok);
@@ -291,8 +291,8 @@ test('resolvePolicyPath: honours explicit absolute path', () => {
 test('resolvePolicyPath: prefers security.yml over base.yml', () => {
   const tmp = mktmp();
   fs.mkdirSync(path.join(tmp, 'policy'));
-  fs.writeFileSync(path.join(tmp, 'policy', 'security.yml'), 'version: 1');
-  fs.writeFileSync(path.join(tmp, 'policy', 'base.yml'), 'version: 1');
+  fs.writeFileSync(path.join(tmp, 'policy', 'security.yml'), 'version: 2');
+  fs.writeFileSync(path.join(tmp, 'policy', 'base.yml'), 'version: 2');
   try {
     assert.strictEqual(resolvePolicyPath(tmp), path.join(tmp, 'policy', 'security.yml'));
   } finally {
@@ -303,7 +303,7 @@ test('resolvePolicyPath: prefers security.yml over base.yml', () => {
 test('resolvePolicyPath: falls back to base.yml when only base exists', () => {
   const tmp = mktmp();
   fs.mkdirSync(path.join(tmp, 'policy'));
-  fs.writeFileSync(path.join(tmp, 'policy', 'base.yml'), 'version: 1');
+  fs.writeFileSync(path.join(tmp, 'policy', 'base.yml'), 'version: 2');
   try {
     assert.strictEqual(resolvePolicyPath(tmp), path.join(tmp, 'policy', 'base.yml'));
   } finally {
@@ -328,7 +328,7 @@ test('runDoctor: clean pass with valid policy + env vars set, writes report', ()
   fs.mkdirSync(policyDir);
   const policyPath = path.join(policyDir, 'security.yml');
   fs.writeFileSync(policyPath, `
-version: 1
+version: 2
 request:
   allow_methods: [GET]
 response_headers:
@@ -363,7 +363,7 @@ test('runDoctor: fails when referenced env var is missing', () => {
   const tmp = mktmp();
   fs.mkdirSync(path.join(tmp, 'policy'));
   fs.writeFileSync(path.join(tmp, 'policy', 'security.yml'), `
-version: 1
+version: 2
 request:
   allow_methods: [GET]
 response_headers: {}
@@ -414,7 +414,7 @@ test('runDoctor: fails when policy is missing', () => {
 test('runDoctor: reportPath: null skips file write', () => {
   const tmp = mktmp();
   fs.mkdirSync(path.join(tmp, 'policy'));
-  fs.writeFileSync(path.join(tmp, 'policy', 'security.yml'), 'version: 1\nrequest:\n  allow_methods: [GET]\nresponse_headers: {}\n');
+  fs.writeFileSync(path.join(tmp, 'policy', 'security.yml'), 'version: 2\nrequest:\n  allow_methods: [GET]\nresponse_headers: {}\n');
   const result: any = runDoctor({
     cwd: tmp,
     pkgRoot: repoRoot,
@@ -437,7 +437,7 @@ test('runDoctor: reportPath: null skips file write', () => {
 test('runDoctor: strict mode fails on warning checks', () => {
   const tmp = mktmp();
   fs.mkdirSync(path.join(tmp, 'policy'));
-  fs.writeFileSync(path.join(tmp, 'policy', 'security.yml'), 'version: 1\nrequest:\n  allow_methods: [GET]\nresponse_headers: {}\n');
+  fs.writeFileSync(path.join(tmp, 'policy', 'security.yml'), 'version: 2\nrequest:\n  allow_methods: [GET]\nresponse_headers: {}\n');
   const result: any = runDoctor({
     cwd: tmp,
     pkgRoot: repoRoot,

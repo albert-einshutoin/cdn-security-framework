@@ -186,7 +186,7 @@ describe('route relation', () => {
         build: (policy: unknown, options: Record<string, unknown>) => string[];
       };
       build({
-        version: 1,
+        version: 2,
         defaults: { mode: 'enforce' },
         request: {
           allow_methods: ['GET'],

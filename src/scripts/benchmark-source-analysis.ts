@@ -164,7 +164,7 @@ function compare(result: SourceAnalysisResult): void {
     implementedEvidence,
   });
   const policy: CDNSecurityFrameworkPolicy = {
-    version: 1,
+    version: 2,
     defaults: { mode: 'enforce' },
     request: { allow_methods: ['GET'], block: { header_missing: [] } },
     routes: [],

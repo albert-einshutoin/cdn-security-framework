@@ -212,7 +212,7 @@ async function startAwsEdgeHarness() {
 
 function cloudflarePolicy() {
   return `
-version: 1
+version: 2
 project: edge-container-cf
 defaults: { mode: enforce }
 request:

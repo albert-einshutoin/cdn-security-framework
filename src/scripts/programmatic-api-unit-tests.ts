@@ -36,7 +36,7 @@ function test(name: string, fn: () => void) {
 const repoRoot = path.join(__dirname, '..');
 
 const BASIC_AWS_POLICY = `
-version: 1
+version: 2
 project: api-test
 request:
   allow_methods: [GET, POST]
@@ -51,7 +51,7 @@ firewall:
 `;
 
 const STATIC_TOKEN_POLICY = `
-version: 1
+version: 2
 project: token-test
 request:
   allow_methods: [GET, POST]
@@ -74,7 +74,7 @@ firewall:
 `;
 
 const BROKEN_POLICY = `
-version: 1
+version: 2
 request:
   allow_methods: [GET]
 response_headers:
@@ -83,7 +83,7 @@ unknown_top_level_key: true
 `;
 
 const READINESS_AWS_POLICY = `
-version: 1
+version: 2
 project: readiness-test
 metadata:
   risk_level: balanced
@@ -108,7 +108,7 @@ firewall:
 `;
 
 const CAPABILITIES_POLICY = `
-version: 1
+version: 2
 project: capabilities-test
 metadata:
   risk_level: balanced
@@ -138,7 +138,7 @@ firewall:
 `;
 
 const REST_RECOMMENDATION_POLICY = `
-version: 1
+version: 2
 project: recommendation-rest-api
 metadata:
   risk_level: balanced
@@ -163,7 +163,7 @@ firewall:
 `;
 
 const MALFORMED_PREFIX_RECOMMENDATION_POLICY = `
-version: 1
+version: 2
 project: malformed-admin-prefix
 metadata:
   risk_level: balanced
@@ -191,7 +191,7 @@ firewall:
 `;
 
 const DIFF_SEMANTIC_BASELINE = `
-version: 1
+version: 2
 project: diff-test
 request:
   allow_methods: [GET, POST]
@@ -223,7 +223,7 @@ firewall:
 `;
 
 const DIFF_SEMANTIC_CANDIDATE = `
-version: 1
+version: 2
 project: diff-test
 request:
   allow_methods: [GET, POST, TRACE]
@@ -256,7 +256,7 @@ firewall:
 `;
 
 const VISUALIZE_NO_CONTROL_POLICY = `
-version: 1
+version: 2
 project: visualize-no-control-test
 `;
 
@@ -375,7 +375,7 @@ test('lintPolicy: returns ok=true for valid policy', () => {
     assert.strictEqual(result.ok, true, `lint failed: ${JSON.stringify(result.errors)}`);
     assert.ok(Array.isArray(result.errors));
     assert.ok(Array.isArray(result.warnings));
-    assert.ok(result.policy && result.policy.version === 1);
+    assert.ok(result.policy && result.policy.version === 2);
   } finally {
     ctx.cleanup();
   }
@@ -408,7 +408,7 @@ test('lintPolicy: invalid policy surfaces schema errors', () => {
 
 test('lintPolicy: rejects wildcard CORS origin when credentials are allowed', () => {
   const ctx = tmpProject(`
-version: 1
+version: 2
 project: api-test
 request:
   allow_methods: [GET]
@@ -571,7 +571,7 @@ test('emitWaf: unknown format → structured error', () => {
 // --- migratePolicy ---
 
 test('migratePolicy: v1 → v1 is ok+noop', () => {
-  const ctx = tmpProject(BASIC_AWS_POLICY);
+  const ctx = tmpProject(BASIC_AWS_POLICY.replace('version: 2', 'version: 1'));
   try {
     const result = api.migratePolicy({ policyPath: ctx.policyPath, toVersion: 1 });
     assert.strictEqual(result.ok, true);
@@ -591,7 +591,7 @@ test('migratePolicy: no version field → ok=false with guidance error', () => {
     fs.writeFileSync(policyPath, 'project: noversion\n', 'utf8');
     const result = api.migratePolicy({ policyPath });
     assert.strictEqual(result.ok, false);
-    assert.ok(result.errors.some((e: string) => /no `version` field/.test(e)));
+    assert.ok(result.errors.some((e: string) => /MIGRATION_VERSION_MISSING/.test(e)));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -612,10 +612,10 @@ test('migratePolicy: downgrade rejected', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'migrate-'));
   try {
     const policyPath = path.join(tmp, 'policy.yml');
-    fs.writeFileSync(policyPath, 'version: 5\nproject: future\n', 'utf8');
+    fs.writeFileSync(policyPath, 'version: 2\nrequest: { allow_methods: [GET] }\nresponse_headers: {}\n', 'utf8');
     const result = api.migratePolicy({ policyPath, toVersion: 1 });
     assert.strictEqual(result.ok, false);
-    assert.ok(result.errors.some((e: string) => /Downgrade/.test(e)));
+    assert.ok(result.errors.some((e: string) => /MIGRATION_DOWNGRADE_UNSUPPORTED/.test(e)));
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -1099,7 +1099,7 @@ test('CLI authoring DX: visualize emits mermaid with control coverage', () => {
     });
     assert.strictEqual(result.status, 0, `visualize failed: ${result.stderr}`);
     assert.ok(result.stdout.includes('flowchart LR'));
-    assert.ok(result.stdout.includes('Policy: capabilities-test (v1)'));
+    assert.ok(result.stdout.includes('Policy: capabilities-test (v2)'));
     assert.ok(result.stdout.includes('request.graphql_guard'));
     assert.ok(result.stdout.includes('response_dlp'));
     assert.ok(result.stdout.includes('(monitor)'));

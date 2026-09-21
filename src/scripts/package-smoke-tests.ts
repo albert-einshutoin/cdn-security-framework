@@ -299,6 +299,24 @@ function smokeInstalledPackage(tarballPath: string) {
       assert.strictEqual(typeof sourceAnalysis.runSourceAnalyzer, 'function');
       assert.strictEqual(typeof nestjs.createNestJsSourceAnalyzer, 'function');
       assert.strictEqual(typeof nestjs.validateNestJsAuthConfig, 'function');
+      const fs = require('fs');
+      const cp = require('child_process');
+      assert.strictEqual(require(path.join(pkgRoot, 'policy', 'schema.json')).properties.version.const, 2);
+      const migrationInput = path.join(process.cwd(), 'migration-v1.json');
+      const originalPolicy = JSON.stringify({ version: 1, metadata: { owner: 'consumer', description: 'literal environment reference' }, request: { allow_methods: ['HEAD', 'GET'] }, response_headers: {} });
+      fs.writeFileSync(migrationInput, originalPolicy);
+      const preview = pkg.migratePolicy({ policyPath: migrationInput });
+      assert.strictEqual(preview.ok, true); assert.strictEqual(preview.saved, false);
+      assert.deepStrictEqual(preview.policy, { ...JSON.parse(originalPolicy), version: 2 });
+      assert.strictEqual(fs.readFileSync(migrationInput, 'utf8'), originalPolicy);
+      const cliPreview = cp.execFileSync(process.execPath, [path.join(pkgRoot, 'bin', 'cli.js'), 'migrate', '--policy', migrationInput], { encoding: 'utf8' });
+      assert.ok(cliPreview.includes('MIGRATION_PREVIEW'));
+      const saved = pkg.migratePolicy({ policyPath: migrationInput, write: true });
+      assert.strictEqual(saved.ok, true); assert.strictEqual(saved.saved, true);
+      assert.strictEqual(fs.readFileSync(migrationInput + '.v1.bak', 'utf8'), originalPolicy);
+      assert.strictEqual(pkg.lintPolicy({ policyPath: migrationInput }).ok, true);
+      assert.strictEqual(pkg.migratePolicy({ policyPath: migrationInput, write: true }).noop, true);
+      console.log('OK: packed schema2 migration preview/save/backup/CLI/noop');
       const result = pkg.lintPolicy({
         policyPath: path.join(pkgRoot, 'policy', 'base.yml'),
         cwd: process.cwd(),
@@ -309,7 +327,9 @@ function smokeInstalledPackage(tarballPath: string) {
     run(process.execPath, ['-e', apiSmoke], { cwd: installDir, stdio: 'inherit' });
 
     fs.writeFileSync(path.join(installDir, 'consumer.ts'), `
-      import { compile } from '${packageName}';
+      import { compile, migratePolicy, type MigratePolicyResult } from '${packageName}';
+      const migrated: MigratePolicyResult = migratePolicy({ policyPath: 'policy.yml', toVersion: 2, target: 'cloudflare', write: false });
+      const migrationExit: 0 | 1 | 2 = migrated.exitCode;
       import { compileArtifacts } from '${packageName}/emitter';
       import { parsePolicyFile } from '${packageName}/parser';
       import { validatePolicy } from '${packageName}/validator';

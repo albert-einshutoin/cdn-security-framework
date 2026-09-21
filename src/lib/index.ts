@@ -76,6 +76,7 @@ export interface LintPolicyResult extends ApiResult {
 export interface MigratePolicyOptions {
   policyPath?: string;
   toVersion?: number | string;
+  target?: 'aws' | 'cloudflare';
   write?: boolean;
   cwd?: string;
 }
@@ -85,6 +86,9 @@ export interface MigratePolicyResult extends ApiResult {
   toVersion: number;
   migrated: boolean;
   noop: boolean;
+  saved: boolean;
+  exitCode: 0 | 1 | 2;
+  policy?: unknown;
   reservedExit2?: boolean;
 }
 

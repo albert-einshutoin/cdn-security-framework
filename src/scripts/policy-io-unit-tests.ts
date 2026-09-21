@@ -56,7 +56,7 @@ function writePolicy(rootDir: string, name: string, body?: string): string {
   const dir = path.join(rootDir, 'policy');
   fs.mkdirSync(dir, { recursive: true });
   const file = path.join(dir, name);
-  fs.writeFileSync(file, body || 'version: 1\nproject: stub\n', 'utf8');
+  fs.writeFileSync(file, body || 'version: 2\nproject: stub\n', 'utf8');
   return file;
 }
 
@@ -375,7 +375,7 @@ test('loadPolicy returns the parsed policy object', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'policy-io-load-'));
   try {
     const policyFile = path.join(tmp, 'p.yml');
-    fs.writeFileSync(policyFile, 'version: 1\nproject: loaded\n', 'utf8');
+    fs.writeFileSync(policyFile, 'version: 2\nproject: loaded\n', 'utf8');
     const policy = loadPolicy(policyFile);
     assert.ok(policy && typeof policy === 'object');
     assert.strictEqual(policy.project, 'loaded');
@@ -388,7 +388,7 @@ test('loadPolicyWithWarnings returns { policy, warnings } for a valid file', () 
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'policy-io-load-'));
   try {
     const policyFile = path.join(tmp, 'p.yml');
-    fs.writeFileSync(policyFile, 'version: 1\nproject: loaded\n', 'utf8');
+    fs.writeFileSync(policyFile, 'version: 2\nproject: loaded\n', 'utf8');
     const result = loadPolicyWithWarnings(policyFile);
     assert.ok(result && typeof result === 'object');
     assert.ok(Array.isArray(result.warnings));

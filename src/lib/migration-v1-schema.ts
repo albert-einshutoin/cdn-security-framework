@@ -1,16 +1,14 @@
-{
+// Published cdn-security-framework@1.4.0 schema, adapter-only.
+// SHA-256 of original JSON: dcf963406f7afaff82edb3d8ae775de26587438d815d5bb3dbde4b57ee9ba1bd
+export default {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "title": "CDN Security Framework Policy",
-  "description": "Schema for policy/base.yml and policy/profiles/*.yml (v2)",
+  "description": "Schema for policy/base.yml and policy/profiles/*.yml (v1)",
   "type": "object",
   "additionalProperties": false,
   "required": ["version", "request", "response_headers"],
   "properties": {
-    "version": { "type": "integer", "const": 2 },
-    "extends": {
-      "type": "string",
-      "description": "Optional base policy path to extend. Path is resolved relative to the current policy file."
-    },
+    "version": { "type": "integer", "const": 1 },
     "project": { "type": "string" },
     "metadata": {
       "description": "Optional profile / policy metadata. `risk_level` hints the intended security posture — `permissive` triggers a build-time warning so operators do not accidentally ship a loose policy to production.",
@@ -294,7 +292,7 @@
           "type": "string"
         },
         "csp_nonce": {
-          "description": "Cloudflare only: generate a per-response nonce before the origin request, send it as x-csp-nonce, and substitute `'nonce-PLACEHOLDER'` in CSP response policies. AWS builds reject this option because CloudFront Functions lack a cryptographic RNG and cannot provide the origin transport contract.",
+          "description": "Generate a per-response nonce and substitute `'nonce-PLACEHOLDER'` in csp_public / csp_admin with the value. The nonce is also exposed as `x-csp-nonce` response header so origin templates can reference it. Cloudflare uses crypto.getRandomValues; CFF falls back to Math.random (lower entropy; documented).",
           "type": "boolean"
         },
         "coop": {
@@ -551,7 +549,7 @@
               "description": "Number of leading SHA-256 hex zeroes required in SHA-256(seed:nonce). Keep low; this is a lightweight friction primitive, not CAPTCHA.",
               "type": "integer",
               "minimum": 1,
-              "maximum": 4
+              "maximum": 6
             },
             "ttl_sec": {
               "description": "Lifetime of the solved challenge cookie. Default 900 seconds.",
@@ -736,4 +734,4 @@
       }
     }
   }
-}
+};

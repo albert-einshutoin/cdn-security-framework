@@ -22,7 +22,7 @@ npx cdn-security <subcommand> [options]
 | `explain` | Print a concise policy posture summary for review and onboarding. |
 | `visualize` | Render a deterministic policy control map in Mermaid or static HTML, including supported/monitor/unsupported/target-specific status. |
 | `diff` | Compare generated output drift or semantic policy posture changes between policies. |
-| `migrate` | Migrate a policy file between schema versions (stub — v1 is the only shipped version today). |
+| `migrate` | Preview or explicitly save a validated v1→v2 migration with an original-policy backup. |
 | `openapi inspect` | Inspect local OpenAPI security contracts as deterministic text or JSON without changing policy or build output. |
 | `openapi generate-policy` | Generate a non-destructive, review-only policy candidate and metadata sidecar. |
 | `contract diff` | Compare OpenAPI declarations with the effective policy and emit security findings. |
@@ -448,24 +448,12 @@ With `--semantic`, `diff` compares two policy files and reports posture changes 
 ## `migrate`
 
 ```bash
-npx cdn-security migrate              # dry-run inspection
-npx cdn-security migrate --to 1       # no-op on v1
-npx cdn-security migrate --policy policy/security.yml --to 1 --write
+./node_modules/.bin/cdn-security migrate --policy policy/security.yml
+./node_modules/.bin/cdn-security migrate --policy policy/security.yml --target cloudflare --write
 ```
 
-Inspects or migrates a policy file between schema versions. v1 is the only shipped schema today, so v1 → v1 is a read-only no-op unless a future migration path is registered.
+Use the executable from the unpublished candidate tarball. Default `--to 2` previews a validated v1→v2 conversion without writing files. `--target aws|cloudflare` is required for provider-sensitive settings; migration does not assume build's AWS default. `--write` saves in place only after validation, requiring an absent `<policy>.v1.bak` sibling that retains the original bytes. Valid same-version input is a read-only noop even with --write.
 
-Flags:
+CLI stdout contains a fixed preview/saved/noop summary. Failure diagnostics are fixed and go to stderr; no policy contents, secret values or unnecessary paths are printed. Exit 0 means success/noop, 1 input/I/O/downgrade error, and 2 unsupported version or explicit human decision required. No difficulty clamping or auth/nonce disabling occurs.
 
-- `-p, --policy <path>` — policy file to inspect (default `policy/security.yml`)
-- `--to <version>` — target schema version (default `1`)
-- `--write` — write migrated content back in place when a migration path exists
-
-Outputs:
-
-- `[INFO]` lines with policy path and current/target schema versions
-- `[OK] Already at target version — no migration needed.` when no migration is required
-
-Exit code is `0` when the policy is already at the target version. Parse errors, missing `version`, downgrades, and other validation failures exit `1`. A forward migration to a version with no registered path in this CLI exits `2` (reserved for "upgrade CLI first").
-
-See [schema-migration.md](./schema-migration.md) for the schema SemVer contract and deprecation window.
+See [schema migration](./schema-migration.md) for exact preservation, save failure, filesystem and rollback boundaries. Published 1.4.0 remains v1; the candidate package version alone does not identify its v2 contract.

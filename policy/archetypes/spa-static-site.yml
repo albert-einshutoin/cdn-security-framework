@@ -4,7 +4,7 @@
 # Threat focus: XSS, cache poisoning, unauthenticated admin exposure.
 # Base profile: balanced (strict if you control all client code).
 
-version: 1
+version: 2
 project: example-spa-static-site
 
 metadata:

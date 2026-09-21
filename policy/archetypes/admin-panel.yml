@@ -4,7 +4,7 @@
 # Threat focus: credential theft, session hijack, CSRF, lateral movement.
 # Base profile: strict plus static_token and no caching.
 
-version: 1
+version: 2
 project: example-admin-panel
 
 metadata:

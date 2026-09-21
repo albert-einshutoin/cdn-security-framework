@@ -42,7 +42,7 @@ function runLint(policyPath: string) {
 
 function basePolicy(overrides: Record<string, any>) {
   return `
-version: 1
+version: 2
 project: schema-lint-test
 request:
   allow_methods: ["GET", "HEAD"]
@@ -76,6 +76,7 @@ test('lint accepts policy inherited via extends', () => {
   fs.writeFileSync(
     childPath,
     `
+version: 2
 extends: ./base.yml
 defaults:
   mode: enforce
@@ -99,6 +100,7 @@ test('lint accepts transitive inheritance', () => {
   fs.writeFileSync(
     midPath,
     `
+version: 2
 extends: ./base.yml
 project: schema-lint-test
 request:
@@ -110,6 +112,7 @@ request:
   fs.writeFileSync(
     childPath,
     `
+version: 2
 extends: ./mid.yml
 request:
   limits:
@@ -321,7 +324,7 @@ test('lint rejects cors.max_age beyond 86400', () => {
 
 test('lint rejects wildcard CORS origin when credentials are allowed', () => {
   const yaml = `
-version: 1
+version: 2
 project: schema-lint-test
 request:
   allow_methods: ["GET", "HEAD"]
@@ -348,7 +351,7 @@ response_headers:
 
 test('lint accepts response_dlp configuration', () => {
   const yaml = `
-version: 1
+version: 2
 project: schema-lint-test
 request:
   allow_methods: ["GET"]
@@ -383,7 +386,7 @@ response_dlp:
 
 test('lint rejects response_dlp body max_bytes above maximum', () => {
   const yaml = `
-version: 1
+version: 2
 project: schema-lint-test
 request:
   allow_methods: ["GET"]
@@ -406,7 +409,7 @@ response_dlp:
 
 test('lint accepts wildcard CORS origin without credentials', () => {
   const yaml = `
-version: 1
+version: 2
 project: schema-lint-test
 request:
   allow_methods: ["GET", "HEAD"]
@@ -454,7 +457,7 @@ test('lint accepts Cloudflare override fields inside rate_limit_rules[]', () => 
 
 test('lint accepts request.graphql_guard configuration', () => {
   const yaml = `
-version: 1
+version: 2
 project: schema-lint-test
 request:
   allow_methods: ["POST"]
@@ -479,7 +482,7 @@ response_headers:
 
 test('lint rejects request.graphql_guard max_depth above maximum', () => {
   const yaml = `
-version: 1
+version: 2
 project: schema-lint-test
 request:
   allow_methods: ["POST"]
@@ -570,7 +573,7 @@ test('lint rejects unknown key at top level (additionalProperties:false)', () =>
 
 test('lint rejects unknown key under request.limits', () => {
   const yaml = `
-version: 1
+version: 2
 project: schema-lint-test
 request:
   allow_methods: ["GET"]

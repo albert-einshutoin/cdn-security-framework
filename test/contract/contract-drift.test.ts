@@ -69,7 +69,7 @@ function contract(
 
 function policy(overrides: Partial<CDNSecurityFrameworkPolicy> = {}): CDNSecurityFrameworkPolicy {
   return {
-    version: 1,
+    version: 2,
     defaults: { mode: 'enforce' },
     request: {
       allow_methods: ['GET'],

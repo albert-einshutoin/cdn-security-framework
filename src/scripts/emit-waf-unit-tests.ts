@@ -32,7 +32,7 @@ const repoRoot = path.join(__dirname, '..');
 const cliPath = path.join(repoRoot, 'bin', 'cli.js');
 
 const BASIC_AWS_POLICY = `
-version: 1
+version: 2
 project: emit-waf-test
 request:
   allow_methods: [GET, POST]
@@ -53,7 +53,7 @@ firewall:
 `;
 
 const BASIC_CF_POLICY = `
-version: 1
+version: 2
 project: emit-waf-cf-test
 request:
   allow_methods: [GET]

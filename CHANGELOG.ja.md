@@ -9,6 +9,10 @@
 
 ## [Unreleased]
 
+### Changed
+
+- **破壊的変更・未公開候補:** Policy schema2をcanonicalとし、v1は明示migration adapterだけで受理します。既定previewで設定を保持し、difficulty5/6・AWS未対応auth/nonceは手動判断を要求。保存時は原本bytesのbackupを必須にします。release GOまでpackage version1.4.0は維持。[移行・rollback](docs/schema-migration.ja.md)。
+
 ### Security
 
 - 最適化後の CloudFront Functions 10 KiB 制限を強制し、secret を含み得る AWS edge code を workflow artifact に upload しないよう変更。

@@ -92,7 +92,7 @@ function runCompileInfra(policyContent: string, options: any = {}) {
 
 test('compile-infra emits JA3 block rules when configured', () => {
   const ctx = runCompileInfra(`
-version: 1
+version: 2
 project: ja3-test
 request:
   allow_methods: ["GET"]
@@ -123,7 +123,7 @@ firewall:
 
 test('compile-infra emits JA4 count rules when configured', () => {
   const ctx = runCompileInfra(`
-version: 1
+version: 2
 project: ja4-test
 request:
   allow_methods: ["GET"]
@@ -155,7 +155,7 @@ firewall:
 
 test('compile-infra still emits managed rules and rate limits', () => {
   const ctx = runCompileInfra(`
-version: 1
+version: 2
 project: waf-test
 request:
   allow_methods: ["GET"]
@@ -183,7 +183,7 @@ firewall:
 
 test('compile-infra supports --rule-group-only for existing web ACL users', () => {
   const ctx = runCompileInfra(`
-version: 1
+version: 2
 project: rg-only-test
 request:
   allow_methods: ["GET"]
@@ -207,7 +207,7 @@ firewall:
 
 test('compile-infra supports --output-mode rule-group for existing web ACL users', () => {
   const ctx = runCompileInfra(`
-version: 1
+version: 2
 project: outmode-test
 request:
   allow_methods: ["GET"]
@@ -230,7 +230,7 @@ firewall:
 
 test('compile-infra emits rate_limit_rules[] with scope_down_statement and custom priority', () => {
   const ctx = runCompileInfra(`
-version: 1
+version: 2
 project: rlr-test
 request:
   allow_methods: ["GET"]
@@ -276,7 +276,7 @@ firewall:
 
 test('compile-infra emits block_response custom_response_body on rule group + references it', () => {
   const ctx = runCompileInfra(`
-version: 1
+version: 2
 project: br-test
 request:
   allow_methods: ["GET"]
@@ -315,7 +315,7 @@ firewall:
 
 test('compile-infra emits aws_wafv2_logging_configuration when logging.enabled', () => {
   const ctx = runCompileInfra(`
-version: 1
+version: 2
 project: log-test
 request:
   allow_methods: ["GET"]
@@ -350,7 +350,7 @@ firewall:
 
 test('compile-infra: logging is NOT emitted when logging.enabled is false/missing', () => {
   const ctx = runCompileInfra(`
-version: 1
+version: 2
 project: nolog-test
 request:
   allow_methods: ["GET"]
@@ -373,7 +373,7 @@ firewall:
 
 test('compile-infra emits geo allowlist as a negated geo match statement', () => {
   const ctx = runCompileInfra(`
-version: 1
+version: 2
 project: geo-allow-test
 request:
   allow_methods: ["GET"]
@@ -397,7 +397,7 @@ firewall:
 
 test('compile-infra emits separate IP allowlist and blocklist resources', () => {
   const ctx = runCompileInfra(`
-version: 1
+version: 2
 project: ip-set-test
 request:
   allow_methods: ["GET"]
@@ -428,7 +428,7 @@ firewall:
 
 test('compile-infra emits transport and origin locals for CloudFront settings', () => {
   const ctx = runCompileInfra(`
-version: 1
+version: 2
 project: transport-origin-test
 request:
   allow_methods: ["GET"]

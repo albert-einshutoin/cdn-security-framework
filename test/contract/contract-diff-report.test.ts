@@ -29,7 +29,7 @@ paths:
       responses:
         '200': { description: OK }
 `);
-  fs.writeFileSync(policyPath, `version: 1
+  fs.writeFileSync(policyPath, `version: 2
 defaults: { mode: ${mode} }
 request:
   allow_methods: [GET]
@@ -165,7 +165,7 @@ exceptions:
     const outsidePolicy = path.join(os.tmpdir(), `swapped-policy-${path.basename(fixture.root)}.yml`);
     fs.writeFileSync(outsidePolicy, 'version: 999\n');
     parser.parsePolicyFile = (options) => {
-      fs.writeFileSync(fixture.policyPath, `extends: ${path.relative(fixture.root, outsidePolicy)}\nversion: 1\n`);
+      fs.writeFileSync(fixture.policyPath, `extends: ${path.relative(fixture.root, outsidePolicy)}\nversion: 2\n`);
       try { return originalParse(options); } finally { fs.writeFileSync(fixture.policyPath, originalPolicy); }
     };
     try {
@@ -185,7 +185,7 @@ exceptions:
     const parentAlias = path.join(inherited.root, 'parent-alias.yml');
     fs.renameSync(inherited.policyPath, parentPolicy);
     fs.symlinkSync(path.basename(parentPolicy), parentAlias);
-    fs.writeFileSync(inherited.policyPath, 'extends: parent-alias.yml\nversion: 1\n');
+    fs.writeFileSync(inherited.policyPath, 'extends: parent-alias.yml\nversion: 2\n');
     expect(diffSecurityContracts({
       openapiPath: inherited.openapiPath,
       policyPath: inherited.policyPath,
@@ -201,7 +201,7 @@ exceptions:
       .replace('allow_methods: [GET]', 'allow_methods: [POST]'));
     fs.writeFileSync(overridePolicy, `extends: base.yml\n${fs.readFileSync(retargeted.policyPath, 'utf8')}`);
     fs.symlinkSync(path.basename(overridePolicy), policyAlias);
-    fs.writeFileSync(retargeted.policyPath, 'extends: policy-alias.yml\nversion: 1\n');
+    fs.writeFileSync(retargeted.policyPath, 'extends: policy-alias.yml\nversion: 2\n');
     const expectedRetargeted = diffSecurityContracts({
       openapiPath: retargeted.openapiPath,
       policyPath: retargeted.policyPath,
@@ -250,7 +250,7 @@ exceptions:
     for (let index = 0; index < 33; index += 1) {
       fs.writeFileSync(path.join(chain.root, `policy-${index}.yml`), index === 32
         ? originalPolicy
-        : `extends: policy-${index + 1}.yml\nversion: 1\n`);
+        : `extends: policy-${index + 1}.yml\nversion: 2\n`);
     }
     expect(() => diffSecurityContracts({
       openapiPath: chain.openapiPath,
@@ -432,7 +432,7 @@ fs.openSync = function (filePath, flags, ...rest) {
     const outsidePolicy = path.join(os.tmpdir(), `outside-policy-${path.basename(ok.root)}.yml`);
     fs.writeFileSync(outsidePolicy, fs.readFileSync(ok.policyPath));
     const extendingPolicy = path.join(ok.root, 'outside-extends.yml');
-    fs.writeFileSync(extendingPolicy, `extends: ${path.relative(ok.root, outsidePolicy)}\nversion: 1\n`);
+    fs.writeFileSync(extendingPolicy, `extends: ${path.relative(ok.root, outsidePolicy)}\nversion: 2\n`);
     expect(run([
       '--openapi', ok.openapiPath, '--policy', extendingPolicy, '--target', 'aws',
       '--workspace-root', ok.root,

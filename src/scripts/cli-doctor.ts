@@ -33,7 +33,7 @@ const CHECK_DEPENDENCIES = 'npm_dependencies';
 
 const MIN_NODE_VERSION = '20.17.0';
 const MIN_NODE_MAJOR = Number(MIN_NODE_VERSION.split('.')[0]);
-const SCHEMA_CURRENT_VERSION = 1;
+const SCHEMA_CURRENT_VERSION = 2;
 
 type CheckStatus = 'pass' | 'fail' | 'warn' | 'skip';
 type CheckExtras = Record<string, any> | undefined;
@@ -138,7 +138,7 @@ function checkSchemaVersion(policyDoc: any): CheckRow {
   if (version === undefined) {
     return fail(
       CHECK_POLICY_SCHEMA_VERSION,
-      'Policy has no `version` field. Add `version: 1`.'
+      'Policy has no `version` field. Add `version: 2`.'
     );
   }
   if (version !== SCHEMA_CURRENT_VERSION) {

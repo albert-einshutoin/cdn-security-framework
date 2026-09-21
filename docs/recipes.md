@@ -20,7 +20,7 @@ required environment variables, and verification commands.
 `origin.auth` is enabled.
 
 ```yaml
-version: 1
+version: 2
 project: cognito-api
 metadata:
   risk_level: strict
@@ -105,7 +105,7 @@ React/Vue/Svelte SPA, or static marketing site.
 **Required env:** none.
 
 ```yaml
-version: 1
+version: 2
 project: spa-static-site
 metadata:
   risk_level: balanced
@@ -170,7 +170,7 @@ in addition to VPN, IP allowlists, or identity-aware proxy controls.
 **Required env:** `EDGE_ADMIN_TOKEN`.
 
 ```yaml
-version: 1
+version: 2
 project: internal-admin
 metadata:
   risk_level: strict
@@ -249,7 +249,7 @@ without exposing a long-lived bearer token.
 `ORIGIN_SECRET` if origin auth is enabled.
 
 ```yaml
-version: 1
+version: 2
 project: signed-downloads
 metadata:
   risk_level: strict
@@ -333,7 +333,7 @@ DLP at the Worker layer.
 **Required env:** `ORIGIN_SECRET` if HMAC origin auth is enabled.
 
 ```yaml
-version: 1
+version: 2
 project: cloudflare-graphql-api
 metadata:
   risk_level: strict

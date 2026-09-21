@@ -137,20 +137,28 @@ interface LintResult {
 
 ### `migratePolicy(opts)`
 
-ポリシーをスキーマバージョン間で移行します。現状 v1 のみリリース済みなので、v1 → v1 は no-op（`{ ok: true, noop: true }`）。
-
-**出力**
+明示v1→v2 adapter。既定はpreview・移行先2で、coreの暗黙fallbackはありません。`policy`は意図的な設定成果物でありredaction済み診断ではありません。有効な同version入力は検証後noopです。[移行契約](./schema-migration.ja.md)を参照してください。
 
 ```ts
-interface MigrateResult {
+interface MigratePolicyOptions {
+  policyPath?: string;
+  toVersion?: number | string; // default 2
+  target?: 'aws' | 'cloudflare'; // no implicit provider
+  write?: boolean; // default false; save requires absent <policy>.v1.bak
+  cwd?: string;
+}
+interface MigratePolicyResult {
   ok: boolean;
   errors: string[];
   warnings: string[];
-  fromVersion?: number | string;
-  toVersion?: number | string;
-  migrated?: unknown;
-  noop?: boolean;
-  reservedExit2?: boolean;  // CLI は終了コード 2 に翻訳
+  fromVersion: number | undefined;
+  toVersion: number;
+  migrated: boolean;
+  noop: boolean;
+  saved: boolean;
+  exitCode: 0 | 1 | 2;
+  policy?: unknown;
+  reservedExit2?: boolean;
 }
 ```
 
