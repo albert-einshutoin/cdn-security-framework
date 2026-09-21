@@ -336,6 +336,10 @@ starter policy はローカルで使えるままにしつつ、本番 CI では�
 
 readiness report には read-only の `wafRecommendations` も含まれます。この engine は policy から `spa-static-site`、`rest-api`、`admin-panel`、`microservice-origin` の posture を推定し、managed WAF rule group と関連設定を、rationale、cost notes、false-positive notes、AWS / Cloudflare target support 付きで提案します。policy は変更しません。推奨の適用は別 change として手動で行ってください。
 
+`--report`は選択した入力policyをfile identityで保護し、相対/絶対表記、symlink、hardlink経由の衝突も拒否します。同一実体、および既存の非通常file・symlink・複数hardlink出力は、書込み前にexit1、stdout空、固定stderr `[ERROR] READINESS_OUTPUT_PROTECTED`で拒否します。I/O失敗や実体/directoryの変化を検知した場合は`[ERROR] READINESS_OUTPUT_WRITE_FAILED`とexit1、stdout空を返し、生errorやpathを診断へ含めません。無関係な通常reportはcwd外も含めて従来どおり上書きでき、親directoryは事前に存在する必要があります。
+
+書込みにはcontract diffと同じwriterを使い、truncateせずopenしたdescriptorと固定した親directoryを検証してから書きます。拒否・書込み失敗時も選択policyは変更しません。reportのtransactionalな置換ではなく、truncate後の書込み失敗では無関係な出力reportが空/部分的な状態になる場合があります。一時fileは作成しません。実行中は書込み可能directoryを排他的に管理してください。最終検証後に同権限の別processが行うrename/hardlink操作までは保証しません。POSIXローカルfilesystemで検証し、Windows/network filesystemの競合挙動は未検証です。保護対象は選択policyであり、継承graph全体の追加監査ではありません。評価findings、report schema、通常のreadiness終了基準は変更しません。
+
 ## `capabilities`
 
 ```bash

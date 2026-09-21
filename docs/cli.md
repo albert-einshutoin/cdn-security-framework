@@ -340,6 +340,10 @@ Use `--fail-on-weak-waf-baseline` for production CI when starter policies should
 
 Readiness reports also include read-only `wafRecommendations`. The engine infers `spa-static-site`, `rest-api`, `admin-panel`, or `microservice-origin` posture from the policy and suggests managed WAF rule groups plus related settings with rationale, cost notes, false-positive notes, and AWS/Cloudflare target support. It never mutates the policy; apply recommendations manually in a follow-up change.
 
+`--report` protects the selected input policy by file identity, including relative/absolute aliases, symlinks and hardlinks. Collisions and existing non-regular, symlink or multi-link output files are rejected before writing with exit 1, empty stdout and `[ERROR] READINESS_OUTPUT_PROTECTED`. I/O failures or detected identity/directory changes emit `[ERROR] READINESS_OUTPUT_WRITE_FAILED` with exit 1 and empty stdout, without raw errors or paths. An unrelated regular report can still be overwritten, including outside cwd; its parent directory must already exist.
+
+Report writing reuses the contract-diff writer: open without truncation, validate the descriptor and pinned parent, then write. The selected policy remains unchanged on rejection or write failure. This is not a transactional report replacement: a write failure after truncation may leave an unrelated output report empty or partial. No temporary file is used. Keep the writable directories under exclusive control while running: concurrent same-user rename/hardlink operations after the final checks are outside the guarantee. POSIX local filesystem behavior is tested; Windows and network filesystem race behavior are not verified. This protection covers the selected policy file, not an additional audit of its inheritance graph. Evaluation findings, report schema and normal readiness exit criteria are unchanged.
+
 ## `capabilities`
 
 ```bash

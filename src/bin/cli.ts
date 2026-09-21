@@ -5,6 +5,7 @@
  */
 
 import { AnalyzeError, runAnalyze, printAnalyzeReport } from './analyze';
+import { ReadinessOutputError, prepareReadinessOutput, writeReadinessOutput } from './readiness-output';
 
 const path = require('path');
 const fs = require('fs');
@@ -3226,6 +3227,15 @@ program
   .action((opts: ReadinessOptions) => {
     const cwd = process.cwd();
     const policyPath = resolvePolicyPath(cwd, opts.policy);
+    let reportTarget: ReturnType<typeof prepareReadinessOutput> | undefined;
+    if (opts.report) {
+      try { reportTarget = prepareReadinessOutput(policyPath, opts.report); }
+      catch (error: unknown) {
+        console.error('[ERROR]', error instanceof ReadinessOutputError ? error.code : 'READINESS_OUTPUT_WRITE_FAILED');
+        process.exitCode = 1;
+        return;
+      }
+    }
     const target = opts.target === 'cloudflare' ? 'cloudflare' : 'aws';
     const { lintPolicy } = require(path.join(pkgRoot, 'lib'));
     const { runDoctor } = require(path.join(pkgRoot, 'scripts', 'cli-doctor.js'));
@@ -3293,9 +3303,13 @@ program
       wafRecommendations,
     };
 
-    if (opts.report) {
-      const reportPath = path.isAbsolute(opts.report) ? opts.report : path.join(cwd, opts.report);
-      fs.writeFileSync(reportPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
+    if (reportTarget) {
+      try { writeReadinessOutput(reportTarget, JSON.stringify(report, null, 2) + '\n'); }
+      catch {
+        console.error('[ERROR] READINESS_OUTPUT_WRITE_FAILED');
+        process.exitCode = 1;
+        return;
+      }
     }
 
     if (opts.json) {
