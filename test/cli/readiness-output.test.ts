@@ -231,3 +231,46 @@ for (const kind of ['warn', 'fail'] as const) {
     expect(report.summary[kind]).toBeGreaterThan(0); expect(JSON.parse(result.stdout)).toEqual(report);
   }, kind === 'warn' ? policyText.replace(', AWSManagedRulesIPReputationList', '') : policyText.replace('mode: enforce', 'mode: monitor')));
 }
+
+for (const kind of ['missing', 'directory']) {
+  test(`R13 ${kind} policy still produces an evaluation failure report`, () => fixture((root) => {
+    const input = path.join(root, kind === 'missing' ? 'absent.yml' : 'input-dir');
+    if (kind === 'directory') fs.mkdirSync(input);
+    const output = path.join(root, 'report.json');
+    const result = run(root, input, output, ['--json']);
+    expect(result.status).toBe(1); expect(result.stderr).toBe('');
+    const report = JSON.parse(fs.readFileSync(output, 'utf8'));
+    expect(report.summary.fail).toBeGreaterThan(0); expect(report.exitCode).toBe(1);
+    expect(JSON.parse(result.stdout)).toEqual(report);
+    if (kind === 'missing') expect(fs.existsSync(input)).toBe(false);
+    else expect(fs.readdirSync(input)).toEqual([]);
+  }));
+}
+test('R13 missing policy cannot be created as its own report', () => fixture((root) => {
+  const input = path.join(root, 'absent.yml');
+  rejected(run(root, input, input)); expect(fs.existsSync(input)).toBe(false);
+}));
+test('R13 missing policy parent alias cannot create the input', () => fixture((root) => {
+  const alias = path.join(root, 'alias'); fs.symlinkSync(root, alias, 'dir');
+  const input = path.join(alias, 'absent.yml');
+  rejected(run(root, input, path.join(root, 'absent.yml')));
+  expect(fs.existsSync(input)).toBe(false);
+}));
+test('R13 policy appearing after evaluation is preserved', () => fixture((root) => {
+  const selected = path.join(root, 'absent.yml'), output = path.join(root, 'report.json');
+  const preload = hook(root, `
+const Module = require('node:module'), load = Module._load;
+Module._load = function(request, ...rest) {
+  const value = load.call(this, request, ...rest);
+  if (request.endsWith('/lib')) return { ...value, lintPolicy(options) {
+    const result = value.lintPolicy(options); mark();
+    fs.copyFileSync(input, path.join(root, 'absent.yml'));
+    return result;
+  }};
+  return value;
+};`);
+  rejected(run(root, selected, output, [], preload), 'WRITE_FAILED'); fired(root);
+  expect(fs.readFileSync(selected, 'utf8')).toBe(policyText);
+  expect(digest(selected)).toBe(digest(path.join(root, 'policy.yml')));
+  expect(fs.existsSync(output)).toBe(false);
+}));

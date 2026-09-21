@@ -338,6 +338,8 @@ readiness report には read-only の `wafRecommendations` も含まれます。
 
 `--report`は選択した入力policyをfile identityで保護し、相対/絶対表記、symlink、hardlink経由の衝突も拒否します。同一実体、および既存の非通常file・symlink・複数hardlink出力は、書込み前にexit1、stdout空、固定stderr `[ERROR] READINESS_OUTPUT_PROTECTED`で拒否します。I/O失敗や実体/directoryの変化を検知した場合は`[ERROR] READINESS_OUTPUT_WRITE_FAILED`とexit1、stdout空を返し、生errorやpathを診断へ含めません。無関係な通常reportはcwd外も含めて従来どおり上書きでき、親directoryは事前に存在する必要があります。
 
+欠落policyやdirectory policyでも、安全な別出力先には従来の評価失敗reportを保存できます。欠落入力は書込み時まで欠落している必要があり、途中で出現した入力は拒否します。解決不能な末尾symlink経由の欠落入力は、安全な参照先を確定できないため拒否します。
+
 書込みにはcontract diffと同じwriterを使い、truncateせずopenしたdescriptorと固定した親directoryを検証してから書きます。拒否・書込み失敗時も選択policyは変更しません。reportのtransactionalな置換ではなく、truncate後の書込み失敗では無関係な出力reportが空/部分的な状態になる場合があります。一時fileは作成しません。実行中は書込み可能directoryを排他的に管理してください。最終検証後に同権限の別processが行うrename/hardlink操作までは保証しません。POSIXローカルfilesystemで検証し、Windows/network filesystemの競合挙動は未検証です。保護対象は選択policyであり、継承graph全体の追加監査ではありません。評価findings、report schema、通常のreadiness終了基準は変更しません。
 
 ## `capabilities`
