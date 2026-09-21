@@ -765,7 +765,7 @@ test('CLI authoring DX: playground emits AWS + Cloudflare fixture decisions', ()
   }
 });
 
-test('CLI authoring DX: analyze surfaces low-frequency block candidates', () => {
+test('A36 CLI authoring DX: analyze surfaces low-frequency block candidates', () => {
   const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'analyze-'));
   const logPath = path.join(tmp, 'monitor.jsonl');
   const urlAuthSentinel = ['ISSUE1020_URL_', 'PASS', 'WORD'].join('');
@@ -830,11 +830,16 @@ test('CLI authoring DX: analyze surfaces low-frequency block candidates', () => 
       encoding: 'utf8',
       env: process.env,
     });
+    const inputHash = () => require('crypto').createHash('sha256').update(fs.readFileSync(logPath)).digest('hex');
+    const beforeHash = inputHash();
     const jsonResult: any = run(['--json']);
     const textResult: any = run([]);
-    assert.strictEqual(jsonResult.status, 0, `analyze JSON failed: ${jsonResult.stderr}`);
-    assert.strictEqual(textResult.status, 0, `analyze text failed: ${textResult.stderr}`);
+    assert.strictEqual(jsonResult.status, 1, `analyze JSON failed: ${jsonResult.stderr}`);
+    assert.strictEqual(textResult.status, 1, `analyze text failed: ${textResult.stderr}`);
+    assert.strictEqual(inputHash(), beforeHash);
     const report = JSON.parse(jsonResult.stdout);
+    assert.strictEqual(report.summary.inputStatus, 'partial');
+    assert.strictEqual(report.diagnostics.counts.ANALYZE_JSON_SYNTAX, 1);
     assert.strictEqual(report.summary.totalLines, 8);
     assert.strictEqual(report.summary.parsedLines, 7);
     assert.strictEqual(report.summary.unparseableLines, 1);
@@ -872,7 +877,7 @@ test('CLI authoring DX: analyze surfaces low-frequency block candidates', () => 
       env: process.env,
     });
     assert.strictEqual(missing.status, 1);
-    assert.ok(missing.stderr.includes('analyze: input file not found'));
+    assert.ok(missing.stderr.includes('ANALYZE_INPUT_NOT_FOUND'));
     assert.ok(!missing.stderr.includes(tmp), 'leaked absolute error input path');
     for (const sentinel of sentinels) {
       assert.ok(!missing.stdout.includes(sentinel), `leaked ${sentinel} to error stdout`);
@@ -887,7 +892,7 @@ test('CLI authoring DX: analyze surfaces low-frequency block candidates', () => 
       });
       assert.strictEqual(unreadable.status, 1);
       assert.strictEqual(unreadable.stdout, '');
-      assert.strictEqual(unreadable.stderr.trim(), '[ERROR] analyze: input could not be read');
+      assert.strictEqual(unreadable.stderr.trim(), '[ERROR] ANALYZE_INPUT_READ_FAILED');
     }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
@@ -1868,3 +1873,8 @@ test('CLI authoring DX: diff --semantic surfaces posture drift', () => {
 if (process.exitCode) {
   process.exit(process.exitCode);
 }
+
+void import('./analyze-unit-tests').then(({ runAnalyzeTests }) => runAnalyzeTests()).catch((error: unknown) => {
+  console.error('FAIL: analyze acceptance tests', error);
+  process.exitCode = 1;
+});

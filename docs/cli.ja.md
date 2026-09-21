@@ -214,21 +214,51 @@ npx cdn-security analyze --input /path/to/monitor.jsonl
 npx cdn-security analyze --input /path/to/monitor.jsonl --min-count 3 --top 10 --json
 ```
 
-`analyze` は監視モードの構造化ログ（JSONL）を受け取り、`block` / `monitor` / `pass` を集約して低頻度な block の候補を抽出し、監視から enforce への移行判断を支援します。
+`analyze` はJSONLを変更せずに読み取り、有効recordをroute/reason別に集計して低頻度block候補を抽出します。ポリシーの安全性判定や変更の適用は行いません。
 
-対応オプション:
+- `--input`: JSONLファイルパス（必須）。
+- `--min-count`: block候補の件数の上限しきい値（以下を採用、既定`5`、小数切捨て）。
+- `--top`: 候補数と候補ごとのsample数の上限（既定`20`、小数切捨て）。
+- `--json`: stdoutへ末尾改行付き単一JSON文書。指定しなければtext report。
 
-- `--input`: `JSONL` のログファイルパス（必須）
-- `--min-count`: `block` 判定の低頻度しきい値（デフォルト `5`）
-- `--top`: ルート/サンプルの最大表示件数（デフォルト `20`）
-- `--json`: 機械可読 JSON を標準出力
+非空行は明示的なown propertyの`event`、`eventName`、`outcome`のいずれかを持つobjectである必要があります。前後空白と大文字小文字を正規化し、`allow`/`pass`/`passed`は`pass`、`block`/`blocked`は`block`、`monitor`/`monitoring`/`logged`は`monitor`として扱います。`audit`、`error`、`challenge`、`challenge_report`は意味を保持します。存在するevent aliasはすべて有効で、意味が一致する必要があります。statusだけからeventを推定せず、status 403のchallengeもblockへ変換しません。
 
-出力:
+外側にevent aliasが1つでもあれば、値が不正でも外側recordを選びます。存在しなければ、own propertyの`message`にevent aliasを持つobjectをJSON文字列で格納します。展開は1段のみで、外側metadataとの合成や別recordへのfallbackはしません。
 
-- 全体サマリ（総行数 / パース可能行 / ブロック / monitor）
-- `block_reason` ごとの集計（対象 target / route）
-- `policy route` ごとの集計（`block_reason` / target）
-- `count <= --min-count` の低頻度 block候補（サンプルイベント付き）
+補助文字列fieldはprivacy正規化前に空でないstringであることを検証します。存在するaliasをすべて検証後、次の順で最初の値を採用します。
+
+| field | alias優先順位 |
+| --- | --- |
+| method | `method`, `httpRequest.method`, `request.method` |
+| URI | `uri`, `path`, `request.uri`, `request.path`, `httpRequest.uri`, `httpRequest.path` |
+| policy route | `policy_route`, `policyRoute`, `route`, `request.route`。すべて欠落時のみURI |
+| target | `target`, `platform`, `provider`, `runtime` |
+| reason | `block_reason`, `blockReason`, `reason` |
+
+存在する`request`/`httpRequest`はobjectである必要があり、arrayやnullは不正です。`status`/`statusCode`は両方検証して最初を採用します。numberは安全な整数、stringは前後空白を除いた十進数字列で、値は0または100〜599です。明示0をfallbackで上書きしません。method/status/target/reasonの欠測表示は`UNKNOWN`/0/`unknown`/`unclassified`です。URI/routeの欠測と、採用値がprivacy正規化で空になった場合は内部でも実値と区別し、表示は`unknown`です。明示値`unknown`は`/unknown`になります。実routeのないblockも件数へ加算しますが、route候補には含めません。
+
+有効eventはすべてroute/reason集計へ加算し、block/monitor件数には明示されたcanonical eventだけを加算します。候補は実routeを持つblockかつ`count <= --min-count`で、件数、routeの順に並び、同順位は入力順を維持します。credential、URL userinfo、query/fragment、危険なpath文字列は集計前に正規化します。診断にはraw recordや引数値を含めません。
+
+| `summary.inputStatus` | 意味 | 終了コード | stderr（固定1行） |
+| --- | --- | --- | --- |
+| `complete` | 非空recordがすべて有効 | 0 | 空 |
+| `partial` | 有効・不正が混在。有効分のreportを返す | 1 | `[WARN] ANALYZE_INPUT_PARTIAL` |
+| `invalid` | 非空recordが存在し、有効recordが0件 | 1 | `[ERROR] ANALYZE_INPUT_INVALID` |
+| `empty` | 非空recordが0件 | 1 | `[WARN] ANALYZE_INPUT_EMPTY` |
+
+exit0は入力処理の完了であり、安全性の合格ではありません。非0終了でもreportは最後まで出力します。非空行の件数は`totalLines = parsedLines + unparseableLines`、有効record数は`analyzedEvents = parsedLines`です。JSONには`diagnostics`、textには`input_status`と`diagnostics`のJSON行を出力します。診断は`total`、以下の順序で0件も含む`counts`、先頭20件の`{line, code}`、残りの件数`omitted`から成ります。`line`は空行も含む1始まりの物理行番号です。
+
+1. `ANALYZE_JSON_SYNTAX`: 外側JSON構文不正。
+2. `ANALYZE_RECORD_TYPE`: 外側がobjectでない。
+3. `ANALYZE_EVENT_MISSING`: event aliasもmessageもない。
+4. `ANALYZE_EVENT_VALUE`: event aliasが空でないstringでない。
+5. `ANALYZE_EVENT_UNKNOWN`: 未知event。
+6. `ANALYZE_EVENT_ALIAS_CONFLICT`: event aliasの意味が不一致。
+7. `ANALYZE_NESTED_MESSAGE`: 1段message envelopeが不正。
+8. `ANALYZE_FIELD_VALUE`: 補助field/container不正。
+9. `ANALYZE_STATUS_VALUE`: status不正。
+
+1不正行につき診断は1件です。JSON/objectとrecord選択、eventの型・既知値・一致、container（`request`→`httpRequest`）、上表順の文字列field、statusの順に検証します。fatalではreportを返さずstdoutは空、exit1と固定stderrの`[ERROR] ANALYZE_INPUT_NOT_FOUND`、`[ERROR] ANALYZE_INPUT_READ_FAILED`、`[ERROR] ANALYZE_ARGUMENT_INVALID`（必須/未知optionも対象）のいずれかを返します。`analyze --help`は通常helpとexit0を維持します。
 
 ## `emit-waf`
 
