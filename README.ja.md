@@ -251,7 +251,7 @@ node node_modules/cdn-security-framework/scripts/policy-lint.js policy/security.
 ## メンテナ向け（npm 公開）
 
 * **package-lock.json**: コミットしておく（CI で `npm ci` するため）。
-* **dist/**: `.gitignore` で無視。ユーザーは `npm run build` で `dist/edge/` と `dist/infra/` を生成する。CI でドリフト検知する場合は CI 内で `npm run build` を実行しポリシーと比較する（`dist/` はコミットしない）。
+* **dist/**: `.gitignore` で無視。consumerは `./node_modules/.bin/cdn-security build` で `dist/edge/` と `dist/infra/` を生成する。CI でドリフト検知する場合は CI 内で `npm run build` を実行しポリシーと比較する（`dist/` はコミットしない）。
 * **CI ワークフロー**:
   * `.github/workflows/policy-lint.yml`: PRの選択的検証と必須shadow比較、`main`・`release/**`・手動・日次の完全検証
   * `.github/workflows/release-npm.yml`: タグ起点の npm 公開ワークフロー

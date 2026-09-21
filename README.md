@@ -205,7 +205,7 @@ node node_modules/cdn-security-framework/scripts/policy-lint.js policy/security.
 ./node_modules/.bin/cdn-security build --policy policy/security.yml --target aws --out-dir dist/aws
 ```
 
-The Quickstart also covers Cloudflare JWT `init --guided`, authenticated POST JSON playground fixtures, OpenAPI inspect→review-only candidate→contract diff, and migration preview/save/backup/rollback. JWT/signed_url are not AWS success examples.
+The Quickstart also covers Cloudflare JWT `init --guided`, playground authentication fixtures and POST JSON, OpenAPI inspect→review-only candidate→contract diff, and migration preview/save/backup/rollback. JWT/signed_url are not AWS success examples.
 
 ### 5. Deploy boundary
 
