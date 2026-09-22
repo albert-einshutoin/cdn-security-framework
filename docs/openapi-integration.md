@@ -14,16 +14,17 @@ prove that the application is secure.
 | Allowed API | Edge/WAF policy | That an allowed route is declared, implemented, or safe in the application |
 | Observed API | Runtime events | That an unobserved route is unused or safe to remove |
 
-This Phase 1 workflow prepares the Declared API and a candidate for the Allowed
-API. It does not yet compare them in CI. See
+This workflow prepares Declared API evidence and a review-only Allowed API candidate.
+Use `contract diff` for comparison; this does not apply a candidate. See
 [ADR 0003](adr/0003-security-contract-trust-model.md) for the complete trust
 model.
 
 ## Ten-minute quickstart
 
 Run these commands from a clone of this repository. For a consuming project,
-install with `npm install --save-dev cdn-security-framework` and use the same
-`npx cdn-security` commands.
+follow the [candidate tarball Quickstart](quickstart.md#5-openapi-to-review);
+published1.4.0 is not the schema2 candidate. Repository npm scripts below are
+not consumer prerequisites.
 
 ### 1. Install and prepare output directories
 

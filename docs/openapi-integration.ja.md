@@ -13,15 +13,15 @@ OpenAPI commandは、信頼できないlocal OpenAPI 3.0/3.1 documentをreview e
 | Allowed API | Edge/WAF Policy | 許可Routeが宣言済み、実装済み、またはApplicationで安全であること |
 | Observed API | Runtime event | 未観測Routeが未使用または削除可能であること |
 
-このPhase 1 workflowはDeclared APIとAllowed APIのCandidateを準備します。まだCIで
-比較しません。完全なtrust modelは
+このworkflowはDeclared APIの根拠とreview-onlyのAllowed API candidateを準備します。
+比較は`contract diff`を使います。candidateの適用はしません。完全なtrust modelは
 [ADR 0003](adr/0003-security-contract-trust-model.ja.md)を参照してください。
 
 ## 10分Quickstart
 
-以下はこのrepositoryのclone rootで実行します。利用側projectでは
-`npm install --save-dev cdn-security-framework`でinstallし、同じ
-`npx cdn-security` commandを使います。
+以下はこのrepositoryのclone rootで実行します。利用側projectは
+[候補tarballのQuickstart](quickstart.ja.md#5-openapiからreviewへ)を使ってください。
+公開1.4.0はschema2候補ではなく、以下のrepository用npm scriptはconsumerの前提ではありません。
 
 ### 1. Installと出力directoryの準備
 

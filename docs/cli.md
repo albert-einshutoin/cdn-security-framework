@@ -4,6 +4,8 @@
 
 `cdn-security` is the single entry point that scaffolds policy, compiles it to edge runtime code, emits infra config, and runs diagnostics.
 
+First follow [candidate installation in an empty consumer](quickstart.md). Published1.4.0 and the schema2 candidate differ. Any `npx` notation below assumes an already installed local binary, not registry fallback. First-run examples use explicit `./node_modules/.bin/cdn-security`.
+
 ```bash
 npx cdn-security <subcommand> [options]
 ```
@@ -114,10 +116,10 @@ example, limits, review workflow, and troubleshooting.
 ## `init`
 
 ```bash
-npx cdn-security init                                      # interactive
-npx cdn-security init --platform aws --profile balanced    # non-interactive
-npx cdn-security init --platform aws --archetype rest-api  # archetype
-npx cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com
+./node_modules/.bin/cdn-security init                                      # interactive
+./node_modules/.bin/cdn-security init --platform aws --profile balanced    # non-interactive
+./node_modules/.bin/cdn-security init --platform aws --archetype rest-api  # archetype
+./node_modules/.bin/cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com
 ```
 
 - `--profile` and `--archetype` are mutually exclusive — a starter is either a security posture (profile) or an app shape (archetype).
@@ -125,6 +127,8 @@ npx cdn-security init --guided --platform cloudflare --app-shape rest-api --auth
 - Guided setup also has CI-friendly flags: `--app-shape`, `--auth`, `--admin-paths`, `--cors-origins`, `--waf`, `--geo-block`, `--ip-allowlist`, `--deployment`, and `--project`.
 - Generated guided policies include comments pointing to secret-management docs. Secret values are never written; only env var names such as `EDGE_ADMIN_TOKEN`, `BASIC_AUTH_CREDS`, `URL_SIGNING_SECRET`, or `WAF_LOG_DESTINATION_ARN` are referenced.
 - `--force` overwrites existing `policy/security.yml`.
+
+Preserve existing inputs; run the guided example in a separate empty directory. JWT targets Cloudflare. See the [Quickstart](quickstart.md#4-guided-setup-and-cloudflare-jwt) for complete non-TTY flags and lint/build.
 
 ## `build`
 
@@ -154,62 +158,27 @@ Build supports inheritance via top-level `extends`:
 ## `playground`
 
 ```bash
-npx cdn-security playground                                      # local fixtures against built-in examples (AWS + Cloudflare)
-npx cdn-security playground --target aws --json                   # machine-readable output
-npx cdn-security playground --policy policy/security.yml -f cases.json
-npx cdn-security playground --allow-placeholder-token --target all  # allow INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN
+export EDGE_ADMIN_TOKEN=docs-fixture-token-not-for-deploy
+./node_modules/.bin/cdn-security playground --policy policy/security.yml --target aws --fixture cases.json --json
 ```
 
-`playground` builds the selected policy to a temporary directory and executes synthetic requests through the generated runtime. It reports `pass|block`, HTTP `status`, and `block_reason` for each fixture and includes the runtime target (`aws` or `cloudflare`).
-
-Input format options:
-
-- `--fixture <path>` accepts one of:
-  - `{ "fixtures": [ ... ] }`
-  - `[ ... ]`
-  - `{ "request": { ... } }`
-- each fixture item accepts:
-  - `method`
-  - `path`
-  - `query` (string or object map)
-  - `headers`
-  - `body`
-
-Example fixture:
+Use an empty consumer already initialized with the balanced profile. Referenced auth environment variables are required at build time. `--allow-placeholder-token` is only for non-production fixtures; never deploy those artifacts.
 
 ```json
 {
   "fixtures": [
-    { "name": "GET /", "request": { "method": "GET", "path": "/" } },
-    { "name": "PATCH blocked", "request": { "method": "PATCH", "path": "/" } },
-    { "name": "admin missing auth", "request": { "method": "GET", "path": "/admin", "headers": { "x-edge-token": "INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN" } } }
+    {"name":"public GET","request":{"method":"GET","path":"/","headers":{"user-agent":"docs-fixture"}}},
+    {"name":"PATCH rejected","request":{"method":"PATCH","path":"/","headers":{"user-agent":"docs-fixture"}}},
+    {"name":"admin missing token","request":{"method":"GET","path":"/admin","headers":{"user-agent":"docs-fixture"}}},
+    {"name":"admin valid synthetic token","request":{"method":"GET","path":"/admin","headers":{"user-agent":"docs-fixture","x-edge-token":"docs-fixture-token-not-for-deploy"}}},
+    {"name":"POST JSON","request":{"method":"POST","path":"/api/items","headers":{"user-agent":"docs-fixture","Content-Type":"application/json"},"body":{"name":"synthetic-item"}}}
   ]
 }
 ```
 
-When `--json` is set, output is:
+Save this as `cases.json`. Expect CLI exit0; in order200/pass,405/block,401/block,200/pass,200/pass. POST includes a JSON `body`, but AWS viewer-request does not inspect bodies.
 
-```json
-{
-  "policyPath": "/path/to/policy/security.yml",
-  "targets": [
-    {
-      "target": "aws",
-      "fixtures": [
-        {
-          "name": "GET /",
-          "decision": "pass",
-          "status": 200,
-          "block_reason": "",
-          "path": "/",
-          "method": "GET",
-          "query": ""
-        }
-      ]
-    }
-  ]
-}
-```
+Fixtures accept an array, `{"fixtures":[...]}`, or `{"request":{...}}`, with method/path/query/headers/body. A temporary build runs in the existing local runtime stub; JSON targets[].fixtures[] reports decision/status/block_reason. Cloudflare replaces external fetch with origin-ok and uses built-in non-production env (EDGE_ADMIN_TOKEN is INSECURE_PLACEHOLDER__REBUILD_WITH_REAL_TOKEN). This is not real JWKS retrieval or valid-JWT verification. See [Quickstart](quickstart.md) for provider-specific steps.
 
 ## `analyze`
 

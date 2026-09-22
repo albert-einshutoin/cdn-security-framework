@@ -15,7 +15,7 @@
 > **「CDN セキュリティを“設計思想ごと”再利用可能にし、
 > 世界中の誰でも短時間で安全な初期構成を作れるようにする」**
 
-**最初に推奨する導入ルート:** `npx cdn-security init --platform aws --archetype spa-static-site --force` から始め、生成された policy を build し、AWS CloudFront Function と WAF Terraform 出力を既存 IaC に組み込みます。Cloudflare Workers も対応していますが、現時点で最初の本番導入パスとして最も揃っているのは AWS + Terraform です。
+**初回導入:** [候補tarballのQuickstart](docs/quickstart.ja.md)を空consumerで実行してください。公開1.4.0と未公開schema2候補をSHA/digestで区別し、既存入力を上書きしません。
 
 ## プロダクト境界とリリース状態
 
@@ -165,101 +165,52 @@ Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.
 - [選択的CIテスト](docs/selective-testing.ja.md) — 変更影響分析、安全なfallback、shadow比較の運用
 - [ADR 0001: Plugin-safe emitter path](docs/adr/0001-plugin-safe-emitter-path.ja.md) — bundler-backed prototype と移行条件
 
+- [Origin認証](docs/origin-auth.ja.md)
+- [署名URL（Cloudflare）](docs/signed-urls.ja.md)
+- [脅威モデル](docs/threat-model.ja.md)
+- [判断表](docs/decision-matrix.ja.md)
+- [観測](docs/observability.ja.md)
+- [Changelog](CHANGELOG.md)
+
 ---
 
 ## ポリシーとランタイム
 
 * **ポリシー**（`policy/security.yml` または `policy/base.yml`）が **唯一の正** です。ブロック条件・ヘッダー・ルート保護を変えるときはポリシーを編集します。
-* **ビルド**で CLI コンパイラを実行: `npx cdn-security build` がポリシーを読み検証し、**Edge Runtime** コードを `dist/edge/*.js` に生成します。`CFG` やランタイム設定の手動同期は不要です。
+* **ビルド**で CLI コンパイラを実行: `./node_modules/.bin/cdn-security build` がポリシーを読み検証し、**Edge Runtime** コードを `dist/edge/*.js` に生成します。`CFG` やランタイム設定の手動同期は不要です。
 * 詳細と IaC 連携は [ポリシーとランタイムの同期](docs/policy-runtime-sync.ja.md) を参照してください。
 
 ---
 
-## クイックスタート（5分）
+## クイックスタート
 
-### 1. インストール
-
-```bash
-npm install --save-dev cdn-security-framework
-```
-
-### 2. 初期化（ポリシーの雛形生成）
+[完全な手順・fixture・期待結果](docs/quickstart.ja.md)に従い、提供された候補tarballのSHA/digestを照合します。公開後の2.0.0導入と未公開候補の導入を混同しません。
 
 ```bash
-npx cdn-security init
+# Set this to the verified tarball supplied with the candidate SHA and SHA-256.
+export CANDIDATE_TARBALL=/path/to/verified-candidate.tgz
+shasum -a 256 "$CANDIDATE_TARBALL"
+mkdir consumer
+cd consumer
+npm init -y
+npm install --save-dev "$CANDIDATE_TARBALL"
+./node_modules/.bin/cdn-security --help
 ```
 
-対話では guided setup、プロファイル（Strict / Balanced / Permissive）、またはアーキタイプ（`spa-static-site`, `rest-api`, `admin-panel`, `microservice-origin`）を選べます。guided setup はアプリ形状、CDN target、auth mode、CORS、WAF posture、deployment intent を順に尋ねます。
-
-非対話: `npx cdn-security init --platform aws --profile balanced --force`
-guided: `npx cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com --force`
-
-### 3. 編集とビルド
-
-`policy/security.yml` を編集し、次を実行します。
+### Init・lint・build
 
 ```bash
-# policy に static_token 認証ゲートがある場合は、参照先の build-time secret を
-# 先に設定します。組み込みの base/admin 例は EDGE_ADMIN_TOKEN を使います。
-export EDGE_ADMIN_TOKEN=replace-with-a-deploy-secret
-
-npx cdn-security build
+./node_modules/.bin/cdn-security init --platform aws --profile balanced
+export EDGE_ADMIN_TOKEN=docs-fixture-token-not-for-deploy
+node node_modules/cdn-security-framework/scripts/policy-lint.js policy/security.yml
+./node_modules/.bin/cdn-security build --policy policy/security.yml --target aws --out-dir dist/aws
 ```
 
-ポリシーが検証され、`dist/edge/viewer-request.js` などが生成されます。
-production ではない fixture build だけなら
-`npx cdn-security build --allow-placeholder-token` も使えますが、placeholder token
-を含む artifact はデプロイしないでください。
+`init --guided`のCloudflare JWT例、認証env付きPOST JSON playground、OpenAPI inspect→review-only candidate→contract diff、migration preview/save/backup/rollbackもQuickstartに記載しています。JWT/signed_urlをAWSの成功例として扱いません。
 
-### 4. テスト
+### 5. デプロイ境界
 
-```bash
-export EDGE_ADMIN_TOKEN=ci-build-token-not-for-deploy
-export ORIGIN_SECRET=ci-origin-secret-not-for-deploy
-
-npm run test:ci
-```
-
-単一 Node 版の CI 品質ゲートを実行します。audit、policy lint、build、runtime、
-unit、fuzz、integration、drift、security-baseline、coverage、package smoke を含みます。
-GitHub Actions の Node バージョン matrix は再現しません。CI 側では引き続き
-Node 20.17.0 / 22 / 24 で package smoke を走らせます。
-ローカルに `policy/security.yml` がある場合、`test:ci` はまずそれを lint/build し、
-runtime / coverage テスト用には `policy/base.yml` fixture を再生成します。
-
-局所確認には以下を使えます。
-
-```bash
-npm run test:runtime
-npm run test:unit
-npm run test:drift
-npm run test:security-baseline
-```
-
-`EDGE_ADMIN_TOKEN` は組み込み admin `static_token` gate を含む生成 artifact に必要です。
-`ORIGIN_SECRET` は origin-auth fixture policy を含む drift / release 系チェックで必要です。
-
-### 4.5 環境診断（初回デプロイ前の任意実行、推奨）
-
-```bash
-npx cdn-security doctor
-npx cdn-security capabilities --policy policy/security.yml --target aws
-npx cdn-security explain
-```
-
-Node バージョン、ポリシーのパース/スキーマバージョン、認証ゲートが参照する全環境変数（`EDGE_ADMIN_TOKEN`・`JWT_SECRET`・`ORIGIN_SECRET` など）、`dist/edge/` の書き込み可否、`npm ls` の健全性を一括で pass/fail 判定します。CI でアーティファクト化できる `doctor-report.json` も書き出します。詳細は [CLI リファレンス](docs/cli.ja.md)。
-CloudFront Functions の static token gate は生成 artifact に焼き込まれるため、
-`doctor` も `build` と同じ環境変数を設定した状態で実行してください。
-
-`explain` はポリシーの姿勢を読み取り専用で要約し、レビューやオンボーディングに使えます。
-
-`capabilities` は target 対応 matrix を表示し、`--policy` 指定時は `aws` / `cloudflare` で partial、unsupported、warning-only になる設定済み control を報告します。automation では `--json` を使ってください。
-
-### 5. デプロイ
-
-生成された `dist/edge/` を Terraform / CDK や CDN コンソールでデプロイしてください。管理ルート用に `EDGE_ADMIN_TOKEN` を環境変数やシークレットで設定します。
-
----
+この例の`--out-dir dist/aws`では`dist/aws/edge/`がruntime、`dist/aws/infra/`がIaC断片です。このoptionを省略した既定の出力先は`dist/edge/`と`dist/infra/`です。[IaC手順](docs/iac.ja.md)を確認し、operatorのTerraform/CDK/CDN workflowへreview後に引き渡します。build自体はdeployしません。synthetic token/placeholder artifactを本番利用せず、適用前に本番用secretで別途build・reviewしてください。
 
 ## Product Core と生成 Security Control
 
@@ -302,7 +253,7 @@ CloudFront Functions の static token gate は生成 artifact に焼き込まれ
 ## メンテナ向け（npm 公開）
 
 * **package-lock.json**: コミットしておく（CI で `npm ci` するため）。
-* **dist/**: `.gitignore` で無視。ユーザーは `npm run build` で `dist/edge/` と `dist/infra/` を生成する。CI でドリフト検知する場合は CI 内で `npm run build` を実行しポリシーと比較する（`dist/` はコミットしない）。
+* **dist/**: `.gitignore` で無視。consumerは `./node_modules/.bin/cdn-security build` で `dist/edge/` と `dist/infra/` を生成する。CI でドリフト検知する場合は CI 内で `npm run build` を実行しポリシーと比較する（`dist/` はコミットしない）。
 * **CI ワークフロー**:
   * `.github/workflows/policy-lint.yml`: PRの選択的検証と必須shadow比較、`main`・`release/**`・手動・日次の完全検証
   * `.github/workflows/release-npm.yml`: タグ起点の npm 公開ワークフロー
