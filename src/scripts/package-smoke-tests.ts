@@ -122,7 +122,7 @@ function assertPackageInventory(files: string[]) {
 
 function assertPackageText(file: string, content: string, files: Set<string>) {
   // Fixed high-confidence patterns. Never echo matching content into diagnostics.
-  assert.ok(!/(?:\/Users\/[^/\s]+\/|\/home\/[^/\s]+\/|[A-Z]:\\Users\\|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bghp_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{50,}\b|\bAKIA[0-9A-Z]{16}\b)/u.test(content), `sensitive content in ${file}`);
+  assert.ok(!/(?:\/Users\/[^/\s]+\/|\/home\/[^/\s]+\/|[A-Z]:\\+Users\\+|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bghp_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{50,}\b|\bAKIA[0-9A-Z]{16}\b)/u.test(content), `sensitive content in ${file}`);
   if (!file.endsWith('.md')) return;
   for (const match of content.matchAll(/\]\(([^)\s]+)(?:\s+[^)]*)?\)/gu)) {
     const target = match[1];
@@ -161,6 +161,8 @@ function assertPackageNegativeCases() {
   assert.throws(() => assertPackageText('README.md', '[missing](absent.md)', new Set(files)));
   assert.throws(() => assertPackageText('docs/record.json', JSON.stringify({ cwd: '/Users/synthetic/work' }), new Set(files)));
   assert.throws(() => assertPackageText('docs/key.txt', '-----BEGIN PRIVATE KEY-----', new Set(files)));
+  assert.throws(() => assertPackageText('docs/record.json', JSON.stringify({ cwd: 'C:\\Users\\synthetic\\work' }), new Set(files)));
+  assert.throws(() => assertPackageText('docs/record.txt', 'C:\\Users\\synthetic\\work', new Set(files)));
   const sentinel = 'ghp_' + 'x'.repeat(36);
   const failure = childProcess.spawnSync(process.execPath, ['-e', `
     const assert = require('node:assert');
@@ -171,7 +173,7 @@ function assertPackageNegativeCases() {
   assert.strictEqual(failure.status, 1);
   assert.ok(failure.stderr.includes('unregistered or missing package file'));
   assert.ok(!(failure.stdout + failure.stderr).includes(sentinel), 'inventory diagnostics must not echo filename secrets');
-  console.log('OK: 9 package inventory/content/link negative cases');
+  console.log('OK: 11 package inventory/content/link negative cases');
 }
 
 function assertPackageContents(pack: PackResult) {
