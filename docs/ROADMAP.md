@@ -15,6 +15,8 @@ The framework does not reimplement a CDN, WAF, DDoS, bot, or CAPTCHA engine.
 The product loop is **Generate → Diff → Review → Apply**. AI may explain a
 finding, but it never decides Allow/Block/Severity/Exit.
 
+This is the product direction; the status table below bounds the current comparison paths and planned capabilities.
+
 ## 2. Four truths and evidence
 
 | View | Source | Meaning |
@@ -30,70 +32,57 @@ and an absent guard is not proof of public access.
 
 ## 3. Current release and main status
 
+Status checked **2026-09-22**, main `111f995bd35d3b24bdd1ee7dd72c35bce19f9170`. [Main validation](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249). Schema2 is implemented on main but unpublished. Published1.4.0, the retained package version1.4.0, and the next target2.0.0 are distinct.
+
 | Area | Status | Evidence / boundary |
 | --- | --- | --- |
 | Released package | v1.4.0 | [v1.4.0 tag](https://github.com/albert-einshutoin/cdn-security-framework/releases/tag/v1.4.0) |
-| Contract / trust foundation (#271–#275) | Implemented | Finding, Security IR, parser/resource/privacy boundaries |
-| OpenAPI-aware policy (#276–#284) | Implemented | Safe loader, refs, normalization, inspect, review-only candidate |
-| Declared ↔ allowed drift (#285–#293) | Implemented | Exceptions, deterministic reports, SARIF, GitHub Actions |
-| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental | Programmatic static analysis; no application execution |
-| Source-aware standard CLI | Planned v1.6.0 | Current CLI does not load application source automatically |
-| v1.5 release preparation | No-Go / product decision blocked | [#544](https://github.com/albert-einshutoin/cdn-security-framework/issues/544) rejected Stable v1.5.0; [#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) owns the major-or-scope decision |
-
-`Implemented` means code, acceptance evidence, and package/docs evidence
-exist. `Experimental` means the interface is reachable but compatibility is
-not yet guaranteed.
+| Contract / trust foundation (#271–#275) | Implemented | [Contract tests](https://github.com/albert-einshutoin/cdn-security-framework/tree/111f995bd35d3b24bdd1ee7dd72c35bce19f9170/test/contract/) / [Public contract](./programmatic-api.md) |
+| OpenAPI-aware policy (#276–#284) | Implemented | [OpenAPI tests](https://github.com/albert-einshutoin/cdn-security-framework/tree/111f995bd35d3b24bdd1ee7dd72c35bce19f9170/test/openapi/) / [OpenAPI guide](./openapi-integration.md) |
+| Declared ↔ allowed drift (#285–#293) | Implemented | [Drift tests](https://github.com/albert-einshutoin/cdn-security-framework/tree/111f995bd35d3b24bdd1ee7dd72c35bce19f9170/test/contract/contract-drift.test.ts) / [Reporters](https://github.com/albert-einshutoin/cdn-security-framework/tree/111f995bd35d3b24bdd1ee7dd72c35bce19f9170/test/reporters/) |
+| NestJS Source Analyzer core (#294–#300) | Implemented / Experimental | [Source guide](./source-analysis-nestjs.md); programmatic/static only |
+| Source-aware standard CLI | Planned v2.1.0 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) |
+| Policy schema 2 / migration | Implemented on main / unpublished | [#1023](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023) / [PR #1033](https://github.com/albert-einshutoin/cdn-security-framework/pull/1033) |
+| v2.0 release preparation | Operational hardening / not RC GO | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) / [#895](https://github.com/albert-einshutoin/cdn-security-framework/issues/895) |
 
 ## 4. Version release train
 
-| Version | Release epic | Outcome | Entry condition | Status |
-| --- | --- | --- | --- | --- |
-| v1.5.0 | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) | Productize the existing OpenAPI ↔ Policy Contract Foundation and release/package/docs hardening | Entry, evidence, compatibility, package, security, and RC reviews | **NO-GO: #544 rejected the current Stable scope; #1013 decision pending** |
-| v1.6.0 | `V160-REL-000` | Source-aware Contract Diff MVP in CLI/CI/Public API | v1.5 post-release review | Planned |
-| v1.7.0 | `V170-REL-000` | Pilot-driven accuracy, onboarding, and monorepo hardening | v1.6 post-release review | Planned |
-| v1.8.0 | `V180-REL-000` | Runtime Evidence preview | v1.7 post-release review | Planned |
-| v1.9.0 | `V190-REL-000` | Policy governance and composition preview | v1.8 post-release review | Planned |
-| v2.0.0 | `V200-REL-000` | Application-aware Security Compiler GA and stable public contract | v1.9 post-release review | Planned |
-| v2.1.0 | `V210-REL-000` | LSP / VS Code editor feedback loop | v2.0 post-release review | Planned |
+| Version | Release epic | Outcome / must-have | Entry condition | Non-goals | Status |
+| --- | --- | --- | --- | --- | --- |
+| v2.0.0 | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) | Contract Foundation / schema 2 / safe migration | [#541](https://github.com/albert-einshutoin/cdn-security-framework/issues/541) / [#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) Decision A | Source CLI / Runtime / Composition / Editor | Operational hardening |
+| v2.1.0 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) | Source-aware Contract Diff MVP | [#545](https://github.com/albert-einshutoin/cdn-security-framework/issues/545) | Runtime / Composition / Editor | Planned |
+| v2.2.0 | [#533](https://github.com/albert-einshutoin/cdn-security-framework/issues/533) | Accuracy / onboarding / monorepo hardening | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) post-release review | New analyzers/providers | Planned |
+| v2.3.0 | [#534](https://github.com/albert-einshutoin/cdn-security-framework/issues/534) | Runtime Evidence Preview | [#533](https://github.com/albert-einshutoin/cdn-security-framework/issues/533) post-release review | Automatic enforcement | Planned |
+| v2.4.0 | [#536](https://github.com/albert-einshutoin/cdn-security-framework/issues/536) | Policy Governance Preview | [#534](https://github.com/albert-einshutoin/cdn-security-framework/issues/534) post-release review | Silent baseline weakening | Planned |
+| v3.0.0 | [#537](https://github.com/albert-einshutoin/cdn-security-framework/issues/537) | GA public contract | [#536](https://github.com/albert-einshutoin/cdn-security-framework/issues/536) post-release review | Editor extension | Planned |
+| v3.1.0 | [#539](https://github.com/albert-einshutoin/cdn-security-framework/issues/539) | Editor integration | [#537](https://github.com/albert-einshutoin/cdn-security-framework/issues/537) post-release review | Automatic apply/deploy | Planned |
 
-The v1.5 scope adds no new product feature. Source-aware CLI, Runtime
-Evidence, Policy Composition, LSP/VS Code, new analyzers, and new CDN/WAF
-features stay outside that release.
+No delivery dates are promised. Each epic owns scope and acceptance. Old V150 identifiers remain historical references.
 
 ## 5. Version dependency graph
 
 ```mermaid
 flowchart LR
-  V150["v1.5 Contract Foundation"] --> V160["v1.6 Source-aware MVP"]
-  V160 --> V170["v1.7 Accuracy Hardening"]
-  V170 --> V180["v1.8 Runtime Evidence"]
-  V180 --> V190["v1.9 Policy Governance"]
-  V190 --> V200["v2.0 GA"]
-  V200 --> V210["v2.1 Editor"]
-  R["#176 Enabling refactor"] -. enables .-> V160
-  R -. enables .-> V200
-  P["#167 Policy governance"] --> V190
-  E["#301 Runtime evidence"] --> V180
+  CF["2.0 Contract Foundation"] --> SA["2.1 Source-aware MVP"]
+  SA --> ACC["2.2 Accuracy / Onboarding"]
+  ACC --> RT["2.3 Runtime Evidence"]
+  RT --> GOV["2.4 Policy Governance"]
+  GOV --> GA["3.0 GA public contract"]
+  GA --> ED["3.1 Editor"]
+  REF["#176 Enabling refactor"] -. enables .-> SA
+  REF -. enables .-> GA
 ```
 
 ## 6. Review cadence and release gates
 
-Every version follows the same gates:
+1. Entry / evidence review: [#541](https://github.com/albert-einshutoin/cdn-security-framework/issues/541).
+2. Current candidate audits: [#887](https://github.com/albert-einshutoin/cdn-security-framework/issues/887), [#889](https://github.com/albert-einshutoin/cdn-security-framework/issues/889), [#891](https://github.com/albert-einshutoin/cdn-security-framework/issues/891), [#890](https://github.com/albert-einshutoin/cdn-security-framework/issues/890), [#1024](https://github.com/albert-einshutoin/cdn-security-framework/issues/1024).
+3. Midpoint / implementation-status review: [#542](https://github.com/albert-einshutoin/cdn-security-framework/issues/542).
+4. RC GO/NO-GO: [#895](https://github.com/albert-einshutoin/cdn-security-framework/issues/895).
+5. Version change / release preparation / separately approved publication: [#571](https://github.com/albert-einshutoin/cdn-security-framework/issues/571).
+6. Post-release outcome review: [#545](https://github.com/albert-einshutoin/cdn-security-framework/issues/545).
 
-1. Entry / evidence review ([#541](https://github.com/albert-einshutoin/cdn-security-framework/issues/541)).
-2. Compatibility and implementation audits ([#553](https://github.com/albert-einshutoin/cdn-security-framework/issues/553), [#555](https://github.com/albert-einshutoin/cdn-security-framework/issues/555)).
-3. Repository, docs, API, Node/package, deterministic, and security work ([#557](https://github.com/albert-einshutoin/cdn-security-framework/issues/557), [#559](https://github.com/albert-einshutoin/cdn-security-framework/issues/559), [#560](https://github.com/albert-einshutoin/cdn-security-framework/issues/560), [#562](https://github.com/albert-einshutoin/cdn-security-framework/issues/562), [#564](https://github.com/albert-einshutoin/cdn-security-framework/issues/564), [#566](https://github.com/albert-einshutoin/cdn-security-framework/issues/566), [#568](https://github.com/albert-einshutoin/cdn-security-framework/issues/568)).
-4. Midpoint status review ([#542](https://github.com/albert-einshutoin/cdn-security-framework/issues/542)).
-5. RC Go/No-Go review ([#544](https://github.com/albert-einshutoin/cdn-security-framework/issues/544)).
-6. Release Issue/PR contract ([#571](https://github.com/albert-einshutoin/cdn-security-framework/issues/571)).
-7. Version bump, tag, and publish only after an explicit RC decision; then post-release review.
-
-For v1.5, #544 records **NO-GO** for the current Stable scope after #555 found
-that a schema validator tightening and AWS CSP nonce fail-closed change reject
-some previously valid v1.4 policies. [#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013)
-must choose a major reclassification or a safely narrowed scope. After that
-decision, a new RC Gate must reach `GO` before [#571](https://github.com/albert-einshutoin/cdn-security-framework/issues/571)
-may create a release PR or bump the version.
+[#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) Decision A adopted major reclassification. Stable v1.5.0 NO-GO ([#544](https://github.com/albert-einshutoin/cdn-security-framework/issues/544)) and old audit [#555](https://github.com/albert-einshutoin/cdn-security-framework/issues/555) remain historical evidence, not acceptance of the new candidate. #895 GO, #571 version changes/release PR, tag/npm publication, and Issue close are separate states. Schema2 on main alone does not mean ready to publish.
 
 ## 7. Status definitions
 
@@ -111,9 +100,9 @@ Closing an Issue alone never changes its status.
 | --- | --- |
 | Cloudflare/auth and compiler test tracks | Current implemented foundation and operational hardening |
 | Issue-to-docs alignment | Current docs/status governance |
-| Monitor/observability and multi-CDN parity | v1.7 accuracy and v1.8 Runtime Evidence |
-| Overlay/inheritance and governance helpers | v1.9 Policy Governance |
-| Stable API/provider direction | v2.0 GA |
+| Monitor/observability and multi-CDN parity | v2.2 accuracy and v2.3 Runtime Evidence |
+| Overlay/inheritance and governance helpers | v2.4 Policy Governance |
+| Stable API/provider direction | v3.0 GA |
 | Rust/WASM and additional CDN research | Research backlog |
 
 The old Track A–G layout is historical context, not a second release plan.

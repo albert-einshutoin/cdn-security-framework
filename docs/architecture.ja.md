@@ -23,6 +23,8 @@ artifact に変換します。CDN / WAF の動作やアプリケーション認�
 どの Truth も別の Truth の証明とは扱いません。未対応・partial な解析は推測で
 補完せず、review 用 finding として報告します。
 
+公開済みは1.4.0。2026-09-22のmainではschema2と明示migrationを実装・検証済みですが、2.0.0は未公開・RC GO前です。 [Evidence](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249).
+
 ### Capability status
 
 | Capability | Status | Interface | Limit |
@@ -31,15 +33,15 @@ artifact に変換します。CDN / WAF の動作やアプリケーション認�
 | OpenAPI policy candidate | Implemented | CLI/API | review-only; never auto-applied |
 | OpenAPI↔Policy drift | Implemented | CLI/JSON/SARIF/GHA | no source needed |
 | NestJS Source Analyzer core | Experimental/Implemented core | Programmatic | no app execution; metadata is not enforcement proof |
-| Source-aware contract diff CLI | Planned v1.6 | — | — |
-| Runtime Evidence v1 | Planned v1.8 | — | — |
-| Policy Composition | Planned v1.9 | — | — |
-| LSP/VS Code | Planned v2.1 | — | — |
+| Source-aware contract diff CLI | Planned v2.1 | — | — |
+| Runtime Evidence v1 | Planned v2.3 | — | — |
+| Policy Composition | Planned v2.4 | — | — |
+| LSP/VS Code | Planned v3.1 | — | — |
 
 対応済み interface は [OpenAPI 導入ガイド](openapi-integration.ja.md)、
 [NestJS Source Analysis](source-analysis-nestjs.ja.md)、[CLI リファレンス](cli.ja.md)、
 [プログラマティック API](programmatic-api.ja.md) を参照してください。
-Source-aware contract diff CLI は v1.6 planned のままで、現行 NestJS analyzer は
+Source-aware contract diff CLI は v2.1 planned のままで、現行 NestJS analyzer は
 programmatic かつ static のみです。
 
 ---
@@ -125,10 +127,9 @@ flowchart LR
 
 ```mermaid
 flowchart TB
-  P[Security Policy
-(YAML)] --> C[Compiler]
+  P["Security Policy (YAML)"] --> C[Compiler]
   C --> CF[CloudFront Functions]
-  C --> LE[Lambda@Edge]
+  C --> LAM["Lambda@Edge"]
   C --> CW[Cloudflare Workers]
 ```
 

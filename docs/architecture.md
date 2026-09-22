@@ -24,6 +24,8 @@ Four independent truths are kept separate:
 No truth is treated as proof of another. Unsupported or partial analysis is
 reported as a finding for review rather than filled in by an assumption.
 
+Published: 1.4.0. On 2026-09-22 main implements and validates schema2 and explicit migration; 2.0.0 remains unpublished and before RC GO. [Evidence](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249).
+
 ### Capability status
 
 | Capability | Status | Interface | Limit |
@@ -32,15 +34,15 @@ reported as a finding for review rather than filled in by an assumption.
 | OpenAPI policy candidate | Implemented | CLI/API | review-only; never auto-applied |
 | OpenAPI↔Policy drift | Implemented | CLI/JSON/SARIF/GHA | no source needed |
 | NestJS Source Analyzer core | Experimental/Implemented core | Programmatic | no app execution; metadata is not enforcement proof |
-| Source-aware contract diff CLI | Planned v1.6 | — | — |
-| Runtime Evidence v1 | Planned v1.8 | — | — |
-| Policy Composition | Planned v1.9 | — | — |
-| LSP/VS Code | Planned v2.1 | — | — |
+| Source-aware contract diff CLI | Planned v2.1 | — | — |
+| Runtime Evidence v1 | Planned v2.3 | — | — |
+| Policy Composition | Planned v2.4 | — | — |
+| LSP/VS Code | Planned v3.1 | — | — |
 
 Use the [OpenAPI integration guide](openapi-integration.md), [NestJS source
 analysis guide](source-analysis-nestjs.md), [CLI reference](cli.md), and
 [Programmatic API](programmatic-api.md) for the supported interfaces. The
-Source-aware contract diff CLI remains planned for v1.6; the current NestJS
+Source-aware contract diff CLI remains planned for v2.1; the current NestJS
 analyzer is programmatic and static only.
 
 ---
@@ -126,10 +128,9 @@ Responsibilities:
 
 ```mermaid
 flowchart TB
-  P[Security Policy
-(YAML)] --> C[Compiler]
+  P["Security Policy (YAML)"] --> C[Compiler]
   C --> CF[CloudFront Functions]
-  C --> LE[Lambda@Edge]
+  C --> LAM["Lambda@Edge"]
   C --> CW[Cloudflare Workers]
 ```
 

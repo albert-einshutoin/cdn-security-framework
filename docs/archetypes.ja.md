@@ -98,5 +98,5 @@ npx cdn-security init --platform aws --archetype rest-api
    # その他 compile-cloudflare.js / compile-infra.js / compile-cloudflare-waf.js も同様に
    ```
 4. `scripts/check-drift.js` の scenarios にアーキタイプを追加。
-5. `bin/cli.js` の `init` ウィザードに選択肢を追加。
+5. `src/bin/cli.ts` の `init` ウィザードに選択肢を追加。
 6. 本ドキュメント（EN + JA）に説明を追記。
