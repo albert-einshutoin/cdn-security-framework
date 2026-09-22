@@ -51,7 +51,7 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
     const r = results.find(r => r.row === row); assert.ok(r, 'missing required row'); verifyIdentity(r, e);
     for (const k of ['sha256', 'size', 'tree', 'lockSha256'] as const) assert.equal(r[k], m[k], 'consumer artifact mismatch');
     assert.equal(r.status, 'pass', 'failed consumer');
-    assert.ok(r.runtime && /^node(?:\.exe)?$/.test(r.runtime.executable) && /^[a-f0-9]{64}$/.test(r.runtime.sha256) && /^[a-z0-9_-]+$/.test(r.runtime.platform) && /^[a-z0-9_]+$/.test(r.runtime.arch), 'missing or invalid runtime identity');
+    assert.ok(r.runtime && ['executable','sha256','platform','arch'].every(k => typeof (r.runtime as any)[k] === 'string') && /^node(?:\.exe)?$/.test(r.runtime.executable) && /^[a-f0-9]{64}$/.test(r.runtime.sha256) && /^[a-z0-9_-]+$/.test(r.runtime.platform) && /^[a-z0-9_]+$/.test(r.runtime.arch), 'missing or invalid runtime identity');
     if (row === '18.20.8' || row === '20.16.0') assert.equal(r.switchVerified, true, 'missing supported-install switch proof');
     assert.ok(r.node === row || (['22', '24'].includes(row) && r.node.startsWith(row + '.')), 'wrong consumer Node');
     assert.match(r.npm, /^\d+\.\d+\.\d+$/);
@@ -62,7 +62,7 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
     assert.ok(Object.values(r.dependencies).every(v => /^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(v)), 'invalid dependency version');
     const lower = row === '18.20.8' || row === '20.16.0';
     assert.ok(Array.isArray(r.steps) && r.steps.length === (lower ? 26 : 12), 'missing command evidence');
-    assert.ok(r.steps.every(s => s && /^[a-zA-Z0-9_.-]+$/.test(s.command) && Number.isFinite(s.durationMs) && s.durationMs >= 0 && s.exit === s.expectedExit && (s.expectedExit === 0 || (lower && s.expectedExit === 1))), 'invalid command evidence');
+    assert.ok(r.steps.every(s => s && typeof s.command === 'string' && /^[a-zA-Z0-9_.-]+$/.test(s.command) && Number.isFinite(s.durationMs) && s.durationMs >= 0 && s.exit === s.expectedExit && (s.expectedExit === 0 || (lower && s.expectedExit === 1))), 'invalid command evidence');
     assert.deepEqual(r.checks, row === '18.20.8' || row === '20.16.0' ? ['node-rejection', 'resolution', 'no-side-effects'] : ['package-smoke', 'resolution', 'schemas']);
   }
 }

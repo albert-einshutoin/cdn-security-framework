@@ -32,6 +32,8 @@ try {
   for (const key of ['npm','resolution','dependencies','steps']) test(`missing ${key} evidence fails`, () => assert.throws(() => aggregate(m, rows.map(r => ({...r,[key]:undefined} as any)), e, ['success','success'])));
   test('empty steps fail', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,steps:[]})), e, ['success','success'])));
   test('failed command fails', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,steps:r.steps.map(s=>({...s,exit:3}))})), e, ['success','success'])));
+  test('missing runtime subfields fail without string coercion', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,runtime:{...r.runtime,platform:undefined} as any})), e, ['success','success'])));
+  test('missing command fails without string coercion', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,steps:r.steps.map(s=>({...s,command:undefined} as any))})), e, ['success','success'])));
   test('missing switch proof fails', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,switchVerified:undefined})), e, ['success','success'])));
   test('duplicate result artifacts are preserved for rejection', () => {
     const dir=path.join(temp,'results');fs.mkdirSync(dir);for(const name of ['artifact-one','artifact-two']){fs.mkdirSync(path.join(dir,name));fs.writeFileSync(path.join(dir,name,'20.17.0.json'),JSON.stringify(rows[0]));}
