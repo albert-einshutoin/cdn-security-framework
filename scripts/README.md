@@ -100,4 +100,4 @@ GitHub Actions workflow `.github/workflows/policy-lint.yml` runs the default qua
 ## Related
 
 - [Policy and runtime sync](../docs/policy-runtime-sync.md)
-- [Policy profiles](../policy/README.md)
+- [Policy profiles](https://github.com/albert-einshutoin/cdn-security-framework/blob/b436da43cb1f8c92759d6e4c121c95998bb78bb5/policy/README.md)

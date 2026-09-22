@@ -170,7 +170,7 @@ Terraform / CloudFormation / CDK / WAF の利用例は [IaC 連携](docs/iac.ja.
 - [脅威モデル](docs/threat-model.ja.md)
 - [判断表](docs/decision-matrix.ja.md)
 - [観測](docs/observability.ja.md)
-- [Changelog](CHANGELOG.md)
+- [Changelog](https://github.com/albert-einshutoin/cdn-security-framework/blob/b436da43cb1f8c92759d6e4c121c95998bb78bb5/CHANGELOG.md)
 
 ---
 

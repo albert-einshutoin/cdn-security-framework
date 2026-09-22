@@ -144,6 +144,8 @@
     "parser/",
     "validator/",
     "docs/",
+    "!docs/benchmarks/compiler-baseline.json",
+    "!docs/benchmarks/compiler-baseline-with-install.json",
     "scripts/README.md",
     "scripts/README.ja.md",
     "scripts/cli-doctor.js",
