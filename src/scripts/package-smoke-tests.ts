@@ -5,7 +5,10 @@ const childProcess = require('child_process');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
-const yaml = require('js-yaml');
+let yaml: any;
+
+export const smokeSteps: Array<{ command: string; exit: number; durationMs: number }> = [];
+let quietConsumer = false;
 
 const repoRoot = path.join(__dirname, '..');
 const packageName = require(path.join(repoRoot, 'package.json')).name;
@@ -29,12 +32,18 @@ type PackResult = {
 };
 
 function run(command: string, args: string[], options: any = {}) {
-  return childProcess.execFileSync(command, args, {
+  const start = process.hrtime.bigint();
+  const result = childProcess.spawnSync(command, args, {
     cwd: options.cwd || repoRoot,
     env: options.env || process.env,
     encoding: options.encoding || 'utf8',
-    stdio: options.stdio || 'pipe',
+    stdio: quietConsumer ? 'pipe' : (options.stdio || 'pipe'),
+    maxBuffer: 8 * 1024 * 1024,
   });
+  if (quietConsumer) smokeSteps.push({ command: path.basename(command), exit: result.status ?? -1,
+    durationMs: Number(process.hrtime.bigint() - start) / 1e6 });
+  assert.strictEqual(result.status, 0, 'package smoke command failed');
+  return result.stdout;
 }
 
 function assertPackedFile(files: Map<string, PackedFile>, filePath: string) {
@@ -90,6 +99,7 @@ function assertSchemaHints(installRoot: string) {
 
 function assertContractDiffWorkflow(filePath: string) {
   const content = fs.readFileSync(filePath, 'utf8');
+  yaml ??= require('js-yaml');
   const workflow = yaml.load(content, { schema: yaml.JSON_SCHEMA });
   assert.ok(workflow.on.pull_request, `${filePath} must use pull_request`);
   assert.strictEqual(workflow.permissions.contents, 'read');
@@ -133,7 +143,7 @@ function assertPackageText(file: string, content: string, files: Set<string>) {
   }
 }
 
-function assertInstalledContents(root: string) {
+export function assertInstalledContents(root: string) {
   const entries: string[] = [];
   function walk(directory: string) {
     for (const entry of fs.readdirSync(path.join(root, directory), { withFileTypes: true })) {
@@ -176,7 +186,7 @@ function assertPackageNegativeCases() {
   console.log('OK: 11 package inventory/content/link negative cases');
 }
 
-function assertPackageContents(pack: PackResult) {
+export function assertPackageContents(pack: PackResult) {
   assertPackageInventory(pack.files.map((file) => file.path));
   assert.ok(pack.size <= packageManifest.sizeBudget.compressedBytes, "compressed package budget exceeded");
   assert.ok(pack.unpackedSize <= packageManifest.sizeBudget.uncompressedBytes, "uncompressed package budget exceeded");
@@ -302,8 +312,11 @@ function assertPackageContents(pack: PackResult) {
   }
 }
 
-function smokeInstalledPackage(tarballPath: string) {
-  withTempDir('cdn-security-install-', (installDir) => {
+export function smokeInstalledPackage(tarballPath: string, preparedConsumer?: string) {
+  quietConsumer = Boolean(preparedConsumer);
+  if (preparedConsumer) yaml = require('node:module').createRequire(path.join(preparedConsumer, 'node_modules', packageName, 'package.json'))('js-yaml');
+  const inspect = (installDir: string) => {
+    if (!preparedConsumer) {
     run('npm', ['init', '-y'], { cwd: installDir, stdio: 'ignore' });
     run(
       'npm',
@@ -322,6 +335,7 @@ function smokeInstalledPackage(tarballPath: string) {
       },
     );
 
+    }
     const installedRoot = path.join(installDir, 'node_modules', packageName);
     const installedBasePolicy = path.join(installedRoot, 'policy', 'base.yml');
     assert.ok(fs.existsSync(installedBasePolicy), 'installed package must include policy/base.yml');
@@ -531,9 +545,12 @@ function smokeInstalledPackage(tarballPath: string) {
       stdio: 'inherit',
     });
     assert.ok(fs.existsSync(path.join(installDir, 'dist-cloudflare', 'edge', 'cloudflare', 'index.ts')));
-  });
+  };
+  if (preparedConsumer) inspect(preparedConsumer);
+  else withTempDir('cdn-security-install-', inspect);
 }
 
+if (require.main === module) {
 assertPackageNegativeCases();
 
 assertContractDiffWorkflow(path.join(repoRoot, '.github', 'workflows', 'contract-diff.yml'));
@@ -550,3 +567,5 @@ withTempDir('cdn-security-pack-', (packDir) => {
 });
 
 console.log('Package contents and packed install smoke tests passed.');
+
+}

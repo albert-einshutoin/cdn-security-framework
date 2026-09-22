@@ -1,3 +1,6 @@
+import { assertSupportedNode } from '../../lib/node-engine';
+assertSupportedNode(require.main === module);
+
 export { createNestJsSourceAnalyzer, nestJsSourceAnalyzer } from './analyzer';
 export {
   EMPTY_NESTJS_AUTH_CONFIG,

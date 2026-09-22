@@ -1,3 +1,6 @@
+import { assertSupportedNode } from './node-engine';
+assertSupportedNode(require.main === module);
+
 /**
  * cdn-security-framework — Programmatic API
  *

@@ -1,3 +1,6 @@
+import { assertSupportedNode } from '../lib/node-engine';
+assertSupportedNode(require.main === module);
+
 import fs from 'node:fs';
 import path from 'node:path';
 

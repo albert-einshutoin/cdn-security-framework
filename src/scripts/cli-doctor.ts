@@ -1,3 +1,6 @@
+import { assertSupportedNode } from '../lib/node-engine';
+assertSupportedNode(require.main === module);
+
 /**
  * cli-doctor.js
  *

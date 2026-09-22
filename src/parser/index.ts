@@ -1,3 +1,6 @@
+import { assertSupportedNode } from '../lib/node-engine';
+assertSupportedNode(require.main === module);
+
 const fs = require('fs');
 const path = require('path');
 const yaml = require('js-yaml');

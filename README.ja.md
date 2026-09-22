@@ -275,3 +275,32 @@ node node_modules/cdn-security-framework/scripts/policy-lint.js policy/security.
 MIT License
 
 ---
+
+### Node互換性と候補検証
+
+必要なNode.jsは **>=20.17.0** です。検証行20.17.0・22・24は代表環境であり、
+この3種類だけを許すallowlistではありません。未公開2.0.0候補では、未対応Nodeを
+compiler・外部依存moduleの読込み前に拒否します。直接CLI/scriptはstderrへ
+`ERR_CSF_UNSUPPORTED_NODE`を出してexit 1（stdoutの正常結果なし）。rootと
+文書化されたJavaScript subpathのimportは、`code`・`required`・`current`付きの
+Errorをthrowし、呼出元processを終了しません。Nodeを更新してから再実行してください。
+engines下限自体は変更せず、従来npmの警告後に動いていた未対応環境を拒否する差分です。
+JSON Schemaデータや生成されたedge runtimeにはこのガードを追加しません。
+
+CIの`package-producer`はPR HEAD（main/manual/scheduleではevent SHA）を
+buildし、1回だけpackします。source/tree/harness SHA、run/attempt、tgzの
+SHA-256/size、共通consumer lockを記録します。Linux consumer jobはmetadataと
+**tgz内容のhash**を照合し、依存をonlineで準備した後、専用cacheからoffline installし、
+network namespaceによる通信遮断下で実行します。製品の再build/repackはしません。
+対応Nodeでは既存CJS・strict TypeScript・direct/local npx CLI・schema・workflowを検証し、
+実Node18.20.8/20.16.0では早期拒否とAPIでの捕捉を確認します。`package-acceptance`は
+全行が重複なく揃い、候補identityと成功結果が一致することを要求し、欠測・cancel・skipを
+成功にしません。既存PR package/main release gateへ結果を伝播します。
+artifactコンテナのdigestとtgz SHA-256は別です。他の完全検証による独立packは
+このsingle-pack受入の証拠に数えません。
+
+実Node/npm/依存versionとpackage相対のmodule/bin解決先を証拠に保存します。
+Action内部のruntimeとconsumer Nodeは別です。hosted受入はLinux、macOS rehearsalは
+追加証拠であり、Windows/network filesystemとの同等性は保証しません。
+#890の詳細自動受入・実際のEN/JA初学者評価や公開・deploy承認をこのlaneで代用しません。
+公開1.4.0へのrollbackは、別途文書化した隔離環境と移行前policy bytesの復元が前提です。
