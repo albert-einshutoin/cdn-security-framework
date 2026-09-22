@@ -11,6 +11,8 @@ const repoRoot = path.join(__dirname, '..');
 const packageName = require(path.join(repoRoot, 'package.json')).name;
 const packageManifest = require(path.join(repoRoot, 'docs', 'api-manifest.json')) as {
   requiredPackageFiles: string[];
+  packagedFiles: Record<string, string[]>;
+  sizeBudget: { compressedBytes: number; uncompressedBytes: number };
 };
 
 type PackedFile = {
@@ -22,6 +24,8 @@ type PackedFile = {
 type PackResult = {
   filename: string;
   files: PackedFile[];
+  size: number;
+  unpackedSize: number;
 };
 
 function run(command: string, args: string[], options: any = {}) {
@@ -107,7 +111,75 @@ function withTempDir(prefix: string, fn: (tmpDir: string) => void) {
   }
 }
 
+function assertPackageInventory(files: string[]) {
+  const expected = Object.values(packageManifest.packagedFiles).flat().sort();
+  assert.strictEqual(new Set(expected).size, expected.length, 'duplicate package ownership');
+  assert.strictEqual(new Set(files.map((file) => file.toLowerCase())).size, files.length, 'duplicate/case-collision package path');
+  assert.ok(files.every((file) => !file.startsWith('/') && !file.includes('\\') && file.split('/').every((part) => part && part !== '.' && part !== '..')), 'unsafe package path');
+  const actual = [...files].sort();
+  assert.ok(actual.length === expected.length && actual.every((file, index) => file === expected[index]), 'unregistered or missing package file');
+}
+
+function assertPackageText(file: string, content: string, files: Set<string>) {
+  // Fixed high-confidence patterns. Never echo matching content into diagnostics.
+  assert.ok(!/(?:\/Users\/[^/\s]+\/|\/home\/[^/\s]+\/|[A-Z]:\\+Users\\+|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|\bghp_[A-Za-z0-9]{36}\b|\bgithub_pat_[A-Za-z0-9_]{50,}\b|\bAKIA[0-9A-Z]{16}\b)/u.test(content), `sensitive content in ${file}`);
+  if (!file.endsWith('.md')) return;
+  for (const match of content.matchAll(/\]\(([^)\s]+)(?:\s+[^)]*)?\)/gu)) {
+    const target = match[1];
+    if (/^(?:[a-z][\w+.-]*:|#)/iu.test(target)) continue;
+    const resolved = path.posix.normalize(path.posix.join(path.posix.dirname(file), target.split('#')[0])).replace(/\/$/u, '');
+    assert.ok(!target.startsWith('/') && !resolved.startsWith('../') &&
+      (resolved === '.' || files.has(resolved) || [...files].some((entry) => entry.startsWith(`${resolved}/`))), `unresolved package documentation link in ${file}`);
+  }
+}
+
+function assertInstalledContents(root: string) {
+  const entries: string[] = [];
+  function walk(directory: string) {
+    for (const entry of fs.readdirSync(path.join(root, directory), { withFileTypes: true })) {
+      const relative = path.posix.join(directory, entry.name);
+      assert.ok(!entry.isSymbolicLink(), 'package member must not be a symlink');
+      if (entry.isDirectory()) walk(relative);
+      else { assert.ok(entry.isFile(), 'package member must be a regular file'); entries.push(relative); }
+    }
+  }
+  walk('');
+  assertPackageInventory(entries);
+  const files = new Set(entries);
+  for (const file of entries) assertPackageText(file, fs.readFileSync(path.join(root, file), 'utf8'), files);
+  const cli = fs.readFileSync(path.join(root, 'bin/cli.js'), 'utf8');
+  assert.ok(cli.startsWith('#!/usr/bin/env node\n'), 'CLI shebang missing');
+}
+
+function assertPackageNegativeCases() {
+  const files = Object.values(packageManifest.packagedFiles).flat();
+  assert.throws(() => assertPackageInventory([...files, 'docs/unregistered.json']));
+  assert.throws(() => assertPackageInventory(files.filter((file) => file !== 'lib/index.d.ts')));
+  assert.throws(() => assertPackageInventory([...files, 'test/fixture.json']));
+  assert.throws(() => assertPackageInventory([...files, 'lib/index.js.map']));
+  assert.throws(() => assertPackageInventory([...files, 'LIB/INDEX.JS']));
+  assert.throws(() => assertPackageText('README.md', '[missing](absent.md)', new Set(files)));
+  assert.throws(() => assertPackageText('docs/record.json', JSON.stringify({ cwd: '/Users/synthetic/work' }), new Set(files)));
+  assert.throws(() => assertPackageText('docs/key.txt', '-----BEGIN PRIVATE KEY-----', new Set(files)));
+  assert.throws(() => assertPackageText('docs/record.json', JSON.stringify({ cwd: 'C:\\Users\\synthetic\\work' }), new Set(files)));
+  assert.throws(() => assertPackageText('docs/record.txt', 'C:\\Users\\synthetic\\work', new Set(files)));
+  const sentinel = 'ghp_' + 'x'.repeat(36);
+  const failure = childProcess.spawnSync(process.execPath, ['-e', `
+    const assert = require('node:assert');
+    const data = JSON.parse(require('node:fs').readFileSync(0, 'utf8'));
+    const packageManifest = { packagedFiles: { test: data.expected } };
+    (${assertPackageInventory.toString()})(data.actual);
+  `], { encoding: 'utf8', input: JSON.stringify({ expected: files, actual: [...files, `docs/${sentinel}.json`] }) });
+  assert.strictEqual(failure.status, 1);
+  assert.ok(failure.stderr.includes('unregistered or missing package file'));
+  assert.ok(!(failure.stdout + failure.stderr).includes(sentinel), 'inventory diagnostics must not echo filename secrets');
+  console.log('OK: 11 package inventory/content/link negative cases');
+}
+
 function assertPackageContents(pack: PackResult) {
+  assertPackageInventory(pack.files.map((file) => file.path));
+  assert.ok(pack.size <= packageManifest.sizeBudget.compressedBytes, "compressed package budget exceeded");
+  assert.ok(pack.unpackedSize <= packageManifest.sizeBudget.uncompressedBytes, "uncompressed package budget exceeded");
   const files = new Map(pack.files.map((file) => [file.path, file]));
   [
     'package.json',
@@ -431,6 +503,7 @@ function smokeInstalledPackage(tarballPath: string) {
     ], { cwd: installDir });
     assert.ok(fs.existsSync(path.join(installDir, 'openapi.candidate.yml')));
     assert.ok(fs.existsSync(path.join(installDir, 'openapi.candidate.meta.json')));
+    assertInstalledContents(installedRoot);
     assertSchemaHints(installedRoot);
 
     run(cliPath, [
@@ -460,6 +533,8 @@ function smokeInstalledPackage(tarballPath: string) {
     assert.ok(fs.existsSync(path.join(installDir, 'dist-cloudflare', 'edge', 'cloudflare', 'index.ts')));
   });
 }
+
+assertPackageNegativeCases();
 
 assertContractDiffWorkflow(path.join(repoRoot, '.github', 'workflows', 'contract-diff.yml'));
 assertContractDiffWorkflow(path.join(repoRoot, 'examples', 'github-actions', 'contract-diff.yml'));

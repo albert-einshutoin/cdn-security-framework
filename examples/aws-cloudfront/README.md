@@ -76,6 +76,6 @@ curl -i "https://YOUR_DISTRIBUTION_DOMAIN/foo/../bar"
 
 ## See also
 
-- [CloudFront Functions Runtime](../../runtimes/aws-cloudfront-functions/README.md)
+- [CloudFront Functions Runtime](https://github.com/albert-einshutoin/cdn-security-framework/blob/b436da43cb1f8c92759d6e4c121c95998bb78bb5/runtimes/aws-cloudfront-functions/README.md)
 - [Quick Start](../../docs/quickstart.md)
 - [Policy and runtime sync](../../docs/policy-runtime-sync.md)

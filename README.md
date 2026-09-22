@@ -4,7 +4,7 @@
 
 [![CI](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/policy-lint.yml/badge.svg)](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/policy-lint.yml)
 [![npm release](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/release-npm.yml/badge.svg)](https://github.com/albert-einshutoin/cdn-security-framework/actions/workflows/release-npm.yml)
-[![coverage ≥ 80%](https://img.shields.io/badge/coverage-%E2%89%A580%25%20lines-brightgreen)](./.github/workflows/policy-lint.yml)
+[![coverage ≥ 80%](https://img.shields.io/badge/coverage-%E2%89%A580%25%20lines-brightgreen)](https://github.com/albert-einshutoin/cdn-security-framework/blob/b436da43cb1f8c92759d6e4c121c95998bb78bb5/.github/workflows/policy-lint.yml)
 [![SLSA v1 provenance](https://img.shields.io/badge/SLSA-v1%20provenance-blue)](./docs/supply-chain.md)
 
 See the [version roadmap](./docs/ROADMAP.md) for the current release train,
@@ -171,7 +171,7 @@ See [IaC integration](docs/iac.md) for Terraform / CloudFormation / CDK / WAF us
 - [Threat model](docs/threat-model.md)
 - [Decision matrix](docs/decision-matrix.md)
 - [Observability](docs/observability.md)
-- [Changelog](CHANGELOG.md)
+- [Changelog](https://github.com/albert-einshutoin/cdn-security-framework/blob/b436da43cb1f8c92759d6e4c121c95998bb78bb5/CHANGELOG.md)
 
 ---
 

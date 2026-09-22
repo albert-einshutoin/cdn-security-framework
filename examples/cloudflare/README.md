@@ -104,7 +104,7 @@ curl -i "https://YOUR_WORKER_DOMAIN/foo/../bar"
 
 ## See also
 
-- [Cloudflare Workers Runtime](../../runtimes/cloudflare-workers/README.md)
+- [Cloudflare Workers Runtime](https://github.com/albert-einshutoin/cdn-security-framework/blob/b436da43cb1f8c92759d6e4c121c95998bb78bb5/runtimes/cloudflare-workers/README.md)
 - [Quick Start](../../docs/quickstart.md)
 - [Policy and runtime sync](../../docs/policy-runtime-sync.md)
 - [Response DLP](../../docs/response-dlp.md)
