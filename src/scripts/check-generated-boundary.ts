@@ -82,7 +82,13 @@ export function inspectGeneratedBoundary(files: readonly TrackedFile[], manifest
   const roots = new Set(GENERATED_ROOTS);
   const generated = new Map<string, string>();
   for (const file of tracked) {
-    if (!file.startsWith(`${manifest.sourceRoot}/`) || !file.endsWith('.ts') || file.endsWith('.d.ts')) continue;
+    if (!file.startsWith(`${manifest.sourceRoot}/`)) continue;
+    // resolveJsonModule also copies imported JSON into the corresponding output path.
+    if (file.endsWith('.json')) {
+      generated.set(file.slice(manifest.sourceRoot.length + 1), file);
+      continue;
+    }
+    if (!file.endsWith('.ts') || file.endsWith('.d.ts')) continue;
     const stem = file.slice(manifest.sourceRoot.length + 1, -3);
     if (stem.includes('/')) roots.add(stem.split('/')[0]);
     for (const suffix of ['.js', '.d.ts', '.js.map', '.d.ts.map']) generated.set(`${stem}${suffix}`, file);

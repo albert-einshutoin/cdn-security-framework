@@ -121,3 +121,11 @@ test('oversized inventories and ownership lists fail within explicit bounds', ()
   const owned = group('templates/a.js'); owned.files = Array(2001).fill('templates/a.js');
   assert.ok(scan(['templates/a.js'], [owned]).violations.some((v) => v.code === 'MISSING_OWNERSHIP_METADATA'));
 });
+
+test('resolveJsonModule copies are rejected, including root-level JSON and owned aliases', () => {
+  const paths = ['src/data.json', 'data.json', 'src/future/data.json', 'future/data.json'];
+  const result = scan(paths, [group('data.json')]);
+  assert.deepEqual(result.violations.map((v) => [v.path, v.code]), [
+    ['data.json', 'TRACKED_COMPILER_OUTPUT'], ['future/data.json', 'TRACKED_COMPILER_OUTPUT'],
+  ]);
+});
