@@ -7,7 +7,7 @@ const os = require('os');
 const path = require('path');
 let yaml: any;
 
-export const smokeSteps: Array<{ command: string; exit: number; durationMs: number }> = [];
+export const smokeSteps: Array<{ command: string; exit: number; expectedExit: number; durationMs: number }> = [];
 let quietConsumer = false;
 
 const repoRoot = path.join(__dirname, '..');
@@ -40,7 +40,7 @@ function run(command: string, args: string[], options: any = {}) {
     stdio: quietConsumer ? 'pipe' : (options.stdio || 'pipe'),
     maxBuffer: 8 * 1024 * 1024,
   });
-  if (quietConsumer) smokeSteps.push({ command: path.basename(command), exit: result.status ?? -1,
+  if (quietConsumer) smokeSteps.push({ command: path.basename(command), exit: result.status ?? -1, expectedExit: 0,
     durationMs: Number(process.hrtime.bigint() - start) / 1e6 });
   assert.strictEqual(result.status, 0, 'package smoke command failed');
   return result.stdout;

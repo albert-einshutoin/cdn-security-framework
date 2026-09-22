@@ -7,7 +7,8 @@ import cp from 'node:child_process';
 
 export const matrixRows = ['20.17.0', '22', '24', '18.20.8', '20.16.0'] as const;
 type Identity = { schemaVersion: 1; source: string; tree: string; harness: string; run: string; attempt: string; sha256: string; size: number; lockSha256: string };
-type Result = Identity & { row: string; status: 'pass'; node: string; npm: string; switchVerified?: boolean; checks: string[]; resolution: string[]; steps: unknown[]; dependencies: Record<string, string> };
+type Step = { command: string; exit: number; expectedExit: number; durationMs: number };
+type Result = Identity & { runtime: { executable: string; sha256: string; platform: string; arch: string }; row: string; status: 'pass'; node: string; npm: string; switchVerified?: boolean; checks: string[]; resolution: string[]; steps: Step[]; dependencies: Record<string, string> };
 const root = path.resolve(__dirname, '..');
 const sha = (file: string) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 function read(file: string): any {
@@ -50,10 +51,34 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
     const r = results.find(r => r.row === row); assert.ok(r, 'missing required row'); verifyIdentity(r, e);
     for (const k of ['sha256', 'size', 'tree', 'lockSha256'] as const) assert.equal(r[k], m[k], 'consumer artifact mismatch');
     assert.equal(r.status, 'pass', 'failed consumer');
+    assert.ok(r.runtime && /^node(?:\.exe)?$/.test(r.runtime.executable) && /^[a-f0-9]{64}$/.test(r.runtime.sha256) && /^[a-z0-9_-]+$/.test(r.runtime.platform) && /^[a-z0-9_]+$/.test(r.runtime.arch), 'missing or invalid runtime identity');
     if (row === '18.20.8' || row === '20.16.0') assert.equal(r.switchVerified, true, 'missing supported-install switch proof');
     assert.ok(r.node === row || (['22', '24'].includes(row) && r.node.startsWith(row + '.')), 'wrong consumer Node');
+    assert.match(r.npm, /^\d+\.\d+\.\d+$/);
+    const pkg = read(path.join(root, 'package.json'));
+    const entries = Object.values(pkg.exports).filter((v: any) => typeof v === 'object').map((v: any) => v.require.slice(2));
+    assert.deepEqual(r.resolution, entries, 'missing or invalid module resolution');
+    assert.ok(r.dependencies && Object.keys(r.dependencies).sort().join() === Object.keys(pkg.dependencies).sort().join(), 'missing dependency evidence');
+    assert.ok(Object.values(r.dependencies).every(v => /^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(v)), 'invalid dependency version');
+    const lower = row === '18.20.8' || row === '20.16.0';
+    assert.ok(Array.isArray(r.steps) && r.steps.length === (lower ? 26 : 12), 'missing command evidence');
+    assert.ok(r.steps.every(s => s && /^[a-zA-Z0-9_.-]+$/.test(s.command) && Number.isFinite(s.durationMs) && s.durationMs >= 0 && s.exit === s.expectedExit && (s.expectedExit === 0 || (lower && s.expectedExit === 1))), 'invalid command evidence');
     assert.deepEqual(r.checks, row === '18.20.8' || row === '20.16.0' ? ['node-rejection', 'resolution', 'no-side-effects'] : ['package-smoke', 'resolution', 'schemas']);
   }
+}
+export function collectResults(directory: string): Result[] {
+  const files: string[] = [];
+  for (const entry of fs.readdirSync(directory, { withFileTypes: true })) {
+    const file = path.join(directory, entry.name);
+    assert.ok(!entry.isSymbolicLink(), 'unsafe result entry');
+    if (entry.isDirectory()) {
+      const members = fs.readdirSync(file, { withFileTypes: true });
+      assert.equal(members.length, 1, 'unexpected result artifact contents');
+      assert.ok(members[0].isFile() && members[0].name.endsWith('.json'), 'invalid result artifact');
+      files.push(path.join(file, members[0].name));
+    } else { assert.ok(entry.isFile() && entry.name.endsWith('.json'), 'invalid result file'); files.push(file); }
+  }
+  return files.map(read);
 }
 function produce(directory: string): void {
   const e = expected(); assert.equal(run('git', ['rev-parse', 'HEAD']).trim(), e.source, 'checkout mismatch');
@@ -86,7 +111,8 @@ function checkResolution(consumer: string): { resolution: string[]; dependencies
     console.log(JSON.stringify({resolution,dependencies}));
   `], consumer));
 }
-function rejection(consumer: string): void {
+function rejection(consumer: string): Step[] {
+  const steps: Step[] = [];
   const pkgRoot = path.join(consumer, 'node_modules/cdn-security-framework'); const pkg = read(path.join(pkgRoot, 'package.json'));
   const entries = [...new Set([...Object.values(pkg.exports).flatMap((v: any) => typeof v === 'object' ? [v.require.slice(2)] : v.endsWith('.js') ? [v.slice(2)] : []),
     ...['cli-doctor','compile','compile-cloudflare','compile-cloudflare-waf','compile-infra','policy-lint'].map(n => `scripts/${n}.js`)])];
@@ -94,36 +120,41 @@ function rejection(consumer: string): void {
   const policyHash = sha(path.join(pkgRoot, 'policy/base.yml'));
   for (const entry of entries) {
     const file = path.join(pkgRoot, entry);
+    const start = process.hrtime.bigint();
     const child = cp.spawnSync(process.execPath, ['-e', `
       const assert=require('node:assert/strict'),Module=require('node:module');
       const original=Module._load;Module._load=function(id,...args){ if(!id.startsWith('.')&&!id.startsWith('/')&&!id.startsWith('node:')) throw new Error('dependency loaded before guard');return original.call(this,id,...args); };
       let caught=false;try{require(process.argv[1]);}catch(e){assert.equal(e.code,'ERR_CSF_UNSUPPORTED_NODE');assert.equal(e.required,'>=20.17.0');assert.equal(e.current,process.versions.node);caught=true;}assert.ok(caught);console.log('caught');
     `, file], { cwd: consumer, encoding: 'utf8', env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '' } });
+    steps.push({command:'node',exit:child.status ?? -1,expectedExit:0,durationMs:Number(process.hrtime.bigint()-start)/1e6});
     assert.equal(child.status, 0, 'API guard not catchable before dependencies'); assert.equal(child.stdout, 'caught\n'); assert.equal(child.stderr, '');
   }
   for (const script of ['bin/cli.js', ...entries.filter(x => x.startsWith('scripts/'))]) {
     for (const args of script === 'bin/cli.js' ? [['--version'], ['--help'], ['build', '--policy', 'absent.yml']] : [['--help']]) {
+      const start = process.hrtime.bigint();
       const r = cp.spawnSync(process.execPath, [path.join(pkgRoot, script), ...args], { cwd: consumer, encoding: 'utf8', env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '' } });
+      steps.push({command:'node',exit:r.status ?? -1,expectedExit:1,durationMs:Number(process.hrtime.bigint()-start)/1e6});
       assert.equal(r.status, 1); assert.equal(r.stdout, '');
       assert.equal(r.stderr, `ERR_CSF_UNSUPPORTED_NODE: Node.js >=20.17.0 is required; current ${process.versions.node}. Upgrade Node.js before using cdn-security-framework.\n`);
     }
   }
   assert.deepEqual(fs.readdirSync(consumer).sort(), before, 'rejection created files');
   assert.equal(sha(path.join(pkgRoot, 'policy/base.yml')), policyHash, 'rejection modified policy');
+  return steps;
 }
 function consume(directory: string, row: string, output: string): void {
   assert.ok(matrixRows.includes(row as typeof matrixRows[number]), 'unknown matrix row');
   const m = verifyTarball(directory, expected()); const consumer = path.join(directory, 'consumer');
   const details = checkResolution(consumer); const rejected = row === '18.20.8' || row === '20.16.0';
-  let steps: unknown[] = [];
-  if (rejected) rejection(consumer);
+  let steps: Step[] = [];
+  if (rejected) steps = rejection(consumer);
   else {
     const smoke = require(path.join(directory, 'scripts/package-smoke-tests.js'));
     smoke.assertPackageContents(read(path.join(directory, 'pack.json')));
     smoke.smokeInstalledPackage(path.join(directory, 'candidate.tgz'), consumer); steps = smoke.smokeSteps;
     run(process.execPath, ['-e', `const fs=require('node:fs'),path=require('node:path');const p=path.resolve('node_modules/cdn-security-framework');const req=require('node:module').createRequire(path.join(p,'package.json'));const Ajv=req('ajv');const ajv=new Ajv({strict:false});for(const f of ['policy/schema.json',...fs.readdirSync(path.join(p,'schemas')).filter(f=>f.endsWith('.json')).map(f=>'schemas/'+f)]){if(!ajv.validateSchema(JSON.parse(fs.readFileSync(path.join(p,f)))))throw new Error('invalid schema');}`], consumer);
   }
-  const result: Result = { ...m, row, status: 'pass', node: process.versions.node, npm: run('npm', ['--version'], consumer).trim(), checks: rejected ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas'], ...details, steps };
+  const result: Result = { ...m, runtime: { executable: path.basename(process.execPath), sha256: sha(process.execPath), platform: process.platform, arch: process.arch }, row, status: 'pass', node: process.versions.node, npm: run('npm', ['--version'], consumer).trim(), checks: rejected ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas'], ...details, steps };
   if (rejected && process.env.CSF_SWITCH_PROOF) {
     const switched = read(process.env.CSF_SWITCH_PROOF) as Result;
     verifyIdentity(switched, expected());
@@ -140,8 +171,7 @@ if (require.main === module) {
     else if (command === 'consume') consume(path.resolve(directory), arg, output);
     else if (command === 'aggregate') {
       const m = verifyTarball(path.resolve(directory), expected());
-      const files = fs.readdirSync(arg).filter(f => f.endsWith('.json'));
-      aggregate(m, files.map(f => read(path.join(arg, f))), expected(), [process.env.CSF_PRODUCER_STATE || '', process.env.CSF_CONSUMER_STATE || '']);
+      aggregate(m, collectResults(arg), expected(), [process.env.CSF_PRODUCER_STATE || '', process.env.CSF_CONSUMER_STATE || '']);
       write(output, { status: 'pass', ...m, rows: matrixRows });
     } else throw new Error('invalid command');
   } catch { console.error('CSF_PACKAGE_ACCEPTANCE_FAILED: candidate, validation, or required evidence is invalid.'); process.exitCode = 1; }

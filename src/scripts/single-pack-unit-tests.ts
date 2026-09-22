@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { aggregate, matrixRows, verifyTarball } from './single-pack';
+import { aggregate, collectResults, matrixRows, verifyTarball } from './single-pack';
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-single-pack-unit-'));
 let count = 0;
 function test(name: string, fn: () => void): void { fn(); count++; console.log(`OK: ${name}`); }
@@ -14,7 +14,10 @@ try {
   const sha = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
   const m = { schemaVersion: 1 as const, source: 'a'.repeat(40), harness: 'a'.repeat(40), tree: 'b'.repeat(40), run: '123', attempt: '1', sha256: sha('candidate'), size: 9, lockSha256: sha('{}') };
   const e = { source: m.source, run: m.run, attempt: m.attempt, sha256: m.sha256 };
-  const rows = matrixRows.map(row => ({ ...m, row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2', switchVerified: true, resolution: [], dependencies: {}, steps: [], checks: row.startsWith('18') || row === '20.16.0' ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas'] }));
+  const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
+  const resolution = Object.values(pkg.exports).filter((v: any) => typeof v === 'object').map((v: any) => v.require.slice(2));
+  const dependencies = Object.fromEntries(Object.keys(pkg.dependencies).map(k => [k,'1.0.0']));
+  const rows = matrixRows.map(row => ({ ...m, runtime: { executable: 'node', sha256: 'f'.repeat(64), platform: 'linux', arch: 'x64' }, row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2', switchVerified: true, resolution, dependencies, steps: Array.from({length:row.startsWith('18') || row === '20.16.0' ? 26 : 12},()=>({command:'node',exit:0,expectedExit:0,durationMs:1})), checks: row.startsWith('18') || row === '20.16.0' ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas'] }));
   fs.writeFileSync(path.join(temp, 'metadata.json'), JSON.stringify(m));
   test('same candidate and complete rows pass', () => { verifyTarball(temp, e); aggregate(m, rows, e, ['success','success']); });
   test('changed tarball fails', () => { fs.writeFileSync(path.join(temp, 'candidate.tgz'), 'tampered!'); assert.throws(() => verifyTarball(temp, e)); fs.writeFileSync(path.join(temp, 'candidate.tgz'), 'candidate'); });
@@ -24,7 +27,16 @@ try {
   test('another attempt fails', () => assert.throws(() => verifyTarball(temp, { ...e, attempt: '2' })));
   test('producer digest is independent', () => assert.throws(() => verifyTarball(temp, { ...e, sha256: 'd'.repeat(64) })));
   test('consumer lock mutation fails', () => { fs.writeFileSync(path.join(temp,'consumer/package-lock.json'),'[]');assert.throws(() => verifyTarball(temp,e));fs.writeFileSync(path.join(temp,'consumer/package-lock.json'),'{}'); });
+  test('missing runtime identity fails', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,runtime:undefined} as any)), e, ['success','success'])));
+  for (const key of ['executable','sha256','platform','arch']) test(`malformed runtime ${key} fails`, () => assert.throws(() => aggregate(m, rows.map(r => ({...r,runtime:{...r.runtime,[key]:''}})), e, ['success','success'])));
+  for (const key of ['npm','resolution','dependencies','steps']) test(`missing ${key} evidence fails`, () => assert.throws(() => aggregate(m, rows.map(r => ({...r,[key]:undefined} as any)), e, ['success','success'])));
+  test('empty steps fail', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,steps:[]})), e, ['success','success'])));
+  test('failed command fails', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,steps:r.steps.map(s=>({...s,exit:3}))})), e, ['success','success'])));
   test('missing switch proof fails', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,switchVerified:undefined})), e, ['success','success'])));
+  test('duplicate result artifacts are preserved for rejection', () => {
+    const dir=path.join(temp,'results');fs.mkdirSync(dir);for(const name of ['artifact-one','artifact-two']){fs.mkdirSync(path.join(dir,name));fs.writeFileSync(path.join(dir,name,'20.17.0.json'),JSON.stringify(rows[0]));}
+    assert.equal(collectResults(dir).length,2);assert.throws(()=>aggregate(m,collectResults(dir),e,['success','success']));
+  });
   test('missing result fails', () => assert.throws(() => aggregate(m, rows.slice(1), e, ['success','success'])));
   test('empty results fail', () => assert.throws(() => aggregate(m, [], e, ['success','success'])));
   test('duplicate result fails', () => assert.throws(() => aggregate(m, [rows[0],rows[0],...rows.slice(2)], e, ['success','success'])));

@@ -122,7 +122,7 @@ jobs:
         with:
           pattern: package-consumer-${{ github.run_id }}-${{ github.run_attempt }}-*
           path: ${{ runner.temp }}/csf-results
-          merge-multiple: true
+          merge-multiple: false
       - name: Require all rows and one candidate digest
         run: node "$RUNNER_TEMP/csf-candidate/scripts/single-pack.js" aggregate "$RUNNER_TEMP/csf-candidate" "$RUNNER_TEMP/csf-results" "$RUNNER_TEMP/csf-summary.json"
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
