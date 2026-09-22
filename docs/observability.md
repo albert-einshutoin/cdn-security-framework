@@ -6,10 +6,10 @@ This document describes recommended **logging and metrics** for the Edge Securit
 
 ## Scope
 
-* **Edge Security Layer** blocks or normalizes requests before they reach WAF or Origin. To operate safely, you should know:
+* **Edge Security Layer** blocks or normalizes requests at its configured invocation events. To operate safely, you should know:
   * How many requests were blocked, and why (method, path traversal, UA, query, admin gate).
   * Whether security headers were applied on responses.
-* This doc defines **recommended** log fields and metric dimensions. Implement them in your runtime or via CDN logging (e.g. CloudFront access logs, Workers analytics).
+* Distinguish generated runtime logs below from operator-built aggregation and metrics. The compiler does not automatically create these counters or metric filters.
 
 ---
 
@@ -28,7 +28,7 @@ When `observability.log_format: json` is set (default), the generated viewer-req
 | `uri` | Request URI path (without query by default) | `/admin` |
 | `correlation_id` | Value of the configured correlation header (minted at origin if absent) | `00-4bf9...-01` |
 
-Audit events (`audit_log_auth: true`) add:
+Cloudflare JWT/signed_url success audit events (`audit_log_auth: true`) add the fields below. AWS rejects these authentication settings at build time; origin logging is not a substitute:
 
 | Field | Description |
 |-------|-------------|
@@ -56,9 +56,9 @@ observability:
 
 ### Correlation propagation
 
-At Lambda@Edge / Worker, if the incoming request does **not** carry `correlation_id_header`, the runtime mints one (`crypto.randomUUID` / `crypto.getRandomValues`) and sets it on the forwarded request. Downstream services then see a consistent ID across edge logs, WAF logs, and origin logs.
+At Lambda@Edge / Worker, if the incoming request does **not** carry `correlation_id_header`, the runtime mints one (`crypto.randomUUID` / `crypto.getRandomValues`) and sets it on the forwarded request. Forwarded downstream logs can use that ID, but earlier viewer/WAF records need not contain an ID minted later.
 
-Allow sampling is deterministic. The runtime uses the incoming correlation ID when present, otherwise it uses the request method and URI path. Lambda@Edge and Workers capture that key before minting a missing correlation ID, so retries for the same method/path remain in the same sample bucket. `sample_rate: 0` disables allow logs; `1` emits every allowed request. Block, monitor, audit, and error logs are never sampled.
+Allow sampling is deterministic. The runtime uses the incoming correlation ID when present, otherwise it uses the request method and URI path. Lambda@Edge and Workers capture that key before minting a missing correlation ID, so retries for the same method/path remain in the same sample bucket. `sample_rate: 0` disables allow logs; `1` emits each allowed decision reached by that function; it does not guarantee observation or delivery for every viewer request. Block, monitor, audit, and error logs are never sampled.
 
 ---
 
@@ -90,9 +90,18 @@ Example: `edge_security_block_count{block_reason="ua_denied", status_code="403"}
 
 ## Implementation notes
 
-* **CloudFront Functions**: No direct logging API; use CloudFront access logs and/or enable logging in the response (e.g. custom header `x-edge-block-reason` for debugging; remove in production if sensitive). Alternatively, send logs from Lambda@Edge if you use it in the same behavior.
-* **Lambda@Edge**: Use `console.log` (or your logger) with structured JSON including `block_reason` and `status_code`; ship logs to CloudWatch Logs and create metrics from filters.
-* **Cloudflare Workers**: Use `console.log` or Workers analytics / custom metrics; add optional `x-edge-block-reason` header for debugging.
+* **CloudFront Functions**: `console.log()` in a LIVE function handling real traffic is sent to CloudWatch Logs. Cache-behavior function logs use `/aws/cloudfront/function/<FunctionName>` in `us-east-1`. Test invocations return logs in their test output instead of delivering them to CloudWatch. [AWS: Edge function logs](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/edge-functions-logs.html)
+* This logging support does not permit arbitrary direct HTTP calls to an external logging API. CloudFront Functions restricts network access and truncates function logs at 10KB. [AWS: CloudFront Functions restrictions](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/cloudfront-function-restrictions.html)
+* **Same cache behavior**: each event type can have one edge-function association. Do not mix CloudFront Functions and Lambda@Edge across viewer-request/viewer-response. CloudFront Functions viewer events may be combined with Lambda@Edge origin-request/origin-response. [AWS: all edge-function restrictions](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/edge-function-restrictions-all.html)
+* **Origin observation**: origin-request runs only when forwarding to the origin; origin-response runs after an origin response. Cache hits bypass these events, and an origin-request function-generated response bypasses origin-response. Origin logs therefore do not cover all viewer requests. [AWS: trigger events](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-cloudfront-trigger-events.html)
+* **Lambda@Edge**: the current origin-request template also uses `console.log`; inspect CloudWatch logs in the invocation Region. Metric filters and aggregation using runtime fields such as `status` are operator-built.
+* **Cloudflare Workers**: distinguish the current Worker's `console.log` output from separately configured analytics/metrics aggregation. Debug headers exposing credentials or internal decisions are not a recommended production default.
+
+### Delivery and completeness
+
+Edge-function log delivery is best effort: records may arrive late or be missing. An absent log is not evidence that no request occurred. Account separately for invocation conditions, sampling, truncation and delivery; do not use these logs as a complete request ledger or billing reconciliation. [AWS: delivery limits](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/edge-functions-logs.html)
+
+Implementation checked on 2026-09-22 at main `111f995bd35d3b24bdd1ee7dd72c35bce19f9170`: `logEvent` and sampling in `templates/aws/viewer-request.js`, `templates/aws/origin-request.js`, and `templates/cloudflare/index.ts`. No runtime/logging feature is added here.
 
 ---
 
