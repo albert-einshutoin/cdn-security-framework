@@ -1,0 +1,226 @@
+{
+  "schemaVersion": 1,
+  "sourceRoot": "src",
+  "outputRoot": ".",
+  "groups": [
+    {
+      "category": "schema-generated-source",
+      "files": [
+        "src/types/policy.d.ts"
+      ],
+      "sourceOfTruth": [
+        "policy/schema.json",
+        "src/scripts/check-generated-types.ts"
+      ],
+      "reason": "Schema-derived source contract consumed by TypeScript; emitted package copy is not tracked.",
+      "removalCondition": "Remove when the canonical policy typing pipeline no longer consumes this declaration."
+    },
+    {
+      "category": "authored-source",
+      "files": [
+        "scripts/README.md",
+        "scripts/README.ja.md"
+      ],
+      "sourceOfTruth": [
+        "scripts/README.md",
+        "scripts/README.ja.md"
+      ],
+      "reason": "Authored documentation in the script build-output directory.",
+      "removalCondition": "Remove when this contributor entry point is retired."
+    },
+    {
+      "category": "fixture-example",
+      "files": [
+        "examples/nestjs-contract/run-analysis.cjs",
+        "examples/nestjs-contract/stubs/nestjs-common/index.js",
+        "examples/nestjs-contract/stubs/nestjs-common/index.d.ts"
+      ],
+      "sourceOfTruth": [
+        "examples/nestjs-contract/run-analysis.cjs",
+        "examples/nestjs-contract/stubs/nestjs-common/index.js",
+        "examples/nestjs-contract/stubs/nestjs-common/index.d.ts"
+      ],
+      "reason": "Authored offline example runner and local framework stub, not compiler output.",
+      "removalCondition": "Remove when the corresponding packaged NestJS example is retired."
+    },
+    {
+      "category": "runtime-template",
+      "files": [
+        "templates/aws/origin-request.js",
+        "templates/aws/viewer-request.js",
+        "templates/aws/viewer-response.js",
+        "templates/cloudflare/index.ts"
+      ],
+      "sourceOfTruth": [
+        "templates/aws/origin-request.js",
+        "templates/aws/viewer-request.js",
+        "templates/aws/viewer-response.js",
+        "templates/cloudflare/index.ts"
+      ],
+      "reason": "Authoritative templates compiled into provider runtime artifacts.",
+      "removalCondition": "Remove only with the corresponding reviewed provider-template retirement."
+    },
+    {
+      "category": "runtime-reference",
+      "files": [
+        "runtimes/aws-cloudfront-functions/viewer-request.js",
+        "runtimes/aws-cloudfront-functions/viewer-response.js",
+        "runtimes/aws-lambda-edge/origin-request.js",
+        "runtimes/cloudflare-workers/src/index.ts"
+      ],
+      "sourceOfTruth": [
+        "runtimes/aws-cloudfront-functions/viewer-request.js",
+        "runtimes/aws-cloudfront-functions/viewer-response.js",
+        "runtimes/aws-lambda-edge/origin-request.js",
+        "runtimes/cloudflare-workers/src/index.ts"
+      ],
+      "reason": "Explicit legacy/reference runtime source, not a package compiler output. Deployable output comes from templates.",
+      "removalCondition": "Remove when the corresponding reference/runtime documentation is retired."
+    },
+    {
+      "category": "generated-golden",
+      "files": [
+        "tests/golden/archetypes/admin-panel/edge/cloudflare/index.ts",
+        "tests/golden/archetypes/admin-panel/edge/origin-request.js",
+        "tests/golden/archetypes/admin-panel/edge/viewer-request.js",
+        "tests/golden/archetypes/admin-panel/edge/viewer-response.js",
+        "tests/golden/archetypes/admin-panel/infra/cloudflare-waf.tf.json",
+        "tests/golden/archetypes/admin-panel/infra/waf-rules.tf.json"
+      ],
+      "sourceOfTruth": [
+        "policy/archetypes/admin-panel.yml",
+        "src/scripts/check-drift.ts"
+      ],
+      "reason": "Reviewed runtime/infra baseline regenerated from this policy by the drift gate.",
+      "removalCondition": "Remove together with the named policy fixture and its drift scenario."
+    },
+    {
+      "category": "generated-golden",
+      "files": [
+        "tests/golden/archetypes/microservice-origin/edge/cloudflare/index.ts",
+        "tests/golden/archetypes/microservice-origin/edge/origin-request.js",
+        "tests/golden/archetypes/microservice-origin/edge/viewer-request.js",
+        "tests/golden/archetypes/microservice-origin/edge/viewer-response.js",
+        "tests/golden/archetypes/microservice-origin/infra/cloudflare-waf.tf.json",
+        "tests/golden/archetypes/microservice-origin/infra/cloudfront-origin.tf.json",
+        "tests/golden/archetypes/microservice-origin/infra/waf-rules.tf.json"
+      ],
+      "sourceOfTruth": [
+        "policy/archetypes/microservice-origin.yml",
+        "src/scripts/check-drift.ts"
+      ],
+      "reason": "Reviewed runtime/infra baseline regenerated from this policy by the drift gate.",
+      "removalCondition": "Remove together with the named policy fixture and its drift scenario."
+    },
+    {
+      "category": "generated-golden",
+      "files": [
+        "tests/golden/archetypes/rest-api/edge/cloudflare/index.ts",
+        "tests/golden/archetypes/rest-api/infra/cloudflare-waf.tf.json",
+        "tests/golden/archetypes/rest-api/infra/waf-rules.tf.json"
+      ],
+      "sourceOfTruth": [
+        "policy/archetypes/rest-api.yml",
+        "src/scripts/check-drift.ts"
+      ],
+      "reason": "Reviewed runtime/infra baseline regenerated from this policy by the drift gate.",
+      "removalCondition": "Remove together with the named policy fixture and its drift scenario."
+    },
+    {
+      "category": "generated-golden",
+      "files": [
+        "tests/golden/archetypes/spa-static-site/edge/cloudflare/index.ts",
+        "tests/golden/archetypes/spa-static-site/edge/origin-request.js",
+        "tests/golden/archetypes/spa-static-site/edge/viewer-request.js",
+        "tests/golden/archetypes/spa-static-site/edge/viewer-response.js",
+        "tests/golden/archetypes/spa-static-site/infra/cloudflare-waf.tf.json",
+        "tests/golden/archetypes/spa-static-site/infra/waf-rules.tf.json"
+      ],
+      "sourceOfTruth": [
+        "policy/archetypes/spa-static-site.yml",
+        "src/scripts/check-drift.ts"
+      ],
+      "reason": "Reviewed runtime/infra baseline regenerated from this policy by the drift gate.",
+      "removalCondition": "Remove together with the named policy fixture and its drift scenario."
+    },
+    {
+      "category": "generated-golden",
+      "files": [
+        "tests/golden/base/edge/cloudflare/index.ts",
+        "tests/golden/base/edge/origin-request.js",
+        "tests/golden/base/edge/viewer-request.js",
+        "tests/golden/base/edge/viewer-response.js",
+        "tests/golden/base/infra/cloudflare-waf.tf.json",
+        "tests/golden/base/infra/waf-rules.tf.json"
+      ],
+      "sourceOfTruth": [
+        "policy/base.yml",
+        "src/scripts/check-drift.ts"
+      ],
+      "reason": "Reviewed runtime/infra baseline regenerated from this policy by the drift gate.",
+      "removalCondition": "Remove together with the named policy fixture and its drift scenario."
+    },
+    {
+      "category": "generated-golden",
+      "files": [
+        "tests/golden/profiles/balanced/edge/cloudflare/index.ts",
+        "tests/golden/profiles/balanced/edge/origin-request.js",
+        "tests/golden/profiles/balanced/edge/viewer-request.js",
+        "tests/golden/profiles/balanced/edge/viewer-response.js",
+        "tests/golden/profiles/balanced/infra/cloudflare-waf.tf.json",
+        "tests/golden/profiles/balanced/infra/waf-rules.tf.json"
+      ],
+      "sourceOfTruth": [
+        "policy/profiles/balanced.yml",
+        "src/scripts/check-drift.ts"
+      ],
+      "reason": "Reviewed runtime/infra baseline regenerated from this policy by the drift gate.",
+      "removalCondition": "Remove together with the named policy fixture and its drift scenario."
+    },
+    {
+      "category": "generated-golden",
+      "files": [
+        "tests/golden/profiles/permissive/edge/cloudflare/index.ts",
+        "tests/golden/profiles/permissive/edge/origin-request.js",
+        "tests/golden/profiles/permissive/edge/viewer-request.js",
+        "tests/golden/profiles/permissive/edge/viewer-response.js",
+        "tests/golden/profiles/permissive/infra/cloudflare-waf.tf.json",
+        "tests/golden/profiles/permissive/infra/waf-rules.tf.json"
+      ],
+      "sourceOfTruth": [
+        "policy/profiles/permissive.yml",
+        "src/scripts/check-drift.ts"
+      ],
+      "reason": "Reviewed runtime/infra baseline regenerated from this policy by the drift gate.",
+      "removalCondition": "Remove together with the named policy fixture and its drift scenario."
+    },
+    {
+      "category": "generated-golden",
+      "files": [
+        "tests/golden/profiles/strict/edge/cloudflare/index.ts",
+        "tests/golden/profiles/strict/edge/origin-request.js",
+        "tests/golden/profiles/strict/edge/viewer-request.js",
+        "tests/golden/profiles/strict/edge/viewer-response.js",
+        "tests/golden/profiles/strict/infra/cloudflare-waf.tf.json",
+        "tests/golden/profiles/strict/infra/waf-rules.tf.json"
+      ],
+      "sourceOfTruth": [
+        "policy/profiles/strict.yml",
+        "src/scripts/check-drift.ts"
+      ],
+      "reason": "Reviewed runtime/infra baseline regenerated from this policy by the drift gate.",
+      "removalCondition": "Remove together with the named policy fixture and its drift scenario."
+    },
+    {
+      "category": "adversarial-symlink-fixture",
+      "files": [
+        "test/fixtures/openapi/malicious/symlink-escape.yaml"
+      ],
+      "sourceOfTruth": [
+        "test/contract/fixture-corpus.test.ts"
+      ],
+      "reason": "Tracked escape fixture verifies rejection outside the OpenAPI fixture root; inspect only its Git index metadata, never follow it.",
+      "removalCondition": "Remove together with the fixture-root symlink escape regression test."
+    }
+  ]
+}

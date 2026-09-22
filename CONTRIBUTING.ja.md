@@ -110,3 +110,5 @@ TypeScript ソースを変更するときは:
 ## 質問
 
 不明点があれば、Issue を「question」ラベルで立てるか、機密にしたい場合は [SECURITY.md](SECURITY.md) の連絡手段をご利用ください。
+
+index上の`config/artifact-ownership.json`に、手書き/template/goldenの例外ファイル、正本、理由、削除条件を正確に記録します。ownership変更をstageしてからindex対象のgateを実行してください。directory一括許可はしません。`build:ts`後の`node scripts/check-generated-boundary.js --json`で相対pathの分類台帳を出力できます。stale metadata、orphan、build directory内のtracking、symlink、case衝突を拒否し、列挙ファイルの本文は読みません。

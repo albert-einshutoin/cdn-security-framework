@@ -120,3 +120,5 @@ By contributing, you agree that your contributions will be licensed under the sa
 ## Questions
 
 If something is unclear, open an Issue with the “question” label or use the contact method in [SECURITY.md](SECURITY.md) for sensitive topics.
+
+The indexed `config/artifact-ownership.json` lists exact authored/template/golden exceptions, their source of truth, reason and removal condition. Stage ownership changes before running the index-based gate. Directory-wide exceptions are not accepted. Use `node scripts/check-generated-boundary.js --json` after `build:ts` for the relative-path classification inventory. The gate rejects stale metadata, orphan output, tracked build directories, symlinks and case collisions without reading listed file contents.
