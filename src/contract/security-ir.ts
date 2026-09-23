@@ -1,3 +1,6 @@
+import { assertSupportedNode } from '../lib/node-engine';
+assertSupportedNode(require.main === module);
+
 import { FINDING_EVIDENCE_SOURCES, type FindingEvidenceV1 } from './finding';
 import { canonicalizePath, createRouteKey, normalizeHttpMethod, type HttpMethod } from './canonical-route';
 

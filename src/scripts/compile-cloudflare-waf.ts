@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { assertSupportedNode } from '../lib/node-engine';
+assertSupportedNode(require.main === module);
+
 /**
  * Compile Cloudflare WAF: security.yml の firewall セクションを読み、
  * dist/infra/cloudflare-waf.tf.json に `cloudflare_ruleset` / `cloudflare_list`

@@ -278,3 +278,37 @@ With the example’s `--out-dir dist/aws`, runtime code is in `dist/aws/edge/` a
 MIT License
 
 ---
+
+### Node compatibility and candidate verification
+
+Node.js **>=20.17.0** is required. The verification rows 20.17.0, 22 and 24 are
+representative supported runtimes, not an allowlist. In the unpublished 2.0.0
+candidate, unsupported Node now fails before loading the compiler or its
+third-party modules: direct CLI/scripts print `ERR_CSF_UNSUPPORTED_NODE` to
+stderr and exit 1 (no stdout result); root and documented JavaScript subpath
+imports throw an Error with `code`, `required` and `current`, without exiting the
+calling process. Upgrade Node before retrying. This enforces the existing engine
+floor; older versions that previously ran after npm's engine warning no longer
+run. JSON Schema data and generated edge runtimes do not acquire this guard.
+
+The `package-producer` CI job builds and packs once at the PR HEAD (or the event
+SHA for main/manual/scheduled runs). It records source/tree/harness SHA, run and
+attempt, tarball SHA-256/size and a common consumer lock. Linux consumer jobs
+verify that metadata and the **tgz contents hash**, prepare dependencies online,
+then install from a dedicated cache and run offline in a network namespace.
+They do not build or pack the product. Supported rows run the existing CJS,
+strict TypeScript, direct/local-npx CLI, schema and workflow smoke. Real Node
+18.20.8 and 20.16.0 rows assert early, catchable rejection. `package-acceptance`
+requires every row exactly once with the same candidate and successful checks;
+missing, cancelled or skipped required work fails. The existing PR package and
+main release gates depend on that result. Artifact-container digests are distinct
+from the tgz SHA-256. Other full-validation tests may independently pack, and do
+not constitute this single-pack lane.
+
+Evidence includes actual Node/npm/dependency versions and package-relative
+module/bin resolution. Action runtimes are separate from consumer Node. Linux is
+the hosted acceptance platform; macOS rehearsal is additional evidence, and
+Windows/network-filesystem parity is not claimed. This lane does not replace the
+rich acceptance and real EN/JA novice walkthrough tracked in #890, or authorize
+publication/deployment. Restoring published 1.4.0 for rollback still requires the
+separate documented isolated environment and original policy bytes.

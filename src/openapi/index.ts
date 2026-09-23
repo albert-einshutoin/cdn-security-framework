@@ -1,3 +1,6 @@
+import { assertSupportedNode } from '../lib/node-engine';
+assertSupportedNode(require.main === module);
+
 export * from './analysis-error';
 export * from './analysis-limits';
 export {

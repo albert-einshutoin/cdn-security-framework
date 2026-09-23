@@ -24,6 +24,114 @@ env:
   ORIGIN_SECRET: ci-origin-secret-not-for-deploy
 
 jobs:
+  package-producer:
+    runs-on: ubuntu-latest
+    outputs:
+      sha256: ${{ steps.pack.outputs.sha256 }}
+    env:
+      CSF_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+          cache: npm
+      - name: Clean install and build producer
+        run: npm ci --ignore-scripts --no-audit --no-fund && npm run build:ts
+      - name: Produce one acceptance tarball and common consumer lock
+        id: pack
+        run: node scripts/single-pack.js produce "$RUNNER_TEMP/csf-candidate"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: package-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/csf-candidate/
+          if-no-files-found: error
+          retention-days: 30
+
+  package-consumer:
+    needs: package-producer
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ['20.17.0', '22', '24', '18.20.8', '20.16.0']
+    env:
+      CSF_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+      CSF_TGZ_SHA256: ${{ needs.package-producer.outputs.sha256 }}
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: package-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/csf-candidate
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - name: Verify producer identity and prepare dependencies online
+        run: |
+          node "$RUNNER_TEMP/csf-candidate/scripts/single-pack.js" verify "$RUNNER_TEMP/csf-candidate"
+          cd "$RUNNER_TEMP/csf-candidate/consumer"
+          npm ci --ignore-scripts --no-audit --no-fund --cache "$RUNNER_TEMP/csf-cache"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Offline install and verify with real consumer Node, without network
+        env:
+          CSF_ROW: ${{ matrix.node }}
+        run: |
+          unset NODE_PATH NODE_OPTIONS
+          sudo unshare --net -- sudo -u "$(id -un)" env PATH="$PATH" RUNNER_TEMP="$RUNNER_TEMP" CSF_SOURCE="$CSF_SOURCE" CSF_TGZ_SHA256="$CSF_TGZ_SHA256" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" CSF_ROW="$CSF_ROW" bash -eu -c '
+            cd "$RUNNER_TEMP/csf-candidate/consumer"
+            if [ "$CSF_ROW" = 18.20.8 ] || [ "$CSF_ROW" = 20.16.0 ]; then
+              node ../scripts/single-pack.js consume .. "$CSF_ROW" "$RUNNER_TEMP/csf-switch.json"
+              export CSF_SWITCH_PROOF="$RUNNER_TEMP/csf-switch.json"
+            fi
+            rm -rf node_modules
+            npm ci --offline --ignore-scripts --no-audit --no-fund --cache "$RUNNER_TEMP/csf-cache"
+            node ../scripts/single-pack.js consume .. "$CSF_ROW" "$RUNNER_TEMP/csf-results/$CSF_ROW.json"
+          '
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: package-consumer-${{ github.run_id }}-${{ github.run_attempt }}-${{ matrix.node }}
+          path: ${{ runner.temp }}/csf-results/
+          if-no-files-found: error
+          retention-days: 30
+
+  package-acceptance:
+    if: always()
+    needs: [package-producer, package-consumer]
+    runs-on: ubuntu-latest
+    env:
+      CSF_SOURCE: ${{ github.event.pull_request.head.sha || github.sha }}
+      CSF_TGZ_SHA256: ${{ needs.package-producer.outputs.sha256 }}
+      CSF_PRODUCER_STATE: ${{ needs.package-producer.result }}
+      CSF_CONSUMER_STATE: ${{ needs.package-consumer.result }}
+    steps:
+      - name: Fail closed on failed, missing, cancelled or skipped producers/consumers
+        run: test "$CSF_PRODUCER_STATE" = success && test "$CSF_CONSUMER_STATE" = success && test -n "$CSF_TGZ_SHA256"
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: package-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/csf-candidate
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          pattern: package-consumer-${{ github.run_id }}-${{ github.run_attempt }}-*
+          path: ${{ runner.temp }}/csf-results
+          merge-multiple: false
+      - name: Require all rows and one candidate digest
+        run: node "$RUNNER_TEMP/csf-candidate/scripts/single-pack.js" aggregate "$RUNNER_TEMP/csf-candidate" "$RUNNER_TEMP/csf-results" "$RUNNER_TEMP/csf-summary.json"
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: package-acceptance-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/csf-summary.json
+          if-no-files-found: error
+          retention-days: 30
+
   pr-selective:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -224,7 +332,7 @@ jobs:
 
   pr-package-smoke-matrix:
     if: needs.pr-selective.outputs.requires-package-matrix == 'true'
-    needs: pr-selective
+    needs: [pr-selective, package-acceptance]
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -286,9 +394,14 @@ jobs:
 
   full-release-matrix:
     if: always() && github.event_name != 'pull_request'
-    needs: full-validation
+    needs: [full-validation, package-acceptance]
     runs-on: ubuntu-latest
     steps:
+      - name: Require complete main and package acceptance
+        env:
+          FULL_RESULT: ${{ needs.full-validation.result }}
+          PACKAGE_RESULT: ${{ needs.package-acceptance.result }}
+        run: test "$FULL_RESULT" = success && test "$PACKAGE_RESULT" = success
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
       - name: Set up Node.js 20.17.0

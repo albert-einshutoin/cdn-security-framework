@@ -1,4 +1,7 @@
 #!/usr/bin/env node
+import { assertSupportedNode } from '../lib/node-engine';
+assertSupportedNode(require.main === module);
+
 /**
  * Policy lint: validates policy YAML against policy/schema.json using ajv,
  * then runs compile-core's auth-gate validator for cross-field checks that
