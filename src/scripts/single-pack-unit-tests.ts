@@ -4,6 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { aggregate, collectResults, matrixRows, verifyTarball } from './single-pack';
+import { assertSafeOutput, requiredChecks, requiredStepIds, requiredInputKeys, requiredOutputKeys } from './package-journey';
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-single-pack-unit-'));
 let count = 0;
 function test(name: string, fn: () => void): void { fn(); count++; console.log(`OK: ${name}`); }
@@ -17,7 +18,25 @@ try {
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
   const resolution = Object.values(pkg.exports).filter((v: any) => typeof v === 'object').map((v: any) => v.require.slice(2));
   const dependencies = Object.fromEntries(Object.keys(pkg.dependencies).map(k => [k,'1.0.0']));
-  const rows = matrixRows.map(row => ({ ...m, runtime: { executable: 'node', sha256: 'f'.repeat(64), platform: 'linux', arch: 'x64' }, row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2', switchVerified: true, resolution, dependencies, steps: Array.from({length:row.startsWith('18') || row === '20.16.0' ? 26 : 12},()=>({command:'node',exit:0,expectedExit:0,durationMs:1})), checks: row.startsWith('18') || row === '20.16.0' ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas'] }));
+  const journeySteps = [...requiredStepIds,
+    'docs-2-1', 'docs-2-2', 'docs-2-3', 'docs-5-4', 'docs-5-5', 'docs-5-6', 'docs-5-7',
+    'parity-text', 'parity-json', 'parity-sarif', 'parity-github-summary',
+    'parity-text', 'parity-json', 'parity-sarif', 'parity-github-summary'].map(id => {
+    const exit = id === 'diff-exit-3' ? 3 : id === 'diff-exit-2'
+      || ['boundary-invalid-policy', 'boundary-output-collision', 'boundary-output-symlink', 'boundary-output-hardlink', 'exception-invalid', 'exception-input-error'].includes(id) ? 2
+      : id.startsWith('parity-') || id.startsWith('exception-') || id === 'rich-diff-summary'
+        || id.startsWith('boundary-') ? 1 : 0;
+    return { id, exit, expectedExit: exit, durationMs: 1, stdoutBytes: 1, stderrBytes: 0 };
+  });
+  const journey = { status: 'pass' as const, checks: [...requiredChecks], steps: journeySteps,
+    outputs: Object.fromEntries(requiredOutputKeys.map(key => [key,{sha256:'e'.repeat(64),bytes:1}])),
+    inputs: Object.fromEntries(requiredInputKeys.map(key => [key,'e'.repeat(64)])),
+    toolchain: { node: '24.1.0' }, onlinePreparationMs: 1, offlineAcceptanceMs: 2,
+    findings: [
+      { ruleId: 'SC-EXPOSURE-001', severity: 'error', route: '/health', evidence: ['parity.yaml#/paths/~1health/post', 'policy.yml#/request/allow_methods'], suppressed: false },
+      { ruleId: 'SC-EXPOSURE-002', severity: 'error', route: 'POST /health', evidence: ['parity.yaml#/paths/~1health/post', 'policy.yml#/request/allow_methods'], suppressed: false },
+    ] };
+  const rows = matrixRows.map(row => ({ ...m, runtime: { executable: 'node', sha256: 'f'.repeat(64), platform: 'linux', arch: 'x64' }, row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2', switchVerified: true, resolution, dependencies, steps: Array.from({length:row.startsWith('18') || row === '20.16.0' ? 26 : 12},()=>({command:'node',exit:0,expectedExit:0,durationMs:1})), checks: row.startsWith('18') || row === '20.16.0' ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas'], ...(row === '24' ? {journey} : {}) }));
   fs.writeFileSync(path.join(temp, 'metadata.json'), JSON.stringify(m));
   test('same candidate and complete rows pass', () => { verifyTarball(temp, e); aggregate(m, rows, e, ['success','success']); });
   test('changed tarball fails', () => { fs.writeFileSync(path.join(temp, 'candidate.tgz'), 'tampered!'); assert.throws(() => verifyTarball(temp, e)); fs.writeFileSync(path.join(temp, 'candidate.tgz'), 'candidate'); });
@@ -46,6 +65,15 @@ try {
   test('different consumer tarball fails', () => assert.throws(() => aggregate(m, rows.map((r,i) => i ? r : {...r,sha256:'d'.repeat(64)}), e, ['success','success'])));
   test('wrong runtime fails', () => assert.throws(() => aggregate(m, rows.map((r,i) => i ? r : {...r,node:'20.16.0'}), e, ['success','success'])));
   test('validation not executed fails', () => assert.throws(() => aggregate(m, rows.map((r,i) => i ? r : {...r,checks:[]}), e, ['success','success'])));
+  test('missing onboarding acceptance fails closed', () => assert.throws(() => aggregate(m, rows.map(r => ({ ...r, journey: undefined })), e, ['success','success'])));
+  test('incomplete onboarding acceptance fails closed', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, journey: { ...journey, checks: [] } } : r), e, ['success','success'])));
+  test('wrong onboarding finding fails closed', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, journey: { ...journey, findings: [{ ...journey.findings[0], ruleId: 'MISSING' }] } } : r), e, ['success','success'])));
+  test('wrong onboarding exit fails closed', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, journey: { ...journey, steps: journeySteps.map(s => s.id === 'diff-exit-3' ? { ...s, exit: 0 } : s) } } : r), e, ['success','success'])));
+  test('missing onboarding output digest fails closed', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, journey: { ...journey, outputs: {} } } : r), e, ['success','success'])));
+  test('missing boundary scenario fails closed', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, journey: { ...journey, steps: journeySteps.filter(s => s.id !== 'boundary-ref-count') } } : r), e, ['success','success'])));
+  test('missing input identity fails closed', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, journey: { ...journey, inputs: Object.fromEntries(Object.entries(journey.inputs).filter(([key]) => key !== 'privacy-openapi')) } } : r), e, ['success','success'])));
+  test('onboarding privacy scanner detects raw synthetic credential', () => assert.throws(() => assertSafeOutput('Bearer SYNTHETIC_SECRET_890_VALUE', '/workspace', 'unit'), /AC_unit_PRIVACY_VALUE/));
+  test('onboarding privacy scanner detects absolute workspace path', () => assert.throws(() => assertSafeOutput('/workspace/private', '/workspace', 'unit'), /AC_unit_PRIVACY_PATH/));
   for (const state of ['failure','cancelled','skipped','']) {
     test(`producer ${state || 'missing'} fails`, () => assert.throws(() => aggregate(m, rows, e, [state,'success'])));
     test(`consumer ${state || 'missing'} fails`, () => assert.throws(() => aggregate(m, rows, e, ['success',state])));
