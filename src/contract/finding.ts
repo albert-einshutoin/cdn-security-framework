@@ -155,7 +155,7 @@ function normalizeEvidenceUri(uri: string, workspaceRoot?: string): string {
   const isPosixAbsolute = normalized.startsWith('/');
   if (!isWindowsAbsolute && !isPosixAbsolute) {
     if (normalized.split('/').includes('..')) throw new Error('Finding evidence uri escapes its root');
-    return normalized.replace(/^\.\//, '');
+    return redactEvidenceFilename(normalized.replace(/^\.\//, ''));
   }
   if (!workspaceRoot) throw new Error('Finding absolute evidence uri requires workspaceRoot');
 
@@ -169,7 +169,16 @@ function normalizeEvidenceUri(uri: string, workspaceRoot?: string): string {
   if (!relative || relative.split('/').includes('..')) {
     throw new Error('Finding evidence uri is invalid');
   }
-  return relative;
+  return redactEvidenceFilename(relative);
+}
+
+function redactEvidenceFilename(uri: string): string {
+  return uri.split('/').map((segment) => {
+    let decoded = segment;
+    try { decoded = decodeURIComponent(segment); } catch { /* Keep malformed escapes inert. */ }
+    return /^(?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|(?:x[-_])?api[-_]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|credentials?|token|password|secret)[_=-].+/i.test(decoded)
+      ? '[REDACTED_FILENAME]' : segment;
+  }).join('/');
 }
 
 function sanitizeEvidence(
