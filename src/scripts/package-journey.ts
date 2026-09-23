@@ -40,6 +40,12 @@ export const requiredOutputKeys = ['candidate', 'candidate-meta', 'rich-inspecti
   'exception-github-summary', 'exception-expired', 'exception-expired-summary',
   'privacy-text', 'privacy-json', 'privacy-sarif', 'privacy-github-summary',
   'privacy-key-text', 'privacy-key-json', 'privacy-key-sarif', 'privacy-key-github-summary'] as const;
+export const expectedFindingProof = [
+  { ruleId: 'SC-EXPOSURE-001', severity: 'error', route: '/health',
+    evidence: ['parity.yaml#/paths/~1health/post/security', 'parity.yaml#/paths/~1health/post', 'policy.yml#/request/allow_methods'], suppressed: false },
+  { ruleId: 'SC-EXPOSURE-002', severity: 'error', route: 'POST /health',
+    evidence: ['parity.yaml#/paths/~1health/post/security', 'parity.yaml#/paths/~1health/post', 'policy.yml#/request/allow_methods'], suppressed: false },
+] as const;
 type Step = { id: string; exit: number; expectedExit: number; durationMs: number; stdoutBytes: number; stderrBytes: number };
 type Output = { sha256: string; bytes: number };
 export type JourneyResult = { status: 'pass'; checks: string[]; steps: Step[]; outputs: Record<string, Output>; inputs: Record<string, string>; toolchain: Record<string, string>; onlinePreparationMs: number; offlineAcceptanceMs: number; findings: Array<{ ruleId: string; severity: string; route: string; evidence: string[]; suppressed: boolean }> };
@@ -407,6 +413,7 @@ export function runAcceptance(artifact: string, fixtureRoot: string): JourneyRes
     parityFindings = base.report.findings.map((f: any) => ({ ruleId: f.ruleId, severity: f.severity,
       route: [f.route?.method, f.route?.path].filter(Boolean).join(' '),
       evidence: f.evidence.map((v: any) => `${v.uri}#${v.pointer}`), suppressed: false }));
+    need(JSON.stringify(parityFindings) === JSON.stringify(expectedFindingProof), 'PARITY_FINDING_PROOF');
     exceptions(root, base.report, base.openapi, base.policy);
   });
   isolated('exits', cleanAndExits);

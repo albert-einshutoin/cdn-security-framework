@@ -4,7 +4,7 @@ import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
 import { aggregate, collectResults, matrixRows, verifyTarball } from './single-pack';
-import { assertSafeOutput, requiredChecks, requiredStepIds, requiredInputKeys, requiredOutputKeys } from './package-journey';
+import { assertSafeOutput, requiredChecks, requiredStepIds, requiredInputKeys, requiredOutputKeys, expectedFindingProof } from './package-journey';
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-single-pack-unit-'));
 let count = 0;
 function test(name: string, fn: () => void): void { fn(); count++; console.log(`OK: ${name}`); }
@@ -32,10 +32,7 @@ try {
     outputs: Object.fromEntries(requiredOutputKeys.map(key => [key,{sha256:'e'.repeat(64),bytes:1}])),
     inputs: Object.fromEntries(requiredInputKeys.map(key => [key,'e'.repeat(64)])),
     toolchain: { node: '24.1.0' }, onlinePreparationMs: 1, offlineAcceptanceMs: 2,
-    findings: [
-      { ruleId: 'SC-EXPOSURE-001', severity: 'error', route: '/health', evidence: ['parity.yaml#/paths/~1health/post', 'policy.yml#/request/allow_methods'], suppressed: false },
-      { ruleId: 'SC-EXPOSURE-002', severity: 'error', route: 'POST /health', evidence: ['parity.yaml#/paths/~1health/post', 'policy.yml#/request/allow_methods'], suppressed: false },
-    ] };
+    findings: expectedFindingProof.map(finding => ({ ...finding, evidence: [...finding.evidence] })) };
   const rows = matrixRows.map(row => ({ ...m, runtime: { executable: 'node', sha256: 'f'.repeat(64), platform: 'linux', arch: 'x64' }, row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2', switchVerified: true, resolution, dependencies, steps: Array.from({length:row.startsWith('18') || row === '20.16.0' ? 26 : 12},()=>({command:'node',exit:0,expectedExit:0,durationMs:1})), checks: row.startsWith('18') || row === '20.16.0' ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas'], ...(row === '24' ? {journey} : {}) }));
   fs.writeFileSync(path.join(temp, 'metadata.json'), JSON.stringify(m));
   test('same candidate and complete rows pass', () => { verifyTarball(temp, e); aggregate(m, rows, e, ['success','success']); });

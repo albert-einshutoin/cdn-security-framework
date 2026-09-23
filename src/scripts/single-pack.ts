@@ -67,7 +67,7 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
     assert.deepEqual(r.checks, row === '18.20.8' || row === '20.16.0' ? ['node-rejection', 'resolution', 'no-side-effects'] : ['package-smoke', 'resolution', 'schemas']);
     if (row === '24') {
       const j = r.journey;
-      const { requiredChecks: required, requiredStepIds, requiredInputKeys, requiredOutputKeys } = require('./package-journey') as typeof import('./package-journey');
+      const { requiredChecks: required, requiredStepIds, requiredInputKeys, requiredOutputKeys, expectedFindingProof } = require('./package-journey') as typeof import('./package-journey');
       assert.ok(j && j.status === 'pass' && Array.isArray(j.checks), 'missing onboarding acceptance');
       assert.deepEqual(j.checks, required, 'incomplete onboarding acceptance');
       assert.ok(Array.isArray(j.steps) && j.steps.length > 0 && j.steps.every(s => s.exit === s.expectedExit && Number.isFinite(s.durationMs) && s.durationMs >= 0), 'invalid onboarding command evidence');
@@ -84,10 +84,7 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
       assert.ok(Object.keys(j.outputs).length >= 6 && Object.values(j.outputs).every(v => /^[a-f0-9]{64}$/.test(v.sha256) && Number.isSafeInteger(v.bytes) && v.bytes > 0), 'missing output digests');
       for (const key of requiredInputKeys) assert.ok(j.inputs[key], `missing onboarding input ${key}`);
       for (const key of requiredOutputKeys) assert.ok(j.outputs[key], `missing onboarding output ${key}`);
-      assert.deepEqual(j.findings, [
-        { ruleId: 'SC-EXPOSURE-001', severity: 'error', route: '/health', evidence: ['parity.yaml#/paths/~1health/post', 'policy.yml#/request/allow_methods'], suppressed: false },
-        { ruleId: 'SC-EXPOSURE-002', severity: 'error', route: 'POST /health', evidence: ['parity.yaml#/paths/~1health/post', 'policy.yml#/request/allow_methods'], suppressed: false },
-      ], 'missing onboarding finding proof');
+      assert.deepEqual(j.findings, expectedFindingProof, 'missing onboarding finding proof');
     }
   }
 }
