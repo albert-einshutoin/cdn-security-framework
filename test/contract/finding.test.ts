@@ -295,15 +295,28 @@ describe('Finding Contract v1', () => {
       expect(JSON.stringify(finding)).not.toContain(secret);
       expect(finding.evidence[0].uri).toBe('config/[REDACTED_FILENAME]');
     }
+    for (const uri of ['config/backup-token-opaquevalue123.yaml', 'config/backup-token%2Dopaquevalue123.yaml']) {
+      const finding = createFinding({
+        ...baseInput,
+        evidence: [{ ...baseInput.evidence[0], uri }],
+      });
+      expect(finding.evidence[0].uri).toBe('config/[REDACTED_FILENAME]');
+    }
     expect(createFinding({
       ...baseInput,
       evidence: [{ ...baseInput.evidence[0], uri: 'config/public-guide.yaml' }],
     }).evidence[0].uri).toBe('config/public-guide.yaml');
-    for (const safeUri of ['docs/oauth-token-format.md', 'config/backup-token-guide.yaml']) {
+    for (const safeUri of ['docs/public-guide.md', 'config/backup-guide.yaml']) {
       expect(createFinding({
         ...baseInput,
         evidence: [{ ...baseInput.evidence[0], uri: safeUri }],
       }).evidence[0].uri).toBe(safeUri);
+    }
+    for (const ambiguousUri of ['docs/oauth-token-format.md', 'config/backup-token-guide.yaml']) {
+      expect(createFinding({
+        ...baseInput,
+        evidence: [{ ...baseInput.evidence[0], uri: ambiguousUri }],
+      }).evidence[0].uri).toBe(ambiguousUri.replace(/[^/]+$/, '[REDACTED_FILENAME]'));
     }
   });
 });
