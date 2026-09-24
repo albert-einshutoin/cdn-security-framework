@@ -20,7 +20,8 @@ const QUERY_PREFIX = /[?&][^=\s&#]+=/g;
 const PROVIDER_TOKEN_PATTERN = /\b(?:sk-(?:proj-)?|gh[opsur]_|github_pat_|AKIA|(?:sk|pk)_)[A-Za-z0-9_.-]{8,}/i;
 const REDACTED_MARKER = '[REDACTED]';
 const SENSITIVE_FILENAME_KEY = '(?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|(?:x[-_])?api[-_]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|credentials?|token|password|secret)';
-const SENSITIVE_FILENAME_MARKER = new RegExp(`(?:^${SENSITIVE_FILENAME_KEY}[_=-].+|(?:^|[._-])${SENSITIVE_FILENAME_KEY}[=._].+)`, 'i');
+// A qualified `-token-value` is ambiguous with a document name; evidence must fail closed.
+const SENSITIVE_FILENAME_MARKER = new RegExp(`(?:^${SENSITIVE_FILENAME_KEY}[_=-].+|(?:^|[._-])${SENSITIVE_FILENAME_KEY}[=._-].+)`, 'i');
 
 export function redactEvidenceFilename(uri: string): string {
   return uri.split('/').map((segment) => {
