@@ -124,7 +124,7 @@ jobs:
         run: |
           VERSION="$(node -p "require('./package.json').version")"
           NAME="$(node -p "require('./package.json').name")"
-          if npm view "${NAME}@${VERSION}" version >/dev/null 2>&1; then
+          if npm view "${NAME}@${VERSION}" version --registry=https://registry.npmjs.org/ >/dev/null 2>&1; then
             echo "exists=true" >> "$GITHUB_OUTPUT"
             echo "${NAME}@${VERSION} already exists on npm; skipping publish and running verification only."
           else
@@ -141,7 +141,7 @@ jobs:
         # identity for the attestation; the legacy token only authorizes the
         # publish itself. Both modes produce a verifiable attestation on the
         # npm registry.
-        run: npm publish "$RUNNER_TEMP/csf-release-candidate/candidate.tgz" --ignore-scripts --provenance --access public --tag "$CSF_DIST_TAG"
+        run: npm publish "$RUNNER_TEMP/csf-release-candidate/candidate.tgz" --ignore-scripts --provenance --access public --tag "$CSF_DIST_TAG" --registry=https://registry.npmjs.org/
 
       # After publish, fetch the tarball we just pushed and verify the
       # registry-side attestation signatures cover it. This catches two
@@ -161,7 +161,7 @@ jobs:
           # the `npm pack --dry-run` artifact from the lint step.
           mkdir -p provenance-verify
           cd provenance-verify
-          REGISTRY_TGZ="$(npm pack "${NAME}@${VERSION}")"
+          REGISTRY_TGZ="$(npm pack "${NAME}@${VERSION}" --registry=https://registry.npmjs.org/)"
           test -f "$REGISTRY_TGZ"
           test "$(sha256sum "$REGISTRY_TGZ" | cut -d ' ' -f 1)" = "$CSF_APPROVED_SHA256"
           # `npm audit signatures` hits the registry attestation API and
@@ -169,5 +169,5 @@ jobs:
           # dependency set lacks a valid attestation. We run it inside the
           # scratch dir where the published tarball is the install target.
           npm init -y >/dev/null
-          npm install --no-save "${NAME}@${VERSION}"
-          npm audit signatures
+          npm install --no-save "${NAME}@${VERSION}" --registry=https://registry.npmjs.org/
+          npm audit signatures --registry=https://registry.npmjs.org/

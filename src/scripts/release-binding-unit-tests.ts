@@ -3,7 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
-import { loadApproval, selectApproval, verifyBinding } from './release-binding';
+import { loadApproval, selectApproval, verifyBinding, verifyReleaseDiff, verifyPublishTarget, verifyH01Evidence } from './release-binding';
 import { verifyTarball } from './single-pack';
 
 type Input = Parameters<typeof verifyBinding>[0];
@@ -11,13 +11,18 @@ const final = {
   source: 'a'.repeat(40), tree: 'b'.repeat(40), run: '123', attempt: '1',
   sha256: 'c'.repeat(64), lockSha256: 'd'.repeat(64),
 };
+const rcPackage = { name: 'cdn-security-framework', version: '1.4.0', dependencies: { ajv: '8.0.0' }, scripts: { test: 'node test.js' }, exports: { '.': './index.js' } };
+const finalPackage = { ...rcPackage, version: '2.0.0' };
+const rcLock = { name: rcPackage.name, version: rcPackage.version, packages: { '': { name: rcPackage.name, version: rcPackage.version }, 'node_modules/ajv': { version: '8.0.0' } } };
+const finalLock = { ...rcLock, version: finalPackage.version, packages: { ...rcLock.packages, '': { ...rcLock.packages[''], version: finalPackage.version } } };
+const releasePaths = ['package.json', 'package-lock.json', 'CHANGELOG.md', 'CHANGELOG.ja.md'];
 function input(): Input {
   return {
     approval: {
       version: 1, decision: 'GO', rc: { ...final, source: 'e'.repeat(40), run: '100', sha256: 'f'.repeat(64) },
-      final: { ...final }, tag: 'v2.0.0', packageVersion: '2.0.0', distTag: 'latest',
+      final: { ...final }, tag: 'v2.0.0', packageVersion: '2.0.0', distTag: 'latest', registry: 'https://registry.npmjs.org/',
       h01Evidence: 'https://github.com/albert-einshutoin/cdn-security-framework/issues/890#issuecomment-123',
-      changedPaths: ['package.json'],
+      changedPaths: [...releasePaths],
     },
     approvalAuthor: 'albert-einshutoin', repository: 'albert-einshutoin/cdn-security-framework',
     environment: { protection_rules: [{ type: 'required_reviewers', prevent_self_review: true, reviewers: [{}] }] },
@@ -31,7 +36,7 @@ function input(): Input {
     ].map((name) => ({ name, status: 'completed', conclusion: 'success' })),
     checkout: final.source, checkoutTree: final.tree, rcTree: final.tree,
     tagCommit: final.source, tag: 'v2.0.0', packageVersion: '2.0.0',
-    changedPaths: ['package.json'], rcArtifact: { ...final, source: 'e'.repeat(40), run: '100', sha256: 'f'.repeat(64) },
+    changedPaths: [...releasePaths], rcArtifact: { ...final, source: 'e'.repeat(40), run: '100', sha256: 'f'.repeat(64) },
     artifact: { ...final },
   };
 }
@@ -52,6 +57,9 @@ const rejects: Array<[string, (value: Input) => void]> = [
   ['reviewed RC tree mismatch', (v) => { v.rcTree = '0'.repeat(40); }],
   ['tag commit mismatch', (v) => { v.tagCommit = '0'.repeat(40); }],
   ['unapproved final diff', (v) => { v.changedPaths.push('src/other.ts'); }],
+  ['owner approved source change', (v) => { v.changedPaths.push('src/other.ts'); v.approval.changedPaths.push('src/other.ts'); }],
+  ['owner approved workflow change', (v) => { v.changedPaths.push('.github/workflows/release-npm.yml'); v.approval.changedPaths.push('.github/workflows/release-npm.yml'); }],
+  ['owner approved generated runtime change', (v) => { v.changedPaths.push('bin/cli.js'); v.approval.changedPaths.push('bin/cli.js'); }],
   ['another artifact run', (v) => { v.artifact.run = '124'; }],
   ['substituted reviewed RC digest', (v) => { v.rcArtifact.sha256 = '0'.repeat(64); }],
   ['another artifact attempt', (v) => { v.artifact.attempt = '2'; }],
@@ -75,6 +83,49 @@ prerelease.approval.tag = 'v2.0.0-rc.1'; prerelease.tag = 'v2.0.0-rc.1';
 prerelease.approval.packageVersion = '2.0.0-rc.1'; prerelease.packageVersion = '2.0.0-rc.1';
 prerelease.approval.distTag = 'next';
 verifyBinding(prerelease);
+const buildMetadata = input();
+buildMetadata.approval.tag = 'v2.0.0+build-1'; buildMetadata.tag = 'v2.0.0+build-1';
+buildMetadata.approval.packageVersion = '2.0.0+build-1'; buildMetadata.packageVersion = '2.0.0+build-1';
+verifyBinding(buildMetadata);
+
+verifyReleaseDiff(releasePaths, rcPackage, finalPackage, rcLock, finalLock);
+for (const [label, paths, pkg, lock] of [
+  ['source', [...releasePaths, 'src/index.ts'], finalPackage, finalLock],
+  ['workflow', [...releasePaths, '.github/workflows/release-npm.yml'], finalPackage, finalLock],
+  ['generated runtime', [...releasePaths, 'bin/cli.js'], finalPackage, finalLock],
+  ['dependencies', releasePaths, { ...finalPackage, dependencies: { ajv: '9.0.0' } }, finalLock],
+  ['exports', releasePaths, { ...finalPackage, exports: { '.': './other.js' } }, finalLock],
+  ['scripts', releasePaths, { ...finalPackage, scripts: { test: 'node other.js' } }, finalLock],
+  ['lock dependency', releasePaths, finalPackage, { ...finalLock, packages: { ...finalLock.packages, 'node_modules/ajv': { version: '9.0.0' } } }],
+] as const) {
+  assert.throws(() => verifyReleaseDiff(paths, rcPackage, pkg, rcLock, lock), { name: 'AssertionError' }, label);
+}
+verifyPublishTarget(finalPackage, finalPackage, {}, 'https://registry.npmjs.org/');
+const workflow = fs.readFileSync('.github/workflows/release-npm.yml', 'utf8');
+for (const command of ['npm view', 'npm publish', 'npm pack', 'npm install --no-save', 'npm audit signatures']) {
+  const line = workflow.split('\n').find((entry) => !entry.trim().startsWith('#') && entry.includes(command));
+  assert.ok(line?.includes('--registry=https://registry.npmjs.org/'), `release command has no pinned registry: ${command}`);
+}
+for (const [label, checkout, packed, env, configured] of [
+  ['checkout publishConfig', { ...finalPackage, publishConfig: { registry: 'https://other.example/' } }, finalPackage, {}, 'https://registry.npmjs.org/'],
+  ['packed publishConfig', finalPackage, { ...finalPackage, publishConfig: { registry: 'https://other.example/' } }, {}, 'https://registry.npmjs.org/'],
+  ['npm env', finalPackage, finalPackage, { NPM_CONFIG_REGISTRY: 'https://other.example/' }, 'https://registry.npmjs.org/'],
+  ['npm config', finalPackage, finalPackage, {}, 'https://other.example/'],
+  ['packed name', finalPackage, { ...finalPackage, name: 'other-package' }, {}, 'https://registry.npmjs.org/'],
+] as const) {
+  assert.throws(() => verifyPublishTarget(checkout, packed, env, configured), { name: 'AssertionError' }, label);
+}
+const h01 = {
+  id: 123, issue_url: 'https://api.github.com/repos/albert-einshutoin/cdn-security-framework/issues/890', author_association: 'OWNER', user: { login: 'albert-einshutoin' },
+  body: `CSF_H01_ASSESSED_V1\n${JSON.stringify({ rcSource: 'e'.repeat(40), rcSha256: 'f'.repeat(64), finalSource: final.source, finalSha256: final.sha256, finalChangedPaths: releasePaths, en: 'assessed', ja: 'assessed', finalDiffImpact: 'assessed' })}`,
+};
+verifyH01Evidence(input().approval, h01, 'albert-einshutoin/cdn-security-framework');
+verifyH01Evidence(input().approval, { ...h01, body: h01.body.replace(JSON.stringify(releasePaths), JSON.stringify([...releasePaths].reverse())) }, 'albert-einshutoin/cdn-security-framework');
+assert.throws(() => verifyH01Evidence(input().approval, { ...h01, body: 'EN/JA preparation complete' }, 'albert-einshutoin/cdn-security-framework'), { name: 'AssertionError' });
+assert.throws(() => verifyH01Evidence(input().approval, { ...h01, body: h01.body.replace(JSON.stringify(releasePaths), JSON.stringify([...releasePaths, releasePaths[0]])) }, 'albert-einshutoin/cdn-security-framework'), { name: 'AssertionError' });
+assert.throws(() => verifyH01Evidence(input().approval, { ...h01, issue_url: 'https://api.github.com/repos/albert-einshutoin/cdn-security-framework/issues/895' }, 'albert-einshutoin/cdn-security-framework'), { name: 'AssertionError' });
+assert.throws(() => verifyH01Evidence(input().approval, { ...h01, body: h01.body.replace('assessed', 'pending') }, 'albert-einshutoin/cdn-security-framework'), { name: 'AssertionError' });
+assert.throws(() => verifyH01Evidence(input().approval, { ...h01, body: h01.body.replace(final.sha256, '0'.repeat(64)) }, 'albert-einshutoin/cdn-security-framework'), { name: 'AssertionError' });
 
 const go = input().approval;
 const comment = (id: number, decision: 'GO' | 'NO_GO') => ({
