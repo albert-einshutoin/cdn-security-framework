@@ -11,6 +11,7 @@ import {
   type FindingExceptionSetV1,
   type FindingInputV1,
 } from '../../src/contract';
+import { stableFindings } from '../../src/contract/drift/shared';
 
 const baseFinding: FindingInputV1 = {
   ruleId: 'SC-AUTHN-001',
@@ -31,6 +32,52 @@ function exceptionSet(exceptions: FindingExceptionSetV1['exceptions']): FindingE
 }
 
 describe('Finding Exception Contract v1', () => {
+  test('redacted filename identity leaves stale selectors unmatched without broadening suppression', () => {
+    const legacyInstanceId = '394560be41547c75fcced8b085263e6dcc0e72f14b41118fd5d163d42cdca301';
+    const finding = createFinding({
+      ...baseFinding,
+      evidence: [{ ...baseFinding.evidence[0], uri: 'config/backup-token-opaquevalue123.yaml' }],
+    });
+    const equivalent = createFinding({
+      ...baseFinding,
+      evidence: [{ ...baseFinding.evidence[0], uri: 'config/backup-token%2Ddifferentvalue.yaml' }],
+    });
+    const differentContent = createFinding({
+      ...baseFinding,
+      evidence: [{ ...baseFinding.evidence[0], uri: 'config/backup-token-anothervalue.yaml', digest: 'sha256:other' }],
+    });
+    expect(finding.evidence[0].uri).toBe('config/[REDACTED_FILENAME]');
+    expect(finding.instanceId).not.toBe(legacyInstanceId);
+    expect(equivalent.instanceId).toBe(finding.instanceId);
+    expect(differentContent.instanceId).not.toBe(finding.instanceId);
+    expect(stableFindings([finding, equivalent])).toHaveLength(1);
+    expect(stableFindings([finding, differentContent])).toHaveLength(2);
+
+    const stale = applyFindingExceptions([finding], exceptionSet([{
+      id: 'EXC-2026-OLD', rule_id: 'SC-AUTHN-001',
+      selector: { instance_id: legacyInstanceId },
+      reason: 'Temporary exception for a reviewed finding.',
+      owner: 'security-team', expires_at: '2026-12-01',
+    }]), { currentDate: '2026-08-23' });
+    expect(stale.suppressedFindings).toEqual([]);
+    expect(stale.findings.some(({ instanceId }) => instanceId === finding.instanceId)).toBe(true);
+
+    const unrelated = createFinding({ ...baseFinding, route: { method: 'GET', path: '/other' } });
+    const nonWaivable = createFinding({
+      ...baseFinding, ruleId: 'SC-UNSAFE-001', category: 'misconfiguration', tags: ['non-waivable'],
+    });
+    const current = applyFindingExceptions([finding, unrelated, nonWaivable], exceptionSet([{
+      id: 'EXC-2026-NEW', rule_id: 'SC-AUTHN-001',
+      selector: { instance_id: finding.instanceId },
+      reason: 'Temporary exception for a reviewed finding.',
+      owner: 'security-team', expires_at: '2026-12-01',
+    }]), { currentDate: '2026-08-23' });
+    expect(current.suppressedFindings.map(({ instanceId }) => instanceId)).toEqual([finding.instanceId]);
+    expect(current.findings.map(({ instanceId }) => instanceId)).toEqual(expect.arrayContaining([
+      unrelated.instanceId, nonWaivable.instanceId,
+    ]));
+  });
+
   test('applies the most specific live exception and retains expired, unused, and duplicate evidence', () => {
     const auth = createFinding(baseFinding);
     const request = createFinding({
