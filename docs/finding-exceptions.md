@@ -20,6 +20,8 @@ exceptions:
 
 `id`, `rule_id`, `selector`, `reason`, `owner`, and `expires_at` are required. Prefer an exact `instance_id`; otherwise use an exact `method` and `path`. A rule-only or wildcard selector is rejected unless `allow_broad: true` and a separate `broad_reason` are present. Never put credentials, tokens, cookies, passwords, or other secrets in rationale fields.
 
+After upgrading to a build that masks credential-like evidence filenames, review existing `instance_id` selectors. The sanitized evidence URI contributes to the Finding identity, so an old ID may no longer match; the Finding then remains unsuppressed. Generate a new exact ID only after reviewing the current Finding. Filenames that become the same masked URI can share an ID when their other identity evidence also matches; a different evidence digest still distinguishes them. Exceptions are never widened automatically.
+
 Load the file with `loadFindingExceptions()`, then pass its result and an explicit ISO `currentDate` to `applyFindingExceptions()`. The explicit date keeps CI output deterministic. The report contains active `findings`, original `suppressedFindings`, sorted `appliedExceptionIds`, and before/after counts.
 
 ## Lifecycle and audit

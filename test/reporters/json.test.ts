@@ -3,7 +3,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 
-const { diffSecurityContracts, formatContractDiffJson } = require('../../contract') as typeof import('../../src/contract');
+const { createFinding, diffSecurityContracts, formatContractDiffJson } = require('../../contract') as typeof import('../../src/contract');
 const {
   JsonReportError,
   renderUnifiedContractDiffJson,
@@ -222,5 +222,25 @@ describe('Unified contract JSON reporter', () => {
       expect((error as JsonReportError).code).toBe('JSON_REPORT_PRIVACY_VIOLATION');
       expect((error as Error).message).not.toContain('super-secret');
     }
+  });
+
+  test('does not emit encoded provider-token filenames from a normalized Finding', () => {
+    const report = reportFixture();
+    const tokenSuffix = 'syntheticvalue12345678';
+    const finding = createFinding({
+      ruleId: 'SC-TST-001', severity: 'error', confidence: 'deterministic', category: 'exposure',
+      title: 'Synthetic mismatch', message: 'Synthetic finding',
+      evidence: [{ source: 'openapi', uri: `refs/ghp%5F${tokenSuffix}.yaml`,
+        digest: `sha256:${'a'.repeat(64)}`, analyzer: 'test', capability: 'routes', complete: true }],
+    });
+    const output = renderUnifiedContractDiffJson({
+      ...report, findings: [finding], summary: {
+        ...report.summary, total: 1, error: 1,
+        bySeverity: { ...report.summary.bySeverity, error: 1 },
+        byCategory: { ...report.summary.byCategory, exposure: 1 },
+      },
+    });
+    expect(output).toContain('refs/[REDACTED_FILENAME]');
+    expect(output).not.toContain(tokenSuffix);
   });
 });
