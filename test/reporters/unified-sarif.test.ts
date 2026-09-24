@@ -66,6 +66,44 @@ function report(): ContractDiffReportV1 {
 
 describe('Unified contract SARIF adapter', () => {
   test.each([
+    'authorization.SYNTHETIC_SECRET_890_VALUE.yaml',
+    'backup-token=SYNTHETIC_SECRET_890_VALUE.yaml',
+    'authorization%252ESYNTHETIC_SECRET_890_VALUE.yaml',
+    'nested%2Fauthorization.SYNTHETIC_SECRET_890_VALUE.yaml',
+  ])('does not publish sensitive evidence filenames through report formats: %s', (uri) => {
+    const input = report();
+    input.inputDigests = { openapi: `sha256:${'a'.repeat(64)}`, policy: `sha256:${'b'.repeat(64)}`, exceptions: null };
+    input.findings = [createFinding({
+      ...input.findings[0],
+      evidence: [{ ...input.findings[0].evidence[0], uri: `config/${uri}`, digest: `sha256:${'b'.repeat(64)}` }],
+    })];
+    expect(input.findings[0].evidence[0].uri).toBe('config/[REDACTED_FILENAME]');
+    const outputs = [
+      renderUnifiedContractDiffJson(input),
+      renderUnifiedContractDiffText(input),
+      JSON.stringify(renderUnifiedContractDiffSarif(input)),
+      renderContractDiffGitHubSummary(input),
+    ];
+    for (const output of outputs) expect(output).not.toContain('SYNTHETIC_SECRET_890_VALUE');
+    expect(outputs[0]).toContain('[REDACTED_FILENAME]');
+    expect(outputs[1]).toContain('[REDACTED_FILENAME]');
+    expect(outputs[2]).toContain('config/%5BREDACTED_FILENAME%5D');
+  });
+
+  test('rejects or masks a raw sensitive evidence filename at reporter boundaries', () => {
+    const input = report();
+    input.inputDigests = { openapi: `sha256:${'a'.repeat(64)}`, policy: `sha256:${'b'.repeat(64)}`, exceptions: null };
+    input.findings[0] = {
+      ...input.findings[0],
+      evidence: [{ ...input.findings[0].evidence[0], uri: 'config/backup-token=SYNTHETIC_SECRET_890_VALUE.yaml', digest: `sha256:${'b'.repeat(64)}` }],
+    };
+    expect(() => renderUnifiedContractDiffJson(input)).toThrow('JSON_REPORT_PRIVACY_VIOLATION');
+    expect(() => renderUnifiedContractDiffSarif(input)).toThrow('SARIF_PRIVACY_VIOLATION');
+    expect(renderUnifiedContractDiffText(input)).not.toContain('SYNTHETIC_SECRET_890_VALUE');
+    expect(renderContractDiffGitHubSummary(input)).not.toContain('SYNTHETIC_SECRET_890_VALUE');
+  });
+
+  test.each([
     "{'credential':'ISSUE1020_VALUE','status':'failed'}",
     "{'credential':'prefix\\'ISSUE1020_VALUE','status':'failed','count':2}",
     '{"credentials":"prefix\\"ISSUE1020_VALUE","status":"failed","count":2}',

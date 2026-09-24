@@ -1,7 +1,7 @@
 import type { ContractDiffReportV1 } from '../contract/contract-diff';
 import type { FindingEvidenceV1, SecurityFindingV1 } from '../contract/finding';
 import { compareFindings, sortFindings } from '../contract/finding-order';
-import { hasUnsafeSensitiveText } from '../contract/sensitive-text';
+import { hasUnsafeSensitiveText, redactEvidenceFilename } from '../contract/sensitive-text';
 
 export interface SarifLog {
   version: '2.1.0';
@@ -197,7 +197,7 @@ function normalizedEvidenceUri(evidence: FindingEvidenceV1): string {
   const decoded = normalized.replace(/%([0-9A-Fa-f]{2})/g, (_match, hex: string) => (
     String.fromCharCode(Number.parseInt(hex, 16))
   ));
-  if (hasUnsafeSensitiveText(decoded)) {
+  if (hasUnsafeSensitiveText(decoded) || redactEvidenceFilename(decoded) !== decoded) {
     throw new SarifReportError('SARIF_PRIVACY_VIOLATION', 'Finding evidence URI contains sensitive data.');
   }
   return normalized;

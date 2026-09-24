@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { isSensitiveField, redactSensitiveText } from './sensitive-text';
+import { isSensitiveField, redactEvidenceFilename, redactSensitiveText } from './sensitive-text';
 
 export const FINDING_SEVERITIES = ['error', 'warning', 'info'] as const;
 export const FINDING_CONFIDENCES = ['deterministic', 'high-confidence', 'heuristic'] as const;
@@ -170,15 +170,6 @@ function normalizeEvidenceUri(uri: string, workspaceRoot?: string): string {
     throw new Error('Finding evidence uri is invalid');
   }
   return redactEvidenceFilename(relative);
-}
-
-function redactEvidenceFilename(uri: string): string {
-  return uri.split('/').map((segment) => {
-    let decoded = segment;
-    try { decoded = decodeURIComponent(segment); } catch { /* Keep malformed escapes inert. */ }
-    return /^(?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|(?:x[-_])?api[-_]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|credentials?|token|password|secret)[_=-].+/i.test(decoded)
-      ? '[REDACTED_FILENAME]' : segment;
-  }).join('/');
 }
 
 function sanitizeEvidence(

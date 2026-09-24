@@ -2,7 +2,7 @@ import type { AllowedCapabilityStatus } from '../contract/allowed-surface';
 import type { ContractDiffReportV1 } from '../contract/contract-diff';
 import type { FindingEvidenceV1, SecurityFindingV1 } from '../contract/finding';
 import { sortFindings } from '../contract/finding-order';
-import { isSensitiveField, redactSensitiveText } from '../contract/sensitive-text';
+import { isSensitiveField, redactEvidenceFilename, redactSensitiveText } from '../contract/sensitive-text';
 import type { CapabilityLevelV1, SecurityContractCapabilitiesV1 } from '../contract/security-ir';
 
 export interface UnifiedContractDiffTextOptions {
@@ -149,7 +149,7 @@ function evidenceText(evidence: FindingEvidenceV1): string {
   const rawUri = evidence.uri.split(/[?#]/, 1)[0];
   const uri = /^(?:[A-Za-z][A-Za-z0-9+.-]*:|[A-Za-z]:[\\/]|\/)/u.test(rawUri)
     ? '[external]'
-    : terminalText(rawUri);
+    : terminalText(redactEvidenceFilename(rawUri));
   const pointer = evidence.pointer ? terminalText(evidence.pointer) : '';
   return `${uri}${pointer ? `#${pointer}` : ''}`;
 }
