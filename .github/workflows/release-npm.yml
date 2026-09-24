@@ -30,11 +30,28 @@ jobs:
     steps:
       - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
 
+      - name: Validate release tag
+        id: release_tag
+        env:
+          DISPATCH_TAG: ${{ inputs.tag }}
+        run: |
+          TAG_NAME="${GITHUB_REF_NAME}"
+          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
+            TAG_NAME="${DISPATCH_TAG}"
+          fi
+          if [[ ! "${TAG_NAME}" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+            echo "Release tag must be a v-prefixed version."
+            exit 1
+          fi
+          printf 'tag=%s\n' "${TAG_NAME}" >> "${GITHUB_OUTPUT}"
+
       - name: Checkout release tag for manual dispatch
         if: github.event_name == 'workflow_dispatch'
+        env:
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
         run: |
-          git fetch --force origin "refs/tags/${{ inputs.tag }}:refs/tags/${{ inputs.tag }}"
-          git checkout --detach "refs/tags/${{ inputs.tag }}"
+          git fetch origin "refs/tags/${RELEASE_TAG}:refs/tags/${RELEASE_TAG}"
+          git checkout --detach "refs/tags/${RELEASE_TAG}"
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -44,15 +61,10 @@ jobs:
           cache: 'npm'
 
       - name: Ensure tag matches package version
+        env:
+          RELEASE_TAG: ${{ steps.release_tag.outputs.tag }}
         run: |
-          TAG_NAME="${GITHUB_REF_NAME}"
-          if [ "${GITHUB_EVENT_NAME}" = "workflow_dispatch" ]; then
-            TAG_NAME="${{ inputs.tag }}"
-          fi
-          case "$TAG_NAME" in
-            v*) ;;
-            *) echo "Release tag must start with v. Got: $TAG_NAME"; exit 1 ;;
-          esac
+          TAG_NAME="${RELEASE_TAG}"
           git fetch origin main
           TAG_COMMIT="$(git rev-list -n 1 "$TAG_NAME")"
           if ! git merge-base --is-ancestor "$TAG_COMMIT" origin/main; then
