@@ -20,6 +20,8 @@ exceptions:
 
 `id`、`rule_id`、`selector`、`reason`、`owner`、`expires_at`は必須です。可能ならExactな`instance_id`を使い、それ以外はExactな`method`と`path`で限定します。Rule-onlyまたはWildcard Selectorは、`allow_broad: true`と独立した`broad_reason`がない限り拒否されます。理由欄にはCredential、Token、Cookie、Passwordなどの秘密情報を記載しないでください。
 
+Credentialらしい証拠ファイル名をマスクする版へ更新した後は、既存の`instance_id` selectorを確認してください。マスク後の証拠URIはFindingのidentityに含まれるため、旧IDが一致しなくなるとFindingは未抑制で残ります。現在のFindingを確認してから新しいExact IDを設定してください。異なるファイル名が同じマスク表示になり、他のidentity根拠も同じ場合は同じIDになり得ますが、証拠digestが異なれば区別されます。例外の対象は自動拡大されません。
+
 `loadFindingExceptions()`で読込み、結果と明示的なISO形式の`currentDate`を`applyFindingExceptions()`へ渡します。日付を明示することでCI出力を決定的にします。Reportには有効な`findings`、元の`suppressedFindings`、Sort済み`appliedExceptionIds`、抑制前後の件数が含まれます。
 
 ## 更新・期限延長・削除・監査
