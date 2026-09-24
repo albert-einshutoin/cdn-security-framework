@@ -1,4 +1,5 @@
 import fs from 'node:fs';
+import crypto from 'node:crypto';
 import os from 'node:os';
 import path from 'node:path';
 import ts from 'typescript';
@@ -57,6 +58,75 @@ afterEach(() => {
 });
 
 describe('TypeScript project loader', () => {
+  test('binds the internal snapshot digest to consumed config, source and package metadata text', async () => {
+    const makeProject = () => {
+      const root = workspace();
+      write(root, 'tsconfig.json', '{ "compilerOptions": { "module": "NodeNext", "moduleResolution": "NodeNext", "noLib": true }, "files": ["src/app.ts"] }');
+      write(root, 'package.json', '{ "type": "module", "imports": { "#dep": "./src/dep.ts" } }');
+      write(root, 'src/app.ts', 'import { value } from "#dep";\nexport const result = value;\n');
+      write(root, 'src/dep.ts', 'export const value = 1;\n');
+      return root;
+    };
+    const root = makeProject();
+    const other = makeProject();
+    const original = fs.readFileSync(path.join(root, 'src/app.ts'));
+    const originalHash = crypto.createHash('sha256').update(original).digest('hex');
+    const cache = new TypeScriptAnalysisCache();
+    const first = await loadTypeScriptProject(options(root, { cache }));
+    expect(first.snapshotDigest).toMatch(/^[a-f0-9]{64}$/);
+    const cached = await loadTypeScriptProject(options(root, { cache }));
+    expect(cached.metrics.cacheHits).toBe(1);
+    expect(cached.snapshotDigest).toBe(first.snapshotDigest);
+    Object.defineProperty(first, 'snapshotDigest', { value: '0'.repeat(64) });
+    expect((await loadTypeScriptProject(options(root, { cache }))).snapshotDigest).toBe(cached.snapshotDigest);
+    expect((await loadTypeScriptProject(options(other))).snapshotDigest).toBe(cached.snapshotDigest);
+    write(root, 'unconsumed.txt', 'not part of the project');
+    expect((await loadTypeScriptProject(options(root))).snapshotDigest).toBe(cached.snapshotDigest);
+    write(root, 'src/dep.ts', 'export const value = 2;\n');
+    const changedSource = await loadTypeScriptProject(options(root));
+    expect(changedSource.snapshotDigest).not.toBe(cached.snapshotDigest);
+    write(root, 'package.json', '{ "type": "module", "imports": { "#dep": "./src/dep.ts" }, "private": true }');
+    const changedMetadata = await loadTypeScriptProject(options(root));
+    expect(changedMetadata.snapshotDigest).not.toBe(changedSource.snapshotDigest);
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "module": "NodeNext", "moduleResolution": "NodeNext", "noLib": true, "strict": true }, "files": ["src/app.ts"] }');
+    expect((await loadTypeScriptProject(options(root))).snapshotDigest).not.toBe(changedMetadata.snapshotDigest);
+    expect(crypto.createHash('sha256').update(fs.readFileSync(path.join(root, 'src/app.ts'))).digest('hex')).toBe(originalHash);
+  });
+
+  test('identifies analyzed text rather than claiming raw-byte identity', async () => {
+    const root = workspace();
+    write(root, 'tsconfig.json', '{ "compilerOptions": { "noLib": true }, "files": ["src/app.ts"] }');
+    const source = path.join(root, 'src/app.ts');
+    const bytes = (invalid: number) => Buffer.concat([
+      Buffer.from('export const value = 1; // '), Buffer.from([invalid]), Buffer.from('\n'),
+    ]);
+    fs.mkdirSync(path.dirname(source), { recursive: true });
+    fs.writeFileSync(source, bytes(0x80));
+    const first = await loadTypeScriptProject(options(root));
+    const rawHash = crypto.createHash('sha256').update(fs.readFileSync(source)).digest('hex');
+    fs.writeFileSync(source, bytes(0x81));
+    const second = await loadTypeScriptProject(options(root));
+    expect(crypto.createHash('sha256').update(fs.readFileSync(source)).digest('hex')).not.toBe(rawHash);
+    expect(second.sourceFiles[0].text).toBe(first.sourceFiles[0].text);
+    expect(second.snapshotDigest).toBe(first.snapshotDigest);
+  });
+
+  test('the existing NestJS fixture digest follows analyzed source bytes without executing them', async () => {
+    const root = workspace();
+    fs.cpSync(path.join(process.cwd(), 'test/fixtures/source-analysis/nestjs-basic'), root, { recursive: true });
+    const source = path.join(root, 'src/controller.ts');
+    const original = fs.readFileSync(source);
+    const first = await loadTypeScriptProject(options(root));
+    expect(first.sourceFiles.some(({ fileName }) => fileName.endsWith('src/controller.ts'))).toBe(true);
+    expect(fs.readFileSync(source)).toEqual(original);
+    fs.appendFileSync(source, '\nthrow new Error("sentinel must not execute");\n');
+    const second = await loadTypeScriptProject(options(root));
+    expect(second.snapshotDigest).not.toBe(first.snapshotDigest);
+    expect(fs.readFileSync(source)).toEqual(Buffer.concat([
+      original, Buffer.from('\nthrow new Error("sentinel must not execute");\n'),
+    ]));
+  });
+
   test('loads JSONC include/exclude/files and path aliases without executing source', async () => {
     const root = workspace();
     write(root, 'tsconfig.json', `{
