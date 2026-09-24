@@ -22,6 +22,24 @@ afterEach(() => {
   for (const dir of scratch.splice(0)) fs.rmSync(dir, { recursive: true, force: true });
 });
 
+test('build success diagnostics keep generated locations relative to the selected output directory', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-build-output-'));
+  scratch.push(dir);
+  fs.copyFileSync(path.join(root, 'policy/base.yml'), path.join(dir, 'policy.yml'));
+  const result = spawnSync(process.execPath, [path.join(root, 'bin/cli.js'), 'build',
+    '--policy', 'policy.yml', '--target', 'aws', '--out-dir', 'dist/aws'], {
+    cwd: dir, encoding: 'utf8', env: { ...process.env,
+      EDGE_ADMIN_TOKEN: 'synthetic-build-token-not-for-deploy',
+      ORIGIN_SECRET: 'synthetic-origin-secret-not-for-deploy' },
+  });
+  expect(result.status).toBe(0);
+  expect(result.stdout).toContain('Generated edge/viewer-request.js');
+  expect(result.stdout).toContain('Generated infra/*.tf.json');
+  expect(result.stdout).not.toContain(dir);
+  expect(result.stderr).not.toContain(dir);
+  expect(fs.existsSync(path.join(dir, 'dist/aws/edge/viewer-request.js'))).toBe(true);
+});
+
 function fixture(gate: unknown, mode: 'enforce' | 'monitor' = 'enforce') {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'aws-auth-cache-'));
   scratch.push(dir);

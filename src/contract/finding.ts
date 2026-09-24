@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 
-import { isSensitiveField, redactSensitiveText } from './sensitive-text';
+import { isSensitiveField, redactEvidenceFilename, redactSensitiveText } from './sensitive-text';
 
 export const FINDING_SEVERITIES = ['error', 'warning', 'info'] as const;
 export const FINDING_CONFIDENCES = ['deterministic', 'high-confidence', 'heuristic'] as const;
@@ -155,7 +155,7 @@ function normalizeEvidenceUri(uri: string, workspaceRoot?: string): string {
   const isPosixAbsolute = normalized.startsWith('/');
   if (!isWindowsAbsolute && !isPosixAbsolute) {
     if (normalized.split('/').includes('..')) throw new Error('Finding evidence uri escapes its root');
-    return normalized.replace(/^\.\//, '');
+    return redactEvidenceFilename(normalized.replace(/^\.\//, ''));
   }
   if (!workspaceRoot) throw new Error('Finding absolute evidence uri requires workspaceRoot');
 
@@ -169,7 +169,7 @@ function normalizeEvidenceUri(uri: string, workspaceRoot?: string): string {
   if (!relative || relative.split('/').includes('..')) {
     throw new Error('Finding evidence uri is invalid');
   }
-  return relative;
+  return redactEvidenceFilename(relative);
 }
 
 function sanitizeEvidence(

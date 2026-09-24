@@ -3196,9 +3196,10 @@ program
 
     console.log('[INFO] Validating policy... OK');
     console.log('[INFO] Target:', result.target === 'aws' ? 'AWS CloudFront Functions' : 'Cloudflare Workers');
-    result.edgeFiles.forEach((f: string) => console.log('[SUCCESS] Generated ' + f));
+    // Report paths relative to the chosen output directory so a local build does not disclose the workspace path.
+    result.edgeFiles.forEach((f: string) => console.log('[SUCCESS] Generated ' + path.relative(result.outDir, f)));
     if (result.infraFiles.length > 0) {
-      console.log('[SUCCESS] Generated ' + path.join(result.outDir, 'infra', '*.tf.json'));
+      console.log('[SUCCESS] Generated infra/*.tf.json');
     }
   });
 

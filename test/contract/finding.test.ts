@@ -269,4 +269,41 @@ describe('Finding Contract v1', () => {
       }],
     })).toThrow('Finding file evidence uri is not supported');
   });
+
+  test('does not expose credential-like filename values in evidence', () => {
+    const secret = 'SYNTHETIC_SECRET_890_VALUE';
+    for (const name of ['authorization', 'x-api-key']) {
+      const finding = createFinding({
+        ...baseInput,
+        evidence: [{ ...baseInput.evidence[0], uri: `${name}-${secret}.yaml` }],
+      });
+      expect(JSON.stringify(finding)).not.toContain(secret);
+      expect(finding.evidence[0].uri).toBe('[REDACTED_FILENAME]');
+    }
+    for (const uri of [
+      `config/authorization.${secret}.yaml`,
+      `config/backup-token=${secret}.yaml`,
+      `config/backup_api-key.${secret}.yaml`,
+      `config/backup-authorization%2E${secret}.yaml`,
+      `config/authorization%252E${secret}.yaml`,
+      `config/nested%2Fauthorization.${secret}.yaml`,
+    ]) {
+      const finding = createFinding({
+        ...baseInput,
+        evidence: [{ ...baseInput.evidence[0], uri }],
+      });
+      expect(JSON.stringify(finding)).not.toContain(secret);
+      expect(finding.evidence[0].uri).toBe('config/[REDACTED_FILENAME]');
+    }
+    expect(createFinding({
+      ...baseInput,
+      evidence: [{ ...baseInput.evidence[0], uri: 'config/public-guide.yaml' }],
+    }).evidence[0].uri).toBe('config/public-guide.yaml');
+    for (const safeUri of ['docs/oauth-token-format.md', 'config/backup-token-guide.yaml']) {
+      expect(createFinding({
+        ...baseInput,
+        evidence: [{ ...baseInput.evidence[0], uri: safeUri }],
+      }).evidence[0].uri).toBe(safeUri);
+    }
+  });
 });

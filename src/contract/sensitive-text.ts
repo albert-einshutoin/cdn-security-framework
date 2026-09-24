@@ -19,6 +19,24 @@ const ASSIGNMENT_PREFIX = /(?<![?&])["']?\b(?:authorization|proxy[-_]?authorizat
 const QUERY_PREFIX = /[?&][^=\s&#]+=/g;
 const PROVIDER_TOKEN_PATTERN = /\b(?:sk-(?:proj-)?|gh[opsur]_|github_pat_|AKIA|(?:sk|pk)_)[A-Za-z0-9_.-]{8,}/i;
 const REDACTED_MARKER = '[REDACTED]';
+const SENSITIVE_FILENAME_KEY = '(?:authorization|proxy[-_]?authorization|cookie|set[-_]?cookie|(?:x[-_])?api[-_]?key|access[_-]?token|refresh[_-]?token|client[-_]?secret|credentials?|token|password|secret)';
+const SENSITIVE_FILENAME_MARKER = new RegExp(`(?:^${SENSITIVE_FILENAME_KEY}[_=-].+|(?:^|[._-])${SENSITIVE_FILENAME_KEY}[=._].+)`, 'i');
+
+export function redactEvidenceFilename(uri: string): string {
+  return uri.split('/').map((segment) => {
+    let decoded = segment;
+    for (let depth = 0; depth < 3; depth += 1) {
+      try {
+        const next = decodeURIComponent(decoded);
+        if (next === decoded) break;
+        decoded = next;
+      } catch { break; }
+    }
+    const encodedAgain = /%[0-9A-Fa-f]{2}/.test(decoded);
+    return encodedAgain || decoded.split('/').some((part) => SENSITIVE_FILENAME_MARKER.test(part))
+      ? '[REDACTED_FILENAME]' : segment;
+  }).join('/');
+}
 
 function isJsonContinuation(value: string): boolean {
   const suffix = value.trimStart();

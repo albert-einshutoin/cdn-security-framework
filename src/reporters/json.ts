@@ -5,6 +5,7 @@ import Ajv, { type ValidateFunction } from 'ajv';
 import type { ContractDiffReportV1 } from '../contract/contract-diff';
 import type { SecurityFindingV1 } from '../contract/finding';
 import { sortFindings } from '../contract/finding-order';
+import { redactEvidenceFilename } from '../contract/sensitive-text';
 
 export const JSON_REPORT_ERROR_CODES = [
   'JSON_REPORT_INPUT_INVALID',
@@ -236,6 +237,9 @@ function privacyCheck(value: unknown, pathName = '/', state = new WeakSet<object
     }
     if (pathName.endsWith('/uri') && ABSOLUTE_URI_PATTERN.test(value)) {
       throw new JsonReportError('JSON_REPORT_PRIVACY_VIOLATION', 'Report contains an external URI.');
+    }
+    if (pathName.endsWith('/uri') && redactEvidenceFilename(value) !== value) {
+      throw new JsonReportError('JSON_REPORT_PRIVACY_VIOLATION', 'Report contains a sensitive evidence filename.');
     }
     return;
   }

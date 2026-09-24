@@ -71,9 +71,11 @@ jobs:
           node-version: '24'
       - name: Verify producer identity and prepare dependencies online
         run: |
+          start_ms=$(date +%s%3N)
           node "$RUNNER_TEMP/csf-candidate/scripts/single-pack.js" verify "$RUNNER_TEMP/csf-candidate"
           cd "$RUNNER_TEMP/csf-candidate/consumer"
           npm ci --ignore-scripts --no-audit --no-fund --cache "$RUNNER_TEMP/csf-cache"
+          echo "CSF_ONLINE_PREP_MS=$(( $(date +%s%3N) - start_ms ))" >> "$GITHUB_ENV"
       - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020
         with:
           node-version: ${{ matrix.node }}
@@ -82,7 +84,7 @@ jobs:
           CSF_ROW: ${{ matrix.node }}
         run: |
           unset NODE_PATH NODE_OPTIONS
-          sudo unshare --net -- sudo -u "$(id -un)" env PATH="$PATH" RUNNER_TEMP="$RUNNER_TEMP" CSF_SOURCE="$CSF_SOURCE" CSF_TGZ_SHA256="$CSF_TGZ_SHA256" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" CSF_ROW="$CSF_ROW" bash -eu -c '
+          sudo unshare --net -- sudo -u "$(id -un)" env PATH="$PATH" RUNNER_TEMP="$RUNNER_TEMP" CSF_SOURCE="$CSF_SOURCE" CSF_TGZ_SHA256="$CSF_TGZ_SHA256" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" CSF_ROW="$CSF_ROW" CSF_ONLINE_PREP_MS="$CSF_ONLINE_PREP_MS" bash -eu -c '
             cd "$RUNNER_TEMP/csf-candidate/consumer"
             if [ "$CSF_ROW" = 18.20.8 ] || [ "$CSF_ROW" = 20.16.0 ]; then
               node ../scripts/single-pack.js consume .. "$CSF_ROW" "$RUNNER_TEMP/csf-switch.json"
