@@ -302,6 +302,17 @@ describe('Finding Contract v1', () => {
       });
       expect(finding.evidence[0].uri).toBe('config/[REDACTED_FILENAME]');
     }
+    for (const [uri, expected] of [
+      ['config/sk-proj-syntheticvalue12345678.yaml', 'config/[REDACTED]'],
+      ['config/ghp%5Fsyntheticvalue12345678.yaml', 'config/[REDACTED_FILENAME]'],
+    ]) {
+      const finding = createFinding({
+        ...baseInput,
+        evidence: [{ ...baseInput.evidence[0], uri }],
+      });
+      expect(finding.evidence[0].uri).toBe(expected);
+      expect(JSON.stringify(finding)).not.toContain('syntheticvalue12345678');
+    }
     expect(createFinding({
       ...baseInput,
       evidence: [{ ...baseInput.evidence[0], uri: 'config/public-guide.yaml' }],

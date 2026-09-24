@@ -223,13 +223,17 @@ describe('Unified contract SARIF adapter', () => {
   test('rejects percent-encoded provider tokens in evidence URIs', () => {
     const input = report();
     const seed = input.findings[0];
-    input.findings = [createFinding({
+    const unsafeUri = 'artifacts/ghp%5Fsyntheticvalue12345678.txt';
+    const normalized = createFinding({
       ...seed,
       evidence: [{
         ...seed.evidence[0],
-        uri: 'artifacts/ghp%5Fsyntheticvalue12345678.txt',
+        uri: unsafeUri,
       }],
-    })];
+    });
+    expect(normalized.evidence[0].uri).toBe('artifacts/[REDACTED_FILENAME]');
+    // Exercise the reporter's boundary with an untrusted Finding that bypassed normalization.
+    input.findings = [{ ...normalized, evidence: [{ ...seed.evidence[0], uri: unsafeUri }] }];
 
     expect(() => renderUnifiedContractDiffSarif(input)).toThrowError(/SARIF_PRIVACY_VIOLATION/);
   });

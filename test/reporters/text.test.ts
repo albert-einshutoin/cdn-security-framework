@@ -162,6 +162,18 @@ describe('Unified contract text reporter', () => {
     expect(output).not.toContain('sk-proj-s');
   });
 
+  test('masks an encoded provider-token filename in displayed evidence', () => {
+    const base = reportFixture();
+    const item = finding('finding-encoded', 'warning');
+    const tokenSuffix = 'syntheticvalue12345678';
+    const output = renderUnifiedContractDiffText({
+      ...base,
+      findings: [{ ...item, evidence: [{ ...item.evidence[0], uri: `refs/ghp%5F${tokenSuffix}.yaml` }] }],
+    });
+    expect(output).toContain('refs/[REDACTED_FILENAME]');
+    expect(output).not.toContain(tokenSuffix);
+  });
+
   test('redacts every value after an auth scheme delimiter', () => {
     const base = reportFixture();
     const item = finding('finding-006', 'warning');
