@@ -55,6 +55,8 @@ export interface TypeScriptProjectMetrics {
 
 export interface LoadedTypeScriptProject {
   program: ts.Program;
+  // Internal digest of decoded input text used by this Program, not raw file bytes or an atomic snapshot.
+  readonly snapshotDigest: string;
   sourceFiles: readonly ts.SourceFile[];
   compilerOptions: Readonly<ts.CompilerOptions>;
   pathAliases: Readonly<Record<string, readonly string[]>>;
@@ -675,6 +677,25 @@ function contentKey(
   return hash.digest('hex');
 }
 
+function snapshotDigest(
+  configDigests: ReadonlyMap<string, string>,
+  sources: readonly { relative: string; text: string }[],
+): string {
+  const compareEntry = (left: readonly string[], right: readonly string[]) => (
+    left[0] < right[0] ? -1 : left[0] > right[0] ? 1 : left[1] < right[1] ? -1 : left[1] > right[1] ? 1 : 0
+  );
+  const configs = [...configDigests].sort(compareEntry);
+  const files = sources.map(({ relative, text }) => [
+    relative, crypto.createHash('sha256').update(text).digest('hex'),
+  ]).sort(compareEntry);
+  return crypto.createHash('sha256').update(JSON.stringify({
+    loader: TYPESCRIPT_PROJECT_LOADER_VERSION,
+    typescript: ts.version,
+    configs,
+    files,
+  })).digest('hex');
+}
+
 async function loadTypeScriptProjectInternal(
   options: LoadTypeScriptProjectOptions,
 ): Promise<LoadedTypeScriptProject> {
@@ -1177,11 +1198,13 @@ async function loadTypeScriptProjectInternal(
     ...[...metadataContents.values()].map(({ relative, text }) => ({ relative, text })),
   ];
   const key = contentKey(configState.digests, compilerOptions, sources);
+  const projectSnapshotDigest = snapshotDigest(configState.digests, sources);
   await yieldAndCheckInterruption(options.cancellationSignal, deadline);
   const cached = options.cache?.read(identity, key);
   if (cached?.value) {
     return {
       ...cached.value,
+      snapshotDigest: projectSnapshotDigest,
       metrics: Object.freeze({
         ...cached.value.metrics,
         cacheHits: 1,
@@ -1192,6 +1215,7 @@ async function loadTypeScriptProjectInternal(
   }
   const loaded: LoadedTypeScriptProject = {
     program,
+    snapshotDigest: projectSnapshotDigest,
     sourceFiles: Object.freeze([...sourceFiles]),
     compilerOptions: Object.freeze({ ...compilerOptions }),
     pathAliases: Object.freeze(Object.fromEntries(Object.entries(compilerOptions.paths ?? {}).map(([name, values]) => (
