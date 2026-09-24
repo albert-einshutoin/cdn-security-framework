@@ -1,7 +1,7 @@
 import { describe, expect, test, vi } from 'vitest';
 
 import { createFinding, type ContractDiffReportV1 } from '../../src/contract';
-import { hasUnsafeSensitiveText } from '../../src/contract/sensitive-text';
+import { hasUnsafeSensitiveText, redactEvidenceFilename } from '../../src/contract/sensitive-text';
 import { renderUnifiedContractDiffJson } from '../../src/reporters/json';
 import { renderUnifiedContractDiffText } from '../../src/reporters/text';
 import { renderContractDiffGitHubSummary } from '../../src/reporters/github-summary';
@@ -65,6 +65,67 @@ function report(): ContractDiffReportV1 {
 }
 
 describe('Unified contract SARIF adapter', () => {
+  test.each([
+    ['provider raw', 'config/ghp_syntheticvalue12345678.yaml', 'config/[REDACTED]'],
+    ['provider percent uppercase', 'config/ghp%5Fsyntheticvalue12345678.yaml', 'config/[REDACTED_FILENAME]'],
+    ['provider percent lowercase', 'config/ghp%5fsyntheticvalue12345678.yaml', 'config/[REDACTED_FILENAME]'],
+    ['provider double encoded', 'config/ghp%255Fsyntheticvalue12345678.yaml', 'config/[REDACTED_FILENAME]'],
+    ['provider triple encoded', 'config/ghp%25255Fsyntheticvalue12345678.yaml', 'config/[REDACTED_FILENAME]'],
+    ['provider beyond decode limit', 'config/ghp%2525255Fsyntheticvalue12345678.yaml', 'config/[REDACTED_FILENAME]'],
+    ['credential key', 'config/authorization.SYNTHETIC_SECRET_890_VALUE.yaml', 'config/[REDACTED_FILENAME]'],
+    ['encoded credential delimiter', 'config/authorization%2eSYNTHETIC_SECRET_890_VALUE.yaml', 'config/[REDACTED_FILENAME]'],
+    ['qualified credential filename', 'config/backup-token%3Dopaquevalue123.yaml', 'config/[REDACTED_FILENAME]'],
+    ['encoded path separator', 'config/nested%2Fauthorization.SYNTHETIC_SECRET_890_VALUE.yaml', 'config/[REDACTED_FILENAME]'],
+    ['malformed encoding after encoded token', 'config/ghp%5Fsyntheticvalue12345678%ZZ.yaml', 'config/[REDACTED_FILENAME]'],
+  ])('keeps bounded filename privacy across Finding and all reporters: %s', (_label, uri, expectedUri) => {
+    const input = report();
+    input.inputDigests = { openapi: `sha256:${'a'.repeat(64)}`, policy: `sha256:${'b'.repeat(64)}`, exceptions: null };
+    const seed = input.findings[0];
+    const finding = createFinding({
+      ...seed,
+      evidence: [{ ...seed.evidence[0], uri, digest: `sha256:${'b'.repeat(64)}` }],
+    });
+    expect(finding.evidence[0].uri).toBe(expectedUri);
+    expect(redactEvidenceFilename(finding.evidence[0].uri)).toBe(expectedUri);
+    input.findings = [finding];
+    const outputs = [
+      JSON.stringify(finding),
+      renderUnifiedContractDiffJson(input),
+      renderUnifiedContractDiffText(input),
+      JSON.stringify(renderUnifiedContractDiffSarif(input)),
+      renderContractDiffGitHubSummary(input),
+    ];
+    for (const output of outputs) {
+      expect(output).not.toContain('syntheticvalue12345678');
+      expect(output).not.toContain('SYNTHETIC_SECRET_890_VALUE');
+      expect(output).not.toContain('opaquevalue123');
+    }
+
+    // Reporter boundaries also receive unnormalized Findings from callers.
+    input.findings = [{ ...finding, evidence: [{ ...finding.evidence[0], uri }] }];
+    expect(() => renderUnifiedContractDiffJson(input)).toThrow('JSON_REPORT_PRIVACY_VIOLATION');
+    expect(() => renderUnifiedContractDiffSarif(input)).toThrowError(SarifReportError);
+    for (const output of [renderUnifiedContractDiffText(input), renderContractDiffGitHubSummary(input)]) {
+      expect(output).not.toContain('syntheticvalue12345678');
+      expect(output).not.toContain('SYNTHETIC_SECRET_890_VALUE');
+      expect(output).not.toContain('opaquevalue123');
+    }
+  });
+
+  test.each([
+    'config/public-guide.yaml',
+    'config/backup-guide.yaml',
+    'config/[REDACTED_FILENAME]',
+    'config/[REDACTED]',
+  ])('preserves safe or previously masked filename %s on repeated normalization', (uri) => {
+    expect(redactEvidenceFilename(redactEvidenceFilename(uri))).toBe(uri);
+    const finding = createFinding({
+      ...report().findings[0],
+      evidence: [{ ...report().findings[0].evidence[0], uri }],
+    });
+    expect(finding.evidence[0].uri).toBe(uri);
+  });
+
   test.each([
     'authorization.SYNTHETIC_SECRET_890_VALUE.yaml',
     'backup-token=SYNTHETIC_SECRET_890_VALUE.yaml',
