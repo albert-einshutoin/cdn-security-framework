@@ -198,6 +198,25 @@ describe('internal single-workspace adapter', () => {
     expect(configured.evidence.policy?.projector).toBe('allowed-surface@1');
   });
 
+  test('uses one config digest for equivalent decorator sets and guard mappings', async () => {
+    const root = workspace();
+    const first = await analyzeSourceAwareWorkspace({
+      ...args(root), source: { tsconfigPath: 'tsconfig.json', authConfig: {
+        public_decorators: ['Public', 'Guest'], roles_decorators: ['Roles', 'AllowedRoles'],
+        guard_mappings: { AuthGuard: { auth_kind: 'bearer' }, ApiKeyGuard: { auth_kind: 'api_key' } },
+      } },
+    });
+    const reordered = await analyzeSourceAwareWorkspace({
+      ...args(root), source: { tsconfigPath: 'tsconfig.json', authConfig: {
+        roles_decorators: ['AllowedRoles', 'Roles'], public_decorators: ['Guest', 'Public'],
+        guard_mappings: { ApiKeyGuard: { auth_kind: 'api_key' }, AuthGuard: { auth_kind: 'bearer' } },
+      } },
+    });
+    expect(first.stages.implemented.status).toBe(reordered.stages.implemented.status);
+    expect(first.evidence.source?.projectDigest).toBe(reordered.evidence.source?.projectDigest);
+    expect(first.evidence.source?.configDigest).toBe(reordered.evidence.source?.configDigest);
+  });
+
   test('keeps raw-byte identity distinct from decoded Source text and does not execute config', async () => {
     const root = workspace();
     const sourceFile = path.join(root, 'src/controller.ts');

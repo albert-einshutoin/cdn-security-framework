@@ -5911,10 +5911,18 @@ export async function runNestJsSourceAnalysisInternal(
     ...plugin,
     analyze: (runContext) => analyze(runContext, authConfig, (digest) => { snapshotDigest = digest; }, cache),
   }, context);
+  // Decorator arrays are membership sets and guard mappings are key lookups; input order is not execution identity.
+  const canonicalConfig = {
+    public_decorators: [...authConfig.public_decorators].sort(),
+    roles_decorators: [...authConfig.roles_decorators].sort(),
+    guard_mappings: Object.fromEntries(Object.entries(authConfig.guard_mappings).sort(([left], [right]) => (
+      left < right ? -1 : left > right ? 1 : 0
+    ))),
+  };
   return {
     execution,
     ...(execution.status === 'success' && snapshotDigest ? { snapshotDigest } : {}),
     analyzer: `${plugin.id}@${plugin.version}`,
-    configDigest: `sha256:${createHash('sha256').update(JSON.stringify(authConfig)).digest('hex')}`,
+    configDigest: `sha256:${createHash('sha256').update(JSON.stringify(canonicalConfig)).digest('hex')}`,
   };
 }
