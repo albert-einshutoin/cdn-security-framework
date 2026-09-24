@@ -68,6 +68,8 @@ describe('Unified contract SARIF adapter', () => {
   test.each([
     'authorization.SYNTHETIC_SECRET_890_VALUE.yaml',
     'backup-token=SYNTHETIC_SECRET_890_VALUE.yaml',
+    'backup-token-opaquevalue123.yaml',
+    'backup-token%2Dopaquevalue123.yaml',
     'authorization%252ESYNTHETIC_SECRET_890_VALUE.yaml',
     'nested%2Fauthorization.SYNTHETIC_SECRET_890_VALUE.yaml',
   ])('does not publish sensitive evidence filenames through report formats: %s', (uri) => {
@@ -101,6 +103,19 @@ describe('Unified contract SARIF adapter', () => {
     expect(() => renderUnifiedContractDiffSarif(input)).toThrow('SARIF_PRIVACY_VIOLATION');
     expect(renderUnifiedContractDiffText(input)).not.toContain('SYNTHETIC_SECRET_890_VALUE');
     expect(renderContractDiffGitHubSummary(input)).not.toContain('SYNTHETIC_SECRET_890_VALUE');
+  });
+
+  test('rejects or masks a raw qualified hyphen credential filename at reporter boundaries', () => {
+    const input = report();
+    input.inputDigests = { openapi: `sha256:${'a'.repeat(64)}`, policy: `sha256:${'b'.repeat(64)}`, exceptions: null };
+    input.findings[0] = {
+      ...input.findings[0],
+      evidence: [{ ...input.findings[0].evidence[0], uri: 'config/backup-token-opaquevalue123.yaml', digest: `sha256:${'b'.repeat(64)}` }],
+    };
+    expect(() => renderUnifiedContractDiffJson(input)).toThrow('JSON_REPORT_PRIVACY_VIOLATION');
+    expect(() => renderUnifiedContractDiffSarif(input)).toThrow('SARIF_PRIVACY_VIOLATION');
+    expect(renderUnifiedContractDiffText(input)).not.toContain('opaquevalue123');
+    expect(renderContractDiffGitHubSummary(input)).not.toContain('opaquevalue123');
   });
 
   test.each([
