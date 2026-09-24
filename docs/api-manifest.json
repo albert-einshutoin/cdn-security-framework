@@ -180,6 +180,8 @@
       "examples/openapi/openapi.yaml"
     ],
     "experimental": [
+      "contract/source-aware-finalizer.d.ts",
+      "contract/source-aware-finalizer.js",
       "contract/source-aware-internal.d.ts",
       "contract/source-aware-internal.js",
       "contract/source-aware-workspace.d.ts",

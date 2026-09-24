@@ -8,7 +8,7 @@ import {
   type SourceAnalysisExecution,
   type SourceAnalysisLimits,
 } from '../source-analysis';
-import { runNestJsSourceAnalysisInternal } from '../source/nestjs/analyzer';
+import { runNestJsSourceAnalysisInternal, validateNestJsAuthConfig } from '../source/nestjs/analyzer';
 import type { TypeScriptAnalysisCache } from '../source/typescript/project-loader';
 import { projectPolicyToAllowedSurface, type AllowedSurfaceModelV1, type AllowedSurfaceTarget } from './allowed-surface';
 import { ContractDiffInputError, loadPolicyForInternal } from './contract-diff';
@@ -66,11 +66,10 @@ function openApiEvidence(inspection: OpenApiInspectionForCli): NonNullable<Sourc
   };
 }
 
-function safeCode(error: unknown, kind: 'openapi' | 'policy' | 'source'): string {
+function safeCode(error: unknown, kind: 'openapi' | 'policy'): string {
   if (kind === 'openapi' && error instanceof OpenApiAnalysisError) return error.code;
   if (kind === 'policy' && error instanceof ContractDiffInputError) return error.code;
-  return kind === 'openapi' ? 'OPENAPI_ANALYSIS_FAILED'
-    : kind === 'policy' ? 'POLICY_PROJECTION_FAILED' : 'SOURCE_ANALYZER_INPUT_INVALID';
+  return kind === 'openapi' ? 'OPENAPI_ANALYSIS_FAILED' : 'POLICY_PROJECTION_FAILED';
 }
 
 // Internal adapter only. Each stage retains its own consumed-input evidence; no atomic workspace snapshot is claimed.
@@ -108,22 +107,33 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
   if (input.source) {
     const limits = { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, ...(input.source.limits ?? {}) };
     try {
-      const analyzed = await runNestJsSourceAnalysisInternal({
-        workspaceRoot: input.workspaceRoot,
-        entrypoints: [input.source.tsconfigPath], limits,
-        cancellationSignal: input.source.cancellationSignal,
-        logger: { log() {} },
-      }, input.source.authConfig, input.source.cache);
-      source = analyzed.execution;
-      if (source.status === 'success' && analyzed.snapshotDigest) {
-        sourceEvidence = {
-          projectDigest: `sha256:${analyzed.snapshotDigest}`, analyzer: analyzed.analyzer,
-          configDigest: analyzed.configDigest, limits,
-        };
+      if (input.source.authConfig !== undefined) validateNestJsAuthConfig(input.source.authConfig);
+    } catch {
+      source = { status: 'failed', diagnostics: [{
+        code: 'SOURCE_ANALYZER_INPUT_INVALID', safeMessage: 'Source input is invalid.',
+      }] };
+    }
+    if (!source) {
+      try {
+        const analyzed = await runNestJsSourceAnalysisInternal({
+          workspaceRoot: input.workspaceRoot,
+          entrypoints: [input.source.tsconfigPath], limits,
+          cancellationSignal: input.source.cancellationSignal,
+          logger: { log() {} },
+        }, input.source.authConfig, input.source.cache);
+        source = analyzed.execution;
+        if (source.status === 'success' && analyzed.snapshotDigest) {
+          sourceEvidence = {
+            projectDigest: `sha256:${analyzed.snapshotDigest}`, analyzer: analyzed.analyzer,
+            configDigest: analyzed.configDigest, limits,
+          };
+        }
+      } catch {
+        // Config validation above is input-classified; an unexpected runner rejection is internal.
+        source = { status: 'failed', diagnostics: [{
+          code: 'SOURCE_ANALYZER_INTERNAL', safeMessage: 'Source analysis failed.',
+        }] };
       }
-    } catch (error) {
-      const code = safeCode(error, 'source') as 'SOURCE_ANALYZER_INPUT_INVALID';
-      source = { status: 'failed', diagnostics: [{ code, safeMessage: 'Source input is invalid.' }] };
     }
   }
 
