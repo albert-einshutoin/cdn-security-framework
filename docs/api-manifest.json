@@ -180,6 +180,8 @@
       "examples/openapi/openapi.yaml"
     ],
     "experimental": [
+      "contract/source-aware-internal.d.ts",
+      "contract/source-aware-internal.js",
       "schemas/nestjs-source-analysis-options.schema.json",
       "source-analysis/index.d.ts",
       "source-analysis/index.js",
