@@ -2,6 +2,9 @@
 
 const fs = require('fs');
 const path = require('path');
+const os = require('os');
+const { spawnSync } = require('child_process');
+const yaml = require('js-yaml');
 
 const repoRoot = path.join(__dirname, '..');
 
@@ -36,6 +39,47 @@ function main() {
   const workflow = read('.github/workflows/policy-lint.yml');
   if (!workflow.includes('npm run test:ci')) {
     fail('.github/workflows/policy-lint.yml must run npm run test:ci');
+  }
+  const releaseSteps = yaml.load(read('.github/workflows/release-npm.yml'))?.jobs?.publish?.steps;
+  if (!Array.isArray(releaseSteps)) fail('release workflow publish steps are missing');
+  if (releaseSteps.some((step: { run?: string }) => step.run?.includes('${{ inputs.tag }}'))) {
+    fail('release tag input must not be interpolated into shell source');
+  }
+  const validateTagAt = releaseSteps.findIndex((step: { name?: string }) => step.name === 'Validate release tag');
+  const checkoutTagAt = releaseSteps.findIndex((step: { name?: string }) => step.name === 'Checkout release tag for manual dispatch');
+  if (validateTagAt < 0 || checkoutTagAt <= validateTagAt) {
+    fail('release tag must be validated before manual checkout');
+  }
+  const validateTagStep = releaseSteps[validateTagAt];
+  const checkoutTagStep = releaseSteps[checkoutTagAt];
+  const versionTagStep = releaseSteps.find((step: { name?: string }) => step.name === 'Ensure tag matches package version');
+  const validatedTagRef = '${{ steps.release_tag.outputs.tag }}';
+  if (validateTagStep.id !== 'release_tag'
+    || checkoutTagStep.env?.RELEASE_TAG !== validatedTagRef
+    || versionTagStep?.env?.RELEASE_TAG !== validatedTagRef) {
+    fail('release checkout and version gate must use the validated tag');
+  }
+  const tagTestDir = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-release-tag-'));
+  try {
+    const outputPath = path.join(tagTestDir, 'tag-output');
+    const checkTag = (event: string, ref: string, input: string) => {
+      fs.rmSync(outputPath, { force: true });
+      const result = spawnSync('bash', ['-e', '-c', validateTagStep.run], {
+        env: { ...process.env, GITHUB_EVENT_NAME: event, GITHUB_REF_NAME: ref, DISPATCH_TAG: input, GITHUB_OUTPUT: outputPath },
+        encoding: 'utf8',
+      });
+      return { status: result.status, output: fs.existsSync(outputPath) ? fs.readFileSync(outputPath, 'utf8') : '' };
+    };
+    const manual = checkTag('workflow_dispatch', 'main', 'v2.0.0-rc.1');
+    const pushed = checkTag('push', 'v2.0.0', 'v9.9.9');
+    const hostile = checkTag('workflow_dispatch', 'main', 'v2.0.0$(printf injected)');
+    if (manual.status !== 0 || manual.output !== 'tag=v2.0.0-rc.1\n'
+      || pushed.status !== 0 || pushed.output !== 'tag=v2.0.0\n'
+      || hostile.status === 0 || hostile.output !== '') {
+      fail('release tag validation must accept version tags and reject shell syntax');
+    }
+  } finally {
+    fs.rmSync(tagTestDir, { recursive: true, force: true });
   }
   const scriptsJson = readJson('package.json');
   const packageScripts = scriptsJson.scripts || {};
