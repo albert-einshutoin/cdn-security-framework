@@ -318,6 +318,24 @@ function loadPolicy(root: string, policyPath: string): {
   return { policy: parsed.policy as CDNSecurityFrameworkPolicy, sources: before.sources };
 }
 
+// Internal workspace adapter: reuse the contract-diff verified Policy snapshot and validation.
+export function loadPolicyForInternal(workspace: string, policyInput: string): {
+  root: string;
+  policy: CDNSecurityFrameworkPolicy;
+  policyDigest: string;
+  sources: readonly { filePath: string; digest: string }[];
+} {
+  const root = workspaceRoot(workspace);
+  const policyPath = inputFile(root, policyInput, 'CONTRACT_DIFF_POLICY_INVALID', 'Policy input');
+  const loaded = loadPolicy(root, policyPath);
+  return {
+    root,
+    policy: loaded.policy,
+    policyDigest: semanticDigest(loaded.policy),
+    sources: loaded.sources.map(({ filePath, digest }) => ({ filePath, digest })),
+  };
+}
+
 function sourceUri(root: string, filePath: string): string {
   return path.relative(root, filePath).split(path.sep).map(encodeURIComponent).join('/');
 }

@@ -22,9 +22,11 @@ type ComparisonState =
   | { status: 'omitted' | 'failed'; code: string; findings?: never };
 
 export interface SourceAwareInternalInput {
-  declared: OpenApiInspectionV1;
-  declaredEvidence: FindingEvidenceV1;
-  allowed: AllowedSurfaceModelV1;
+  declared?: OpenApiInspectionV1;
+  declaredEvidence?: FindingEvidenceV1;
+  declaredFailure?: string;
+  allowed?: AllowedSurfaceModelV1;
+  allowedFailure?: string;
   target: AllowedSurfaceTarget;
   source?: SourceAnalysisExecution;
   implementedEvidence?: FindingEvidenceV1;
@@ -80,50 +82,42 @@ function compare(status: 'complete' | 'partial', run: () => SecurityFindingV1[])
 
 // Internal only: callers own safe loading and evidence identity; this function performs no I/O.
 export function composeSourceAwareComparisons(input: SourceAwareInternalInput): SourceAwareInternalResult {
-  const declared: StageState = {
+  const declared: StageState = input.declared && input.declaredEvidence ? {
     status: capabilityStatus(input.declared.contract.capabilities),
     diagnosticCodes: diagnosticCodes(input.declared.diagnostics.map(({ code }) => code)),
-  };
+  } : { status: 'failed', code: input.declaredFailure ?? 'OPENAPI_EVIDENCE_MISSING', diagnosticCodes: [] };
   const implementedEvidence = input.implementedEvidence;
   const implemented = sourceStage(input.source, implementedEvidence);
   // Projection completed; provider support is a separate capability, never inferred from this status.
-  const allowed = {
+  const allowed = input.allowed ? {
     status: 'complete' as const, diagnosticCodes: [],
     targetCapabilities: input.allowed.targetCapabilities[input.target].map(({ id, status }) => ({ id, status })),
-  };
-  const declaredAllowed = compare(declared.status === 'partial' ? 'partial' : 'complete', () => (
-    compareSecurityContracts({ declared: input.declared.contract, allowed: input.allowed, target: input.target })
-  ));
-  if (!input.source || input.source.status === 'failed' || implemented.status === 'failed'
-    || !implementedEvidence) {
-    const unavailable: ComparisonState = implemented.status === 'omitted'
-      ? { status: 'omitted', code: implemented.code ?? 'SOURCE_NOT_REQUESTED' }
-      : { status: 'failed', code: implemented.code ?? 'SOURCE_ANALYZER_FAILED' };
-    return {
-      stages: { declared, implemented, allowed },
-      comparisons: {
-        declaredAllowed,
-        implementedDeclared: unavailable,
-        implementedAllowed: unavailable,
-      },
-    };
-  }
-  const source = input.source.result.contract;
-  const sourceStatus = implemented.status === 'partial' || declared.status === 'partial' ? 'partial' : 'complete';
-  const implementedDeclared = compare(sourceStatus, () => compareSourceOpenApiContracts({
-    declared: input.declared.contract,
-    implemented: source,
-    declaredEvidence: input.declaredEvidence,
-    implementedEvidence,
-  }));
-  const implementedAllowed = compare(implemented.status === 'partial' ? 'partial' : 'complete', () => (
-    compareSourcePolicyContracts({
-      implemented: source,
-      implementedEvidence,
-      allowed: input.allowed,
-      target: input.target,
-    })
-  ));
+  } : { status: 'failed' as const, code: input.allowedFailure ?? 'POLICY_INPUT_FAILED', diagnosticCodes: [], targetCapabilities: [] };
+  const missing = (stage: StageState): ComparisonState => stage.status === 'omitted'
+    ? { status: 'omitted', code: stage.code ?? 'SOURCE_NOT_REQUESTED' }
+    : { status: 'failed', code: stage.code ?? 'INPUT_FAILED' };
+  const declaredAllowed = !input.declared || !input.declaredEvidence ? missing(declared)
+    : !input.allowed ? missing(allowed)
+      : compare(declared.status === 'partial' ? 'partial' : 'complete', () => (
+        compareSecurityContracts({ declared: input.declared!.contract, allowed: input.allowed!, target: input.target })
+      ));
+  const source = input.source?.status === 'success' && implementedEvidence ? input.source.result.contract : undefined;
+  const implementedDeclared = !source ? missing(implemented)
+    : !input.declared || !input.declaredEvidence ? missing(declared)
+      : compare(implemented.status === 'partial' || declared.status === 'partial' ? 'partial' : 'complete', () => (
+        compareSourceOpenApiContracts({
+          declared: input.declared!.contract, implemented: source,
+          declaredEvidence: input.declaredEvidence!, implementedEvidence: implementedEvidence!,
+        })
+      ));
+  const implementedAllowed = !source ? missing(implemented)
+    : !input.allowed ? missing(allowed)
+      : compare(implemented.status === 'partial' ? 'partial' : 'complete', () => (
+        compareSourcePolicyContracts({
+          implemented: source, implementedEvidence: implementedEvidence!,
+          allowed: input.allowed!, target: input.target,
+        })
+      ));
   return {
     stages: { declared, implemented, allowed },
     comparisons: { declaredAllowed, implementedDeclared, implementedAllowed },

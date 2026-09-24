@@ -55,8 +55,12 @@ export interface OpenApiInspectionV1 {
 
 export interface OpenApiInspectionForCli {
   report: OpenApiInspectionV1;
+  rootSourceUri: string;
+  limits: Readonly<OpenApiAnalysisLimits>;
   sourcePaths: readonly string[];
   sourceIdentities: readonly OpenApiSourceIdentity[];
+  // Internal graph input evidence, from the same resolved documents as `report`.
+  sourceDigests: readonly { sourceUri: string; contentDigest: string }[];
 }
 
 const CAPABILITY_MESSAGES: Record<CapabilityLevelV1, string | undefined> = {
@@ -147,10 +151,13 @@ export function inspectOpenApiForCli(options: InspectOpenApiOptions): OpenApiIns
   const workspaceRoot = fs.realpathSync(options.workspaceRoot);
   return {
     report,
+    rootSourceUri: root.sourceUri,
+    limits,
     sourcePaths: graph.documents.map(({ sourceUri }) => (
       path.resolve(workspaceRoot, ...sourceUri.split('/').map(decodeURIComponent))
     )),
     sourceIdentities: resolvedOpenApiSourceIdentities(graph),
+    sourceDigests: graph.documents.map(({ sourceUri, contentDigest }) => ({ sourceUri, contentDigest })),
   };
 }
 
