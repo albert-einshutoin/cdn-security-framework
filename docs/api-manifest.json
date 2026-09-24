@@ -182,6 +182,8 @@
     "experimental": [
       "contract/source-aware-internal.d.ts",
       "contract/source-aware-internal.js",
+      "contract/source-aware-workspace.d.ts",
+      "contract/source-aware-workspace.js",
       "schemas/nestjs-source-analysis-options.schema.json",
       "source-analysis/index.d.ts",
       "source-analysis/index.js",

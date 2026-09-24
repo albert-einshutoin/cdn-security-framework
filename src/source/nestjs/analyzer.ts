@@ -17,7 +17,10 @@ import {
 } from '../../contract/security-ir';
 import {
   SourceAnalyzerContractError,
+  runSourceAnalyzer,
   type AnalyzerDiagnostic,
+  type SourceAnalysisContext,
+  type SourceAnalysisExecution,
   type SourceAnalyzerDiagnosticCode,
   type SourceAnalyzerPlugin,
   type UnresolvedSourceOperationCandidate,
@@ -26,6 +29,7 @@ import {
   TypeScriptProjectLoadError,
   loadTypeScriptProject,
   type LoadedTypeScriptProject,
+  type TypeScriptAnalysisCache,
 } from '../typescript/project-loader';
 import {
   classifyNestJsRouteDecorator,
@@ -5231,6 +5235,7 @@ async function loadProject(
   workspaceRoot: string,
   tsconfigPath: string,
   context: Parameters<SourceAnalyzerPlugin['analyze']>[0],
+  cache?: TypeScriptAnalysisCache,
 ): Promise<LoadedTypeScriptProject> {
   try {
     const loaded = await loadTypeScriptProject({
@@ -5238,6 +5243,7 @@ async function loadProject(
       tsconfigPath,
       limits: context.limits,
       cancellationSignal: context.cancellationSignal,
+      cache,
     });
     if (loaded.diagnostics.some(({ code }) => code === 'TS_PROJECT_TYPESCRIPT_DIAGNOSTIC')) {
       throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INPUT_INVALID');
@@ -5253,6 +5259,8 @@ async function loadProject(
 async function analyze(
   context: Parameters<SourceAnalyzerPlugin['analyze']>[0],
   authConfig: Readonly<NestJsAuthConfig>,
+  onProjectLoaded?: (digest: string) => void,
+  cache?: TypeScriptAnalysisCache,
 ) {
   if (context.entrypoints.length !== 1) {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INPUT_INVALID');
@@ -5264,7 +5272,8 @@ async function analyze(
     }
     if (performance.now() >= deadline) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_TIMEOUT');
   };
-  const loaded = await loadProject(context.workspaceRoot, context.entrypoints[0], context);
+  const loaded = await loadProject(context.workspaceRoot, context.entrypoints[0], context, cache);
+  onProjectLoaded?.(loaded.snapshotDigest);
   const checker = loaded.program.getTypeChecker();
   const compilerOptions = loaded.program.getCompilerOptions();
   const useDefineForClassFields = compilerOptions.useDefineForClassFields
@@ -5888,3 +5897,32 @@ export function createNestJsSourceAnalyzer(config?: unknown): SourceAnalyzerPlug
 }
 
 export const nestJsSourceAnalyzer = createNestJsSourceAnalyzer();
+
+// Each call owns its evidence callback. The public plugin and execution shapes stay unchanged.
+export async function runNestJsSourceAnalysisInternal(
+  context: SourceAnalysisContext,
+  config?: unknown,
+  cache?: TypeScriptAnalysisCache,
+): Promise<{ execution: SourceAnalysisExecution; snapshotDigest?: string; analyzer: string; configDigest: string }> {
+  const plugin = createNestJsSourceAnalyzer(config);
+  const authConfig = config === undefined ? EMPTY_NESTJS_AUTH_CONFIG : validateNestJsAuthConfig(config);
+  let snapshotDigest: string | undefined;
+  const execution = await runSourceAnalyzer({
+    ...plugin,
+    analyze: (runContext) => analyze(runContext, authConfig, (digest) => { snapshotDigest = digest; }, cache),
+  }, context);
+  // Decorator arrays are membership sets and guard mappings are key lookups; input order is not execution identity.
+  const canonicalConfig = {
+    public_decorators: [...authConfig.public_decorators].sort(),
+    roles_decorators: [...authConfig.roles_decorators].sort(),
+    guard_mappings: Object.fromEntries(Object.entries(authConfig.guard_mappings).sort(([left], [right]) => (
+      left < right ? -1 : left > right ? 1 : 0
+    ))),
+  };
+  return {
+    execution,
+    ...(execution.status === 'success' && snapshotDigest ? { snapshotDigest } : {}),
+    analyzer: `${plugin.id}@${plugin.version}`,
+    configDigest: `sha256:${createHash('sha256').update(JSON.stringify(canonicalConfig)).digest('hex')}`,
+  };
+}
