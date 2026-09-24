@@ -34,7 +34,8 @@ export function redactEvidenceFilename(uri: string): string {
       } catch { break; }
     }
     const encodedAgain = /%[0-9A-Fa-f]{2}/.test(decoded);
-    return encodedAgain || decoded.split('/').some((part) => SENSITIVE_FILENAME_MARKER.test(part))
+    return encodedAgain || decoded.split('/').some((part) =>
+      SENSITIVE_FILENAME_MARKER.test(part) || hasUnsafeSensitiveText(part))
       ? '[REDACTED_FILENAME]' : segment;
   }).join('/');
 }
