@@ -13,7 +13,12 @@ try {
   fs.writeFileSync(path.join(temp, 'candidate.tgz'), 'candidate');
   fs.writeFileSync(path.join(temp, 'consumer/package-lock.json'), '{}');
   const sha = (s: string) => crypto.createHash('sha256').update(s).digest('hex');
-  const m = { schemaVersion: 1 as const, source: 'a'.repeat(40), harness: 'a'.repeat(40), tree: 'b'.repeat(40), run: '123', attempt: '1', sha256: sha('candidate'), size: 9, lockSha256: sha('{}') };
+  fs.mkdirSync(path.join(temp, 'validation'));
+  fs.copyFileSync(path.join(__dirname, '../test/fixtures/sarif/sarif-schema-2.1.0.json'),
+    path.join(temp, 'validation/sarif-schema-2.1.0.json'));
+  fs.writeFileSync(path.join(temp, 'validation/official-sarif-test-validator.cjs'), 'validator');
+  const m = { schemaVersion: 1 as const, source: 'a'.repeat(40), harness: 'a'.repeat(40), tree: 'b'.repeat(40), run: '123', attempt: '1', sha256: sha('candidate'), size: 9, lockSha256: sha('{}'),
+    schemaSha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(temp, 'validation/sarif-schema-2.1.0.json'))).digest('hex'), validatorSha256: sha('validator') };
   const e = { source: m.source, run: m.run, attempt: m.attempt, sha256: m.sha256 };
   const pkg = JSON.parse(fs.readFileSync(path.join(__dirname, '../package.json'), 'utf8'));
   const resolution = Object.values(pkg.exports).filter((v: any) => typeof v === 'object').map((v: any) => v.require.slice(2));
@@ -33,9 +38,11 @@ try {
     inputs: Object.fromEntries(requiredInputKeys.map(key => [key,'e'.repeat(64)])),
     toolchain: { node: '24.1.0' }, onlinePreparationMs: 1, offlineAcceptanceMs: 2,
     findings: expectedFindingProof.map(finding => ({ ...finding, evidence: [...finding.evidence] })) };
-  const rows = matrixRows.map(row => ({ ...m, runtime: { executable: 'node', sha256: 'f'.repeat(64), platform: 'linux', arch: 'x64' }, row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2', switchVerified: true, resolution, dependencies, steps: Array.from({length:row.startsWith('18') || row === '20.16.0' ? 26 : 12},()=>({command:'node',exit:0,expectedExit:0,durationMs:1})), checks: row.startsWith('18') || row === '20.16.0' ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas'], ...(row === '24' ? {journey} : {}) }));
+  const rows = matrixRows.map(row => ({ ...m, runtime: { executable: 'node', sha256: 'f'.repeat(64), platform: 'linux', arch: 'x64' }, row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2', switchVerified: true, resolution, dependencies, steps: Array.from({length:row.startsWith('18') || row === '20.16.0' ? 26 : 13},()=>({command:'node',exit:0,expectedExit:0,durationMs:1})), checks: row.startsWith('18') || row === '20.16.0' ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas','official-sarif-schema'], ...(row === '24' ? {journey} : {}) }));
   fs.writeFileSync(path.join(temp, 'metadata.json'), JSON.stringify(m));
   test('same candidate and complete rows pass', () => { verifyTarball(temp, e); aggregate(m, rows, e, ['success','success']); });
+  test('missing internal Source-aware smoke command fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, steps: r.steps.slice(0, 12) } : r), e, ['success','success'])));
   test('changed tarball fails', () => { fs.writeFileSync(path.join(temp, 'candidate.tgz'), 'tampered!'); assert.throws(() => verifyTarball(temp, e)); fs.writeFileSync(path.join(temp, 'candidate.tgz'), 'candidate'); });
   test('missing tarball fails', () => { fs.renameSync(path.join(temp,'candidate.tgz'),path.join(temp,'saved')); assert.throws(() => verifyTarball(temp,e));fs.renameSync(path.join(temp,'saved'),path.join(temp,'candidate.tgz')); });
   test('different source fails', () => assert.throws(() => verifyTarball(temp, { ...e, source: 'c'.repeat(40) })));
@@ -43,6 +50,8 @@ try {
   test('another attempt fails', () => assert.throws(() => verifyTarball(temp, { ...e, attempt: '2' })));
   test('producer digest is independent', () => assert.throws(() => verifyTarball(temp, { ...e, sha256: 'd'.repeat(64) })));
   test('consumer lock mutation fails', () => { fs.writeFileSync(path.join(temp,'consumer/package-lock.json'),'[]');assert.throws(() => verifyTarball(temp,e));fs.writeFileSync(path.join(temp,'consumer/package-lock.json'),'{}'); });
+  test('official schema mutation fails', () => { fs.writeFileSync(path.join(temp,'validation/sarif-schema-2.1.0.json'),'{}');assert.throws(() => verifyTarball(temp,e));fs.copyFileSync(path.join(__dirname,'../test/fixtures/sarif/sarif-schema-2.1.0.json'),path.join(temp,'validation/sarif-schema-2.1.0.json')); });
+  test('validator mutation fails', () => { fs.writeFileSync(path.join(temp,'validation/official-sarif-test-validator.cjs'),'changed');assert.throws(() => verifyTarball(temp,e));fs.writeFileSync(path.join(temp,'validation/official-sarif-test-validator.cjs'),'validator'); });
   test('missing runtime identity fails', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,runtime:undefined} as any)), e, ['success','success'])));
   for (const key of ['executable','sha256','platform','arch']) test(`malformed runtime ${key} fails`, () => assert.throws(() => aggregate(m, rows.map(r => ({...r,runtime:{...r.runtime,[key]:''}})), e, ['success','success'])));
   for (const key of ['npm','resolution','dependencies','steps']) test(`missing ${key} evidence fails`, () => assert.throws(() => aggregate(m, rows.map(r => ({...r,[key]:undefined} as any)), e, ['success','success'])));
@@ -62,6 +71,7 @@ try {
   test('different consumer tarball fails', () => assert.throws(() => aggregate(m, rows.map((r,i) => i ? r : {...r,sha256:'d'.repeat(64)}), e, ['success','success'])));
   test('wrong runtime fails', () => assert.throws(() => aggregate(m, rows.map((r,i) => i ? r : {...r,node:'20.16.0'}), e, ['success','success'])));
   test('validation not executed fails', () => assert.throws(() => aggregate(m, rows.map((r,i) => i ? r : {...r,checks:[]}), e, ['success','success'])));
+  test('official schema evidence missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, checks: r.checks.filter(check => check !== 'official-sarif-schema') } : r), e, ['success','success'])));
   test('missing onboarding acceptance fails closed', () => assert.throws(() => aggregate(m, rows.map(r => ({ ...r, journey: undefined })), e, ['success','success'])));
   test('incomplete onboarding acceptance fails closed', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, journey: { ...journey, checks: [] } } : r), e, ['success','success'])));
   test('wrong onboarding finding fails closed', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, journey: { ...journey, findings: [{ ...journey.findings[0], ruleId: 'MISSING' }] } } : r), e, ['success','success'])));

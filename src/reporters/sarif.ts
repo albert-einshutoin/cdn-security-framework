@@ -1,5 +1,6 @@
 import type { ContractDiffReportV1 } from '../contract/contract-diff';
 import type { FindingEvidenceV1, SecurityFindingV1 } from '../contract/finding';
+import type { SourceAwareOutputBundle } from '../contract/source-aware-output';
 import { compareFindings, sortFindings } from '../contract/finding-order';
 import { hasUnsafeSensitiveText, redactEvidenceFilename } from '../contract/sensitive-text';
 
@@ -18,7 +19,8 @@ interface SarifRun {
       properties: {
         analyzers: string[];
         findingSchemaVersion: number;
-        reportSchemaVersion: number;
+        reportSchemaVersion?: number;
+        sourceAware?: Record<string, unknown>;
         capabilities?: {
           openapi: Record<string, string>;
           policy: Array<{ id: string; status: string }>;
@@ -71,6 +73,8 @@ interface SarifResult {
     tags: string[];
     evidenceSources?: string[];
     capabilities?: string[];
+    sourceAware?: { disposition: 'active' | 'suppressed' | 'governance'; comparisons: string[];
+      omittedSyntheticSourceLocations: number; omittedRelatedLocations: number };
   };
 }
 
@@ -371,8 +375,8 @@ function unifiedFindingKey(finding: SecurityFindingV1): string {
   return `${canonicalJson({ ...fields, tags: tags ? [...tags].sort(compareText) : undefined })}\u0000${unifiedEvidence(finding.ruleId, evidence).map((item) => canonicalJson(item)).join('\u0000')}`;
 }
 
-function unifiedEvidence(ruleId: string, evidence: readonly FindingEvidenceV1[]): FindingEvidenceV1[] {
-  const order = PRIMARY_SOURCE_ORDER[ruleId];
+function unifiedEvidence(ruleId: string, evidence: readonly FindingEvidenceV1[], allowUnknownRule = false): FindingEvidenceV1[] {
+  const order = PRIMARY_SOURCE_ORDER[ruleId] ?? (allowUnknownRule ? Object.keys(SOURCE_PRIORITY) as FindingEvidenceV1['source'][] : undefined);
   if (!order) {
     throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Finding rule family has no primary-source mapping.');
   }
@@ -392,8 +396,8 @@ function unifiedEvidence(ruleId: string, evidence: readonly FindingEvidenceV1[])
     .sort((left, right) => compareText(unifiedEvidenceKey(left), unifiedEvidenceKey(right)));
 }
 
-function primaryEvidence(finding: SecurityFindingV1, evidence: readonly FindingEvidenceV1[]): FindingEvidenceV1 | undefined {
-  const order = PRIMARY_SOURCE_ORDER[finding.ruleId];
+function primaryEvidence(finding: SecurityFindingV1, evidence: readonly FindingEvidenceV1[], allowUnknownRule = false): FindingEvidenceV1 | undefined {
+  const order = PRIMARY_SOURCE_ORDER[finding.ruleId] ?? (allowUnknownRule ? Object.keys(SOURCE_PRIORITY) as FindingEvidenceV1['source'][] : undefined);
   if (!order) {
     throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Finding rule family has no primary-source mapping.');
   }
@@ -532,9 +536,10 @@ function unifiedResult(
   finding: SecurityFindingV1,
   suppressed: boolean,
   maxRelatedLocations: number,
+  allowUnknownRule = false,
 ): SarifResult {
-  const evidence = unifiedEvidence(finding.ruleId, finding.evidence);
-  const primary = primaryEvidence(finding, evidence);
+  const evidence = unifiedEvidence(finding.ruleId, finding.evidence, allowUnknownRule);
+  const primary = primaryEvidence(finding, evidence, allowUnknownRule);
   const related = evidence.filter((item) => item !== primary).slice(0, maxRelatedLocations);
   const sources = [...new Set(evidence.map(({ source }) => unifiedText(source)))].sort(compareText);
   const capabilities = [...new Set(evidence.map(({ capability }) => unifiedText(capability)))].sort(compareText);
@@ -879,5 +884,97 @@ export function renderUnifiedContractDiffSarif(
   } catch (error: unknown) {
     if (error instanceof SarifReportError) throw error;
     throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Unified report could not be rendered.');
+  }
+}
+
+/** Internal pre-Entry renderer: one complete finalizer result, never a bounded Text/JSON preview. */
+export function renderSourceAwareSarif(
+  bundle: SourceAwareOutputBundle,
+  options: UnifiedContractDiffSarifOptions = {},
+): SarifLog {
+  const maxResults = options.maxResults ?? DEFAULT_MAX_RESULTS;
+  const maxOutputBytes = options.maxOutputBytes ?? DEFAULT_MAX_OUTPUT_BYTES;
+  const maxRelatedLocations = options.maxRelatedLocations ?? DEFAULT_MAX_RELATED_LOCATIONS;
+  if (![maxResults, maxOutputBytes, maxRelatedLocations].every((n) => Number.isSafeInteger(n) && n >= 0)
+    || maxOutputBytes === 0 || !bundle || (!bundle.finalized && !bundle.finalizationError)) {
+    throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Source-aware SARIF input is invalid.');
+  }
+  try {
+    const final = bundle.finalized;
+    const groups = final ? [
+      { disposition: 'active' as const, findings: final.findings },
+      { disposition: 'governance' as const, findings: final.exceptionDiagnostics },
+      { disposition: 'suppressed' as const, findings: final.suppressedFindings },
+    ] : [];
+    const count = groups.reduce((sum, group) => sum + group.findings.length, 0);
+    if (count > maxResults || count > MAX_UNIFIED_FINDINGS) {
+      throw new SarifReportError('SARIF_OUTPUT_LIMIT_EXCEEDED', 'Source-aware SARIF exceeds the result limit.');
+    }
+    const membership = new Map(final?.memberships.map(({ instanceId, comparisons }) => [instanceId, comparisons]) ?? []);
+    const rules = new Map<string, SecurityFindingV1>();
+    const results: SarifResult[] = [];
+    const analyzers = new Set<string>();
+    for (const group of groups) {
+      for (const finding of group.findings) {
+        if (finding.evidence.length > MAX_UNIFIED_EVIDENCE) {
+          throw new SarifReportError('SARIF_OUTPUT_LIMIT_EXCEEDED', 'Source-aware evidence exceeds the limit.');
+        }
+        if (!rules.has(finding.ruleId)) rules.set(finding.ruleId, finding);
+        for (const evidence of finding.evidence) analyzers.add(unifiedText(evidence.analyzer));
+        // A Source project digest is decoded input evidence, not a physical file/line location.
+        const physical = finding.evidence.filter(({ source, uri }) => !(source === 'source-ast' && uri === 'source-project'));
+        const uniquePhysical = unifiedEvidence(finding.ruleId, physical, true);
+        const item = unifiedResult({ ...finding, evidence: physical }, group.disposition === 'suppressed', maxRelatedLocations, true);
+        item.properties.sourceAware = {
+          disposition: group.disposition,
+          comparisons: [...(membership.get(finding.instanceId) ?? [])],
+          omittedSyntheticSourceLocations: finding.evidence.length - physical.length,
+          omittedRelatedLocations: Math.max(0, uniquePhysical.length - 1 - maxRelatedLocations),
+        };
+        results.push(item);
+      }
+    }
+    const notifications: SarifInvocation['toolExecutionNotifications'] = [];
+    if (bundle.finalizationError) notifications.push({
+      descriptor: { id: bundle.finalizationError.code },
+      message: { text: 'Source-aware finalization failed.' },
+    });
+    if (final) {
+      for (const code of final.analysis.codes) notifications.push({
+        descriptor: { id: unifiedText(code) }, message: { text: 'Source-aware analysis diagnostic.' },
+      });
+      if (final.analysis.status === 'partial') notifications.push({
+        descriptor: { id: 'SOURCE_ANALYSIS_PARTIAL' }, message: { text: 'Source-aware analysis is partial.' },
+      });
+    }
+    const sourceAware = final ? {
+      target: bundle.target, metadata: bundle.metadata, stages: final.stages,
+      comparisons: final.comparisons, summary: final.summary, analysis: final.analysis,
+      threshold: final.threshold, internalExitCode: final.exitCode,
+    } : {
+      target: bundle.target, metadata: bundle.metadata, stages: bundle.finalizationError?.stages,
+      comparisons: bundle.finalizationError?.comparisons,
+      internalExitCode: bundle.finalizationError?.exitCode ?? 3,
+      finalizationErrorCode: bundle.finalizationError?.code,
+    };
+    const output: SarifLog = {
+      version: '2.1.0', $schema: 'https://json.schemastore.org/sarif-2.1.0.json',
+      runs: [{
+        tool: { driver: {
+          name: 'cdn-security-framework', informationUri: FINDING_REFERENCE,
+          rules: [...rules.values()].sort((a, b) => compareText(a.ruleId, b.ruleId)).map(unifiedRule),
+          properties: { analyzers: [...analyzers].sort(compareText), findingSchemaVersion: 1, sourceAware },
+        } },
+        results,
+        invocations: [{ executionSuccessful: final?.analysis.outcome === 'ok', toolExecutionNotifications: notifications }],
+      }],
+    };
+    if (serializedBytes(output) > maxOutputBytes) {
+      throw new SarifReportError('SARIF_OUTPUT_LIMIT_EXCEEDED', 'Source-aware SARIF exceeds the byte limit.');
+    }
+    return output;
+  } catch (error) {
+    if (error instanceof SarifReportError) throw error;
+    throw new SarifReportError('SARIF_UNIFIED_REPORT_INVALID', 'Source-aware SARIF could not be rendered.');
   }
 }

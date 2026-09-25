@@ -144,11 +144,17 @@ try {
   fs.mkdirSync(path.join(directory, 'consumer'));
   const tarball = path.join(directory, 'candidate.tgz');
   const lockfile = path.join(directory, 'consumer/package-lock.json');
+  const validation = path.join(directory, 'validation');
+  fs.mkdirSync(validation);
+  const schema = path.join(validation, 'sarif-schema-2.1.0.json');
+  const validator = path.join(validation, 'official-sarif-test-validator.cjs');
+  fs.copyFileSync('test/fixtures/sarif/sarif-schema-2.1.0.json', schema);
+  fs.writeFileSync(validator, 'synthetic validator');
   fs.writeFileSync(tarball, 'synthetic tarball');
   fs.writeFileSync(lockfile, 'synthetic lock');
   const hash = (file: string) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
   const metadata = { schemaVersion: 1, ...final, sha256: hash(tarball), lockSha256: hash(lockfile), size: fs.statSync(tarball).size,
-    harness: final.source };
+    harness: final.source, schemaSha256: hash(schema), validatorSha256: hash(validator) };
   fs.writeFileSync(path.join(directory, 'metadata.json'), JSON.stringify(metadata));
   verifyTarball(directory, { source: final.source, run: final.run, attempt: final.attempt, sha256: metadata.sha256 });
   fs.writeFileSync(tarball, 'substituted bytes');

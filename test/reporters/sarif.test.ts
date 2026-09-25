@@ -1,9 +1,9 @@
-import Ajv from 'ajv';
 import { describe, expect, test } from 'vitest';
 
 import { createFinding, type ContractDiffReportV1 } from '../../src/contract';
 import { renderFindingsAsSarif } from '../../src/reporters/sarif';
 import { assertGolden } from '../helpers/golden-assert';
+import { validateLocalSarif } from '../helpers/sarif-validation';
 
 function report(): ContractDiffReportV1 {
   const active = createFinding({
@@ -106,37 +106,7 @@ describe('SARIF 2.1.0 reporter', () => {
     expect(first.runs[0].results[0].relatedLocations).toHaveLength(1);
     expect(first.runs[0].results[1].locations).toBeUndefined();
     expect(first.runs[0].results[2].suppressions).toEqual([{ kind: 'external', status: 'accepted' }]);
-    const validate = new Ajv({ strict: false }).compile({
-      type: 'object', required: ['$schema', 'version', 'runs'],
-      properties: {
-        version: { const: '2.1.0' },
-        runs: {
-          type: 'array', minItems: 1,
-          items: {
-            type: 'object', required: ['tool', 'results'],
-            properties: {
-              tool: {
-                type: 'object', required: ['driver'],
-                properties: {
-                  driver: {
-                    type: 'object', required: ['name', 'rules'],
-                    properties: { rules: { type: 'array' } },
-                  },
-                },
-              },
-              results: {
-                type: 'array',
-                items: {
-                  type: 'object', required: ['ruleId', 'level', 'message', 'partialFingerprints'],
-                  properties: { level: { enum: ['error', 'warning', 'note'] } },
-                },
-              },
-            },
-          },
-        },
-      },
-    });
-    expect(validate(first), JSON.stringify(validate.errors)).toBe(true);
+    expect(validateLocalSarif(first), JSON.stringify(validateLocalSarif.errors)).toBe(true);
     expect(JSON.stringify(first)).not.toMatch(/timestamp|runId|\/Users\/|Authorization|Cookie/i);
     assertGolden('finding-sarif-2.1.0', first);
   });
