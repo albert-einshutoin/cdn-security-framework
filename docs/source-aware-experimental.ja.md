@@ -1,0 +1,59 @@
+# Experimental Source-aware CLI（devブランチ限定）
+
+`cdn-security contract source-diff` は `dev/2.1-source-aware` 候補packageの
+**未公開Experimental**入口です。公開済み1.4.0、2.0のRC、完成した標準2.1 workflowには
+含まれません。記録されたCI runの候補tarballを使い、`npm latest`で置き換えません。
+
+対応Node.js（>=20.17.0）の空の使い捨てPOSIX consumerへ照合済み`.tgz`を置き、
+PR証拠のSHA-256と一致することを確認してから導入します。offline受入では共通lockと
+依存cacheを別途準備し、single-pack consumer laneを使います。
+
+```sh
+shasum -a 256 candidate.tgz
+npm install --ignore-scripts ./candidate.tgz
+mkdir -p workspace
+cat > workspace/openapi.yaml <<'YAML'
+openapi: 3.0.3
+info: {title: Synthetic, version: 1.0.0}
+paths:
+  /users:
+    get:
+      responses:
+        '200': {description: OK}
+YAML
+cat > workspace/policy.yml <<'YAML'
+version: 2
+defaults: {mode: enforce}
+request:
+  allow_methods: [GET]
+  block: {header_missing: []}
+routes: []
+response_headers: {}
+YAML
+./node_modules/.bin/cdn-security contract source-diff \
+  --workspace-root workspace --openapi openapi.yaml --policy policy.yml \
+  --target aws --current-date 2026-09-25 --format text
+```
+
+単一workspaceを明示します。`--source tsconfig.json`を渡すと既存の静的NestJS解析を
+要求します。省略時のSourceは **omitted** で、自動探索しません。
+`--target aws|cloudflare`、任意のbounded `--exceptions <path>` と
+`--environment <name>`、`--fail-on error|warning|never`（既定`error`）、
+`--format text|json|sarif|summary`（既定`text`）を指定できます。例外ファイルがなくても
+`--current-date YYYY-MM-DD`は必須です。Source認証設定は既存defaultを使い、
+確認できない情報はpublic/認証済みと推定せずunknown/partialにします。
+partialは安全性の証明ではありません。
+
+Text/JSONは件数上限のあるpreviewです。JSONは完全な安定公開schemaではありません。
+SARIFは既存reporter制限内の完全結果、Summaryは最大10件/32KiBの表示です。
+形式によって省略表示は異なります。exit `0`は処理成立・Finding閾値未到達、
+`1`は処理成立・閾値到達、`2`は入力/configuration/bounded-input失敗、
+`3`は内部/reporter/出力失敗です。入力stageが失敗しても、独立比較のFindingを
+含むreportを出してexit `2`になる場合があります。`--fail-on never`は失敗を
+成功へ変換しません。reportはstdout、固定失敗診断はstderrです。JSON/SARIFは
+単一JSONと末尾改行を出します。`--out`、ファイル保存、GitHub Summaryへの書込み・
+upload、PR投稿、apply/deployは未実装です。shellのredirectはCLI起動前に働くため、
+入力ファイルへreportをredirectしないでください。
+
+実binaryはinstalled-package smokeで検証します。[標準CLIリファレンス](cli.ja.md)は
+2.0のコマンドを説明します。正式Source-aware workflowとGitHub uploadは後続工程です。

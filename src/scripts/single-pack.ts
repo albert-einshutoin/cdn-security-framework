@@ -68,9 +68,10 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
     assert.ok(r.dependencies && Object.keys(r.dependencies).sort().join() === Object.keys(pkg.dependencies).sort().join(), 'missing dependency evidence');
     assert.ok(Object.values(r.dependencies).every(v => /^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(v)), 'invalid dependency version');
     const lower = row === '18.20.8' || row === '20.16.0';
-    assert.ok(Array.isArray(r.steps) && r.steps.length === (lower ? 26 : 13), 'missing command evidence');
-    assert.ok(r.steps.every(s => s && typeof s.command === 'string' && /^[a-zA-Z0-9_.-]+$/.test(s.command) && Number.isFinite(s.durationMs) && s.durationMs >= 0 && s.exit === s.expectedExit && (s.expectedExit === 0 || (lower && s.expectedExit === 1))), 'invalid command evidence');
-    assert.deepEqual(r.checks, row === '18.20.8' || row === '20.16.0' ? ['node-rejection', 'resolution', 'no-side-effects'] : ['package-smoke', 'resolution', 'schemas', 'official-sarif-schema']);
+    assert.ok(Array.isArray(r.steps) && r.steps.length === (lower ? 26 : 20), 'missing command evidence');
+    assert.ok(r.steps.every(s => s && typeof s.command === 'string' && /^[a-zA-Z0-9_.-]+$/.test(s.command) && Number.isFinite(s.durationMs) && s.durationMs >= 0 && s.exit === s.expectedExit && (s.expectedExit === 0 || (lower && s.expectedExit === 1) || (s.command === 'cdn-security-source-diff' && [1, 2, 3].includes(s.expectedExit)))), 'invalid command evidence');
+    if (!lower) assert.deepEqual(r.steps.filter(s => s.command === 'cdn-security-source-diff').map(s => s.expectedExit), [0, 0, 0, 0, 1, 2, 3], 'missing installed CLI exit proof');
+    assert.deepEqual(r.checks, row === '18.20.8' || row === '20.16.0' ? ['node-rejection', 'resolution', 'no-side-effects'] : ['package-smoke', 'resolution', 'schemas', 'official-sarif-schema', 'source-aware-cli']);
     if (row === '24') {
       const j = r.journey;
       const { requiredChecks: required, requiredStepIds, requiredInputKeys, requiredOutputKeys, expectedFindingProof } = require('./package-journey') as typeof import('./package-journey');
@@ -191,8 +192,9 @@ function consume(directory: string, row: string, output: string): void {
     smoke.assertPackageContents(read(path.join(directory, 'pack.json')));
     const { createOfficialSarifValidator } = require(path.join(directory, 'validation/official-sarif-test-validator.cjs')) as typeof import('./official-sarif-test-validator');
     const validate = createOfficialSarifValidator(path.join(directory, 'validation/sarif-schema-2.1.0.json'));
-    smoke.smokeInstalledPackage(path.join(directory, 'candidate.tgz'), consumer,
-      (value: unknown) => assert.ok(validate(value), 'installed internal SARIF failed pinned official schema'));
+    const cliVerified = smoke.smokeInstalledPackage(path.join(directory, 'candidate.tgz'), consumer,
+      (value: unknown) => assert.ok(validate(value), 'installed SARIF failed pinned official schema'));
+    assert.equal(cliVerified, true, 'installed source-diff CLI proof missing');
     steps = smoke.smokeSteps;
     run(process.execPath, ['-e', `const fs=require('node:fs'),path=require('node:path');const p=path.resolve('node_modules/cdn-security-framework');const req=require('node:module').createRequire(path.join(p,'package.json'));const Ajv=req('ajv');const ajv=new Ajv({strict:false});for(const f of ['policy/schema.json',...fs.readdirSync(path.join(p,'schemas')).filter(f=>f.endsWith('.json')).map(f=>'schemas/'+f)]){if(!ajv.validateSchema(JSON.parse(fs.readFileSync(path.join(p,f)))))throw new Error('invalid schema');}`], consumer);
     if (row === '24') {
@@ -200,7 +202,7 @@ function consume(directory: string, row: string, output: string): void {
         path.join(consumer, 'node_modules/cdn-security-framework/examples')], consumer));
     }
   }
-  const result: Result = { ...m, runtime: { executable: path.basename(process.execPath), sha256: sha(process.execPath), platform: process.platform, arch: process.arch }, row, status: 'pass', node: process.versions.node, npm: run('npm', ['--version'], consumer).trim(), checks: rejected ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas','official-sarif-schema'], ...details, steps, ...(journey ? { journey } : {}) };
+  const result: Result = { ...m, runtime: { executable: path.basename(process.execPath), sha256: sha(process.execPath), platform: process.platform, arch: process.arch }, row, status: 'pass', node: process.versions.node, npm: run('npm', ['--version'], consumer).trim(), checks: rejected ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli'], ...details, steps, ...(journey ? { journey } : {}) };
   if (rejected && process.env.CSF_SWITCH_PROOF) {
     const switched = read(process.env.CSF_SWITCH_PROOF) as Result;
     verifyIdentity(switched, expected());

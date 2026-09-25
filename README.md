@@ -48,6 +48,8 @@ Published: 1.4.0. On 2026-09-22 main implements and validates schema2 and explic
 For the runnable paths, see the [OpenAPI integration guide](docs/openapi-integration.md),
 [NestJS source analysis guide](docs/source-analysis-nestjs.md),
 [CLI reference](docs/cli.md), and [Programmatic API](docs/programmatic-api.md).
+The dev-only [Experimental Source-aware CLI](docs/source-aware-experimental.md)
+does not change the published or standard workflow status above.
 The [version roadmap](docs/ROADMAP.md) is the release-status source of truth.
 
 The framework does not claim that a generated artifact is fully secure, that a

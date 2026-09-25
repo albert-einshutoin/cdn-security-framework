@@ -48,6 +48,8 @@ OpenAPI、source analysis、policy、runtime evidence は別々の Truth であ�
 [NestJS Source Analysis](docs/source-analysis-nestjs.ja.md)、
 [CLI リファレンス](docs/cli.ja.md)、[プログラマティック API](docs/programmatic-api.ja.md)
 を参照してください。[Version roadmap](docs/ROADMAP.ja.md) が release status の正本です。
+dev限定の[Experimental Source-aware CLI](docs/source-aware-experimental.ja.md)は、
+上記の公開済み・標準workflowの状態を変更しません。
 
 生成 artifact が完全に安全であること、Guard や Analyzer の結果が runtime の
 enforcement を証明すること、未対応 provider の control が利用できることは主張しません。

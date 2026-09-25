@@ -2855,7 +2855,9 @@ const { registerContractDiffCommand } = require(path.join(
   'commands',
   'contract-diff.js',
 ));
-registerContractDiffCommand(program);
+const contractCommand = registerContractDiffCommand(program);
+const { registerSourceDiffCommand } = require(path.join(pkgRoot, 'bin', 'commands', 'source-diff.js'));
+registerSourceDiffCommand(contractCommand);
 
 program
   .command('init')
@@ -3678,10 +3680,17 @@ program
   });
 
 try {
-  program.parse();
+  await program.parseAsync();
 } catch (error: unknown) {
   const commanderError = error as { code?: string; exitCode?: number };
-  if (process.argv[2] === 'contract' && process.argv[3] === 'diff'
+  if (process.argv[2] === 'contract' && process.argv[3] === 'source-diff'
+    && commanderError.code?.startsWith('commander.')) {
+    if (commanderError.exitCode === 0) process.exitCode = 0;
+    else {
+      console.error('[ERROR] SOURCE_DIFF_ARGUMENT_INVALID: Invalid source-diff arguments.');
+      process.exitCode = 2;
+    }
+  } else if (process.argv[2] === 'contract' && process.argv[3] === 'diff'
     && commanderError.code?.startsWith('commander.')) {
     if (commanderError.exitCode === 0) process.exitCode = 0;
     else {
