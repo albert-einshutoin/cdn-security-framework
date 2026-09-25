@@ -1,12 +1,7 @@
 import type { Command } from 'commander';
 
-import { analyzeSourceAwareWorkspace } from '../../contract/source-aware-workspace';
-import { finalizeSourceAwareOutput } from '../../contract/source-aware-output';
-import { formatSourceAwarePreviewJson, formatSourceAwarePreviewText } from '../../contract/source-aware-finalizer';
 import { loadFindingExceptions, validateFindingExceptionSet } from '../../contract/finding-exceptions';
 import type { ContractDiffFailOn } from '../../contract/contract-diff';
-import { renderSourceAwareSarif } from '../../reporters/sarif';
-import { renderSourceAwareSummary } from '../../reporters/source-aware-summary';
 
 interface Options {
   workspaceRoot?: string;
@@ -93,6 +88,19 @@ async function run(options: Options): Promise<void> {
   }
 
   try {
+    const [
+      { analyzeSourceAwareWorkspace },
+      { finalizeSourceAwareOutput },
+      { formatSourceAwarePreviewJson, formatSourceAwarePreviewText },
+      { renderSourceAwareSarif },
+      { renderSourceAwareSummary },
+    ] = await Promise.all([
+      import('../../contract/source-aware-workspace'),
+      import('../../contract/source-aware-output'),
+      import('../../contract/source-aware-finalizer'),
+      import('../../reporters/sarif'),
+      import('../../reporters/source-aware-summary'),
+    ]);
     const workspace = await analyzeSourceAwareWorkspace({
       workspaceRoot: input.workspaceRoot, openapiPath: input.openapiPath,
       policyPath: input.policyPath, target: input.target,
