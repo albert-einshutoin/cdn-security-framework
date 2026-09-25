@@ -47,6 +47,31 @@ supplied. The existing Source authentication defaults apply: information they
 cannot establish remains unknown or partial, never inferred as public or
 authenticated. A partial result is not proof of safety.
 
+With `--source`, `--source-auth-config <path>` reads one explicit YAML or JSON
+data file relative to `--workspace-root`. For example,
+[`examples/nestjs-contract/security-analyzer.yml`](../examples/nestjs-contract/security-analyzer.yml)
+maps `Public`, `Roles`, and `JwtAuthGuard` in that fixture. Without the option,
+existing empty Source auth defaults remain in force; an explicit file containing
+all three required keys with empty arrays/map has the same meaning. The file is
+validated as the existing `NestJsAuthConfig` object, with required
+`public_decorators`, `roles_decorators`, and `guard_mappings` and no extra keys.
+In the example, the default leaves `GET /users/{id}` and `POST /users` auth
+unknown. The explicit file recognizes direct `Public` on the GET route,
+`Roles('writer')` on the POST route, and the declared bearer mapping for
+`JwtAuthGuard`. The unmapped `UnknownGuard` still makes its route partial;
+the analyzer can then report the corresponding OpenAPI/Policy mismatch Findings.
+An invalid file exits `2` before analysis with a fixed diagnostic and never
+falls back to defaults. The option without `--source` also exits `2` without
+reading the file. There is no discovery, include, alias/merge composition,
+environment interpolation, or executable JS/TS config. The CLI reads at most
+64 KiB from one regular file; workspace-local symlinks are accepted, while
+symlinks outside the workspace are rejected. This input guarantee is for the
+CLI file option, not every programmatic config object. POSIX/local fixtures are
+verified; Windows and network filesystems are not verified. A mapped Guard name
+and auth kind express a user-provided static assumption. They do not prove the
+Guard body, token validation, middleware order, or runtime enforcement. Unknown
+Guards and other unresolved Source facts stay partial.
+
 Text and JSON are bounded previews; JSON is not a stable complete public
 Source-aware schema. SARIF covers the complete result within existing reporter
 limits. Summary shows up to 10 Findings and 32 KiB. Findings and omissions may

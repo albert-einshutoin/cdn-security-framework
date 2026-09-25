@@ -44,6 +44,28 @@ YAML
 確認できない情報はpublic/認証済みと推定せずunknown/partialにします。
 partialは安全性の証明ではありません。
 
+`--source`とともに`--source-auth-config <path>`を指定すると、
+`--workspace-root`基準で明示した単一のYAML/JSONデータファイルを読みます。
+既存例の[`security-analyzer.yml`](../examples/nestjs-contract/security-analyzer.yml)は
+`Public`、`Roles`、`JwtAuthGuard`を対応付けます。option省略時は既存の空の
+Source認証defaultを維持します。必須の`public_decorators`、`roles_decorators`、
+`guard_mappings`をすべて明示した空定義も同じ意味です。
+既存例ではdefaultの`GET /users/{id}`と`POST /users`の認証はunknownです。
+明示設定を読むと、GETの直接`Public`、POSTの`Roles('writer')`、
+`JwtAuthGuard`のbearer対応を認識し、OpenAPI/Policyとの該当する不一致を
+Findingに反映します。`UnknownGuard`を設定していないrouteはpartialのままです。
+未知fieldや不正な設定は
+解析前に固定診断とexit `2`で拒否し、defaultへ戻しません。`--source`なしで
+このoptionだけを渡した場合は、ファイルを読まずexit `2`です。自動探索、
+include、alias/mergeによる合成、環境変数展開、実行可能なJS/TS設定はありません。
+CLI入力は単一の通常ファイルを最大64 KiBまで読みます。workspace内symlinkは
+許容し、外へ解決されるsymlinkは拒否します。この上限はCLIのファイル入力に
+適用し、Programmatic APIの全設定objectには適用しません。確認済み環境は
+POSIX/local fixtureで、Windowsやnetwork filesystemは未検証です。
+Guard名と認証種別の対応は利用者が与える静的な前提であり、Guard本体、token検証、
+middleware順序、runtime認証の証明ではありません。未設定のGuardや他の未解決
+Source事実はpartialのままです。
+
 Text/JSONは件数上限のあるpreviewです。JSONは完全な安定公開schemaではありません。
 SARIFは既存reporter制限内の完全結果、Summaryは最大10件/32KiBの表示です。
 形式によって省略表示は異なります。exit `0`は処理成立・Finding閾値未到達、

@@ -204,6 +204,8 @@ export function assertPackageContents(pack: PackResult) {
     'bin/commands/contract-diff.d.ts',
     'bin/commands/source-diff.js',
     'bin/commands/source-diff.d.ts',
+    'bin/commands/source-auth-config.js',
+    'bin/commands/source-auth-config.d.ts',
     'lib/index.js',
     'lib/index.d.ts',
     'lib/compile.js',
@@ -429,6 +431,9 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
       const { formatSourceAwarePreviewJson, formatSourceAwarePreviewText } = require(path.join(pkgRoot, 'contract/source-aware-finalizer.js'));
       const { renderSourceAwareSarif } = require(path.join(pkgRoot, 'reporters/sarif.js'));
       const { renderSourceAwareSummary } = require(path.join(pkgRoot, 'reporters/source-aware-summary.js'));
+      const { loadSourceAuthConfig } = require(path.join(pkgRoot, 'bin/commands/source-auth-config.js'));
+      const { runNestJsSourceAnalysisInternal } = require(path.join(pkgRoot, 'source/nestjs/analyzer.js'));
+      const { DEFAULT_SOURCE_ANALYSIS_LIMITS } = require(path.join(pkgRoot, 'source-analysis/index.js'));
       const root = fs.mkdtempSync(path.join(process.cwd(), 'source-aware-'));
       (async () => {
         try {
@@ -445,7 +450,8 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
           fs.writeFileSync(path.join(root, 'refs/token=opaquevalue123.yaml'), 'components:\n  parameters:\n    Id:\n      name: id\n      in: path\n      required: true\n      schema: {type: string}\n');
           fs.writeFileSync(path.join(root, 'openapi.yaml'), "openapi: 3.0.3\ninfo: {title: Synthetic, version: 1.0.0}\npaths:\n  /users/{id}:\n    get:\n      parameters:\n        - $ref: './refs/token=opaquevalue123.yaml#/components/parameters/Id'\n      responses:\n        '200': {description: Authorization Bearer synthetic-secret-opaquevalue123}\n  /users:\n    post:\n      responses:\n        '200': {description: OK}\n");
           const inputNames = ['openapi.yaml', 'refs/token=opaquevalue123.yaml', 'policy.yml',
-            'tsconfig.json', 'src/controller.ts', 'node_modules/@nestjs/common/package.json',
+            'tsconfig.json', 'src/controller.ts',
+            'node_modules/@nestjs/common/package.json',
             'node_modules/@nestjs/common/index.js', 'node_modules/@nestjs/common/index.d.ts'];
           const inputHashes = inputNames.map(name => crypto.createHash('sha256').update(fs.readFileSync(path.join(root, name))).digest('hex'));
           const workspace = await analyzeSourceAwareWorkspace({ workspaceRoot: root, openapiPath: 'openapi.yaml', policyPath: 'policy.yml', target: 'aws', source: { tsconfigPath: 'tsconfig.json' } });
@@ -521,9 +527,166 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
           assert.ok(failure.stderr.includes('SOURCE_DIFF_REPORTER_FAILED'));
           assert.ok(!failure.stderr.includes('synthetic-private-fault') && !failure.stderr.includes(root)
             && !failure.stderr.includes('opaquevalue123') && !failure.stderr.includes('token%3Dopaquevalue123'));
+          const authRoot = path.join(root, 'auth-example');
+          fs.cpSync(path.join(pkgRoot, 'examples/nestjs-contract'), authRoot, { recursive: true });
+          const authDependency = path.join(authRoot, 'node_modules/@nestjs/common');
+          fs.mkdirSync(path.dirname(authDependency), { recursive: true });
+          fs.cpSync(path.join(authRoot, 'stubs/nestjs-common'), authDependency, { recursive: true });
+          fs.writeFileSync(path.join(authRoot, 'auth.json'), JSON.stringify({
+            guard_mappings: { JwtAuthGuard: { auth_kind: 'bearer' } },
+            roles_decorators: ['Roles'], public_decorators: ['Public'],
+          }));
+          fs.writeFileSync(path.join(authRoot, 'auth-alt.json'), JSON.stringify({
+            guard_mappings: { JwtAuthGuard: { auth_kind: 'api_key' } },
+            roles_decorators: [], public_decorators: [],
+          }));
+          fs.writeFileSync(path.join(authRoot, 'auth-bad.yml'),
+            'public_decorators: []\nroles_decorators: []\nguard_mappings: {}\nprivate: opaquevalue123\n');
+          const authInputNames = ['tsconfig.json', 'tsconfig.base.json', 'openapi.yaml', 'security-analyzer.yml',
+            'policy/security.yml', 'packages/shared/tsconfig.json', 'src/base.controller.ts',
+            'src/decorators.ts', 'src/guards.ts', 'src/runtime-prefix.ts', 'src/users.controller.ts',
+            'node_modules/@nestjs/common/index.d.ts', 'node_modules/@nestjs/common/index.js',
+            'node_modules/@nestjs/common/package.json', 'auth.json', 'auth-alt.json', 'auth-bad.yml'];
+          const authInputHashes = authInputNames.map(name => crypto.createHash('sha256')
+            .update(fs.readFileSync(path.join(authRoot, name))).digest('hex'));
+          const loadedAuth = loadSourceAuthConfig({ workspaceRoot: authRoot, inputPath: 'security-analyzer.yml' });
+          const loadedJson = loadSourceAuthConfig({ workspaceRoot: authRoot, inputPath: 'auth.json' });
+          const loadedAlt = loadSourceAuthConfig({ workspaceRoot: authRoot, inputPath: 'auth-alt.json' });
+          assert.deepEqual(loadedAuth.config, loadedJson.config);
+          assert.notEqual(loadedAuth.rawDigest, loadedJson.rawDigest);
+          const authWorkspaceOptions = { workspaceRoot: authRoot, openapiPath: 'openapi.yaml',
+            policyPath: 'policy/security.yml', target: 'aws' };
+          const defaultAuthWorkspace = await analyzeSourceAwareWorkspace({ ...authWorkspaceOptions,
+            source: { tsconfigPath: 'tsconfig.json' } });
+          const configuredWorkspace = await analyzeSourceAwareWorkspace({ ...authWorkspaceOptions,
+            source: { tsconfigPath: 'tsconfig.json', authConfig: loadedAuth.config } });
+          const changedWorkspace = await analyzeSourceAwareWorkspace({ ...authWorkspaceOptions,
+            source: { tsconfigPath: 'tsconfig.json', authConfig: loadedAlt.config } });
+          const configuredBundle = finalizeSourceAwareOutput(configuredWorkspace, { currentDate: '2026-09-25', failOn: 'never' });
+          const changedBundle = finalizeSourceAwareOutput(changedWorkspace, { currentDate: '2026-09-25', failOn: 'never' });
+          assert.equal(configuredWorkspace.evidence.source.projectDigest, defaultAuthWorkspace.evidence.source.projectDigest);
+          assert.equal(changedWorkspace.evidence.source.projectDigest, defaultAuthWorkspace.evidence.source.projectDigest);
+          assert.notEqual(configuredWorkspace.evidence.source.configDigest, defaultAuthWorkspace.evidence.source.configDigest);
+          assert.notEqual(changedWorkspace.evidence.source.configDigest, configuredWorkspace.evidence.source.configDigest);
+          assert.ok(configuredBundle.finalized && changedBundle.finalized);
+          assert.notDeepEqual(configuredBundle.finalized.findings, changedBundle.finalized.findings);
+          const expectedAuthFindings = [
+            ['SC-AUTHN-006', 'GET', '/users/duplicate'],
+            ['SC-AUTHN-006', 'GET', '/users/inherited'],
+            ['SC-AUTHN-006', 'POST', '/users'],
+            ['SC-AUTHZ-002', 'POST', '/users'],
+          ];
+          const authFindings = findings => findings.filter(finding =>
+            ['SC-AUTHN-006', 'SC-AUTHZ-002'].includes(finding.ruleId))
+            .map(finding => [finding.ruleId, finding.route?.method, finding.route?.path])
+            .sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right)));
+          assert.deepEqual(authFindings(configuredWorkspace.comparisons.implementedAllowed.findings), expectedAuthFindings);
+          assert.deepEqual(authFindings(changedWorkspace.comparisons.implementedAllowed.findings), [
+            ['SC-AUTHN-006', 'GET', '/users/duplicate'],
+            ['SC-AUTHN-006', 'GET', '/users/inherited'],
+            ['SC-AUTHN-006', 'POST', '/users'],
+          ]);
+          const sourceOptions = { workspaceRoot: authRoot, entrypoints: ['tsconfig.json'],
+            limits: DEFAULT_SOURCE_ANALYSIS_LIMITS, logger: { log() {} } };
+          for (const [config, expected] of [
+            [loadedAuth.config, [
+              ['GET /users/{id}', 'public', 'none', undefined],
+              ['POST /users', 'authenticated', 'alternatives', 'bearer'],
+              ['PATCH /users/details', 'unknown', 'unknown', undefined],
+            ]],
+            [loadedAlt.config, [
+              ['GET /users/{id}', 'authenticated', 'alternatives', 'api-key'],
+              ['POST /users', 'authenticated', 'alternatives', 'api-key'],
+              ['PATCH /users/details', 'unknown', 'unknown', undefined],
+            ]],
+          ]) {
+            const analyzed = await runNestJsSourceAnalysisInternal(sourceOptions, config);
+            assert.equal(analyzed.execution.status, 'success');
+            const operations = analyzed.execution.result.contract.operations;
+            assert.deepEqual(expected.map(([route]) => {
+              const operation = operations.find(item => item.routeKey === route);
+              return [operation.routeKey, operation.exposure, operation.auth.mode,
+                operation.auth.alternatives[0]?.schemes[0]?.kind];
+            }), expected);
+          }
+          const authArgs = ['contract', 'source-diff', '--workspace-root', authRoot, '--openapi', 'openapi.yaml',
+            '--policy', 'policy/security.yml', '--target', 'aws', '--source', 'tsconfig.json',
+            '--current-date', '2026-09-25', '--fail-on', 'never'];
+          const configuredExpected = JSON.parse(formatSourceAwarePreviewJson(configuredBundle.finalized));
+          const changedExpected = JSON.parse(formatSourceAwarePreviewJson(changedBundle.finalized));
+          const authCases = [];
+          let configuredJson;
+          const configuredSarif = renderSourceAwareSarif(configuredBundle);
+          for (const format of ['text', 'json', 'sarif', 'summary']) {
+            const start = process.hrtime.bigint();
+            const result = cp.spawnSync(process.execPath, [cli, ...authArgs, '--source-auth-config', 'security-analyzer.yml', '--format', format], {
+              cwd: authRoot, encoding: 'utf8', env: { ...process.env, NODE_PATH: '' }, maxBuffer: 8 * 1024 * 1024,
+            });
+            steps.push({ command: 'cdn-security-source-auth-config', exit: result.status ?? -1, expectedExit: 0,
+              durationMs: Number(process.hrtime.bigint() - start) / 1e6 });
+            authCases.push('configured-' + format);
+            assert.equal(result.status, 0, 'configured installed CLI failed');
+            assert.equal(result.stderr, '');
+            assert.ok(!result.stdout.includes(root) && !result.stdout.includes('opaquevalue123'));
+            if (format === 'json') {
+              configuredJson = JSON.parse(result.stdout);
+              assert.deepEqual(configuredJson, configuredExpected);
+              assert.deepEqual(authFindings(configuredJson.findings.active), expectedAuthFindings);
+            }
+            if (format === 'sarif') {
+              assert.deepEqual(JSON.parse(result.stdout), configuredSarif);
+              fs.writeFileSync(path.join(process.cwd(), 'source-auth-installed-cli-sarif.json'), result.stdout);
+            }
+            if (format === 'text') assert.equal(result.stdout, formatSourceAwarePreviewText(configuredBundle.finalized));
+            if (format === 'summary') assert.equal(result.stdout, renderSourceAwareSummary(configuredBundle));
+          }
+          for (const scenario of [
+            { name: 'equivalent-json', config: 'auth.json', expected: configuredExpected, exit: 0 },
+            { name: 'changed-config', config: 'auth-alt.json', expected: changedExpected, exit: 0 },
+            { name: 'invalid-config', config: 'auth-bad.yml', exit: 2 },
+          ]) {
+            const start = process.hrtime.bigint();
+            const result = cp.spawnSync(process.execPath, [cli, ...authArgs, '--source-auth-config', scenario.config, '--format', 'json'], {
+              cwd: authRoot, encoding: 'utf8', env: { ...process.env, NODE_PATH: '' }, maxBuffer: 8 * 1024 * 1024,
+            });
+            steps.push({ command: 'cdn-security-source-auth-config', exit: result.status ?? -1,
+              expectedExit: scenario.exit, durationMs: Number(process.hrtime.bigint() - start) / 1e6 });
+            authCases.push(scenario.name);
+            assert.equal(result.status, scenario.exit, scenario.name);
+            assert.ok(!result.stdout.includes(root) && !result.stderr.includes(root)
+              && !result.stdout.includes('opaquevalue123') && !result.stderr.includes('opaquevalue123'));
+            if (scenario.exit === 0) {
+              const report = JSON.parse(result.stdout);
+              assert.deepEqual(report, scenario.expected);
+              assert.deepEqual(authFindings(report.findings.active), scenario.name === 'changed-config' ? [
+                ['SC-AUTHN-006', 'GET', '/users/duplicate'],
+                ['SC-AUTHN-006', 'GET', '/users/inherited'],
+                ['SC-AUTHN-006', 'POST', '/users'],
+              ] : expectedAuthFindings);
+            }
+            else { assert.equal(result.stdout, ''); assert.ok(result.stderr.includes('SOURCE_DIFF_AUTH_CONFIG_INVALID')); }
+          }
+          const noSourceArgs = authArgs.filter((value, index) => value !== '--source' && authArgs[index - 1] !== '--source');
+          const noSourceStart = process.hrtime.bigint();
+          const noSource = cp.spawnSync(process.execPath, [cli, ...noSourceArgs,
+            '--source-auth-config', 'missing-token=opaquevalue123.yml'], {
+            cwd: authRoot, encoding: 'utf8', env: { ...process.env, NODE_PATH: '' }, maxBuffer: 8 * 1024 * 1024,
+          });
+          steps.push({ command: 'cdn-security-source-auth-config', exit: noSource.status ?? -1,
+            expectedExit: 2, durationMs: Number(process.hrtime.bigint() - noSourceStart) / 1e6 });
+          authCases.push('without-source');
+          assert.equal(noSource.status, 2);
+          assert.equal(noSource.stdout, '');
+          assert.ok(noSource.stderr.includes('SOURCE_DIFF_AUTH_CONFIG_REQUIRES_SOURCE')
+            && !noSource.stderr.includes(root) && !noSource.stderr.includes('opaquevalue123'));
           assert.deepEqual(inputNames.map(name => crypto.createHash('sha256').update(fs.readFileSync(path.join(root, name))).digest('hex')), inputHashes);
+          assert.deepEqual(authInputNames.map(name => crypto.createHash('sha256')
+            .update(fs.readFileSync(path.join(authRoot, name))).digest('hex')), authInputHashes);
           fs.writeFileSync(path.join(process.cwd(), 'source-aware-cli-proof.json'), JSON.stringify({
-            formats: ['text', 'json', 'sarif', 'summary'], steps,
+            formats: ['text', 'json', 'sarif', 'summary'], steps, authCases,
+            authConfig: { rawDigest: loadedAuth.rawDigest,
+              configDigest: configuredWorkspace.evidence.source.configDigest,
+              projectDigest: configuredWorkspace.evidence.source.projectDigest },
           }));
           console.log('OK: installed internal Source-aware workspace/finalizer/4-format smoke');
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
@@ -542,19 +705,28 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
     console.log('OK: installed internal SARIF validates against pinned official schema');
     const cliProofPath = path.join(installDir, 'source-aware-cli-proof.json');
     const cliSarifPath = path.join(installDir, 'source-aware-installed-cli-sarif.json');
+    const authSarifPath = path.join(installDir, 'source-auth-installed-cli-sarif.json');
     const cliProof = JSON.parse(fs.readFileSync(cliProofPath, 'utf8'));
     assert.deepStrictEqual(cliProof.formats, ['text', 'json', 'sarif', 'summary']);
-    assert.ok(Array.isArray(cliProof.steps) && cliProof.steps.length === 7
-      && cliProof.steps.every((step: { command: string; exit: number; expectedExit: number; durationMs: number }) =>
-        step.command === 'cdn-security-source-diff' && step.exit === step.expectedExit
+    assert.deepStrictEqual(cliProof.authCases, ['configured-text', 'configured-json', 'configured-sarif',
+      'configured-summary', 'equivalent-json', 'changed-config', 'invalid-config', 'without-source']);
+    assert.ok(cliProof.authConfig && ['rawDigest', 'configDigest', 'projectDigest'].every((key) =>
+      /^sha256:[a-f0-9]{64}$/.test(cliProof.authConfig[key])), 'configured digest proof missing');
+    assert.ok(Array.isArray(cliProof.steps) && cliProof.steps.length === 15
+      && cliProof.steps.every((step: { command: string; exit: number; expectedExit: number; durationMs: number }, index: number) =>
+        step.command === (index < 7 ? 'cdn-security-source-diff' : 'cdn-security-source-auth-config')
+        && step.exit === step.expectedExit
         && Number.isFinite(step.durationMs) && step.durationMs >= 0), 'installed CLI proof missing');
-    assert.deepStrictEqual(cliProof.steps.map((step: { expectedExit: number }) => step.expectedExit), [0, 0, 0, 0, 1, 2, 3]);
+    assert.deepStrictEqual(cliProof.steps.map((step: { expectedExit: number }) => step.expectedExit),
+      [0, 0, 0, 0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 2, 2]);
     validateInstalledSarif(JSON.parse(fs.readFileSync(cliSarifPath, 'utf8')));
+    validateInstalledSarif(JSON.parse(fs.readFileSync(authSarifPath, 'utf8')));
     if (quietConsumer) smokeSteps.push(...cliProof.steps);
     fs.rmSync(cliProofPath);
     fs.rmSync(cliSarifPath);
+    fs.rmSync(authSarifPath);
     cliVerified = true;
-    console.log('OK: installed Experimental source-diff CLI validates all four formats');
+    console.log('OK: installed Experimental source-diff CLI validates four formats and explicit auth config');
 
     fs.writeFileSync(path.join(installDir, 'consumer.ts'), `
       import { compile, migratePolicy, type MigratePolicyResult } from '${packageName}';
