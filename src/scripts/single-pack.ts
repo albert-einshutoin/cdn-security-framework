@@ -68,10 +68,11 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
     assert.ok(r.dependencies && Object.keys(r.dependencies).sort().join() === Object.keys(pkg.dependencies).sort().join(), 'missing dependency evidence');
     assert.ok(Object.values(r.dependencies).every(v => /^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(v)), 'invalid dependency version');
     const lower = row === '18.20.8' || row === '20.16.0';
-    assert.ok(Array.isArray(r.steps) && r.steps.length === (lower ? 26 : 20), 'missing command evidence');
-    assert.ok(r.steps.every(s => s && typeof s.command === 'string' && /^[a-zA-Z0-9_.-]+$/.test(s.command) && Number.isFinite(s.durationMs) && s.durationMs >= 0 && s.exit === s.expectedExit && (s.expectedExit === 0 || (lower && s.expectedExit === 1) || (s.command === 'cdn-security-source-diff' && [1, 2, 3].includes(s.expectedExit)))), 'invalid command evidence');
+    assert.ok(Array.isArray(r.steps) && r.steps.length === (lower ? 26 : 28), 'missing command evidence');
+    assert.ok(r.steps.every(s => s && typeof s.command === 'string' && /^[a-zA-Z0-9_.-]+$/.test(s.command) && Number.isFinite(s.durationMs) && s.durationMs >= 0 && s.exit === s.expectedExit && (s.expectedExit === 0 || (lower && s.expectedExit === 1) || (s.command === 'cdn-security-source-diff' && [1, 2, 3].includes(s.expectedExit)) || (s.command === 'cdn-security-source-auth-config' && s.expectedExit === 2))), 'invalid command evidence');
     if (!lower) assert.deepEqual(r.steps.filter(s => s.command === 'cdn-security-source-diff').map(s => s.expectedExit), [0, 0, 0, 0, 1, 2, 3], 'missing installed CLI exit proof');
-    assert.deepEqual(r.checks, row === '18.20.8' || row === '20.16.0' ? ['node-rejection', 'resolution', 'no-side-effects'] : ['package-smoke', 'resolution', 'schemas', 'official-sarif-schema', 'source-aware-cli']);
+    if (!lower) assert.deepEqual(r.steps.filter(s => s.command === 'cdn-security-source-auth-config').map(s => s.expectedExit), [0, 0, 0, 0, 0, 0, 2, 2], 'missing configured CLI exit proof');
+    assert.deepEqual(r.checks, row === '18.20.8' || row === '20.16.0' ? ['node-rejection', 'resolution', 'no-side-effects'] : ['package-smoke', 'resolution', 'schemas', 'official-sarif-schema', 'source-aware-cli', 'source-auth-config']);
     if (row === '24') {
       const j = r.journey;
       const { requiredChecks: required, requiredStepIds, requiredInputKeys, requiredOutputKeys, expectedFindingProof } = require('./package-journey') as typeof import('./package-journey');
@@ -202,7 +203,7 @@ function consume(directory: string, row: string, output: string): void {
         path.join(consumer, 'node_modules/cdn-security-framework/examples')], consumer));
     }
   }
-  const result: Result = { ...m, runtime: { executable: path.basename(process.execPath), sha256: sha(process.execPath), platform: process.platform, arch: process.arch }, row, status: 'pass', node: process.versions.node, npm: run('npm', ['--version'], consumer).trim(), checks: rejected ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli'], ...details, steps, ...(journey ? { journey } : {}) };
+  const result: Result = { ...m, runtime: { executable: path.basename(process.execPath), sha256: sha(process.execPath), platform: process.platform, arch: process.arch }, row, status: 'pass', node: process.versions.node, npm: run('npm', ['--version'], consumer).trim(), checks: rejected ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli','source-auth-config'], ...details, steps, ...(journey ? { journey } : {}) };
   if (rejected && process.env.CSF_SWITCH_PROOF) {
     const switched = read(process.env.CSF_SWITCH_PROOF) as Result;
     verifyIdentity(switched, expected());

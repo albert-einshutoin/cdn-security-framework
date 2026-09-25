@@ -2,6 +2,7 @@ import type { Command } from 'commander';
 
 import { loadFindingExceptions, validateFindingExceptionSet } from '../../contract/finding-exceptions';
 import type { ContractDiffFailOn } from '../../contract/contract-diff';
+import { loadSourceAuthConfig } from './source-auth-config';
 
 interface Options {
   workspaceRoot?: string;
@@ -9,6 +10,7 @@ interface Options {
   policy?: string;
   target?: string;
   source?: string;
+  sourceAuthConfig?: string;
   exceptions?: string;
   environment?: string;
   currentDate?: string;
@@ -42,8 +44,12 @@ function validate(options: Options) {
     throw new SourceDiffArgumentError('SOURCE_DIFF_DATE_INVALID');
   }
   if (options.source === '' || options.exceptions === ''
+    || options.sourceAuthConfig === ''
     || (options.environment !== undefined && (options.environment.length > 128 || !options.environment.trim()))) {
     throw new SourceDiffArgumentError('SOURCE_DIFF_ARGUMENT_INVALID');
+  }
+  if (options.sourceAuthConfig !== undefined && !options.source) {
+    throw new SourceDiffArgumentError('SOURCE_DIFF_AUTH_CONFIG_REQUIRES_SOURCE');
   }
   return { workspaceRoot, openapiPath, policyPath, target: target as 'aws' | 'cloudflare',
     currentDate, failOn: options.failOn as ContractDiffFailOn };
@@ -75,6 +81,17 @@ async function run(options: Options): Promise<void> {
     return;
   }
 
+  let authConfig;
+  if (options.sourceAuthConfig !== undefined) {
+    try {
+      authConfig = loadSourceAuthConfig({ workspaceRoot: input.workspaceRoot, inputPath: options.sourceAuthConfig }).config;
+    } catch {
+      console.error('[ERROR] SOURCE_DIFF_AUTH_CONFIG_INVALID: Source auth config input is invalid.');
+      process.exitCode = 2;
+      return;
+    }
+  }
+
   let exceptions;
   if (options.exceptions) {
     try {
@@ -104,7 +121,7 @@ async function run(options: Options): Promise<void> {
     const workspace = await analyzeSourceAwareWorkspace({
       workspaceRoot: input.workspaceRoot, openapiPath: input.openapiPath,
       policyPath: input.policyPath, target: input.target,
-      ...(options.source ? { source: { tsconfigPath: options.source } } : {}),
+      ...(options.source ? { source: { tsconfigPath: options.source, ...(authConfig ? { authConfig } : {}) } } : {}),
     });
     const bundle = finalizeSourceAwareOutput(workspace, {
       currentDate: input.currentDate, failOn: input.failOn, environment: options.environment, exceptions,
@@ -149,6 +166,7 @@ export function registerSourceDiffCommand(contract: Command): void {
     .option('--policy <path>', 'Schema 2 Policy inside the workspace')
     .option('--target <target>', 'Target: aws | cloudflare')
     .option('--source <tsconfig-path>', 'Optional NestJS Source tsconfig (no auto-discovery)')
+    .option('--source-auth-config <path>', 'Optional YAML/JSON NestJS auth data inside the workspace (requires --source)')
     .option('--exceptions <path>', 'Optional bounded Finding exceptions file')
     .option('--environment <name>', 'Exception environment context')
     .option('--current-date <date>', 'Required exception evaluation date: YYYY-MM-DD')

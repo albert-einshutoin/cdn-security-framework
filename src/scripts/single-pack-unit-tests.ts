@@ -40,16 +40,18 @@ try {
     findings: expectedFindingProof.map(finding => ({ ...finding, evidence: [...finding.evidence] })) };
   const rows = matrixRows.map(row => {
     const lower = row === '18.20.8' || row === '20.16.0';
-    const steps = Array.from({ length: lower ? 26 : 20 }, (_, index) => {
-      const cli = !lower && index >= 13;
-      const expectedExit = cli && index >= 17 ? index - 16 : 0;
-      return { command: cli ? 'cdn-security-source-diff' : 'node', exit: expectedExit, expectedExit, durationMs: 1 };
+    const steps = Array.from({ length: lower ? 26 : 28 }, (_, index) => {
+      const cli = !lower && index >= 13 && index < 20;
+      const auth = !lower && index >= 20;
+      const expectedExit = cli && index >= 17 ? index - 16 : auth && index >= 26 ? 2 : 0;
+      return { command: cli ? 'cdn-security-source-diff' : auth ? 'cdn-security-source-auth-config' : 'node',
+        exit: expectedExit, expectedExit, durationMs: 1 };
     });
     return { ...m, runtime: { executable: 'node', sha256: 'f'.repeat(64), platform: 'linux', arch: 'x64' },
       row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2',
       switchVerified: true, resolution, dependencies, steps,
       checks: lower ? ['node-rejection','resolution','no-side-effects']
-        : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli'],
+        : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli','source-auth-config'],
       ...(row === '24' ? { journey } : {}) };
   });
   fs.writeFileSync(path.join(temp, 'metadata.json'), JSON.stringify(m));
@@ -86,6 +88,8 @@ try {
   test('validation not executed fails', () => assert.throws(() => aggregate(m, rows.map((r,i) => i ? r : {...r,checks:[]}), e, ['success','success'])));
   test('official schema evidence missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, checks: r.checks.filter(check => check !== 'official-sarif-schema') } : r), e, ['success','success'])));
   test('installed source-diff CLI evidence missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, checks: r.checks.filter(check => check !== 'source-aware-cli') } : r), e, ['success','success'])));
+  test('configured CLI evidence missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, checks: r.checks.filter(check => check !== 'source-auth-config') } : r), e, ['success','success'])));
+  test('configured CLI command missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, steps: r.steps.filter(step => step.command !== 'cdn-security-source-auth-config') } : r), e, ['success','success'])));
   test('missing onboarding acceptance fails closed', () => assert.throws(() => aggregate(m, rows.map(r => ({ ...r, journey: undefined })), e, ['success','success'])));
   test('incomplete onboarding acceptance fails closed', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, journey: { ...journey, checks: [] } } : r), e, ['success','success'])));
   test('wrong onboarding finding fails closed', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, journey: { ...journey, findings: [{ ...journey.findings[0], ruleId: 'MISSING' }] } } : r), e, ['success','success'])));
