@@ -62,7 +62,7 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
     assert.ok(r.dependencies && Object.keys(r.dependencies).sort().join() === Object.keys(pkg.dependencies).sort().join(), 'missing dependency evidence');
     assert.ok(Object.values(r.dependencies).every(v => /^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(v)), 'invalid dependency version');
     const lower = row === '18.20.8' || row === '20.16.0';
-    assert.ok(Array.isArray(r.steps) && r.steps.length === (lower ? 26 : 12), 'missing command evidence');
+    assert.ok(Array.isArray(r.steps) && r.steps.length === (lower ? 26 : 13), 'missing command evidence');
     assert.ok(r.steps.every(s => s && typeof s.command === 'string' && /^[a-zA-Z0-9_.-]+$/.test(s.command) && Number.isFinite(s.durationMs) && s.durationMs >= 0 && s.exit === s.expectedExit && (s.expectedExit === 0 || (lower && s.expectedExit === 1))), 'invalid command evidence');
     assert.deepEqual(r.checks, row === '18.20.8' || row === '20.16.0' ? ['node-rejection', 'resolution', 'no-side-effects'] : ['package-smoke', 'resolution', 'schemas']);
     if (row === '24') {
