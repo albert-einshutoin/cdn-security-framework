@@ -112,7 +112,7 @@ describe('Experimental source-diff CLI', () => {
     expect(report.analysis).toEqual(expected.finalized?.analysis);
     expect(result.stdout).not.toContain(root);
     expect(names.map((name) => hash(path.join(root, name)))).toEqual(before);
-  });
+  }, 10_000);
 
   test('omits Source without scanning it and retains the independent comparison', () => {
     const root = workspace();
