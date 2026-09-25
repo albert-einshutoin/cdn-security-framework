@@ -412,6 +412,53 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer?: st
     `;
     run(process.execPath, ['-e', apiSmoke], { cwd: installDir, stdio: 'inherit' });
 
+    // Development-only deep-path check of the packed internal 2.1 adapter; no public export is added.
+    const internalSourceSmoke = String.raw`
+      const assert = require('node:assert/strict');
+      const fs = require('node:fs');
+      const path = require('node:path');
+      const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
+      const { analyzeSourceAwareWorkspace } = require(path.join(pkgRoot, 'contract/source-aware-workspace.js'));
+      const { finalizeSourceAwareOutput } = require(path.join(pkgRoot, 'contract/source-aware-output.js'));
+      const { formatSourceAwarePreviewJson, formatSourceAwarePreviewText } = require(path.join(pkgRoot, 'contract/source-aware-finalizer.js'));
+      const { renderSourceAwareSarif } = require(path.join(pkgRoot, 'reporters/sarif.js'));
+      const { renderSourceAwareSummary } = require(path.join(pkgRoot, 'reporters/source-aware-summary.js'));
+      const root = fs.mkdtempSync(path.join(process.cwd(), 'source-aware-'));
+      (async () => {
+        try {
+          fs.mkdirSync(path.join(root, 'src'), { recursive: true });
+          fs.mkdirSync(path.join(root, 'refs'), { recursive: true });
+          const dependency = path.join(root, 'node_modules/@nestjs/common');
+          fs.mkdirSync(dependency, { recursive: true });
+          fs.writeFileSync(path.join(dependency, 'package.json'), JSON.stringify({ name: '@nestjs/common', version: '1.0.0', main: 'index.js', types: 'index.d.ts' }));
+          fs.writeFileSync(path.join(dependency, 'index.js'), 'throw new Error("Source executed");\n');
+          fs.writeFileSync(path.join(dependency, 'index.d.ts'), 'export declare function Controller(path?: string): ClassDecorator;\nexport declare function Get(path?: string): MethodDecorator;\n');
+          fs.writeFileSync(path.join(root, 'tsconfig.json'), JSON.stringify({ compilerOptions: { experimentalDecorators: true, moduleResolution: 'node', noLib: true, types: [] }, files: ['src/controller.ts'] }));
+          fs.writeFileSync(path.join(root, 'src/controller.ts'), 'import { Controller, Get } from "@nestjs/common";\n@Controller("users") class UsersController { @Get(":id") read() {} }\n');
+          fs.writeFileSync(path.join(root, 'policy.yml'), 'version: 2\ndefaults: {mode: enforce}\nrequest:\n  allow_methods: [GET]\n  limits: {max_uri_length: 21}\n  block: {header_missing: []}\nroutes: []\nresponse_headers: {}\n');
+          fs.writeFileSync(path.join(root, 'refs/common.yaml'), 'components:\n  parameters:\n    Id:\n      name: id\n      in: path\n      required: true\n      schema: {type: string}\n');
+          fs.writeFileSync(path.join(root, 'openapi.yaml'), "openapi: 3.0.3\ninfo: {title: Synthetic, version: 1.0.0}\npaths:\n  /users/{id}:\n    get:\n      parameters:\n        - $ref: './refs/common.yaml#/components/parameters/Id'\n      responses:\n        '200': {description: OK}\n");
+          const workspace = await analyzeSourceAwareWorkspace({ workspaceRoot: root, openapiPath: 'openapi.yaml', policyPath: 'policy.yml', target: 'aws', source: { tsconfigPath: 'tsconfig.json' } });
+          const bundle = finalizeSourceAwareOutput(workspace, { currentDate: '2026-09-25', failOn: 'never' });
+          assert.ok(bundle.finalized);
+          assert.notEqual(bundle.finalized.stages.implemented.status, 'failed');
+          const json = JSON.parse(formatSourceAwarePreviewJson(bundle.finalized));
+          const text = formatSourceAwarePreviewText(bundle.finalized);
+          const sarif = renderSourceAwareSarif(bundle);
+          const summary = renderSourceAwareSummary(bundle);
+          assert.equal(sarif.version, '2.1.0');
+          assert.equal(sarif.runs[0].results.length, bundle.finalized.summary.active + bundle.finalized.summary.suppressed + bundle.finalized.summary.governance);
+          assert.deepEqual(json.summary, bundle.finalized.summary);
+          assert.ok(text.includes('unique=' + bundle.finalized.summary.unique));
+          assert.ok(summary.includes('| Unique | ' + bundle.finalized.summary.unique + ' |'));
+          assert.ok(bundle.metadata.source && bundle.metadata.openapi && bundle.metadata.policy);
+          assert.ok(!(JSON.stringify(sarif) + summary).includes(root));
+          console.log('OK: installed internal Source-aware workspace/finalizer/4-format smoke');
+        } finally { fs.rmSync(root, { recursive: true, force: true }); }
+      })().catch((error) => { console.error(error?.name ?? 'internal source smoke failed'); process.exitCode = 1; });
+    `;
+    run(process.execPath, ['-e', internalSourceSmoke], { cwd: installDir, stdio: 'inherit' });
+
     fs.writeFileSync(path.join(installDir, 'consumer.ts'), `
       import { compile, migratePolicy, type MigratePolicyResult } from '${packageName}';
       const migrated: MigratePolicyResult = migratePolicy({ policyPath: 'policy.yml', toVersion: 2, target: 'cloudflare', write: false });

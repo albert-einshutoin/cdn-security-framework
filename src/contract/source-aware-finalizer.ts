@@ -264,7 +264,8 @@ function routePath(value: string): string {
     ? redactEvidenceFilename(field(value)) : '[REDACTED_ROUTE]';
 }
 
-function previewFinding(finding: SecurityFindingV1, memberships: SourceAwareComparisonName[]) {
+// Shared safe projection for bounded displays; callers must pass the full finalized result independently.
+export function previewFinding(finding: SecurityFindingV1, memberships: SourceAwareComparisonName[]) {
   return {
     instanceId: finding.instanceId,
     ruleId: finding.ruleId,
