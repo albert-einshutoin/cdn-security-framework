@@ -2,7 +2,6 @@ import type { Command } from 'commander';
 
 import { loadFindingExceptions, validateFindingExceptionSet } from '../../contract/finding-exceptions';
 import type { ContractDiffFailOn } from '../../contract/contract-diff';
-import { loadSourceAuthConfig } from './source-auth-config';
 
 interface Options {
   workspaceRoot?: string;
@@ -83,8 +82,17 @@ async function run(options: Options): Promise<void> {
 
   let authConfig;
   if (options.sourceAuthConfig !== undefined) {
+    let authLoader: typeof import('./source-auth-config');
+    try { authLoader = await import('./source-auth-config'); }
+    catch {
+      console.error('[ERROR] SOURCE_DIFF_INTERNAL: Source-aware analysis failed unexpectedly.');
+      process.exitCode = 3;
+      return;
+    }
     try {
-      authConfig = loadSourceAuthConfig({ workspaceRoot: input.workspaceRoot, inputPath: options.sourceAuthConfig }).config;
+      authConfig = authLoader.loadSourceAuthConfig({
+        workspaceRoot: input.workspaceRoot, inputPath: options.sourceAuthConfig,
+      }).config;
     } catch {
       console.error('[ERROR] SOURCE_DIFF_AUTH_CONFIG_INVALID: Source auth config input is invalid.');
       process.exitCode = 2;

@@ -153,6 +153,42 @@ describe('Experimental Source auth data file', () => {
     expect(help.stderr).toBe('');
   });
 
+  test('does not load optional auth config for help, unrelated commands, or absent config', () => {
+    const root = example();
+    const preload = file(root, 'reject-auth-loader.cjs', `const Module = require('node:module');
+const load = Module._load;
+Module._load = function (request, parent, isMain) {
+  if (request.endsWith('/source-auth-config') || request.endsWith('/source-auth-config.js')) {
+    throw new Error('UNEXPECTED_AUTH_CONFIG_LOAD');
+  }
+  return load.call(this, request, parent, isMain);
+};
+`);
+    const run = (args: string[]) => spawnSync(process.execPath, [cli, ...args], {
+      cwd: root, encoding: 'utf8', timeout: 30_000,
+      env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: `--require=${preload}` },
+    });
+    const common = ['contract', 'source-diff', '--workspace-root', root, '--openapi', 'openapi.yaml',
+      '--policy', 'policy/security.yml', '--target', 'aws', '--current-date', '2026-09-25'];
+    for (const args of [
+      ['--version'], ['--help'], ['contract', 'diff', '--help'],
+      ['contract', 'source-diff', '--help'],
+      [...common, '--source', 'tsconfig.json', '--format', 'json', '--fail-on', 'never'],
+    ]) {
+      const result = run(args);
+      expect(result.error).toBeUndefined();
+      expect(result.signal).toBeNull();
+      expect(result.status, `${args.join(' ')}: ${result.stderr}`).toBe(0);
+      expect(result.stderr).not.toContain('UNEXPECTED_AUTH_CONFIG_LOAD');
+    }
+    const invalid = run([...common, '--source-auth-config', 'missing.yml']);
+    expect(invalid.error).toBeUndefined();
+    expect(invalid.signal).toBeNull();
+    expect(invalid.status).toBe(2);
+    expect(invalid.stderr).toContain('SOURCE_DIFF_AUTH_CONFIG_REQUIRES_SOURCE');
+    expect(invalid.stderr).not.toContain('UNEXPECTED_AUTH_CONFIG_LOAD');
+  });
+
   test('uses the same Source project with different explicit auth facts', async () => {
     const root = example();
     file(root, 'auth-alt.json', JSON.stringify({ public_decorators: [], roles_decorators: [],
