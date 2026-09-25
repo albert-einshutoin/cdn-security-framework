@@ -422,6 +422,7 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
       const fs = require('node:fs');
       const path = require('node:path');
       const cp = require('node:child_process');
+      const crypto = require('node:crypto');
       const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const { analyzeSourceAwareWorkspace } = require(path.join(pkgRoot, 'contract/source-aware-workspace.js'));
       const { finalizeSourceAwareOutput } = require(path.join(pkgRoot, 'contract/source-aware-output.js'));
@@ -441,8 +442,12 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
           fs.writeFileSync(path.join(root, 'tsconfig.json'), JSON.stringify({ compilerOptions: { experimentalDecorators: true, moduleResolution: 'node', noLib: true, types: [] }, files: ['src/controller.ts'] }));
           fs.writeFileSync(path.join(root, 'src/controller.ts'), 'import { Controller, Get } from "@nestjs/common";\n@Controller("users") class UsersController { @Get(":id") read() {} }\n');
           fs.writeFileSync(path.join(root, 'policy.yml'), 'version: 2\ndefaults: {mode: enforce}\nrequest:\n  allow_methods: [GET]\n  limits: {max_uri_length: 21}\n  block: {header_missing: []}\nroutes: []\nresponse_headers: {}\n');
-          fs.writeFileSync(path.join(root, 'refs/common.yaml'), 'components:\n  parameters:\n    Id:\n      name: id\n      in: path\n      required: true\n      schema: {type: string}\n');
-          fs.writeFileSync(path.join(root, 'openapi.yaml'), "openapi: 3.0.3\ninfo: {title: Synthetic, version: 1.0.0}\npaths:\n  /users/{id}:\n    get:\n      parameters:\n        - $ref: './refs/common.yaml#/components/parameters/Id'\n      responses:\n        '200': {description: OK}\n  /users:\n    post:\n      responses:\n        '200': {description: OK}\n");
+          fs.writeFileSync(path.join(root, 'refs/token=opaquevalue123.yaml'), 'components:\n  parameters:\n    Id:\n      name: id\n      in: path\n      required: true\n      schema: {type: string}\n');
+          fs.writeFileSync(path.join(root, 'openapi.yaml'), "openapi: 3.0.3\ninfo: {title: Synthetic, version: 1.0.0}\npaths:\n  /users/{id}:\n    get:\n      parameters:\n        - $ref: './refs/token=opaquevalue123.yaml#/components/parameters/Id'\n      responses:\n        '200': {description: Authorization Bearer synthetic-secret-opaquevalue123}\n  /users:\n    post:\n      responses:\n        '200': {description: OK}\n");
+          const inputNames = ['openapi.yaml', 'refs/token=opaquevalue123.yaml', 'policy.yml',
+            'tsconfig.json', 'src/controller.ts', 'node_modules/@nestjs/common/package.json',
+            'node_modules/@nestjs/common/index.js', 'node_modules/@nestjs/common/index.d.ts'];
+          const inputHashes = inputNames.map(name => crypto.createHash('sha256').update(fs.readFileSync(path.join(root, name))).digest('hex'));
           const workspace = await analyzeSourceAwareWorkspace({ workspaceRoot: root, openapiPath: 'openapi.yaml', policyPath: 'policy.yml', target: 'aws', source: { tsconfigPath: 'tsconfig.json' } });
           const bundle = finalizeSourceAwareOutput(workspace, { currentDate: '2026-09-25', failOn: 'never' });
           assert.ok(bundle.finalized);
@@ -474,6 +479,7 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
             assert.equal(result.status, 0, 'installed Experimental CLI failed');
             assert.equal(result.stderr, '');
             assert.ok(!result.stdout.includes(root));
+            assert.ok(!result.stdout.includes('opaquevalue123') && !result.stdout.includes('token%3Dopaquevalue123'));
             if (format === 'text') assert.ok(result.stdout.includes('unique=' + bundle.finalized.summary.unique));
             if (format === 'json') assert.deepEqual(JSON.parse(result.stdout).summary, bundle.finalized.summary);
             if (format === 'sarif') {
@@ -497,6 +503,7 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
             assert.equal(result.status, scenario.exit, scenario.name);
             assert.equal(result.stderr, '');
             assert.ok(!result.stdout.includes(root));
+            assert.ok(!result.stdout.includes('opaquevalue123') && !result.stdout.includes('token%3Dopaquevalue123'));
             const report = JSON.parse(result.stdout);
             assert.equal(report.exitCode, scenario.exit);
           }
@@ -512,7 +519,9 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
           assert.equal(failure.status, 3);
           assert.equal(failure.stdout, '');
           assert.ok(failure.stderr.includes('SOURCE_DIFF_REPORTER_FAILED'));
-          assert.ok(!failure.stderr.includes('synthetic-private-fault') && !failure.stderr.includes(root));
+          assert.ok(!failure.stderr.includes('synthetic-private-fault') && !failure.stderr.includes(root)
+            && !failure.stderr.includes('opaquevalue123') && !failure.stderr.includes('token%3Dopaquevalue123'));
+          assert.deepEqual(inputNames.map(name => crypto.createHash('sha256').update(fs.readFileSync(path.join(root, name))).digest('hex')), inputHashes);
           fs.writeFileSync(path.join(process.cwd(), 'source-aware-cli-proof.json'), JSON.stringify({
             formats: ['text', 'json', 'sarif', 'summary'], steps,
           }));
