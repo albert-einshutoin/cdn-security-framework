@@ -5236,6 +5236,7 @@ async function loadProject(
   tsconfigPath: string,
   context: Parameters<SourceAnalyzerPlugin['analyze']>[0],
   cache?: TypeScriptAnalysisCache,
+  onInputPath?: (path: string) => void,
 ): Promise<LoadedTypeScriptProject> {
   try {
     const loaded = await loadTypeScriptProject({
@@ -5244,6 +5245,7 @@ async function loadProject(
       limits: context.limits,
       cancellationSignal: context.cancellationSignal,
       cache,
+      onInputPath,
     });
     if (loaded.diagnostics.some(({ code }) => code === 'TS_PROJECT_TYPESCRIPT_DIAGNOSTIC')) {
       throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INPUT_INVALID');
@@ -5261,6 +5263,7 @@ async function analyze(
   authConfig: Readonly<NestJsAuthConfig>,
   onProjectLoaded?: (digest: string) => void,
   cache?: TypeScriptAnalysisCache,
+  onInputPath?: (path: string) => void,
 ) {
   if (context.entrypoints.length !== 1) {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INPUT_INVALID');
@@ -5272,7 +5275,7 @@ async function analyze(
     }
     if (performance.now() >= deadline) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_TIMEOUT');
   };
-  const loaded = await loadProject(context.workspaceRoot, context.entrypoints[0], context, cache);
+  const loaded = await loadProject(context.workspaceRoot, context.entrypoints[0], context, cache, onInputPath);
   onProjectLoaded?.(loaded.snapshotDigest);
   const checker = loaded.program.getTypeChecker();
   const compilerOptions = loaded.program.getCompilerOptions();
@@ -5903,13 +5906,15 @@ export async function runNestJsSourceAnalysisInternal(
   context: SourceAnalysisContext,
   config?: unknown,
   cache?: TypeScriptAnalysisCache,
+  onInputPath?: (path: string) => void,
 ): Promise<{ execution: SourceAnalysisExecution; snapshotDigest?: string; analyzer: string; configDigest: string }> {
   const plugin = createNestJsSourceAnalyzer(config);
   const authConfig = config === undefined ? EMPTY_NESTJS_AUTH_CONFIG : validateNestJsAuthConfig(config);
   let snapshotDigest: string | undefined;
   const execution = await runSourceAnalyzer({
     ...plugin,
-    analyze: (runContext) => analyze(runContext, authConfig, (digest) => { snapshotDigest = digest; }, cache),
+    analyze: (runContext) => analyze(runContext, authConfig, (digest) => { snapshotDigest = digest; }, cache,
+      onInputPath),
   }, context);
   // Decorator arrays are membership sets and guard mappings are key lookups; input order is not execution identity.
   const canonicalConfig = {

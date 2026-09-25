@@ -10,6 +10,7 @@ interface Options {
   target?: string;
   source?: string;
   sourceAuthConfig?: string;
+  out?: string;
   exceptions?: string;
   environment?: string;
   currentDate?: string;
@@ -50,6 +51,9 @@ function validate(options: Options) {
   if (options.sourceAuthConfig !== undefined && !options.source) {
     throw new SourceDiffArgumentError('SOURCE_DIFF_AUTH_CONFIG_REQUIRES_SOURCE');
   }
+  if (options.out !== undefined && (!options.out || options.out === '-' || options.out.endsWith('/'))) {
+    throw new SourceDiffArgumentError('SOURCE_DIFF_OUTPUT_INVALID');
+  }
   return { workspaceRoot, openapiPath, policyPath, target: target as 'aws' | 'cloudflare',
     currentDate, failOn: options.failOn as ContractDiffFailOn };
 }
@@ -78,6 +82,24 @@ async function run(options: Options): Promise<void> {
     console.error(`[ERROR] ${code}: Invalid source-diff arguments.`);
     process.exitCode = 2;
     return;
+  }
+
+  let outputModule: typeof import('./source-output') | undefined;
+  let outputGuard: ReturnType<typeof import('./source-output').sourceOutputGuard> | undefined;
+  if (options.out !== undefined) {
+    try {
+      outputModule = await import('./source-output');
+      outputGuard = outputModule.sourceOutputGuard(input.workspaceRoot);
+      for (const candidate of [input.openapiPath, input.policyPath, options.source,
+        options.exceptions, options.sourceAuthConfig]) {
+        if (candidate) outputGuard.recordInputPath(candidate);
+      }
+    } catch (error) {
+      const known = outputModule && error instanceof outputModule.SourceOutputError ? error : undefined;
+      console.error(`[ERROR] ${known?.code ?? 'SOURCE_DIFF_INTERNAL'}: Source-aware output cannot be prepared.`);
+      process.exitCode = known?.exitCode ?? 3;
+      return;
+    }
   }
 
   let authConfig;
@@ -129,6 +151,7 @@ async function run(options: Options): Promise<void> {
     const workspace = await analyzeSourceAwareWorkspace({
       workspaceRoot: input.workspaceRoot, openapiPath: input.openapiPath,
       policyPath: input.policyPath, target: input.target,
+      onInputPath: outputGuard?.recordInputPath,
       ...(options.source ? { source: { tsconfigPath: options.source, ...(authConfig ? { authConfig } : {}) } } : {}),
     });
     const bundle = finalizeSourceAwareOutput(workspace, {
@@ -151,11 +174,21 @@ async function run(options: Options): Promise<void> {
       process.exitCode = 3;
       return;
     }
-    try { await writeStdout(output); }
-    catch {
-      console.error('[ERROR] SOURCE_DIFF_OUTPUT_FAILED: Source-aware report could not be written.');
-      process.exitCode = 3;
-      return;
+    if (outputGuard) {
+      try { outputGuard.write(outputGuard.prepare(options.out!, workspace, final), output); }
+      catch (error) {
+        const known = outputModule && error instanceof outputModule.SourceOutputError ? error : undefined;
+        console.error(`[ERROR] ${known?.code ?? 'SOURCE_DIFF_OUTPUT_WRITE_FAILED'}: Source-aware report could not be saved.`);
+        process.exitCode = known?.exitCode ?? 3;
+        return;
+      }
+    } else {
+      try { await writeStdout(output); }
+      catch {
+        console.error('[ERROR] SOURCE_DIFF_OUTPUT_FAILED: Source-aware report could not be written.');
+        process.exitCode = 3;
+        return;
+      }
     }
     process.exitCode = final.exitCode;
   } catch {
@@ -175,6 +208,7 @@ export function registerSourceDiffCommand(contract: Command): void {
     .option('--target <target>', 'Target: aws | cloudflare')
     .option('--source <tsconfig-path>', 'Optional NestJS Source tsconfig (no auto-discovery)')
     .option('--source-auth-config <path>', 'Optional YAML/JSON NestJS auth data inside the workspace (requires --source)')
+    .option('--out <path>', 'Save the report to one new file inside the workspace')
     .option('--exceptions <path>', 'Optional bounded Finding exceptions file')
     .option('--environment <name>', 'Exception environment context')
     .option('--current-date <date>', 'Required exception evaluation date: YYYY-MM-DD')

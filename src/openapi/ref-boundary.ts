@@ -33,6 +33,7 @@ export interface ResolveOpenApiRefPathOptions {
   ref: string;
   realpath?: (inputPath: string) => string;
   fragmentSeparated?: boolean;
+  onInputPath?: (path: string) => void;
 }
 
 export function resolveOpenApiRefPath(options: ResolveOpenApiRefPathOptions): string {
@@ -69,6 +70,7 @@ export function resolveOpenApiRefPath(options: ResolveOpenApiRefPathOptions): st
   if (!isPathWithinWorkspace(rootRealPath, lexicalCandidate)) {
     throw new OpenApiAnalysisError('OPENAPI_REF_OUTSIDE_ROOT', { sourceUri: sourcePath });
   }
+  options.onInputPath?.(lexicalCandidate);
 
   let candidateRealPath: string;
   try {

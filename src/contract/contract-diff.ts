@@ -160,11 +160,13 @@ function workspaceRoot(input: string): string {
   }
 }
 
-function inputFile(root: string, input: string, code: string, label: string): string {
+function inputFile(root: string, input: string, code: string, label: string,
+  onInputPath?: (path: string) => void): string {
   if (typeof input !== 'string' || !input.trim()) {
     throw new ContractDiffInputError(code, `${label} path is required.`);
   }
   const candidate = path.resolve(root, input);
+  onInputPath?.(candidate);
   try {
     const resolved = fs.realpathSync(candidate);
     if (!within(root, resolved) || !fs.statSync(resolved).isFile()) throw new Error('invalid input');
@@ -235,13 +237,15 @@ function readBoundedPolicyFile(root: string, filePath: string): {
   }
 }
 
-function policySources(root: string, entryPath: string): PolicySnapshot {
+function policySources(root: string, entryPath: string,
+  onInputPath?: (path: string) => void): PolicySnapshot {
   const sources: PolicySource[] = [];
   const aliases = new Map<string, string>();
   const active = new Set<string>();
   let totalBytes = 0;
   let visits = 0;
   const visit = (filePath: string, lexicalPath = filePath): void => {
+    onInputPath?.(lexicalPath);
     aliases.set(lexicalPath, filePath);
     if (active.has(lexicalPath)) {
       throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy extends contains a cycle.');
@@ -267,6 +271,7 @@ function policySources(root: string, entryPath: string): PolicySnapshot {
         lexicalParentPath,
         'CONTRACT_DIFF_POLICY_OUTSIDE_ROOT',
         'Policy extends target',
+        onInputPath,
       );
       visit(parentPath, lexicalParentPath);
     }
@@ -282,13 +287,14 @@ function policySources(root: string, entryPath: string): PolicySnapshot {
   return { aliases, sources };
 }
 
-function loadPolicy(root: string, policyPath: string): {
+function loadPolicy(root: string, policyPath: string,
+  onInputPath?: (path: string) => void): {
   policy: CDNSecurityFrameworkPolicy;
   sources: PolicySource[];
 } {
   const { parsePolicyFile } = require(path.join(packageRoot(), 'parser')) as typeof import('../parser');
   const { validatePolicy } = require(path.join(packageRoot(), 'validator')) as typeof import('../validator');
-  const before = policySources(root, policyPath);
+  const before = policySources(root, policyPath, onInputPath);
   const snapshots = new Map(before.sources.map(({ filePath, content }) => [filePath, content]));
   const parsed = parsePolicyFile({
     policyPath,
@@ -307,7 +313,7 @@ function loadPolicy(root: string, policyPath: string): {
   if (!validation.ok) {
     throw new ContractDiffInputError('CONTRACT_DIFF_POLICY_INVALID', 'Policy input failed schema validation.');
   }
-  const after = policySources(root, policyPath);
+  const after = policySources(root, policyPath, onInputPath);
   const identity = ({ aliases, sources }: PolicySnapshot) => ({
     aliases: [...aliases].sort(([left], [right]) => compareText(left, right)),
     sources: sources.map(({ filePath, digest }) => ({ filePath, digest })),
@@ -319,15 +325,16 @@ function loadPolicy(root: string, policyPath: string): {
 }
 
 // Internal workspace adapter: reuse the contract-diff verified Policy snapshot and validation.
-export function loadPolicyForInternal(workspace: string, policyInput: string): {
+export function loadPolicyForInternal(workspace: string, policyInput: string,
+  onInputPath?: (path: string) => void): {
   root: string;
   policy: CDNSecurityFrameworkPolicy;
   policyDigest: string;
   sources: readonly { filePath: string; digest: string }[];
 } {
   const root = workspaceRoot(workspace);
-  const policyPath = inputFile(root, policyInput, 'CONTRACT_DIFF_POLICY_INVALID', 'Policy input');
-  const loaded = loadPolicy(root, policyPath);
+  const policyPath = inputFile(root, policyInput, 'CONTRACT_DIFF_POLICY_INVALID', 'Policy input', onInputPath);
+  const loaded = loadPolicy(root, policyPath, onInputPath);
   return {
     root,
     policy: loaded.policy,

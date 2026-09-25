@@ -30,6 +30,7 @@ export interface LoadOpenApiDocumentOptions {
   inputPath: string;
   workspaceRoot: string;
   limits?: Partial<OpenApiAnalysisLimits>;
+  onInputPath?: (path: string) => void;
 }
 
 export interface LoadedOpenApiSourceDocument {
@@ -216,6 +217,7 @@ export function loadOpenApiSourceDocument(
     workspaceRoot: options.workspaceRoot,
     sourcePath: candidate,
     ref: '#',
+    onInputPath: options.onInputPath,
   });
   let rootRealPath: string;
   try {

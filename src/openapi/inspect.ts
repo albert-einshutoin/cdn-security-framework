@@ -21,6 +21,7 @@ export interface InspectOpenApiOptions {
   inputPath: string;
   workspaceRoot: string;
   limits?: Partial<OpenApiAnalysisLimits>;
+  onInputPath?: (path: string) => void;
 }
 
 export interface OpenApiInspectionDiagnosticV1 {
@@ -96,12 +97,15 @@ export function inspectOpenApiForCli(options: InspectOpenApiOptions): OpenApiIns
     ...DEFAULT_OPENAPI_ANALYSIS_LIMITS,
     ...(options.limits ?? {}),
   });
+  options.onInputPath?.(path.resolve(options.workspaceRoot, options.inputPath));
   const root = loadOpenApiDocument({
     inputPath: options.inputPath,
     workspaceRoot: options.workspaceRoot,
     limits,
+    onInputPath: options.onInputPath,
   });
-  const graph = resolveOpenApiReferences({ root, workspaceRoot: options.workspaceRoot, limits });
+  const graph = resolveOpenApiReferences({ root, workspaceRoot: options.workspaceRoot, limits,
+    onInputPath: options.onInputPath });
   const contract = normalizeOpenApiOperations(graph, { limits });
   const exposures: Record<ExposureV1, number> = {
     public: 0,

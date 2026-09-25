@@ -19,6 +19,8 @@ export interface SourceAwareWorkspaceInput {
   openapiPath: string;
   policyPath: string;
   target: AllowedSurfaceTarget;
+  /** Internal file-save guard; receives paths during the existing input loads. */
+  onInputPath?: (path: string) => void;
   openapiLimits?: Partial<OpenApiAnalysisLimits>;
   source?: {
     tsconfigPath: string;
@@ -79,6 +81,7 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
   try {
     inspection = inspectOpenApiForCli({
       workspaceRoot: input.workspaceRoot, inputPath: input.openapiPath, limits: input.openapiLimits,
+      onInputPath: input.onInputPath,
     });
   } catch (error) { declaredFailure = safeCode(error, 'openapi'); }
 
@@ -86,7 +89,7 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
   let policyEvidence: SourceAwareWorkspaceResult['evidence']['policy'];
   let allowedFailure: string | undefined;
   try {
-    const loaded = loadPolicyForInternal(input.workspaceRoot, input.policyPath);
+    const loaded = loadPolicyForInternal(input.workspaceRoot, input.policyPath, input.onInputPath);
     const sources = loaded.sources.map(({ filePath, digest: contentDigest }) => ({
       uri: safeUri(path.relative(loaded.root, filePath).split(path.sep).map(encodeURIComponent).join('/')),
       digest: contentDigest,
@@ -120,7 +123,7 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
           entrypoints: [input.source.tsconfigPath], limits,
           cancellationSignal: input.source.cancellationSignal,
           logger: { log() {} },
-        }, input.source.authConfig, input.source.cache);
+        }, input.source.authConfig, input.source.cache, input.onInputPath);
         source = analyzed.execution;
         if (source.status === 'success' && analyzed.snapshotDigest) {
           sourceEvidence = {
