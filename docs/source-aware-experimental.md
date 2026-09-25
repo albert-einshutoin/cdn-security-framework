@@ -82,9 +82,33 @@ for internal, reporter, or output failure. A failed input stage may still produc
 a report with independent Findings and exit `2`. `--fail-on never` does not
 turn errors into success. Reports go to stdout; fixed failure diagnostics go to
 stderr. JSON and SARIF stdout each contain one JSON document and a trailing
-newline. No `--out`, file save, GitHub Summary write/upload, PR posting,
-apply, or deploy exists. Shell redirection happens before the CLI starts; never
-redirect a report onto an input file.
+newline. Use `--out <path>` to save those same bytes to **one new regular file**
+inside the explicit workspace instead of stdout. For example, append
+`--format sarif --out reports/source.sarif` to the command above after creating
+`workspace/reports`. The parent directory must already exist. The CLI does not
+create directories, overwrite or append to existing files, or accept `--out -`.
+Choose a fresh destination name for each saved run.
+An existing file, symlink, hardlink, directory, FIFO, or socket at the destination
+is refused. The new file is created with restrictive owner-only permissions
+(`0600` on POSIX). The `0`/`1`/`2` report status is retained after successful
+save; invalid or protected destinations exit `2`, and write/cleanup failure
+exits `3` with a fixed diagnostic and no report on stdout.
+
+The destination must remain inside the workspace and outside `policy`, `dist`,
+`node_modules`, and `.git`, including aliases through symlinks. It cannot
+collide with an explicit or discovered OpenAPI, Policy, Source, auth-config,
+exception, local-reference, tsconfig, or package-metadata input, even when an
+input is missing. The guard refuses saving when an internal input stage cannot
+establish sufficient protection. These checks cover the inputs observed in this
+run, not an atomic snapshot of a concurrently changing workspace. A concurrent
+actor changing directory entries can still cause a failed save or, in an
+unrecoverable filesystem fault, leave a detectable partial new file. Do not
+share the workspace with untrusted concurrent writers. POSIX/local fixtures
+are verified; Windows and network filesystems are not verified.
+
+GitHub Summary write/upload, PR posting, apply, and deploy are not provided.
+Shell redirection happens before the CLI starts; never redirect a report onto
+an input file.
 
 The installed-package smoke verifies this binary. The [standard CLI reference](cli.md)
 documents the 2.0 commands; the formal Source-aware workflow and GitHub upload

@@ -55,6 +55,7 @@ export interface ResolveOpenApiReferencesOptions {
   root: LoadedOpenApiDocument;
   workspaceRoot: string;
   limits: OpenApiAnalysisLimits;
+  onInputPath?: (path: string) => void;
 }
 
 export interface ResolvedJsonPointer {
@@ -221,6 +222,7 @@ export function resolveOpenApiReferences(
       inputPath: absolutePath,
       workspaceRoot,
       limits,
+      onInputPath: options.onInputPath,
     });
     const cached = documents.get(loaded.sourceUri);
     if (cached) return cached;
@@ -266,6 +268,7 @@ export function resolveOpenApiReferences(
       ? currentPath
       : resolveOpenApiRefPath({
         workspaceRoot, sourcePath: currentPath, ref: refPath, fragmentSeparated: true,
+        onInputPath: options.onInputPath,
       });
     const targetDocument = rawPath === '' ? fromDocument : loadDocument(targetPath);
     const resolved = resolveJsonPointerValue(targetDocument.document, fragment, targetDocument.sourceUri);

@@ -268,6 +268,7 @@ export interface LoadTypeScriptProjectOptions {
   cancellationSignal?: AbortSignal;
   cache?: TypeScriptAnalysisCache;
   fileSystem?: TypeScriptProjectFileSystem;
+  onInputPath?: (path: string) => void;
 }
 
 const SAFE_MESSAGES: Readonly<Record<TypeScriptProjectDiagnosticCode, string>> = Object.freeze({
@@ -438,6 +439,7 @@ function resolveExtendsCandidate(
   fileSystem: TypeScriptProjectFileSystem,
   configDirectory: string,
   specifier: string,
+  onInputPath?: (path: string) => void,
 ): string {
   if (path.isAbsolute(specifier)) throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
   if (!specifier.startsWith('.') || /^[a-z][a-z0-9+.-]*:/iu.test(specifier)) {
@@ -445,6 +447,7 @@ function resolveExtendsCandidate(
   }
   const base = path.resolve(configDirectory, specifier);
   for (const candidate of [base, `${base}.json`, path.join(base, 'tsconfig.json')]) {
+    onInputPath?.(candidate);
     try {
       if (fileSystem.stat(candidate).isFile()) return candidate;
     } catch (error) {
@@ -464,9 +467,11 @@ function validateConfigTree(
   state: ConfigState,
   visiting: Set<string>,
   depth = 1,
+  onInputPath?: (path: string) => void,
 ): void {
   checkInterruption(signal, deadline);
   if (depth > limits.maxAnalysisDepth) throw new TypeScriptProjectLoadError('TS_PROJECT_DEPTH_LIMIT');
+  onInputPath?.(configPath);
   const resolved = realFileWithin(fileSystem, workspaceRoot, configPath, 'TS_PROJECT_CONFIG_MISSING');
   if (visiting.has(resolved.absolute)) throw new TypeScriptProjectLoadError('TS_PROJECT_INVALID_CONFIG');
   const lexicalPath = path.resolve(configPath);
@@ -572,8 +577,9 @@ function validateConfigTree(
     visiting.add(resolved.absolute);
     try {
       for (const specifier of values as string[]) {
-        const candidate = resolveExtendsCandidate(fileSystem, configDirectory, specifier);
-        validateConfigTree(fileSystem, workspaceRoot, candidate, limits, signal, deadline, state, visiting, depth + 1);
+        const candidate = resolveExtendsCandidate(fileSystem, configDirectory, specifier, onInputPath);
+        validateConfigTree(fileSystem, workspaceRoot, candidate, limits, signal, deadline, state, visiting,
+          depth + 1, onInputPath);
       }
     } finally {
       visiting.delete(resolved.absolute);
@@ -712,6 +718,7 @@ async function loadTypeScriptProjectInternal(
     throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
   }
   const configPath = path.resolve(workspaceRoot, options.tsconfigPath);
+  options.onInputPath?.(configPath);
   const resolvedConfig = realFileWithin(fileSystem, workspaceRoot, configPath, 'TS_PROJECT_CONFIG_MISSING');
   const configState: ConfigState = {
     digests: new Map(), contents: new Map(), snapshots: new Map(), snapshotTargets: new Map(),
@@ -726,6 +733,8 @@ async function loadTypeScriptProjectInternal(
     deadline,
     configState,
     new Set(),
+    1,
+    options.onInputPath,
   );
 
   const read = ts.readConfigFile(
@@ -768,6 +777,7 @@ async function loadTypeScriptProjectInternal(
   }
   for (const reference of parsed.projectReferences ?? []) {
     const absolute = path.resolve(reference.path);
+    options.onInputPath?.(absolute);
     if (absolute !== workspaceRoot && !relativeWithin(workspaceRoot, absolute)) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
     }
@@ -791,6 +801,7 @@ async function loadTypeScriptProjectInternal(
   let largestFileBytes = configState.largestFileBytes;
   for (const fileName of parsed.fileNames) {
     checkInterruption(options.cancellationSignal, deadline);
+    options.onInputPath?.(fileName);
     const resolved = realFileWithin(fileSystem, workspaceRoot, fileName, 'TS_PROJECT_CONFIG_MISSING');
     if (!SOURCE_EXTENSIONS.some((extension) => resolved.relative.endsWith(extension))) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_EXTENSION_UNSUPPORTED', { sourceUri: resolved.relative });
@@ -931,6 +942,18 @@ async function loadTypeScriptProjectInternal(
     if (!identity) throw new TypeScriptProjectLoadError('TS_PROJECT_INTERNAL');
     return [canonical, identity];
   }));
+  const recordedInputCandidates = new Set<string>();
+  const recordInputCandidate = (candidate: string): void => {
+    if (!options.onInputPath) return;
+    const lexical = path.resolve(candidate);
+    if (!relativeWithin(workspaceRoot, lexical)
+      || lexical.split(path.sep).includes('node_modules')
+      || (!SOURCE_EXTENSIONS.some((extension) => lexical.endsWith(extension))
+        && path.basename(lexical) !== 'package.json')
+      || recordedInputCandidates.has(lexical)) return;
+    recordedInputCandidates.add(lexical);
+    options.onInputPath(lexical);
+  };
   const isHoistedNodeModulesPath = (candidate: string): boolean => {
     let current = path.resolve(candidate);
     while (path.dirname(current) !== current && path.basename(current) !== 'node_modules') {
@@ -942,6 +965,7 @@ async function loadTypeScriptProjectInternal(
   };
   const resolveProgramPath = (candidate: string): ReturnType<typeof safeExistingPath> => {
     const lexical = path.resolve(candidate);
+    recordInputCandidate(lexical);
     const safe = safeExistingPath(candidate);
     if (safe) {
       const canonical = path.resolve(safe.absolute);
@@ -967,6 +991,10 @@ async function loadTypeScriptProjectInternal(
     const safe = resolveProgramPath(candidate);
     if (!safe) return undefined;
     if (safe.kind === 'unsupported') return undefined;
+    if (safe.kind === 'workspace' || safe.kind === 'package-metadata') {
+      options.onInputPath?.(candidate);
+      options.onInputPath?.(safe.absolute);
+    }
     if (safe.kind === 'workspace' && safe.absolute.endsWith('.tsx')
       && compilerOptions.jsxImportSource && isPathLikeSpecifier(compilerOptions.jsxImportSource)) {
       safeConfigPath(

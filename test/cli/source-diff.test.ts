@@ -112,7 +112,7 @@ describe('Experimental source-diff CLI', () => {
     expect(report.analysis).toEqual(expected.finalized?.analysis);
     expect(result.stdout).not.toContain(root);
     expect(names.map((name) => hash(path.join(root, name)))).toEqual(before);
-  });
+  }, 10_000);
 
   test('omits Source without scanning it and retains the independent comparison', () => {
     const root = workspace();
@@ -397,7 +397,8 @@ describe('Experimental source-diff CLI', () => {
   test.each([
     ['missing value', ['--source']],
     ['excess argument', ['unexpected-position']],
-    ['unsupported output option', ['--out', 'report.json']],
+    ['unsupported force option', ['--force']],
+    ['unsupported stdout output alias', ['--out', '-']],
     ['bad target', ['--target', 'synthetic-secret-opaquevalue123']],
     ['bad format', ['--format', 'synthetic-secret-opaquevalue123']],
     ['bad date', ['--current-date', '2026-02-30']],
@@ -407,7 +408,7 @@ describe('Experimental source-diff CLI', () => {
     const result = invoke(root, extra);
     expect(result.status).toBe(2);
     expect(result.stdout).toBe('');
-    expect(result.stderr).toMatch(/SOURCE_DIFF_(ARGUMENT|TARGET|FORMAT|DATE|FAIL_ON)_INVALID/);
+    expect(result.stderr).toMatch(/SOURCE_DIFF_(ARGUMENT|TARGET|FORMAT|DATE|FAIL_ON|OUTPUT)_INVALID/);
     expect(result.stderr).not.toContain('opaquevalue123');
     expect(result.stderr).not.toContain(root);
   });

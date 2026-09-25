@@ -206,6 +206,8 @@ export function assertPackageContents(pack: PackResult) {
     'bin/commands/source-diff.d.ts',
     'bin/commands/source-auth-config.js',
     'bin/commands/source-auth-config.d.ts',
+    'bin/commands/source-output.js',
+    'bin/commands/source-output.d.ts',
     'lib/index.js',
     'lib/index.d.ts',
     'lib/compile.js',
@@ -679,11 +681,83 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
           assert.equal(noSource.stdout, '');
           assert.ok(noSource.stderr.includes('SOURCE_DIFF_AUTH_CONFIG_REQUIRES_SOURCE')
             && !noSource.stderr.includes(root) && !noSource.stderr.includes('opaquevalue123'));
+          const saveCases = [];
+          const save = (name, destinationRoot, commandArgs, format, outputName, expectedExit,
+            expectedStdout, diagnostic) => {
+            const outputPath = path.join(destinationRoot, outputName);
+            const before = fs.existsSync(outputPath) && fs.statSync(outputPath).isFile()
+              ? crypto.createHash('sha256').update(fs.readFileSync(outputPath)).digest('hex') : null;
+            const start = process.hrtime.bigint();
+            const result = cp.spawnSync(process.execPath,
+              [cli, ...commandArgs, '--format', format, '--out', outputName], {
+                cwd: destinationRoot, encoding: 'utf8', env: { ...process.env, NODE_PATH: '' },
+                maxBuffer: 8 * 1024 * 1024,
+              });
+            steps.push({ command: 'cdn-security-source-save', exit: result.status ?? -1,
+              expectedExit, durationMs: Number(process.hrtime.bigint() - start) / 1e6 });
+            assert.equal(result.status, expectedExit, name);
+            assert.equal(result.stdout, '', name + ' must not write stdout');
+            assert.ok(!result.stderr.includes(root) && !result.stderr.includes('opaquevalue123'), name);
+            if (diagnostic) assert.ok(result.stderr.includes(diagnostic), name);
+            else assert.equal(result.stderr, '', name);
+            let digest = null;
+            if (expectedStdout !== null) {
+              const bytes = fs.readFileSync(outputPath);
+              assert.equal(bytes.toString('utf8'), expectedStdout, name + ' saved bytes');
+              assert.equal(fs.statSync(outputPath).mode & 0o077, 0, name + ' file mode');
+              digest = crypto.createHash('sha256').update(bytes).digest('hex');
+            } else if (before !== null) {
+              assert.equal(crypto.createHash('sha256').update(fs.readFileSync(outputPath)).digest('hex'), before);
+            } else assert.equal(fs.existsSync(outputPath), false, name + ' unexpected output');
+            saveCases.push({ name, exit: result.status, digest });
+          };
+          for (const format of ['text', 'json', 'sarif', 'summary']) {
+            const stdout = cp.spawnSync(process.execPath, [cli, ...args, '--format', format], {
+              cwd: root, encoding: 'utf8', env: { ...process.env, NODE_PATH: '' }, maxBuffer: 8 * 1024 * 1024,
+            });
+            assert.equal(stdout.status, 0);
+            save('format-' + format, root, args, format, 'saved-' + format + '.report', 0, stdout.stdout);
+            if (format === 'sarif') fs.writeFileSync(path.join(process.cwd(),
+              'source-save-installed-cli-sarif.json'), fs.readFileSync(path.join(root, 'saved-sarif.report')));
+          }
+          const configuredStdout = cp.spawnSync(process.execPath, [cli, ...authArgs,
+            '--source-auth-config', 'security-analyzer.yml', '--format', 'json'], {
+            cwd: authRoot, encoding: 'utf8', env: { ...process.env, NODE_PATH: '' }, maxBuffer: 8 * 1024 * 1024,
+          });
+          assert.equal(configuredStdout.status, 0);
+          save('configured-auth', authRoot, [...authArgs, '--source-auth-config', 'security-analyzer.yml'],
+            'json', 'configured.report', 0, configuredStdout.stdout);
+          const thresholdStdout = cp.spawnSync(process.execPath, [cli, ...args,
+            '--fail-on', 'warning', '--format', 'json'], {
+            cwd: root, encoding: 'utf8', env: { ...process.env, NODE_PATH: '' }, maxBuffer: 8 * 1024 * 1024,
+          });
+          assert.equal(thresholdStdout.status, 1);
+          save('threshold', root, [...args, '--fail-on', 'warning'], 'json',
+            'threshold.report', 1, thresholdStdout.stdout);
+          fs.writeFileSync(path.join(root, 'existing.report'), 'original');
+          save('existing', root, args, 'json', 'existing.report', 2, null, 'SOURCE_DIFF_OUTPUT_EXISTS');
+          save('input-collision', root, args, 'json', 'openapi.yaml', 2, null,
+            'SOURCE_DIFF_OUTPUT_PROTECTED');
+          const writeFault = path.join(root, 'write-fault.cjs');
+          fs.writeFileSync(writeFault, "const fs=require('node:fs');const write=fs.writeFileSync;fs.writeFileSync=function(file,value,...rest){if(typeof file==='number'){write(file,'partial');throw Error('synthetic-private-write')}return write(file,value,...rest)};");
+          const faultStart = process.hrtime.bigint();
+          const fault = cp.spawnSync(process.execPath, [cli, ...args, '--format', 'json',
+            '--out', 'fault.report'], { cwd: root, encoding: 'utf8',
+            env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '--require=' + writeFault },
+            maxBuffer: 8 * 1024 * 1024 });
+          steps.push({ command: 'cdn-security-source-save', exit: fault.status ?? -1,
+            expectedExit: 3, durationMs: Number(process.hrtime.bigint() - faultStart) / 1e6 });
+          assert.equal(fault.status, 3);
+          assert.equal(fault.stdout, '');
+          assert.ok(fault.stderr.includes('SOURCE_DIFF_OUTPUT_WRITE_FAILED')
+            && !fault.stderr.includes('synthetic-private-write') && !fault.stderr.includes(root));
+          assert.equal(fs.existsSync(path.join(root, 'fault.report')), false);
+          saveCases.push({ name: 'write-fault', exit: 3, digest: null });
           assert.deepEqual(inputNames.map(name => crypto.createHash('sha256').update(fs.readFileSync(path.join(root, name))).digest('hex')), inputHashes);
           assert.deepEqual(authInputNames.map(name => crypto.createHash('sha256')
             .update(fs.readFileSync(path.join(authRoot, name))).digest('hex')), authInputHashes);
           fs.writeFileSync(path.join(process.cwd(), 'source-aware-cli-proof.json'), JSON.stringify({
-            formats: ['text', 'json', 'sarif', 'summary'], steps, authCases,
+            formats: ['text', 'json', 'sarif', 'summary'], steps, authCases, saveCases,
             authConfig: { rawDigest: loadedAuth.rawDigest,
               configDigest: configuredWorkspace.evidence.source.configDigest,
               projectDigest: configuredWorkspace.evidence.source.projectDigest },
@@ -706,25 +780,34 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
     const cliProofPath = path.join(installDir, 'source-aware-cli-proof.json');
     const cliSarifPath = path.join(installDir, 'source-aware-installed-cli-sarif.json');
     const authSarifPath = path.join(installDir, 'source-auth-installed-cli-sarif.json');
+    const saveSarifPath = path.join(installDir, 'source-save-installed-cli-sarif.json');
     const cliProof = JSON.parse(fs.readFileSync(cliProofPath, 'utf8'));
     assert.deepStrictEqual(cliProof.formats, ['text', 'json', 'sarif', 'summary']);
     assert.deepStrictEqual(cliProof.authCases, ['configured-text', 'configured-json', 'configured-sarif',
       'configured-summary', 'equivalent-json', 'changed-config', 'invalid-config', 'without-source']);
+    assert.deepStrictEqual(cliProof.saveCases.map((item: { name: string; exit: number }) => [item.name, item.exit]),
+      [['format-text', 0], ['format-json', 0], ['format-sarif', 0], ['format-summary', 0],
+        ['configured-auth', 0], ['threshold', 1], ['existing', 2], ['input-collision', 2], ['write-fault', 3]]);
+    assert.ok(cliProof.saveCases.slice(0, 6).every((item: { digest: string }) => /^[a-f0-9]{64}$/.test(item.digest))
+      && cliProof.saveCases.slice(6).every((item: { digest: null }) => item.digest === null));
     assert.ok(cliProof.authConfig && ['rawDigest', 'configDigest', 'projectDigest'].every((key) =>
       /^sha256:[a-f0-9]{64}$/.test(cliProof.authConfig[key])), 'configured digest proof missing');
-    assert.ok(Array.isArray(cliProof.steps) && cliProof.steps.length === 15
+    assert.ok(Array.isArray(cliProof.steps) && cliProof.steps.length === 24
       && cliProof.steps.every((step: { command: string; exit: number; expectedExit: number; durationMs: number }, index: number) =>
-        step.command === (index < 7 ? 'cdn-security-source-diff' : 'cdn-security-source-auth-config')
+        step.command === (index < 7 ? 'cdn-security-source-diff'
+          : index < 15 ? 'cdn-security-source-auth-config' : 'cdn-security-source-save')
         && step.exit === step.expectedExit
         && Number.isFinite(step.durationMs) && step.durationMs >= 0), 'installed CLI proof missing');
     assert.deepStrictEqual(cliProof.steps.map((step: { expectedExit: number }) => step.expectedExit),
-      [0, 0, 0, 0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 2, 2]);
+      [0, 0, 0, 0, 1, 2, 3, 0, 0, 0, 0, 0, 0, 2, 2, 0, 0, 0, 0, 0, 1, 2, 2, 3]);
     validateInstalledSarif(JSON.parse(fs.readFileSync(cliSarifPath, 'utf8')));
     validateInstalledSarif(JSON.parse(fs.readFileSync(authSarifPath, 'utf8')));
+    validateInstalledSarif(JSON.parse(fs.readFileSync(saveSarifPath, 'utf8')));
     if (quietConsumer) smokeSteps.push(...cliProof.steps);
     fs.rmSync(cliProofPath);
     fs.rmSync(cliSarifPath);
     fs.rmSync(authSarifPath);
+    fs.rmSync(saveSarifPath);
     cliVerified = true;
     console.log('OK: installed Experimental source-diff CLI validates four formats and explicit auth config');
 

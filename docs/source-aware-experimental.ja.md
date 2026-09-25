@@ -73,9 +73,30 @@ SARIFは既存reporter制限内の完全結果、Summaryは最大10件/32KiBの�
 `3`は内部/reporter/出力失敗です。入力stageが失敗しても、独立比較のFindingを
 含むreportを出してexit `2`になる場合があります。`--fail-on never`は失敗を
 成功へ変換しません。reportはstdout、固定失敗診断はstderrです。JSON/SARIFは
-単一JSONと末尾改行を出します。`--out`、ファイル保存、GitHub Summaryへの書込み・
-upload、PR投稿、apply/deployは未実装です。shellのredirectはCLI起動前に働くため、
-入力ファイルへreportをredirectしないでください。
+単一JSONと末尾改行を出します。`--out <path>`を指定すると、同じbytesを明示した
+workspace内の**新規通常ファイル1件**に保存し、stdoutには出しません。上の例には、
+`workspace/reports`を先に作成したうえで`--format sarif --out reports/source.sarif`
+を追加できます。親directoryは既存である必要があります。directoryの作成、既存
+ファイルの上書き・追記、`--out -`は行いません。保存するたびに新しい保存先名を
+選んでください。保存先が既存のファイル、symlink、hardlink、directory、FIFO、
+socketなら拒否します。新規ファイルはPOSIXで所有者
+のみの権限（`0600`）です。保存成功後もreportのexit `0`/`1`/`2`を維持し、
+不正・保護対象の保存先はexit `2`、書込み・後始末の失敗は固定診断とexit `3`
+で、stdoutにreportを出しません。
+
+保存先はworkspace内かつ`policy`、`dist`、`node_modules`、`.git`の外側に
+限定し、symlink経由のaliasも検査します。明示または検出されたOpenAPI、Policy、
+Source、認証設定、例外、local ref、tsconfig、package metadataの入力名には、
+入力が未存在でも保存できません。内部入力stageの保護が十分に確立できない場合も
+保存を拒否します。検査対象は当該実行で観測した入力であり、並行変更中のworkspace
+全体を原子的にsnapshotするものではありません。directory entryを別processが
+変更すると保存失敗や、回復不能なfilesystem障害では検知可能な部分的な新規
+ファイルが残る場合があります。信頼できない並行writerとworkspaceを共有しないで
+ください。検証済み環境はPOSIX/local fixtureで、Windowsとnetwork filesystemは
+未検証です。
+
+GitHub Summaryへの書込み・upload、PR投稿、apply/deployは未実装です。shellの
+redirectはCLI起動前に働くため、入力ファイルへreportをredirectしないでください。
 
 実binaryはinstalled-package smokeで検証します。[標準CLIリファレンス](cli.ja.md)は
 2.0のコマンドを説明します。正式Source-aware workflowとGitHub uploadは後続工程です。
