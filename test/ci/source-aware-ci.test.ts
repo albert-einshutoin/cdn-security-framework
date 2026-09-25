@@ -162,11 +162,30 @@ describe('installed dev-only Source-aware CI connection', () => {
     expect(delivery.gate.status).toBe(2);
   });
 
-  it('W06/W07 rejects tampered bytes and failed Summary transfer at the real gate', () => {
+  it('W06 rejects tampered report bytes at the real gate', () => {
     const tampered = runCase('tampered');
     fs.appendFileSync(path.join(tampered.output, 'summary.md'), 'changed\n');
     const bad = deliver(tampered.output, 'tampered');
     expect(bad.gate.status).toBe(3);
+  });
+
+  it('W06 rejects a missing generated report at the real gate', () => {
+    const missing = runCase('missing-report');
+    fs.unlinkSync(path.join(missing.output, 'source-aware.sarif'));
+    const delivery = deliver(missing.output, 'missing-report');
+    expect(delivery.gate.status).toBe(3);
+    expect(fs.readFileSync(delivery.step, 'utf8')).toContain('CI_REPORT_UNAVAILABLE');
+  });
+
+  it('W06 rejects a missing generation record at the real gate', () => {
+    const missing = runCase('missing-record');
+    fs.unlinkSync(path.join(missing.output, 'ci-record.json'));
+    const delivery = deliver(missing.output, 'missing-record');
+    expect(delivery.gate.status).toBe(3);
+    expect(fs.readFileSync(delivery.step, 'utf8')).toContain('CI_REPORT_UNAVAILABLE');
+  });
+
+  it('W07 rejects failed Summary transfer at the real gate', () => {
     const transfer = runCase('transfer');
     const missing = deliver(transfer.output, 'transfer', {
       GITHUB_STEP_SUMMARY: path.join(temp, 'missing-parent/summary.md'),
@@ -174,18 +193,35 @@ describe('installed dev-only Source-aware CI connection', () => {
     expect(missing.gate.status).toBe(3);
     expect(JSON.parse(fs.readFileSync(path.join(missing.stage, 'delivery.json'), 'utf8')).summaryTransfer)
       .toBe('failed');
-    const states = runCase('states');
+  });
+
+  it('W06 rejects skipped acceptance and cancelled producer at the real gate', () => {
+    const states = runCase('upstream-states');
     for (const [name, extra] of [
       ['skipped', { CSF_ACCEPTANCE_STATE: 'skipped' }],
       ['cancelled', { CSF_PRODUCER_STATE: 'cancelled' }],
-      ['artifact', { CSF_ARTIFACT_OUTCOME: 'failure' }],
-      ['signal', { CSF_ANALYZE_OUTCOME: 'failure' }],
-      ['publish', { CSF_PUBLISH_OUTCOME: 'failure' }],
-      ['candidate', { CSF_TGZ_SHA256: '0'.repeat(64) }],
     ] as const) {
       const stage = deliver(states.output, name, extra);
       expect(stage.gate.status).toBe(3);
     }
+  });
+
+  it('W07 rejects failed analysis, publish, and artifact outcomes at the real gate', () => {
+    const states = runCase('delivery-states');
+    for (const [name, extra] of [
+      ['artifact', { CSF_ARTIFACT_OUTCOME: 'failure' }],
+      ['signal', { CSF_ANALYZE_OUTCOME: 'failure' }],
+      ['publish', { CSF_PUBLISH_OUTCOME: 'failure' }],
+    ] as const) {
+      const stage = deliver(states.output, name, extra);
+      expect(stage.gate.status).toBe(3);
+    }
+  });
+
+  it('W06 rejects candidate mismatch at the real gate', () => {
+    const states = runCase('candidate-state');
+    const stage = deliver(states.output, 'candidate', { CSF_TGZ_SHA256: '0'.repeat(64) });
+    expect(stage.gate.status).toBe(3);
   });
 
   it('W05 never substitutes stale or failed product reports', () => {
