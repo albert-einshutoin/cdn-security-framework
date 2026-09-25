@@ -8,7 +8,6 @@ import {
   type SourceAnalysisExecution,
   type SourceAnalysisLimits,
 } from '../source-analysis';
-import { runNestJsSourceAnalysisInternal, validateNestJsAuthConfig } from '../source/nestjs/analyzer';
 import type { TypeScriptAnalysisCache } from '../source/typescript/project-loader';
 import { projectPolicyToAllowedSurface, type AllowedSurfaceModelV1, type AllowedSurfaceTarget } from './allowed-surface';
 import { ContractDiffInputError, loadPolicyForInternal } from './contract-diff';
@@ -105,6 +104,7 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
   let source: SourceAnalysisExecution | undefined;
   let sourceEvidence: SourceAwareWorkspaceResult['evidence']['source'];
   if (input.source) {
+    const { runNestJsSourceAnalysisInternal, validateNestJsAuthConfig } = await import('../source/nestjs/analyzer');
     const limits = { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, ...(input.source.limits ?? {}) };
     try {
       if (input.source.authConfig !== undefined) validateNestJsAuthConfig(input.source.authConfig);

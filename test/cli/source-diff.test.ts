@@ -427,4 +427,37 @@ describe('Experimental source-diff CLI', () => {
     expect(version.stdout).toMatch(/^1\.4\.0\n$/);
     expect(fs.readdirSync(root).sort()).toEqual(before);
   });
+
+  test('unrelated CLI commands and no-source diff do not load the Source analyzer', () => {
+    const root = workspace();
+    const preload = path.join(root, 'reject-source-load.cjs');
+    fs.writeFileSync(preload, `const Module = require('node:module');
+const load = Module._load;
+Module._load = function (request, parent, isMain) {
+  if (request === 'typescript' || request.includes('source/nestjs/analyzer')) {
+    throw new Error('UNEXPECTED_SOURCE_ANALYZER_LOAD');
+  }
+  return load.call(this, request, parent, isMain);
+};
+`);
+    const run = (args: string[]) => spawnSync(process.execPath, [cli, ...args], {
+      cwd: root, encoding: 'utf8', timeout: 10_000,
+      env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: `--require=${preload}` },
+    });
+    const commands = [
+      ['--version'],
+      ['--help'],
+      ['contract', 'diff', '--workspace-root', root, '--openapi', 'openapi.yaml',
+        '--policy', 'policy.yml', '--target', 'aws', '--fail-on', 'never'],
+      ['contract', 'source-diff', '--workspace-root', root, '--openapi', 'openapi.yaml',
+        '--policy', 'policy.yml', '--target', 'aws', '--current-date', date, '--fail-on', 'never'],
+    ];
+    for (const args of commands) {
+      const result = run(args);
+      expect(result.error).toBeUndefined();
+      expect(result.signal).toBeNull();
+      expect(result.status, `${args.join(' ')}: ${result.stderr}`).toBe(0);
+      expect(result.stderr).not.toContain('UNEXPECTED_SOURCE_ANALYZER_LOAD');
+    }
+  });
 });
