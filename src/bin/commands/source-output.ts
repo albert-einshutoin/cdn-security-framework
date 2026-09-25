@@ -26,28 +26,48 @@ export function sourceOutputGuard(workspaceRoot: string) {
   let incomplete = false;
   const recordInputPath = (inputPath: string) => {
     try {
-      const lexical = path.resolve(root, inputPath);
-      let actual: string;
-      try {
-        actual = fs.realpathSync(lexical);
-        if (!isPathWithinWorkspace(root, lexical) && !isPathWithinWorkspace(root, actual)) return;
-        inputPaths.add(lexical);
-        inputPaths.add(actual);
-        const stat = fs.statSync(actual);
-        if (stat.isFile()) sourceFiles.set(actual, { device: stat.dev, inode: stat.ino });
-      } catch {
-        // Missing declared inputs still reserve their name, including parent aliases.
-        if (isPathWithinWorkspace(root, lexical)) inputPaths.add(lexical);
-        let parent: string;
-        try { parent = fs.realpathSync(path.dirname(lexical)); }
-        catch (error) {
-          if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
-          throw error;
+      let lexical = path.resolve(root, inputPath);
+      const seen = new Set<string>();
+      let followedLink = false;
+      while (!seen.has(lexical)) {
+        seen.add(lexical);
+        let actual: string;
+        try {
+          actual = fs.realpathSync(lexical);
+          if (!isPathWithinWorkspace(root, lexical) && !isPathWithinWorkspace(root, actual)) {
+            if (followedLink) incomplete = true;
+            return;
+          }
+          inputPaths.add(lexical);
+          inputPaths.add(actual);
+          const stat = fs.statSync(actual);
+          if (stat.isFile()) sourceFiles.set(actual, { device: stat.dev, inode: stat.ino });
+          return;
+        } catch {
+          // Missing inputs reserve their name and any dangling symlink target.
+          if (isPathWithinWorkspace(root, lexical)) inputPaths.add(lexical);
+          let parent: string;
+          try { parent = fs.realpathSync(path.dirname(lexical)); }
+          catch (error) {
+            if ((error as NodeJS.ErrnoException).code === 'ENOENT') return;
+            throw error;
+          }
+          actual = path.join(parent, path.basename(lexical));
+          if (!isPathWithinWorkspace(root, lexical) && !isPathWithinWorkspace(root, actual)) {
+            if (followedLink) incomplete = true;
+            return;
+          }
+          inputPaths.add(lexical);
+          inputPaths.add(actual);
+          try {
+            lexical = path.resolve(path.dirname(actual), fs.readlinkSync(actual));
+            followedLink = true;
+          }
+          catch (error) {
+            if (['ENOENT', 'EINVAL'].includes((error as NodeJS.ErrnoException).code ?? '')) return;
+            throw error;
+          }
         }
-        actual = path.join(parent, path.basename(lexical));
-        if (!isPathWithinWorkspace(root, lexical) && !isPathWithinWorkspace(root, actual)) return;
-        inputPaths.add(lexical);
-        inputPaths.add(actual);
       }
     } catch { incomplete = true; }
   };

@@ -220,6 +220,54 @@ describe('Experimental source-diff new-file output', () => {
     expect(createHash('sha256').update(fs.readFileSync(source)).digest('hex')).toBe(before);
   });
 
+  test('does not fill a missing TypeScript project reference with a report', () => {
+    const root = sourceWorkspace();
+    fs.copyFileSync(path.join(root, 'security-analyzer.yml'), path.join(root, 'token=opaquevalue123.yml'));
+    const configPath = path.join(root, 'tsconfig.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    config.references = [{ path: './missing-reference.json' }];
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const saved = invokeSource(root, ['--format', 'json', '--out', 'missing-reference.json']);
+    expect(saved.status).toBe(2);
+    expect(saved.stdout).toBe('');
+    expect(saved.stderr).toContain('SOURCE_DIFF_OUTPUT_PROTECTED');
+    expect(fs.existsSync(path.join(root, 'missing-reference.json'))).toBe(false);
+  });
+
+  test('does not fill the target of a dangling TypeScript project reference symlink', () => {
+    const root = sourceWorkspace();
+    fs.copyFileSync(path.join(root, 'security-analyzer.yml'), path.join(root, 'token=opaquevalue123.yml'));
+    fs.symlinkSync('actual-missing.json', path.join(root, 'missing-reference.json'));
+    const configPath = path.join(root, 'tsconfig.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    config.references = [{ path: './missing-reference.json' }];
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const saved = invokeSource(root, ['--format', 'json', '--out', 'actual-missing.json']);
+    expect(saved.status).toBe(2);
+    expect(saved.stdout).toBe('');
+    expect(saved.stderr).toContain('SOURCE_DIFF_OUTPUT_PROTECTED');
+    expect(fs.existsSync(path.join(root, 'actual-missing.json'))).toBe(false);
+    expect(fs.lstatSync(path.join(root, 'missing-reference.json')).isSymbolicLink()).toBe(true);
+  });
+
+  test('refuses saving when a missing reference chain leaves and reenters the workspace', () => {
+    const root = sourceWorkspace();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-source-ref-chain-'));
+    roots.push(outside);
+    fs.copyFileSync(path.join(root, 'security-analyzer.yml'), path.join(root, 'token=opaquevalue123.yml'));
+    fs.symlinkSync(path.join(outside, 'intermediate'), path.join(root, 'missing-reference.json'));
+    fs.symlinkSync(path.join(root, 'actual-missing.json'), path.join(outside, 'intermediate'));
+    const configPath = path.join(root, 'tsconfig.json');
+    const config = JSON.parse(fs.readFileSync(configPath, 'utf8'));
+    config.references = [{ path: './missing-reference.json' }];
+    fs.writeFileSync(configPath, JSON.stringify(config));
+    const saved = invokeSource(root, ['--format', 'json', '--out', 'actual-missing.json']);
+    expect(saved.status).toBe(3);
+    expect(saved.stdout).toBe('');
+    expect(saved.stderr).toContain('SOURCE_DIFF_OUTPUT_PROTECTION_INCOMPLETE');
+    expect(fs.existsSync(path.join(root, 'actual-missing.json'))).toBe(false);
+  });
+
   test('rejects outside, protected, aliased, and missing-parent destinations', () => {
     const root = workspace();
     const outside = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-source-outside-'));

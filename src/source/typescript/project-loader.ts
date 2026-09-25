@@ -777,6 +777,7 @@ async function loadTypeScriptProjectInternal(
   }
   for (const reference of parsed.projectReferences ?? []) {
     const absolute = path.resolve(reference.path);
+    options.onInputPath?.(absolute);
     if (absolute !== workspaceRoot && !relativeWithin(workspaceRoot, absolute)) {
       throw new TypeScriptProjectLoadError('TS_PROJECT_PATH_OUTSIDE_ROOT');
     }
