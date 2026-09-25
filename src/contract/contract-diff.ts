@@ -505,12 +505,20 @@ export function contractDiffExitCode(
   report: ContractDiffReportV1,
   failOn: ContractDiffFailOn,
 ): 0 | 1 {
+  return contractDiffThresholdReached(report.summary, failOn) ? 1 : 0;
+}
+
+// Shared threshold rule for the public two-way report and internal Source-aware finalization.
+export function contractDiffThresholdReached(
+  summary: Pick<ContractDiffReportV1['summary'], 'error' | 'warning'>,
+  failOn: ContractDiffFailOn,
+): boolean {
   if (!CONTRACT_DIFF_FAIL_ON.includes(failOn)) {
     throw new ContractDiffInputError('CONTRACT_DIFF_FAIL_ON_INVALID', 'fail-on must be error, warning, or never.');
   }
-  if (failOn === 'never') return 0;
-  if (report.summary.error > 0) return 1;
-  return failOn === 'warning' && report.summary.warning > 0 ? 1 : 0;
+  if (failOn === 'never') return false;
+  if (summary.error > 0) return true;
+  return failOn === 'warning' && summary.warning > 0;
 }
 
 export function formatContractDiffJson(report: ContractDiffReportV1): string {

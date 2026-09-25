@@ -5,6 +5,7 @@ import path from 'node:path';
 import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { analyzeSourceAwareWorkspace } from '../../src/contract/source-aware-workspace';
+import { finalizeSourceAwareWorkspace, formatSourceAwarePreviewJson, formatSourceAwarePreviewText } from '../../src/contract/source-aware-finalizer';
 import { compareSecurityContracts, projectPolicyToAllowedSurface } from '../../src/contract';
 import { inspectOpenApi } from '../../src/openapi';
 import * as sourceRunner from '../../src/source/nestjs/analyzer';
@@ -69,6 +70,106 @@ afterEach(() => {
 });
 
 describe('internal single-workspace adapter', () => {
+  test('finalizes real NestJS/OpenAPI/schema-2 workspace without changing its inputs or executing Source', async () => {
+    const root = workspace();
+    const names = ['openapi.yaml', 'refs/common.yaml', 'policy.yml', 'tsconfig.json', 'src/controller.ts'];
+    const before = names.map((name) => hash(path.join(root, name)));
+    const network = vi.spyOn(globalThis, 'fetch').mockImplementation(() => { throw new Error('network forbidden'); });
+    const analyzed = await analyzeSourceAwareWorkspace(args(root));
+    const final = finalizeSourceAwareWorkspace(analyzed, { currentDate: '2026-09-25', failOn: 'never' });
+    const jsonText = formatSourceAwarePreviewJson(final);
+    const preview = JSON.parse(jsonText);
+    const text = formatSourceAwarePreviewText(final);
+    expect(network).not.toHaveBeenCalled();
+    expect(final.stages.implemented.status).toBe('partial');
+    expect(final.analysis).toMatchObject({ status: 'partial', outcome: 'ok' });
+    expect(final.exitCode).toBe(0);
+    expect(final.comparisons.declaredAllowed.status).toMatch(/complete|partial/);
+    expect(final.comparisons.implementedDeclared.status).toBe('partial');
+    expect(final.comparisons.implementedAllowed.status).toBe('partial');
+    expect(final.summary.unique).toBeGreaterThan(0);
+    expect(preview.summary).toEqual(final.summary);
+    expect(preview.comparisons).toEqual(final.comparisons);
+    expect(preview.findings.active.map(({ ruleId }: { ruleId: string }) => ruleId))
+      .toEqual(final.findings.slice(0, preview.findings.active.length).map(({ ruleId }) => ruleId));
+    expect(text).toContain(`unique=${final.summary.unique}`);
+    expect(jsonText).not.toContain(root);
+    expect(text).not.toContain(root);
+    expect(names.map((name) => hash(path.join(root, name)))).toEqual(before);
+    expect(formatSourceAwarePreviewJson(final)).toBe(jsonText);
+
+    const { source: _source, ...withoutSource } = args(root);
+    const noSource = finalizeSourceAwareWorkspace(await analyzeSourceAwareWorkspace(withoutSource), {
+      currentDate: '2026-09-25', failOn: 'never',
+    });
+    // The fixture's OpenAPI graph remains partial even when Source is intentionally absent.
+    expect(noSource.stages.declared.status).toBe('partial');
+    expect(noSource.analysis).toMatchObject({ status: 'partial', outcome: 'ok' });
+    expect(noSource.comparisons.implementedDeclared).toEqual({ status: 'omitted', code: 'SOURCE_NOT_REQUESTED' });
+    expect(noSource.summary.unique).toBe(noSource.comparisons.declaredAllowed.status === 'complete'
+      || noSource.comparisons.declaredAllowed.status === 'partial' ? noSource.comparisons.declaredAllowed.count : -1);
+
+    const sourceFailed = finalizeSourceAwareWorkspace(await analyzeSourceAwareWorkspace({
+      ...args(root), source: { tsconfigPath: '../outside.ts' },
+    }), { currentDate: '2026-09-25', failOn: 'never' });
+    expect(sourceFailed.comparisons.declaredAllowed.status).toMatch(/complete|partial/);
+    expect(sourceFailed.comparisons.implementedDeclared.status).toBe('failed');
+    expect(sourceFailed.analysis).toMatchObject({ status: 'failed', outcome: 'input-error' });
+    expect(sourceFailed.exitCode).toBe(2);
+    expect(names.map((name) => hash(path.join(root, name)))).toEqual(before);
+  });
+
+  test('classifies an unexpected Source runner rejection as internal without leaking its message', async () => {
+    const root = workspace();
+    vi.spyOn(sourceRunner, 'runNestJsSourceAnalysisInternal')
+      .mockRejectedValueOnce(new Error('synthetic-token-opaquevalue123'));
+    const analyzed = await analyzeSourceAwareWorkspace(args(root));
+    expect(analyzed.stages.implemented).toMatchObject({ status: 'failed', code: 'SOURCE_ANALYZER_INTERNAL' });
+    const final = finalizeSourceAwareWorkspace(analyzed, { currentDate: '2026-09-25', failOn: 'never' });
+    expect(final).toMatchObject({ analysis: { status: 'failed', outcome: 'internal-error' }, exitCode: 3 });
+    expect(final.comparisons.declaredAllowed.status).toMatch(/complete|partial/);
+    expect(formatSourceAwarePreviewJson(final)).not.toContain('opaquevalue123');
+  });
+
+  test('finalization retains the independent real comparison on OpenAPI, Policy or Source limit failure', async () => {
+    const root = workspace();
+    const openapiPath = path.join(root, 'openapi.yaml');
+    const originalOpenapi = fs.readFileSync(openapiPath);
+    fs.writeFileSync(openapiPath, 'not: openapi\n');
+    const badOpenapiHash = hash(openapiPath);
+    const badOpenapi = finalizeSourceAwareWorkspace(await analyzeSourceAwareWorkspace(args(root)), {
+      currentDate: '2026-09-25', failOn: 'never',
+    });
+    expect(badOpenapi.comparisons.declaredAllowed.status).toBe('failed');
+    expect(badOpenapi.comparisons.implementedAllowed.status).toMatch(/complete|partial/);
+    expect(badOpenapi.summary.unique).toBeGreaterThan(0);
+    expect(badOpenapi.analysis).toMatchObject({ status: 'failed', outcome: 'input-error' });
+    expect(badOpenapi.exitCode).toBe(2);
+    expect(hash(openapiPath)).toBe(badOpenapiHash);
+
+    fs.writeFileSync(openapiPath, originalOpenapi);
+    const policyPath = path.join(root, 'policy.yml');
+    fs.writeFileSync(policyPath, 'version: 1\n');
+    const badPolicyHash = hash(policyPath);
+    const badPolicy = finalizeSourceAwareWorkspace(await analyzeSourceAwareWorkspace(args(root)), {
+      currentDate: '2026-09-25', failOn: 'never',
+    });
+    expect(badPolicy.comparisons.implementedDeclared.status).toMatch(/complete|partial/);
+    expect(badPolicy.comparisons.implementedAllowed.status).toBe('failed');
+    expect(badPolicy.analysis).toMatchObject({ status: 'failed', outcome: 'input-error' });
+    expect(badPolicy.exitCode).toBe(2);
+    expect(hash(policyPath)).toBe(badPolicyHash);
+
+    fs.writeFileSync(policyPath, policy);
+    const limited = finalizeSourceAwareWorkspace(await analyzeSourceAwareWorkspace({
+      ...args(root), source: { tsconfigPath: 'tsconfig.json', limits: { maxOperations: 1 } },
+    }), { currentDate: '2026-09-25', failOn: 'never' });
+    expect(limited.comparisons.declaredAllowed.status).toMatch(/complete|partial/);
+    expect(limited.stages.implemented).toMatchObject({ status: 'failed', code: 'SOURCE_ANALYZER_OPERATION_LIMIT' });
+    expect(limited.analysis).toMatchObject({ status: 'failed', outcome: 'input-error' });
+    expect(limited.exitCode).toBe(2);
+  });
+
   test('uses real OpenAPI refs, schema 2 Policy and one NestJS analysis with same-run project digest', async () => {
     const root = workspace();
     const inputs = ['openapi.yaml', 'refs/common.yaml', 'policy.yml', 'tsconfig.json', 'src/controller.ts']
