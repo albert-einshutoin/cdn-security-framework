@@ -6,10 +6,12 @@ import crypto from 'node:crypto';
 import cp from 'node:child_process';
 
 export const matrixRows = ['20.17.0', '22', '24', '18.20.8', '20.16.0'] as const;
-type Identity = { schemaVersion: 1; source: string; tree: string; harness: string; run: string; attempt: string; sha256: string; size: number; lockSha256: string };
+type Identity = { schemaVersion: 1; source: string; tree: string; harness: string; run: string; attempt: string; sha256: string; size: number; lockSha256: string;
+  schemaSha256: string; validatorSha256: string };
 type Step = { command: string; exit: number; expectedExit: number; durationMs: number };
 type Result = Identity & { runtime: { executable: string; sha256: string; platform: string; arch: string }; row: string; status: 'pass'; node: string; npm: string; switchVerified?: boolean; checks: string[]; resolution: string[]; steps: Step[]; dependencies: Record<string, string>; journey?: import('./package-journey').JourneyResult };
 const root = path.resolve(__dirname, '..');
+const OFFICIAL_SARIF_SCHEMA_SHA256 = 'c3b4bb2d6093897483348925aaa73af03b3e3f4bd4ca38cef26dcb4212a2682e';
 const sha = (file: string) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
 function read(file: string): any {
   assert.ok(fs.statSync(file).isFile() && fs.statSync(file).size <= 2 * 1024 * 1024, 'invalid metadata file');
@@ -30,6 +32,8 @@ const expected = expectedIdentity;
 export function verifyIdentity(m: Identity, e: ReturnType<typeof expected>): void {
   assert.ok(m && m.schemaVersion === 1 && m.source === e.source && m.harness === e.source && m.run === e.run && m.attempt === e.attempt, 'candidate/run identity mismatch');
   assert.match(m.tree, /^[a-f0-9]{40}$/); assert.match(m.sha256, /^[a-f0-9]{64}$/); assert.match(m.lockSha256, /^[a-f0-9]{64}$/);
+  assert.equal(m.schemaSha256, OFFICIAL_SARIF_SCHEMA_SHA256, 'official schema mismatch');
+  assert.match(m.validatorSha256, /^[a-f0-9]{64}$/);
   assert.ok(Number.isSafeInteger(m.size) && m.size > 0 && m.size <= 1024 * 1024, 'invalid tarball size');
   if (e.sha256 !== undefined) assert.equal(m.sha256, e.sha256, 'producer digest mismatch');
 }
@@ -41,6 +45,8 @@ export function verifyTarball(directory: string, e: ReturnType<typeof expected>)
   assert.equal(fs.statSync(file).size, m.size, 'tarball size mismatch');
   assert.equal(sha(file), m.sha256, 'tarball digest mismatch');
   assert.equal(sha(path.join(directory, 'consumer/package-lock.json')), m.lockSha256, 'consumer lock mismatch');
+  assert.equal(sha(path.join(directory, 'validation/sarif-schema-2.1.0.json')), m.schemaSha256, 'official schema digest mismatch');
+  assert.equal(sha(path.join(directory, 'validation/official-sarif-test-validator.cjs')), m.validatorSha256, 'validator digest mismatch');
   return m;
 }
 export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof expected>, states: string[]): void {
@@ -50,7 +56,7 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
   assert.equal(new Set(results.map(r => r.row)).size, matrixRows.length, 'duplicate consumer result');
   for (const row of matrixRows) {
     const r = results.find(r => r.row === row); assert.ok(r, 'missing required row'); verifyIdentity(r, e);
-    for (const k of ['sha256', 'size', 'tree', 'lockSha256'] as const) assert.equal(r[k], m[k], 'consumer artifact mismatch');
+    for (const k of ['sha256', 'size', 'tree', 'lockSha256', 'schemaSha256', 'validatorSha256'] as const) assert.equal(r[k], m[k], 'consumer artifact mismatch');
     assert.equal(r.status, 'pass', 'failed consumer');
     assert.ok(r.runtime && ['executable','sha256','platform','arch'].every(k => typeof (r.runtime as any)[k] === 'string') && /^node(?:\.exe)?$/.test(r.runtime.executable) && /^[a-f0-9]{64}$/.test(r.runtime.sha256) && /^[a-z0-9_-]+$/.test(r.runtime.platform) && /^[a-z0-9_]+$/.test(r.runtime.arch), 'missing or invalid runtime identity');
     if (row === '18.20.8' || row === '20.16.0') assert.equal(r.switchVerified, true, 'missing supported-install switch proof');
@@ -64,7 +70,7 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
     const lower = row === '18.20.8' || row === '20.16.0';
     assert.ok(Array.isArray(r.steps) && r.steps.length === (lower ? 26 : 13), 'missing command evidence');
     assert.ok(r.steps.every(s => s && typeof s.command === 'string' && /^[a-zA-Z0-9_.-]+$/.test(s.command) && Number.isFinite(s.durationMs) && s.durationMs >= 0 && s.exit === s.expectedExit && (s.expectedExit === 0 || (lower && s.expectedExit === 1))), 'invalid command evidence');
-    assert.deepEqual(r.checks, row === '18.20.8' || row === '20.16.0' ? ['node-rejection', 'resolution', 'no-side-effects'] : ['package-smoke', 'resolution', 'schemas']);
+    assert.deepEqual(r.checks, row === '18.20.8' || row === '20.16.0' ? ['node-rejection', 'resolution', 'no-side-effects'] : ['package-smoke', 'resolution', 'schemas', 'official-sarif-schema']);
     if (row === '24') {
       const j = r.journey;
       const { requiredChecks: required, requiredStepIds, requiredInputKeys, requiredOutputKeys, expectedFindingProof } = require('./package-journey') as typeof import('./package-journey');
@@ -115,8 +121,17 @@ function produce(directory: string): void {
   for (const file of ['scripts/single-pack.js', 'scripts/package-smoke-tests.js', 'scripts/package-journey.js', 'docs/api-manifest.json', 'package.json']) {
     fs.mkdirSync(path.dirname(path.join(directory, file)), { recursive: true }); fs.copyFileSync(path.join(root, file), path.join(directory, file));
   }
+  const validation = path.join(directory, 'validation');
+  fs.mkdirSync(validation, { recursive: true });
+  fs.copyFileSync(path.join(root, 'test/fixtures/sarif/sarif-schema-2.1.0.json'), path.join(validation, 'sarif-schema-2.1.0.json'));
+  const { buildSync } = require('esbuild') as typeof import('esbuild');
+  buildSync({ entryPoints: [path.join(root, 'scripts/official-sarif-test-validator.js')],
+    outfile: path.join(validation, 'official-sarif-test-validator.cjs'), bundle: true, platform: 'node',
+    format: 'cjs', target: 'node20', logLevel: 'silent' });
   const m: Identity = { schemaVersion: 1, source: e.source, harness: e.source, tree: run('git', ['rev-parse', 'HEAD^{tree}']).trim(), run: e.run, attempt: e.attempt,
-    sha256: sha(path.join(directory, 'candidate.tgz')), size: fs.statSync(path.join(directory, 'candidate.tgz')).size, lockSha256: sha(path.join(consumer, 'package-lock.json')) };
+    sha256: sha(path.join(directory, 'candidate.tgz')), size: fs.statSync(path.join(directory, 'candidate.tgz')).size, lockSha256: sha(path.join(consumer, 'package-lock.json')),
+    schemaSha256: sha(path.join(validation, 'sarif-schema-2.1.0.json')),
+    validatorSha256: sha(path.join(validation, 'official-sarif-test-validator.cjs')) };
   verifyIdentity(m, e); write(path.join(directory, 'metadata.json'), m);
   if (process.env.GITHUB_OUTPUT) fs.appendFileSync(process.env.GITHUB_OUTPUT, `sha256=${m.sha256}\n`);
   console.log(JSON.stringify(m));
@@ -174,14 +189,18 @@ function consume(directory: string, row: string, output: string): void {
   else {
     const smoke = require(path.join(directory, 'scripts/package-smoke-tests.js'));
     smoke.assertPackageContents(read(path.join(directory, 'pack.json')));
-    smoke.smokeInstalledPackage(path.join(directory, 'candidate.tgz'), consumer); steps = smoke.smokeSteps;
+    const { createOfficialSarifValidator } = require(path.join(directory, 'validation/official-sarif-test-validator.cjs')) as typeof import('./official-sarif-test-validator');
+    const validate = createOfficialSarifValidator(path.join(directory, 'validation/sarif-schema-2.1.0.json'));
+    smoke.smokeInstalledPackage(path.join(directory, 'candidate.tgz'), consumer,
+      (value: unknown) => assert.ok(validate(value), 'installed internal SARIF failed pinned official schema'));
+    steps = smoke.smokeSteps;
     run(process.execPath, ['-e', `const fs=require('node:fs'),path=require('node:path');const p=path.resolve('node_modules/cdn-security-framework');const req=require('node:module').createRequire(path.join(p,'package.json'));const Ajv=req('ajv');const ajv=new Ajv({strict:false});for(const f of ['policy/schema.json',...fs.readdirSync(path.join(p,'schemas')).filter(f=>f.endsWith('.json')).map(f=>'schemas/'+f)]){if(!ajv.validateSchema(JSON.parse(fs.readFileSync(path.join(p,f)))))throw new Error('invalid schema');}`], consumer);
     if (row === '24') {
       journey = JSON.parse(run(process.execPath, [path.join(directory, 'scripts/package-journey.js'), directory,
         path.join(consumer, 'node_modules/cdn-security-framework/examples')], consumer));
     }
   }
-  const result: Result = { ...m, runtime: { executable: path.basename(process.execPath), sha256: sha(process.execPath), platform: process.platform, arch: process.arch }, row, status: 'pass', node: process.versions.node, npm: run('npm', ['--version'], consumer).trim(), checks: rejected ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas'], ...details, steps, ...(journey ? { journey } : {}) };
+  const result: Result = { ...m, runtime: { executable: path.basename(process.execPath), sha256: sha(process.execPath), platform: process.platform, arch: process.arch }, row, status: 'pass', node: process.versions.node, npm: run('npm', ['--version'], consumer).trim(), checks: rejected ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas','official-sarif-schema'], ...details, steps, ...(journey ? { journey } : {}) };
   if (rejected && process.env.CSF_SWITCH_PROOF) {
     const switched = read(process.env.CSF_SWITCH_PROOF) as Result;
     verifyIdentity(switched, expected());

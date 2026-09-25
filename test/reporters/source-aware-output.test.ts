@@ -11,9 +11,12 @@ import { formatSourceAwarePreviewJson, formatSourceAwarePreviewText } from '../.
 import { finalizeSourceAwareOutput } from '../../src/contract/source-aware-output';
 import { renderSourceAwareSarif, SarifReportError } from '../../src/reporters/sarif';
 import { renderSourceAwareSummary, SourceAwareSummaryError } from '../../src/reporters/source-aware-summary';
+import { createOfficialSarifValidator } from '../../src/scripts/official-sarif-test-validator';
 import { validateLocalSarif } from '../helpers/sarif-validation';
 
 const roots: string[] = [];
+const validateOfficialSarif = createOfficialSarifValidator(path.join(process.cwd(),
+  'test/fixtures/sarif/sarif-schema-2.1.0.json'));
 function fixture(): string {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-source-output-'));
   roots.push(root);
@@ -74,6 +77,11 @@ function exception(instanceId: string, expiresAt = '2026-12-01'): FindingExcepti
   }] };
 }
 
+function expectOfficialSchema(value: unknown): void {
+  const serialized = JSON.parse(JSON.stringify(value));
+  expect(validateOfficialSarif(serialized), JSON.stringify(validateOfficialSarif.errors)).toBe(true);
+}
+
 describe('Source-aware internal output adapters', () => {
   test('same real workspace result yields Text, JSON, full SARIF and bounded Summary without changing inputs', async () => {
     const root = fixture();
@@ -117,6 +125,7 @@ describe('Source-aware internal output adapters', () => {
     expect(paths.map((name) => fs.readFileSync(path.join(root, name)))).toEqual(before);
     expect(renderSourceAwareSummary(bundle)).toBe(summary);
     expect(validateLocalSarif(sarif), JSON.stringify(validateLocalSarif.errors)).toBe(true);
+    expectOfficialSchema(sarif);
   });
 
   test('different disposable roots produce the same four deterministic output meanings', async () => {
@@ -147,6 +156,7 @@ describe('Source-aware internal output adapters', () => {
     expect(bundle.finalized?.comparisons.implementedAllowed.status).toMatch(/complete|partial/);
     expect(bundle.finalized?.summary.unique).toBeGreaterThan(0);
     expect(renderSourceAwareSarif(bundle).runs[0].invocations?.[0].executionSuccessful).toBe(false);
+    expectOfficialSchema(renderSourceAwareSarif(bundle));
     expect(renderSourceAwareSummary(bundle)).toContain('**Result: tool error**');
     expect(fs.readFileSync(openapiPath)).toEqual(before);
   });
@@ -156,6 +166,7 @@ describe('Source-aware internal output adapters', () => {
     const id = workspace.comparisons.declaredAllowed.findings[0].instanceId;
     const bundle = finalizeSourceAwareOutput(workspace, { ...options, failOn: 'warning', exceptions: exception(id) });
     const sarif = renderSourceAwareSarif(bundle);
+    expectOfficialSchema(sarif);
     expect(bundle.finalized?.summary).toMatchObject({ unique: 1, active: 0, suppressed: 1 });
     expect(sarif.runs[0].results).toHaveLength(1);
     expect(sarif.runs[0].results[0]).toMatchObject({
@@ -170,30 +181,39 @@ describe('Source-aware internal output adapters', () => {
     expect(renderSourceAwareSummary(bundle)).toContain('| Suppressed | 1 |');
     const expired = finalizeSourceAwareOutput(workspace, { ...options, failOn: 'warning', exceptions: exception(id, '2026-01-01') });
     expect(expired.finalized?.summary).toMatchObject({ active: 1, governance: 1 });
-    expect(renderSourceAwareSarif(expired).runs[0].results.map(({ ruleId }) => ruleId)).toContain('SC-GOV-001');
+    const expiredSarif = renderSourceAwareSarif(expired);
+    expectOfficialSchema(expiredSarif);
+    expect(expiredSarif.runs[0].results.map(({ ruleId }) => ruleId)).toContain('SC-GOV-001');
     const invalid = finalizeSourceAwareOutput(workspace, { ...options, exceptions: {
       version: 1, exceptions: [{ ...exception(id).exceptions[0], reason: 'short' }],
     } });
     expect(invalid.finalized?.analysis.outcome).toBe('input-error');
-    expect(renderSourceAwareSarif(invalid).runs[0].invocations?.[0].executionSuccessful).toBe(false);
+    const invalidSarif = renderSourceAwareSarif(invalid);
+    expectOfficialSchema(invalidSarif);
+    expect(invalidSarif.runs[0].invocations?.[0].executionSuccessful).toBe(false);
     const nonWaivable = createFinding({ ...findingInput, ruleId: 'SC-UNSAFE-001', category: 'misconfiguration' });
     const unsafeWorkspace = synthetic([nonWaivable]);
     const unsafeException = exception(nonWaivable.instanceId);
     unsafeException.exceptions[0].rule_id = 'SC-UNSAFE-001';
     const unsafeOutput = finalizeSourceAwareOutput(unsafeWorkspace, { ...options, exceptions: unsafeException });
     expect(unsafeOutput.finalized?.summary).toMatchObject({ active: 1, suppressed: 0 });
-    expect(renderSourceAwareSarif(unsafeOutput).runs[0].results[0].suppressions).toBeUndefined();
+    const unsafeSarif = renderSourceAwareSarif(unsafeOutput);
+    expectOfficialSchema(unsafeSarif);
+    expect(unsafeSarif.runs[0].results[0].suppressions).toBeUndefined();
   });
 
   test('threshold, Source omission, partial and failed stages stay distinct from actual execution status', () => {
     const threshold = finalizeSourceAwareOutput(synthetic(), { ...options, failOn: 'warning' });
     expect(threshold.finalized?.exitCode).toBe(1);
-    expect(renderSourceAwareSarif(threshold).runs[0].invocations?.[0].executionSuccessful).toBe(true);
+    const thresholdSarif = renderSourceAwareSarif(threshold);
+    expectOfficialSchema(thresholdSarif);
+    expect(thresholdSarif.runs[0].invocations?.[0].executionSuccessful).toBe(true);
     const omitted = synthetic([]);
     omitted.stages.implemented = { status: 'omitted', code: 'SOURCE_NOT_REQUESTED', diagnosticCodes: [] };
     omitted.comparisons.implementedDeclared = { status: 'omitted', code: 'SOURCE_NOT_REQUESTED' };
     omitted.comparisons.implementedAllowed = { status: 'omitted', code: 'SOURCE_NOT_REQUESTED' };
     const noSource = finalizeSourceAwareOutput(omitted, options);
+    expectOfficialSchema(renderSourceAwareSarif(noSource));
     expect(renderSourceAwareSummary(noSource)).toContain('implemented | omitted | SOURCE_NOT_REQUESTED');
     expect(renderSourceAwareSarif(noSource).runs[0].tool.driver.properties.sourceAware).toMatchObject({
       analysis: { status: 'complete', outcome: 'ok' }, summary: { unique: 0 },
@@ -202,12 +222,14 @@ describe('Source-aware internal output adapters', () => {
     partial.stages.implemented = { status: 'partial', diagnosticCodes: ['SOURCE_ANALYZER_DYNAMIC_ROUTE'] };
     partial.comparisons.implementedDeclared = { status: 'partial', findings: partial.comparisons.declaredAllowed.findings };
     const partialOutput = finalizeSourceAwareOutput(partial, options);
+    expectOfficialSchema(renderSourceAwareSarif(partialOutput));
     expect(renderSourceAwareSummary(partialOutput)).toContain('**Result: partial analysis**');
     const failed = synthetic();
     failed.stages.implemented = { status: 'failed', code: 'SOURCE_ANALYZER_FILE_LIMIT', diagnosticCodes: [] };
     failed.comparisons.implementedDeclared = { status: 'failed', code: 'SOURCE_ANALYZER_FILE_LIMIT' };
     failed.comparisons.implementedAllowed = { status: 'failed', code: 'SOURCE_ANALYZER_FILE_LIMIT' };
     const failedOutput = finalizeSourceAwareOutput(failed, options);
+    expectOfficialSchema(renderSourceAwareSarif(failedOutput));
     expect(failedOutput.finalized?.comparisons.declaredAllowed).toMatchObject({ count: 1 });
     expect(renderSourceAwareSarif(failedOutput).runs[0]).toMatchObject({
       results: [{ ruleId: 'SC-AUTHN-001' }], invocations: [{ executionSuccessful: false }],
@@ -216,7 +238,11 @@ describe('Source-aware internal output adapters', () => {
     failed.stages.implemented = { status: 'failed', code: 'SOURCE_ANALYZER_CANCELLED', diagnosticCodes: [] };
     failed.comparisons.implementedDeclared = { status: 'failed', code: 'SOURCE_ANALYZER_CANCELLED' };
     failed.comparisons.implementedAllowed = { status: 'failed', code: 'SOURCE_ANALYZER_CANCELLED' };
-    expect(finalizeSourceAwareOutput(failed, options).finalized?.exitCode).toBe(3);
+    const cancelled = finalizeSourceAwareOutput(failed, options);
+    expect(cancelled.finalized?.exitCode).toBe(3);
+    const cancelledSarif = renderSourceAwareSarif(cancelled);
+    expectOfficialSchema(cancelledSarif);
+    expect(cancelledSarif.runs[0].invocations?.[0].executionSuccessful).toBe(false);
   });
 
   test('fixed finalizer error exposes no stale report or raw input and synthetic Source has no invented location', () => {
@@ -227,6 +253,7 @@ describe('Source-aware internal output adapters', () => {
     const bundle = finalizeSourceAwareOutput(workspace, options);
     expect(bundle.finalized).toBeUndefined();
     expect(bundle.finalizationError?.code).toBe('SOURCE_FINDING_IDENTITY_CONFLICT');
+    expectOfficialSchema(renderSourceAwareSarif(bundle));
     expect(renderSourceAwareSarif(bundle).runs[0]).toMatchObject({
       results: [], invocations: [{ executionSuccessful: false }],
     });
@@ -235,6 +262,7 @@ describe('Source-aware internal output adapters', () => {
       evidence: [{ source: 'source-ast', uri: 'source-project', digest: 'sha256:synthetic',
         analyzer: 'nestjs@1', capability: 'routes', complete: false }] })]);
     const sourceOutput = renderSourceAwareSarif(finalizeSourceAwareOutput(sourceOnly, options));
+    expectOfficialSchema(sourceOutput);
     expect(sourceOutput.runs[0].results[0].locations).toBeUndefined();
     expect(sourceOutput.runs[0].results[0].properties.sourceAware?.omittedSyntheticSourceLocations).toBe(1);
   });
@@ -254,12 +282,29 @@ describe('Source-aware internal output adapters', () => {
     expect(summary).toContain('Top findings omitted: 35.');
     expect(summary).toContain('| Unique | 45 |');
     expect(renderSourceAwareSarif(bundle).runs[0].results).toHaveLength(45);
+    expectOfficialSchema(renderSourceAwareSarif(bundle));
     expect(JSON.parse(formatSourceAwarePreviewJson(bundle.finalized!)).omittedFindings).toBeGreaterThan(0);
     expect(() => renderSourceAwareSummary(bundle, { maxOutputBytes: 100 })).toThrowError(
       expect.objectContaining({ code: 'SOURCE_SUMMARY_OUTPUT_LIMIT_EXCEEDED' }),
     );
     expect(SarifReportError).toBeDefined();
     expect(SourceAwareSummaryError).toBeDefined();
+  });
+
+  test('pinned official draft-04 validator rejects schema errors and validates URI formats', () => {
+    const valid = JSON.parse(JSON.stringify(renderSourceAwareSarif(finalizeSourceAwareOutput(synthetic(), options))));
+    expect(validateOfficialSarif(valid)).toBe(true);
+    for (const mutate of [
+      (value: any) => { delete value.version; },
+      (value: any) => { value.version = '2.2.0'; },
+      (value: any) => { value.unexpected = true; },
+      (value: any) => { value.runs = 'not-an-array'; },
+      (value: any) => { value.runs[0].results[0].locations[0].physicalLocation.artifactLocation.uri = 'bad uri with spaces'; },
+    ]) {
+      const invalid = JSON.parse(JSON.stringify(valid));
+      mutate(invalid);
+      expect(validateOfficialSarif(invalid)).toBe(false);
+    }
   });
 
   test('privacy and Markdown payloads are masked or rejected before publishing any result', () => {

@@ -312,7 +312,8 @@ export function assertPackageContents(pack: PackResult) {
   }
 }
 
-export function smokeInstalledPackage(tarballPath: string, preparedConsumer?: string) {
+export function smokeInstalledPackage(tarballPath: string, preparedConsumer: string | undefined,
+  validateInstalledSarif: (value: unknown) => void) {
   quietConsumer = Boolean(preparedConsumer);
   if (preparedConsumer) yaml = require('node:module').createRequire(path.join(preparedConsumer, 'node_modules', packageName, 'package.json'))('js-yaml');
   const inspect = (installDir: string) => {
@@ -453,11 +454,17 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer?: st
           assert.ok(summary.includes('| Unique | ' + bundle.finalized.summary.unique + ' |'));
           assert.ok(bundle.metadata.source && bundle.metadata.openapi && bundle.metadata.policy);
           assert.ok(!(JSON.stringify(sarif) + summary).includes(root));
+          fs.writeFileSync(path.join(process.cwd(), 'source-aware-installed-sarif.json'), JSON.stringify(sarif));
           console.log('OK: installed internal Source-aware workspace/finalizer/4-format smoke');
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
       })().catch((error) => { console.error(error?.name ?? 'internal source smoke failed'); process.exitCode = 1; });
     `;
     run(process.execPath, ['-e', internalSourceSmoke], { cwd: installDir, stdio: 'inherit' });
+    const installedSarifPath = path.join(installDir, 'source-aware-installed-sarif.json');
+    const installedSarif = JSON.parse(fs.readFileSync(installedSarifPath, 'utf8'));
+    fs.rmSync(installedSarifPath);
+    validateInstalledSarif(installedSarif);
+    console.log('OK: installed internal SARIF validates against pinned official schema');
 
     fs.writeFileSync(path.join(installDir, 'consumer.ts'), `
       import { compile, migratePolicy, type MigratePolicyResult } from '${packageName}';
@@ -610,7 +617,10 @@ withTempDir('cdn-security-pack-', (packDir) => {
 
   const pack = packResults[0] as PackResult;
   assertPackageContents(pack);
-  smokeInstalledPackage(path.join(packDir, pack.filename));
+  const { createOfficialSarifValidator } = require('./official-sarif-test-validator') as typeof import('./official-sarif-test-validator');
+  const validate = createOfficialSarifValidator(path.join(repoRoot, 'test/fixtures/sarif/sarif-schema-2.1.0.json'));
+  smokeInstalledPackage(path.join(packDir, pack.filename), undefined,
+    (value) => assert.ok(validate(value), 'installed internal SARIF failed pinned official schema'));
 });
 
 console.log('Package contents and packed install smoke tests passed.');
