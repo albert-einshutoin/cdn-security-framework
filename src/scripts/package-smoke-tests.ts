@@ -202,6 +202,8 @@ export function assertPackageContents(pack: PackResult) {
     'bin/commands/openapi-inspect.d.ts',
     'bin/commands/contract-diff.js',
     'bin/commands/contract-diff.d.ts',
+    'bin/commands/source-diff.js',
+    'bin/commands/source-diff.d.ts',
     'lib/index.js',
     'lib/index.d.ts',
     'lib/compile.js',
@@ -316,6 +318,7 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
   validateInstalledSarif: (value: unknown) => void) {
   quietConsumer = Boolean(preparedConsumer);
   if (preparedConsumer) yaml = require('node:module').createRequire(path.join(preparedConsumer, 'node_modules', packageName, 'package.json'))('js-yaml');
+  let cliVerified = false;
   const inspect = (installDir: string) => {
     if (!preparedConsumer) {
     run('npm', ['init', '-y'], { cwd: installDir, stdio: 'ignore' });
@@ -418,6 +421,7 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
       const assert = require('node:assert/strict');
       const fs = require('node:fs');
       const path = require('node:path');
+      const cp = require('node:child_process');
       const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const { analyzeSourceAwareWorkspace } = require(path.join(pkgRoot, 'contract/source-aware-workspace.js'));
       const { finalizeSourceAwareOutput } = require(path.join(pkgRoot, 'contract/source-aware-output.js'));
@@ -438,7 +442,7 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
           fs.writeFileSync(path.join(root, 'src/controller.ts'), 'import { Controller, Get } from "@nestjs/common";\n@Controller("users") class UsersController { @Get(":id") read() {} }\n');
           fs.writeFileSync(path.join(root, 'policy.yml'), 'version: 2\ndefaults: {mode: enforce}\nrequest:\n  allow_methods: [GET]\n  limits: {max_uri_length: 21}\n  block: {header_missing: []}\nroutes: []\nresponse_headers: {}\n');
           fs.writeFileSync(path.join(root, 'refs/common.yaml'), 'components:\n  parameters:\n    Id:\n      name: id\n      in: path\n      required: true\n      schema: {type: string}\n');
-          fs.writeFileSync(path.join(root, 'openapi.yaml'), "openapi: 3.0.3\ninfo: {title: Synthetic, version: 1.0.0}\npaths:\n  /users/{id}:\n    get:\n      parameters:\n        - $ref: './refs/common.yaml#/components/parameters/Id'\n      responses:\n        '200': {description: OK}\n");
+          fs.writeFileSync(path.join(root, 'openapi.yaml'), "openapi: 3.0.3\ninfo: {title: Synthetic, version: 1.0.0}\npaths:\n  /users/{id}:\n    get:\n      parameters:\n        - $ref: './refs/common.yaml#/components/parameters/Id'\n      responses:\n        '200': {description: OK}\n  /users:\n    post:\n      responses:\n        '200': {description: OK}\n");
           const workspace = await analyzeSourceAwareWorkspace({ workspaceRoot: root, openapiPath: 'openapi.yaml', policyPath: 'policy.yml', target: 'aws', source: { tsconfigPath: 'tsconfig.json' } });
           const bundle = finalizeSourceAwareOutput(workspace, { currentDate: '2026-09-25', failOn: 'never' });
           assert.ok(bundle.finalized);
@@ -455,9 +459,71 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
           assert.ok(bundle.metadata.source && bundle.metadata.openapi && bundle.metadata.policy);
           assert.ok(!(JSON.stringify(sarif) + summary).includes(root));
           fs.writeFileSync(path.join(process.cwd(), 'source-aware-installed-sarif.json'), JSON.stringify(sarif));
+          const cli = path.join(pkgRoot, 'bin/cli.js');
+          const args = ['contract', 'source-diff', '--workspace-root', root, '--openapi', 'openapi.yaml',
+            '--policy', 'policy.yml', '--target', 'aws', '--source', 'tsconfig.json',
+            '--current-date', '2026-09-25', '--fail-on', 'never'];
+          const steps = [];
+          for (const format of ['text', 'json', 'sarif', 'summary']) {
+            const start = process.hrtime.bigint();
+            const result = cp.spawnSync(process.execPath, [cli, ...args, '--format', format], {
+              cwd: root, encoding: 'utf8', env: { ...process.env, NODE_PATH: '' }, maxBuffer: 8 * 1024 * 1024,
+            });
+            steps.push({ command: 'cdn-security-source-diff', exit: result.status ?? -1, expectedExit: 0,
+              durationMs: Number(process.hrtime.bigint() - start) / 1e6 });
+            assert.equal(result.status, 0, 'installed Experimental CLI failed');
+            assert.equal(result.stderr, '');
+            assert.ok(!result.stdout.includes(root));
+            if (format === 'text') assert.ok(result.stdout.includes('unique=' + bundle.finalized.summary.unique));
+            if (format === 'json') assert.deepEqual(JSON.parse(result.stdout).summary, bundle.finalized.summary);
+            if (format === 'sarif') {
+              const report = JSON.parse(result.stdout);
+              assert.equal(report.runs[0].results.length, sarif.runs[0].results.length);
+              fs.writeFileSync(path.join(process.cwd(), 'source-aware-installed-cli-sarif.json'), result.stdout);
+            }
+            if (format === 'summary') assert.ok(result.stdout.includes('| Unique | ' + bundle.finalized.summary.unique + ' |'));
+          }
+          const rejected = [
+            { name: 'finding-threshold', args: [...args, '--fail-on', 'warning', '--format', 'json'], exit: 1 },
+            { name: 'input-error', args: [...args, '--openapi', 'missing.yaml', '--format', 'json'], exit: 2 },
+          ];
+          for (const scenario of rejected) {
+            const start = process.hrtime.bigint();
+            const result = cp.spawnSync(process.execPath, [cli, ...scenario.args], {
+              cwd: root, encoding: 'utf8', env: { ...process.env, NODE_PATH: '' }, maxBuffer: 8 * 1024 * 1024,
+            });
+            steps.push({ command: 'cdn-security-source-diff', exit: result.status ?? -1,
+              expectedExit: scenario.exit, durationMs: Number(process.hrtime.bigint() - start) / 1e6 });
+            assert.equal(result.status, scenario.exit, scenario.name);
+            assert.equal(result.stderr, '');
+            assert.ok(!result.stdout.includes(root));
+            const report = JSON.parse(result.stdout);
+            assert.equal(report.exitCode, scenario.exit);
+          }
+          const preload = path.join(root, 'reporter-fault.cjs');
+          fs.writeFileSync(preload, "const Module=require('node:module');const original=Module._load;Module._load=function(request,parent,isMain){const loaded=original.apply(this,arguments);return request.endsWith('/reporters/sarif')?{...loaded,renderSourceAwareSarif:()=>{throw Error('synthetic-private-fault')}}:loaded};");
+          const failureStart = process.hrtime.bigint();
+          const failure = cp.spawnSync(process.execPath, [cli, ...args, '--format', 'sarif'], {
+            cwd: root, encoding: 'utf8', env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '--require=' + preload },
+            maxBuffer: 8 * 1024 * 1024,
+          });
+          steps.push({ command: 'cdn-security-source-diff', exit: failure.status ?? -1, expectedExit: 3,
+            durationMs: Number(process.hrtime.bigint() - failureStart) / 1e6 });
+          assert.equal(failure.status, 3);
+          assert.equal(failure.stdout, '');
+          assert.ok(failure.stderr.includes('SOURCE_DIFF_REPORTER_FAILED'));
+          assert.ok(!failure.stderr.includes('synthetic-private-fault') && !failure.stderr.includes(root));
+          fs.writeFileSync(path.join(process.cwd(), 'source-aware-cli-proof.json'), JSON.stringify({
+            formats: ['text', 'json', 'sarif', 'summary'], steps,
+          }));
           console.log('OK: installed internal Source-aware workspace/finalizer/4-format smoke');
         } finally { fs.rmSync(root, { recursive: true, force: true }); }
-      })().catch((error) => { console.error(error?.name ?? 'internal source smoke failed'); process.exitCode = 1; });
+      })().catch((error) => {
+        console.error(error?.name ?? 'internal source smoke failed',
+          typeof error?.actual === 'number' ? error.actual : '',
+          typeof error?.expected === 'number' ? error.expected : '');
+        process.exitCode = 1;
+      });
     `;
     run(process.execPath, ['-e', internalSourceSmoke], { cwd: installDir, stdio: 'inherit' });
     const installedSarifPath = path.join(installDir, 'source-aware-installed-sarif.json');
@@ -465,6 +531,21 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
     fs.rmSync(installedSarifPath);
     validateInstalledSarif(installedSarif);
     console.log('OK: installed internal SARIF validates against pinned official schema');
+    const cliProofPath = path.join(installDir, 'source-aware-cli-proof.json');
+    const cliSarifPath = path.join(installDir, 'source-aware-installed-cli-sarif.json');
+    const cliProof = JSON.parse(fs.readFileSync(cliProofPath, 'utf8'));
+    assert.deepStrictEqual(cliProof.formats, ['text', 'json', 'sarif', 'summary']);
+    assert.ok(Array.isArray(cliProof.steps) && cliProof.steps.length === 7
+      && cliProof.steps.every((step: { command: string; exit: number; expectedExit: number; durationMs: number }) =>
+        step.command === 'cdn-security-source-diff' && step.exit === step.expectedExit
+        && Number.isFinite(step.durationMs) && step.durationMs >= 0), 'installed CLI proof missing');
+    assert.deepStrictEqual(cliProof.steps.map((step: { expectedExit: number }) => step.expectedExit), [0, 0, 0, 0, 1, 2, 3]);
+    validateInstalledSarif(JSON.parse(fs.readFileSync(cliSarifPath, 'utf8')));
+    if (quietConsumer) smokeSteps.push(...cliProof.steps);
+    fs.rmSync(cliProofPath);
+    fs.rmSync(cliSarifPath);
+    cliVerified = true;
+    console.log('OK: installed Experimental source-diff CLI validates all four formats');
 
     fs.writeFileSync(path.join(installDir, 'consumer.ts'), `
       import { compile, migratePolicy, type MigratePolicyResult } from '${packageName}';
@@ -602,6 +683,7 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
   };
   if (preparedConsumer) inspect(preparedConsumer);
   else withTempDir('cdn-security-install-', inspect);
+  return cliVerified;
 }
 
 if (require.main === module) {

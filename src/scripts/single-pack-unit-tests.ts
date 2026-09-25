@@ -38,7 +38,20 @@ try {
     inputs: Object.fromEntries(requiredInputKeys.map(key => [key,'e'.repeat(64)])),
     toolchain: { node: '24.1.0' }, onlinePreparationMs: 1, offlineAcceptanceMs: 2,
     findings: expectedFindingProof.map(finding => ({ ...finding, evidence: [...finding.evidence] })) };
-  const rows = matrixRows.map(row => ({ ...m, runtime: { executable: 'node', sha256: 'f'.repeat(64), platform: 'linux', arch: 'x64' }, row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2', switchVerified: true, resolution, dependencies, steps: Array.from({length:row.startsWith('18') || row === '20.16.0' ? 26 : 13},()=>({command:'node',exit:0,expectedExit:0,durationMs:1})), checks: row.startsWith('18') || row === '20.16.0' ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas','official-sarif-schema'], ...(row === '24' ? {journey} : {}) }));
+  const rows = matrixRows.map(row => {
+    const lower = row === '18.20.8' || row === '20.16.0';
+    const steps = Array.from({ length: lower ? 26 : 20 }, (_, index) => {
+      const cli = !lower && index >= 13;
+      const expectedExit = cli && index >= 17 ? index - 16 : 0;
+      return { command: cli ? 'cdn-security-source-diff' : 'node', exit: expectedExit, expectedExit, durationMs: 1 };
+    });
+    return { ...m, runtime: { executable: 'node', sha256: 'f'.repeat(64), platform: 'linux', arch: 'x64' },
+      row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2',
+      switchVerified: true, resolution, dependencies, steps,
+      checks: lower ? ['node-rejection','resolution','no-side-effects']
+        : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli'],
+      ...(row === '24' ? { journey } : {}) };
+  });
   fs.writeFileSync(path.join(temp, 'metadata.json'), JSON.stringify(m));
   test('same candidate and complete rows pass', () => { verifyTarball(temp, e); aggregate(m, rows, e, ['success','success']); });
   test('missing internal Source-aware smoke command fails closed', () => assert.throws(() => aggregate(m,
@@ -72,6 +85,7 @@ try {
   test('wrong runtime fails', () => assert.throws(() => aggregate(m, rows.map((r,i) => i ? r : {...r,node:'20.16.0'}), e, ['success','success'])));
   test('validation not executed fails', () => assert.throws(() => aggregate(m, rows.map((r,i) => i ? r : {...r,checks:[]}), e, ['success','success'])));
   test('official schema evidence missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, checks: r.checks.filter(check => check !== 'official-sarif-schema') } : r), e, ['success','success'])));
+  test('installed source-diff CLI evidence missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, checks: r.checks.filter(check => check !== 'source-aware-cli') } : r), e, ['success','success'])));
   test('missing onboarding acceptance fails closed', () => assert.throws(() => aggregate(m, rows.map(r => ({ ...r, journey: undefined })), e, ['success','success'])));
   test('incomplete onboarding acceptance fails closed', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, journey: { ...journey, checks: [] } } : r), e, ['success','success'])));
   test('wrong onboarding finding fails closed', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, journey: { ...journey, findings: [{ ...journey.findings[0], ruleId: 'MISSING' }] } } : r), e, ['success','success'])));

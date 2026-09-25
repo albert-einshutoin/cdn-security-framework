@@ -33,8 +33,8 @@ function linesFor(bundle: SourceAwareOutputBundle, top: number): string[] {
         : '**Result: analysis complete**',
     final ? `**Finding threshold:** ${final.threshold.reached ? 'reached' : 'not reached'} (${final.threshold.failOn})`
       : '**Finding threshold:** not evaluated',
-    final ? `**Internal verdict:** ${final.exitCode} (no CLI process exit measured)`
-      : `**Internal verdict:** ${error?.exitCode ?? 3} (finalization failed; no CLI process exit measured)`,
+    final ? `**Exit verdict:** ${final.exitCode}`
+      : `**Exit verdict:** ${error?.exitCode ?? 3} (finalization failed)`,
     '', '## Stage status', '', '| Stage | Status | Reason |', '| --- | --- | --- |',
   ];
   for (const name of ['declared', 'implemented', 'allowed'] as const) {

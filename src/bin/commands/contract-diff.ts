@@ -141,7 +141,7 @@ function run(options: ContractDiffCliOptions): void {
   process.exitCode = contractDiffExitCode(execution.report, options.failOn as ContractDiffFailOn);
 }
 
-export function registerContractDiffCommand(program: Command): void {
+export function registerContractDiffCommand(program: Command): Command {
   const contract = program
     .command('contract')
     .description('Compare an OpenAPI contract with the effective CDN security policy');
@@ -175,4 +175,5 @@ export function registerContractDiffCommand(program: Command): void {
         }
       }
     });
+  return contract;
 }
