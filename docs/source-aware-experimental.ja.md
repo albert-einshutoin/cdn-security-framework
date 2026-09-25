@@ -95,8 +95,10 @@ Source、認証設定、例外、local ref、tsconfig、package metadataの入�
 ください。検証済み環境はPOSIX/local fixtureで、Windowsとnetwork filesystemは
 未検証です。
 
-GitHub Summaryへの書込み・upload、PR投稿、apply/deployは未実装です。shellの
+[dev限定CI例](source-aware-ci-dev.ja.md)は合成fixtureの検証済みStep Summaryと
+通常のActions artifactを保存します。CLI自体はGitHubへ書き込まず、正式2.1
+workflow、Code Scanning upload、PR投稿、apply/deployは未実装です。shellの
 redirectはCLI起動前に働くため、入力ファイルへreportをredirectしないでください。
 
 実binaryはinstalled-package smokeで検証します。[標準CLIリファレンス](cli.ja.md)は
-2.0のコマンドを説明します。正式Source-aware workflowとGitHub uploadは後続工程です。
+2.0のコマンドを説明します。正式Source-aware workflowは後続工程です。
