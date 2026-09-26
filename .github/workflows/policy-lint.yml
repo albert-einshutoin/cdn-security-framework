@@ -134,6 +134,93 @@ jobs:
           if-no-files-found: error
           retention-days: 30
 
+  # Dev-only manual validation. Ordinary main PRs and scheduled/release runs skip this job.
+  source-aware-ci:
+    if: >-
+      always() && github.event_name == 'workflow_dispatch' &&
+      (github.ref == 'refs/heads/dev/2.1-source-aware' ||
+      startsWith(github.ref, 'refs/heads/feat/source-aware-ci/'))
+    needs: [package-producer, package-acceptance]
+    runs-on: ubuntu-latest
+    env:
+      CSF_SOURCE: ${{ github.sha }}
+      CSF_TGZ_SHA256: ${{ needs.package-producer.outputs.sha256 }}
+      CSF_PRODUCER_STATE: ${{ needs.package-producer.result }}
+      CSF_ACCEPTANCE_STATE: ${{ needs.package-acceptance.result }}
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093
+        with:
+          name: package-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/csf-candidate
+      - name: Verify one candidate and prepare installed dependencies online
+        run: |
+          node "$RUNNER_TEMP/csf-candidate/scripts/single-pack.js" verify "$RUNNER_TEMP/csf-candidate"
+          cd "$RUNNER_TEMP/csf-candidate/consumer"
+          npm ci --ignore-scripts --no-audit --no-fund --cache "$RUNNER_TEMP/csf-cache"
+      - name: Prepare fresh synthetic target and CI directories
+        run: |
+          root="$RUNNER_TEMP/csf-source-aware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -m 700 "$root"
+          mkdir -m 700 "$root/workspace" "$root/stage"
+          cp -R examples/nestjs-contract/. "$root/workspace/"
+          mkdir -m 700 "$root/workspace/reports"
+          CSF_WORKSPACE="$root/workspace" node -e '
+            const fs=require("node:fs"),path=require("node:path");
+            fs.writeFileSync(path.join(process.env.CSF_WORKSPACE,"../config.json"),JSON.stringify({
+              workspaceRoot:process.env.CSF_WORKSPACE,openapi:"openapi.yaml",
+              policy:"policy/security.yml",target:"aws",source:"tsconfig.json",
+              currentDate:"2026-09-25",failOn:"never",format:"summary"
+            })+"\n",{flag:"wx",mode:0o600});'
+      - name: Analyze once and save Summary and SARIF without network
+        id: analyze
+        run: |
+          unset NODE_PATH NODE_OPTIONS
+          root="$RUNNER_TEMP/csf-source-aware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          sudo unshare --net -- sudo -u "$(id -un)" env PATH="$PATH" CSF_SOURCE="$CSF_SOURCE" CSF_TGZ_SHA256="$CSF_TGZ_SHA256" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            node "$RUNNER_TEMP/csf-candidate/consumer/node_modules/cdn-security-framework/scripts/source-aware-ci.js" \
+              run "$root/config.json" "$RUNNER_TEMP/csf-candidate" "$root/workspace/reports"
+      - name: Verify current-run files and append safe Step Summary
+        id: publish
+        if: always()
+        run: |
+          root="$RUNNER_TEMP/csf-source-aware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          node "$RUNNER_TEMP/csf-candidate/consumer/node_modules/cdn-security-framework/scripts/source-aware-ci.js" \
+            publish "$root/workspace/reports/ci-record.json" "$RUNNER_TEMP/csf-candidate" "$root/stage"
+      - name: Verify exact staged files before upload
+        id: stage
+        if: always() && steps.publish.outputs.has-files == 'true'
+        run: |
+          root="$RUNNER_TEMP/csf-source-aware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          node "$RUNNER_TEMP/csf-candidate/consumer/node_modules/cdn-security-framework/scripts/source-aware-ci.js" \
+            verify-stage "$root/workspace/reports/ci-record.json" "$RUNNER_TEMP/csf-candidate" "$root/stage/delivery.json"
+      - name: Upload only verified current-run files
+        id: upload
+        if: always() && steps.stage.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: source-aware-ci-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ steps.publish.outputs.artifact-paths }}
+          if-no-files-found: error
+          retention-days: 30
+      - name: Enforce analysis, report, Summary, artifact, and dependency gate
+        if: always()
+        env:
+          CSF_ANALYZE_OUTCOME: ${{ steps.analyze.outcome }}
+          CSF_PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          CSF_STAGE_OUTCOME: ${{ steps.stage.outcome }}
+          CSF_ARTIFACT_OUTCOME: ${{ steps.upload.outcome }}
+        run: |
+          root="$RUNNER_TEMP/csf-source-aware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          node "$RUNNER_TEMP/csf-candidate/consumer/node_modules/cdn-security-framework/scripts/source-aware-ci.js" \
+            gate "$root/workspace/reports/ci-record.json" "$RUNNER_TEMP/csf-candidate" "$root/stage/delivery.json"
+
   pr-selective:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest

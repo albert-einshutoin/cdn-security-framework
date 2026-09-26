@@ -106,10 +106,12 @@ unrecoverable filesystem fault, leave a detectable partial new file. Do not
 share the workspace with untrusted concurrent writers. POSIX/local fixtures
 are verified; Windows and network filesystems are not verified.
 
-GitHub Summary write/upload, PR posting, apply, and deploy are not provided.
+The separate [dev-only CI example](source-aware-ci-dev.md) writes a verified
+Step Summary and a normal Actions artifact for synthetic fixtures. The CLI
+itself does not write to GitHub, and standard 2.1 workflow integration, Code
+Scanning upload, PR posting, apply, and deploy are not provided.
 Shell redirection happens before the CLI starts; never redirect a report onto
 an input file.
 
 The installed-package smoke verifies this binary. The [standard CLI reference](cli.md)
-documents the 2.0 commands; the formal Source-aware workflow and GitHub upload
-remain future work.
+documents the 2.0 commands; a formal Source-aware workflow remains future work.

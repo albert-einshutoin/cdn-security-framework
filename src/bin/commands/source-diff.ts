@@ -3,7 +3,7 @@ import type { Command } from 'commander';
 import { loadFindingExceptions, validateFindingExceptionSet } from '../../contract/finding-exceptions';
 import type { ContractDiffFailOn } from '../../contract/contract-diff';
 
-interface Options {
+export interface SourceDiffOptions {
   workspaceRoot?: string;
   openapi?: string;
   policy?: string;
@@ -27,7 +27,7 @@ function required(value: string | undefined, name: string): string {
   return value;
 }
 
-function validate(options: Options) {
+function validate(options: SourceDiffOptions) {
   const workspaceRoot = required(options.workspaceRoot, 'WORKSPACE_ROOT');
   const openapiPath = required(options.openapi, 'OPENAPI');
   const policyPath = required(options.policy, 'POLICY');
@@ -74,14 +74,19 @@ function writeStdout(output: string): Promise<void> {
   });
 }
 
-async function run(options: Options): Promise<void> {
+type PreparedSourceDiff =
+  | { ok: false; code: string; exitCode: 2 | 3; message: string }
+  | { ok: true; bundle: import('../../contract/source-aware-output').SourceAwareOutputBundle;
+      workspace: import('../../contract/source-aware-workspace').SourceAwareWorkspaceResult;
+      outputGuard?: ReturnType<typeof import('./source-output').sourceOutputGuard> };
+
+/** Internal shared analysis path for the CLI and the dev-only CI driver. */
+export async function prepareSourceDiff(options: SourceDiffOptions): Promise<PreparedSourceDiff> {
   let input: ReturnType<typeof validate>;
   try { input = validate(options); }
   catch (error) {
     const code = error instanceof SourceDiffArgumentError ? error.code : 'SOURCE_DIFF_ARGUMENT_INVALID';
-    console.error(`[ERROR] ${code}: Invalid source-diff arguments.`);
-    process.exitCode = 2;
-    return;
+    return { ok: false, code, exitCode: 2, message: 'Invalid source-diff arguments.' };
   }
 
   let outputModule: typeof import('./source-output') | undefined;
@@ -96,9 +101,8 @@ async function run(options: Options): Promise<void> {
       }
     } catch (error) {
       const known = outputModule && error instanceof outputModule.SourceOutputError ? error : undefined;
-      console.error(`[ERROR] ${known?.code ?? 'SOURCE_DIFF_INTERNAL'}: Source-aware output cannot be prepared.`);
-      process.exitCode = known?.exitCode ?? 3;
-      return;
+      return { ok: false, code: known?.code ?? 'SOURCE_DIFF_INTERNAL',
+        exitCode: known?.exitCode ?? 3, message: 'Source-aware output cannot be prepared.' };
     }
   }
 
@@ -107,18 +111,16 @@ async function run(options: Options): Promise<void> {
     let authLoader: typeof import('./source-auth-config');
     try { authLoader = await import('./source-auth-config'); }
     catch {
-      console.error('[ERROR] SOURCE_DIFF_INTERNAL: Source-aware analysis failed unexpectedly.');
-      process.exitCode = 3;
-      return;
+      return { ok: false, code: 'SOURCE_DIFF_INTERNAL', exitCode: 3,
+        message: 'Source-aware analysis failed unexpectedly.' };
     }
     try {
       authConfig = authLoader.loadSourceAuthConfig({
         workspaceRoot: input.workspaceRoot, inputPath: options.sourceAuthConfig,
       }).config;
     } catch {
-      console.error('[ERROR] SOURCE_DIFF_AUTH_CONFIG_INVALID: Source auth config input is invalid.');
-      process.exitCode = 2;
-      return;
+      return { ok: false, code: 'SOURCE_DIFF_AUTH_CONFIG_INVALID', exitCode: 2,
+        message: 'Source auth config input is invalid.' };
     }
   }
 
@@ -128,9 +130,8 @@ async function run(options: Options): Promise<void> {
       exceptions = loadFindingExceptions({ inputPath: options.exceptions,
         workspaceRoot: input.workspaceRoot, currentDate: input.currentDate });
     } catch {
-      console.error('[ERROR] SOURCE_DIFF_EXCEPTIONS_INVALID: Finding exceptions input is invalid.');
-      process.exitCode = 2;
-      return;
+      return { ok: false, code: 'SOURCE_DIFF_EXCEPTIONS_INVALID', exitCode: 2,
+        message: 'Finding exceptions input is invalid.' };
     }
   }
 
@@ -138,15 +139,9 @@ async function run(options: Options): Promise<void> {
     const [
       { analyzeSourceAwareWorkspace },
       { finalizeSourceAwareOutput },
-      { formatSourceAwarePreviewJson, formatSourceAwarePreviewText },
-      { renderSourceAwareSarif },
-      { renderSourceAwareSummary },
     ] = await Promise.all([
       import('../../contract/source-aware-workspace'),
       import('../../contract/source-aware-output'),
-      import('../../contract/source-aware-finalizer'),
-      import('../../reporters/sarif'),
-      import('../../reporters/source-aware-summary'),
     ]);
     const workspace = await analyzeSourceAwareWorkspace({
       workspaceRoot: input.workspaceRoot, openapiPath: input.openapiPath,
@@ -158,11 +153,32 @@ async function run(options: Options): Promise<void> {
       currentDate: input.currentDate, failOn: input.failOn, environment: options.environment, exceptions,
     });
     if (bundle.finalizationError) {
-      console.error(`[ERROR] ${bundle.finalizationError.code}: Source-aware finalization failed.`);
-      process.exitCode = bundle.finalizationError.exitCode;
-      return;
+      return { ok: false, code: bundle.finalizationError.code,
+        exitCode: bundle.finalizationError.exitCode, message: 'Source-aware finalization failed.' };
     }
-    const final = bundle.finalized!;
+    return { ok: true, bundle, workspace, outputGuard };
+  } catch {
+    return { ok: false, code: 'SOURCE_DIFF_INTERNAL', exitCode: 3,
+      message: 'Source-aware analysis failed unexpectedly.' };
+  }
+}
+
+async function run(options: SourceDiffOptions): Promise<void> {
+  const prepared = await prepareSourceDiff(options);
+  if (!prepared.ok) {
+    console.error(`[ERROR] ${prepared.code}: ${prepared.message}`);
+    process.exitCode = prepared.exitCode;
+    return;
+  }
+  const { bundle, workspace, outputGuard } = prepared;
+  const final = bundle.finalized!;
+  try {
+    const [{ formatSourceAwarePreviewJson, formatSourceAwarePreviewText },
+      { renderSourceAwareSarif }, { renderSourceAwareSummary }] = await Promise.all([
+      import('../../contract/source-aware-finalizer'),
+      import('../../reporters/sarif'),
+      import('../../reporters/source-aware-summary'),
+    ]);
     let output: string;
     try {
       output = options.format === 'sarif' ? `${JSON.stringify(renderSourceAwareSarif(bundle), null, 2)}\n`
@@ -177,7 +193,8 @@ async function run(options: Options): Promise<void> {
     if (outputGuard) {
       try { outputGuard.write(outputGuard.prepare(options.out!, workspace, final), output); }
       catch (error) {
-        const known = outputModule && error instanceof outputModule.SourceOutputError ? error : undefined;
+        const { SourceOutputError } = await import('./source-output');
+        const known = error instanceof SourceOutputError ? error : undefined;
         console.error(`[ERROR] ${known?.code ?? 'SOURCE_DIFF_OUTPUT_WRITE_FAILED'}: Source-aware report could not be saved.`);
         process.exitCode = known?.exitCode ?? 3;
         return;

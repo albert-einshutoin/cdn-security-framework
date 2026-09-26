@@ -160,6 +160,8 @@
     "scripts/compile-infra.d.ts",
     "scripts/policy-lint.js",
     "scripts/policy-lint.d.ts",
+    "scripts/source-aware-ci.js",
+    "scripts/source-aware-ci.d.ts",
     "scripts/lib/",
     "types/",
     "templates/",

@@ -74,6 +74,9 @@ const KNOWN_CODES = new Set<string>([
   'COMPARISON_FAILED', 'COMPARISON_RESOURCE_LIMIT', 'INPUT_FAILED',
   'SOURCE_COMPARISON_UNEXPECTED_OMISSION',
 ]);
+export function isSourceAwareDiagnosticCode(value: unknown): value is string {
+  return typeof value === 'string' && (KNOWN_CODES.has(value) || value === 'SOURCE_UNKNOWN_FAILURE');
+}
 const MAX_PREVIEW_FINDINGS = 40;
 const MAX_PREVIEW_EXCEPTION_IDS = 40;
 const MAX_PREVIEW_BYTES = 32_768;
