@@ -225,7 +225,8 @@ jobs:
   source-aware-pilot:
     if: >-
       always() && github.event_name == 'workflow_dispatch' &&
-      startsWith(github.ref, 'refs/heads/feat/source-aware-pilot/')
+      (startsWith(github.ref, 'refs/heads/feat/source-aware-pilot/') ||
+       startsWith(github.ref, 'refs/heads/feat/source-global-prefix/'))
     needs: [package-producer, package-acceptance]
     runs-on: ubuntu-latest
     env:

@@ -1,0 +1,294 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Fixed RealWorld explicit /api routing assumption, not upstream OpenAPI",
+    "version": "0.0.0-evaluation"
+  },
+  "paths": {
+    "/api/articles": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        }
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        }
+      }
+    },
+    "/api/articles/feed": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        }
+      }
+    },
+    "/api/articles/{slug}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/articles/{slug}/comments": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/articles/{slug}/comments/{id}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/articles/{slug}/favorite": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/profiles/{username}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "username",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/profiles/{username}/follow": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "username",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "username",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/user": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        }
+      },
+      "put": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        }
+      }
+    },
+    "/api/users": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        }
+      }
+    },
+    "/api/users/{slug}": {
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "slug",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    },
+    "/api/users/login": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Evaluation only; route observed in fixed controller"
+          }
+        }
+      }
+    }
+  }
+}

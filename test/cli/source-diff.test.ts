@@ -93,6 +93,56 @@ afterEach(() => {
 });
 
 describe('Experimental source-diff CLI', () => {
+  test('validates explicit routing before input loads and reports the same assumption in four formats', () => {
+    const root = workspace();
+    const withoutSource = invoke(root, ['--source-global-prefix', '/api']);
+    expect(withoutSource.status).toBe(2);
+    expect(withoutSource.stdout).toBe('');
+    expect(withoutSource.stderr).toContain('SOURCE_DIFF_PREFIX_REQUIRES_SOURCE');
+    const invalid = invoke(root, ['--source', 'tsconfig.json', '--source-global-prefix', 'api%2f']);
+    expect(invalid.status).toBe(2);
+    expect(invalid.stdout).toBe('');
+    expect(invalid.stderr).toContain('SOURCE_DIFF_PREFIX_INVALID');
+    expect(invalid.stderr).not.toContain('api%2f');
+    for (const format of ['text', 'json', 'sarif', 'summary']) {
+      const result = invoke(root, ['--source', 'tsconfig.json', '--source-global-prefix', 'api',
+        '--fail-on', 'never', '--format', format]);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stderr).toBe('');
+      expect(result.stdout).toContain('/api');
+      if (format === 'json') {
+        expect(JSON.parse(result.stdout).routingAssumption.globalPrefix).toBe('/api');
+      }
+      if (format === 'sarif') {
+        expect(JSON.parse(result.stdout).runs[0].tool.driver.properties.sourceAware.metadata.routingAssumption.globalPrefix)
+          .toBe('/api');
+      }
+    }
+    const saved = invoke(root, ['--source', 'tsconfig.json', '--source-global-prefix', '/api',
+      '--fail-on', 'never', '--format', 'json', '--out', 'prefix.json']);
+    expect(saved.status, saved.stderr).toBe(0);
+    expect(saved.stdout).toBe('');
+    expect(JSON.parse(fs.readFileSync(path.join(root, 'prefix.json'), 'utf8')).routingAssumption.globalPrefix)
+      .toBe('/api');
+
+    const providerLike = invoke(root, ['--source', 'tsconfig.json',
+      '--source-global-prefix', 'sk-opaquevalue123']);
+    expect(providerLike.status).toBe(2);
+    expect(providerLike.stdout).toBe('');
+    expect(providerLike.stderr).toContain('SOURCE_DIFF_PREFIX_INVALID');
+    expect(providerLike.stderr).not.toContain('opaquevalue123');
+
+    const secretLike = 'token-opaquevalue123';
+    for (const format of ['text', 'json', 'sarif', 'summary']) {
+      const result = invoke(root, ['--source', 'tsconfig.json', '--source-global-prefix', secretLike,
+        '--fail-on', 'never', '--format', format]);
+      expect(result.status, `${format}: ${result.stderr}`).toBe(0);
+      expect(result.stdout).not.toContain(secretLike);
+      expect(result.stdout).not.toContain('opaquevalue123');
+      expect(result.stderr).not.toContain('opaquevalue123');
+    }
+  }, 30_000);
+
   test('uses one real workspace result and leaves every input unchanged', async () => {
     const root = workspace();
     const names = ['openapi.yaml', 'refs/common.yaml', 'policy.yml', 'tsconfig.json', 'src/controller.ts'];
@@ -429,14 +479,15 @@ describe('Experimental source-diff CLI', () => {
     expect(fs.readdirSync(root).sort()).toEqual(before);
   });
 
-  test('unrelated CLI commands and no-source diff do not load the Source analyzer', () => {
+  test('unrelated CLI commands and no-source diff do not load Source-only modules', () => {
     const root = workspace();
     const preload = path.join(root, 'reject-source-load.cjs');
     fs.writeFileSync(preload, `const Module = require('node:module');
 const load = Module._load;
 Module._load = function (request, parent, isMain) {
-  if (request === 'typescript' || request.includes('source/nestjs/analyzer')) {
-    throw new Error('UNEXPECTED_SOURCE_ANALYZER_LOAD');
+  if (request === 'typescript' || request.includes('source/nestjs/analyzer')
+    || request.includes('source-global-prefix')) {
+    throw new Error('UNEXPECTED_SOURCE_MODULE_LOAD');
   }
   return load.call(this, request, parent, isMain);
 };
@@ -458,7 +509,7 @@ Module._load = function (request, parent, isMain) {
       expect(result.error).toBeUndefined();
       expect(result.signal).toBeNull();
       expect(result.status, `${args.join(' ')}: ${result.stderr}`).toBe(0);
-      expect(result.stderr).not.toContain('UNEXPECTED_SOURCE_ANALYZER_LOAD');
+      expect(result.stderr).not.toContain('UNEXPECTED_SOURCE_MODULE_LOAD');
     }
   });
 });

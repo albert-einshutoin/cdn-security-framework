@@ -2,6 +2,7 @@
 
 const assert = require('assert');
 const childProcess = require('child_process');
+const crypto = require('node:crypto');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
@@ -948,6 +949,104 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
   if (preparedConsumer) inspect(preparedConsumer);
   else withTempDir('cdn-security-install-', inspect);
   return cliVerified;
+}
+
+export type PrefixProof = { globalPrefix: '/api'; projectDigest: string; configDigest: string;
+  routingDigest: string; comparisonContractDigest: string; savedSha256: string; inputSha256: string;
+  unprefixedInventory: { sourceOnly: number; declaredOnly: number; methodMismatch: number };
+  prefixedInventory: { sourceOnly: number; declaredOnly: number; methodMismatch: number } };
+
+/** One representative installed Node row uses the same packed CLI for every prefix scenario. */
+export function smokeInstalledPrefix(consumer: string, validateSarif: (value: unknown) => void):
+  { steps: typeof smokeSteps; proof: PrefixProof } {
+  const pkgRoot = path.join(consumer, 'node_modules', packageName);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-installed-prefix-'));
+  const digest = (value: Buffer | string) => crypto.createHash('sha256').update(value).digest('hex');
+  try {
+    fs.cpSync(path.join(pkgRoot, 'examples/nestjs-contract'), root, { recursive: true });
+    const dependency = path.join(root, 'node_modules/@nestjs/common');
+    fs.mkdirSync(path.dirname(dependency), { recursive: true });
+    fs.cpSync(path.join(root, 'stubs/nestjs-common'), dependency, { recursive: true });
+    const inputNames = ['openapi.yaml', 'policy/security.yml', 'tsconfig.json',
+      'src/users.controller.ts', 'src/runtime-prefix.ts'];
+    const inputSha256 = digest(JSON.stringify(inputNames.map(name => digest(fs.readFileSync(path.join(root, name))))));
+    const cli = path.join(pkgRoot, 'bin/cli.js');
+    const args = ['contract', 'source-diff', '--workspace-root', root, '--openapi', 'openapi.yaml',
+      '--policy', 'policy/security.yml', '--target', 'aws'];
+    const steps: typeof smokeSteps = [];
+    const invoke = (extra: string[], expectedExit: number, withSource = true) => {
+      const start = process.hrtime.bigint();
+      const result = childProcess.spawnSync(process.execPath, [cli, ...args,
+        ...(withSource ? ['--source', 'tsconfig.json'] : []),
+        '--current-date', '2026-09-25', '--fail-on', 'never', ...extra], {
+        cwd: root, encoding: 'utf8', timeout: 30_000, maxBuffer: 8 * 1024 * 1024,
+        env: { ...process.env, NODE_PATH: '', NODE_OPTIONS: '' },
+      });
+      steps.push({ command: 'cdn-security-source-prefix', exit: result.status ?? -1,
+        expectedExit, durationMs: Number(process.hrtime.bigint() - start) / 1e6 });
+      assert.equal(result.error, undefined, 'installed prefix CLI process error');
+      assert.equal(result.signal, null, 'installed prefix CLI signal');
+      assert.equal(result.status, expectedExit, 'installed prefix CLI exit');
+      assert.ok(!(result.stdout + result.stderr).includes(root), 'installed prefix CLI leaked workspace path');
+      return result;
+    };
+    let prefixedSarif: any;
+    for (const format of ['text', 'json', 'sarif', 'summary']) {
+      const result = invoke(['--source-global-prefix', '/api', '--format', format], 0);
+      assert.equal(result.stderr, '');
+      assert.ok(result.stdout.includes('/api'), 'installed prefix missing from report');
+      if (format === 'json') {
+        const report = JSON.parse(result.stdout);
+        assert.equal(report.routingAssumption.globalPrefix, '/api');
+      }
+      if (format === 'sarif') {
+        prefixedSarif = JSON.parse(result.stdout);
+        validateSarif(prefixedSarif);
+      }
+    }
+    const unprefixed = invoke(['--format', 'sarif'], 0);
+    const unprefixedSarif = JSON.parse(unprefixed.stdout);
+    validateSarif(unprefixedSarif);
+    const metadata = prefixedSarif.runs[0].tool.driver.properties.sourceAware.metadata;
+    const oldMetadata = unprefixedSarif.runs[0].tool.driver.properties.sourceAware.metadata;
+    assert.equal(oldMetadata.routingAssumption, undefined);
+    assert.equal(metadata.routingAssumption.globalPrefix, '/api');
+    assert.deepEqual(metadata.source, oldMetadata.source, 'prefix changed original Source digest');
+    const inventory = (report: any) => {
+      const rules = report.runs[0].results.map((result: any) => result.ruleId);
+      return { sourceOnly: rules.filter((rule: string) => rule === 'SC-INVENTORY-001').length,
+        declaredOnly: rules.filter((rule: string) => rule === 'SC-INVENTORY-003').length,
+        methodMismatch: rules.filter((rule: string) => rule === 'SC-INVENTORY-004').length };
+    };
+    const unprefixedInventory = inventory(unprefixedSarif);
+    const prefixedInventory = inventory(prefixedSarif);
+    assert.deepEqual(unprefixedInventory, { sourceOnly: 2, declaredOnly: 1, methodMismatch: 1 },
+      'installed omitted prefix changed decorator-local comparison');
+    assert.deepEqual(prefixedInventory, { sourceOnly: 6, declaredOnly: 5, methodMismatch: 0 },
+      'installed explicit prefix comparison changed');
+    assert.ok(prefixedSarif.runs[0].results.some((result: any) =>
+      result.properties?.sourceAware?.route?.path === '/api/users/{id}'),
+    'installed prefix comparison route missing');
+    for (const [extra, code, withSource] of [
+      [['--source-global-prefix', 'api%2f'], 'SOURCE_DIFF_PREFIX_INVALID', true],
+      [['--source-global-prefix', '/api'], 'SOURCE_DIFF_PREFIX_REQUIRES_SOURCE', false],
+    ] as const) {
+      const result = invoke([...extra], 2, withSource);
+      assert.equal(result.stdout, '');
+      assert.ok(result.stderr.includes(code));
+      assert.ok(!result.stderr.includes('api%2f') && !result.stderr.includes(root));
+    }
+    const saved = invoke(['--source-global-prefix', '/api', '--format', 'json', '--out', 'prefix-report.json'], 0);
+    assert.equal(saved.stdout, ''); assert.equal(saved.stderr, '');
+    const savedBytes = fs.readFileSync(path.join(root, 'prefix-report.json'));
+    assert.equal(JSON.parse(savedBytes.toString()).routingAssumption.globalPrefix, '/api');
+    assert.equal(digest(JSON.stringify(inputNames.map(name => digest(fs.readFileSync(path.join(root, name)))))),
+      inputSha256, 'installed prefix changed an input');
+    return { steps, proof: { globalPrefix: '/api', projectDigest: metadata.source.projectDigest,
+      configDigest: metadata.source.configDigest, routingDigest: metadata.routingAssumption.digest,
+      comparisonContractDigest: metadata.routingAssumption.comparisonContractDigest,
+      savedSha256: digest(savedBytes), inputSha256, unprefixedInventory, prefixedInventory } };
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
 }
 
 if (require.main === module) {

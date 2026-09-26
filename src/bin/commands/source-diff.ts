@@ -9,6 +9,7 @@ export interface SourceDiffOptions {
   policy?: string;
   target?: string;
   source?: string;
+  sourceGlobalPrefix?: string;
   sourceAuthConfig?: string;
   out?: string;
   exceptions?: string;
@@ -51,6 +52,9 @@ function validate(options: SourceDiffOptions) {
   if (options.sourceAuthConfig !== undefined && !options.source) {
     throw new SourceDiffArgumentError('SOURCE_DIFF_AUTH_CONFIG_REQUIRES_SOURCE');
   }
+  if (options.sourceGlobalPrefix !== undefined && !options.source) {
+    throw new SourceDiffArgumentError('SOURCE_DIFF_PREFIX_REQUIRES_SOURCE');
+  }
   if (options.out !== undefined && (!options.out || options.out === '-' || options.out.endsWith('/'))) {
     throw new SourceDiffArgumentError('SOURCE_DIFF_OUTPUT_INVALID');
   }
@@ -87,6 +91,17 @@ export async function prepareSourceDiff(options: SourceDiffOptions): Promise<Pre
   catch (error) {
     const code = error instanceof SourceDiffArgumentError ? error.code : 'SOURCE_DIFF_ARGUMENT_INVALID';
     return { ok: false, code, exitCode: 2, message: 'Invalid source-diff arguments.' };
+  }
+
+  let globalPrefix: string | undefined;
+  if (options.sourceGlobalPrefix !== undefined) {
+    try {
+      const { normalizeSourceGlobalPrefix } = await import('../../contract/source-global-prefix');
+      globalPrefix = normalizeSourceGlobalPrefix(options.sourceGlobalPrefix);
+    } catch {
+      return { ok: false, code: 'SOURCE_DIFF_PREFIX_INVALID', exitCode: 2,
+        message: 'Source global prefix is invalid.' };
+    }
   }
 
   let outputModule: typeof import('./source-output') | undefined;
@@ -147,7 +162,8 @@ export async function prepareSourceDiff(options: SourceDiffOptions): Promise<Pre
       workspaceRoot: input.workspaceRoot, openapiPath: input.openapiPath,
       policyPath: input.policyPath, target: input.target,
       onInputPath: outputGuard?.recordInputPath,
-      ...(options.source ? { source: { tsconfigPath: options.source, ...(authConfig ? { authConfig } : {}) } } : {}),
+      ...(options.source ? { source: { tsconfigPath: options.source, ...(authConfig ? { authConfig } : {}),
+        ...(globalPrefix ? { globalPrefix } : {}) } } : {}),
     });
     const bundle = finalizeSourceAwareOutput(workspace, {
       currentDate: input.currentDate, failOn: input.failOn, environment: options.environment, exceptions,
@@ -224,6 +240,7 @@ export function registerSourceDiffCommand(contract: Command): void {
     .option('--policy <path>', 'Schema 2 Policy inside the workspace')
     .option('--target <target>', 'Target: aws | cloudflare')
     .option('--source <tsconfig-path>', 'Optional NestJS Source tsconfig (no auto-discovery)')
+    .option('--source-global-prefix <path>', 'Explicit fixed Source comparison prefix (requires --source)')
     .option('--source-auth-config <path>', 'Optional YAML/JSON NestJS auth data inside the workspace (requires --source)')
     .option('--out <path>', 'Save the report to one new file inside the workspace')
     .option('--exceptions <path>', 'Optional bounded Finding exceptions file')

@@ -16,6 +16,8 @@ type Candidate = { source: string; harness: string; tree: string; run: string; a
 type Saved = { status: 'saved'; name: 'summary.md' | 'source-aware.sarif'; sha256: string; bytes: number };
 type Failed = { status: 'failed' | 'not-generated'; code: string };
 type RecordV1 = { schemaVersion: 1; candidate: Candidate; targetEvidenceSha256: string;
+  routingAssumption?: { globalPrefix: string; digest: string; comparisonContractDigest?: string;
+    origin: 'explicit-option' };
   analysis: { exitCode: 0 | 1 | 2 | 3; status: 'complete' | 'partial' | 'failed'; codes: string[] };
   reports: { summary: Saved | Failed; sarif: Saved | Failed } };
 type StagedFile = { name: Saved['name'] | 'ci-record.json'; sha256: string; bytes: number };
@@ -57,10 +59,24 @@ function candidateFields(value: any, metadata = false): Candidate {
 }
 
 function recordFields(value: any): RecordV1 {
-  exactKeys(value, ['schemaVersion', 'candidate', 'targetEvidenceSha256', 'analysis', 'reports']);
+  exactKeys(value, ['schemaVersion', 'candidate', 'targetEvidenceSha256', 'analysis', 'reports',
+    ...(value?.routingAssumption === undefined ? [] : ['routingAssumption'])]);
   assert.equal(value.schemaVersion, 1);
   candidateFields(value.candidate);
   assert.match(value.targetEvidenceSha256, hex64);
+  if (value.routingAssumption !== undefined) {
+    const routing = value.routingAssumption;
+    exactKeys(routing, ['globalPrefix', 'digest', 'origin',
+      ...(routing.comparisonContractDigest === undefined ? [] : ['comparisonContractDigest'])]);
+    assert.ok(typeof routing.globalPrefix === 'string' && routing.globalPrefix.length <= 4096
+      && /^\/(?:[A-Za-z0-9_-]+|\[REDACTED_FILENAME\])(?:\/(?:[A-Za-z0-9_-]+|\[REDACTED_FILENAME\]))*$/.test(routing.globalPrefix)
+      && !hasUnsafeSensitiveText(routing.globalPrefix));
+    assert.match(routing.digest, /^sha256:[a-f0-9]{64}$/);
+    if (routing.comparisonContractDigest !== undefined) {
+      assert.match(routing.comparisonContractDigest, /^sha256:[a-f0-9]{64}$/);
+    }
+    assert.equal(routing.origin, 'explicit-option');
+  }
   exactKeys(value.analysis, ['exitCode', 'status', 'codes']);
   assert.ok([0, 1, 2, 3].includes(value.analysis.exitCode));
   assert.ok(['complete', 'partial', 'failed'].includes(value.analysis.status));
@@ -166,6 +182,7 @@ async function run(configFile: string, candidateDir: string, output: string): Pr
   const record: RecordV1 = {
     schemaVersion: 1, candidate: identity,
     targetEvidenceSha256: digest(JSON.stringify(bundle.metadata)),
+    ...(bundle.metadata.routingAssumption ? { routingAssumption: bundle.metadata.routingAssumption } : {}),
     analysis: { exitCode: final.exitCode, status: final.analysis.status,
       codes: final.analysis.codes.map(safeCode) },
     reports: { summary: { status: 'not-generated', code: 'CI_NOT_RENDERED' },

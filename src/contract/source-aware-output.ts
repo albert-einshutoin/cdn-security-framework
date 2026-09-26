@@ -4,6 +4,7 @@ import {
   type SourceAwareFinalizedResult, type SourceAwareFinalizerOptions,
 } from './source-aware-finalizer';
 import type { SourceAwareWorkspaceResult } from './source-aware-workspace';
+import { redactEvidenceFilename } from './sensitive-text';
 
 type StageName = 'declared' | 'implemented' | 'allowed';
 type StageStatus = SourceAwareWorkspaceResult['stages'][StageName]['status'];
@@ -16,6 +17,8 @@ export interface SourceAwareOutputBundle {
     openapi?: { graphDigest: string; digestKind: 'raw-document-graph' };
     policy?: { inputDigest: string; semanticDigest: string; digestKind: 'decoded-input-text' };
     source?: { projectDigest: string; configDigest: string; digestKind: 'decoded-project-text' };
+    routingAssumption?: { globalPrefix: string; digest: string; comparisonContractDigest?: string;
+      origin: 'explicit-option' };
     targetCapabilities: AllowedTargetCapabilityV1[];
   };
   finalized?: SourceAwareFinalizedResult;
@@ -42,6 +45,7 @@ export function finalizeSourceAwareOutput(
   const semanticDigest = workspace.evidence.policy && digest(workspace.evidence.policy.policyDigest);
   const projectDigest = workspace.evidence.source && digest(workspace.evidence.source.projectDigest);
   const configDigest = workspace.evidence.source && digest(workspace.evidence.source.configDigest);
+  const routing = workspace.evidence.routingAssumption;
   const bundle: SourceAwareOutputBundle = {
     target: workspace.target,
     metadata: {
@@ -50,6 +54,12 @@ export function finalizeSourceAwareOutput(
         digestKind: 'decoded-input-text' } as const } : {}),
       ...(projectDigest && configDigest ? { source: { projectDigest, configDigest,
         digestKind: 'decoded-project-text' } as const } : {}),
+      ...(routing ? { routingAssumption: {
+        globalPrefix: redactEvidenceFilename(routing.globalPrefix),
+        digest: routing.digest,
+        ...(routing.comparisonContractDigest ? { comparisonContractDigest: routing.comparisonContractDigest } : {}),
+        origin: 'explicit-option' as const,
+      } } : {}),
       targetCapabilities: capabilities,
     },
   };

@@ -49,6 +49,7 @@ export const SOURCE_ANALYZER_DIAGNOSTIC_CODES = [
   'SOURCE_ANALYZER_TIMEOUT',
   'SOURCE_ANALYZER_INVALID_RESULT',
   'SOURCE_ANALYZER_INTERNAL',
+  'SOURCE_ROUTING_TRANSFORM_FAILED',
 ] as const;
 
 const SOURCE_ANALYZER_RESULT_DIAGNOSTIC_CODES = [
@@ -169,6 +170,7 @@ const SAFE_MESSAGES: Readonly<Record<SourceAnalyzerDiagnosticCode, string>> = Ob
   SOURCE_ANALYZER_TIMEOUT: 'Source analysis timed out.',
   SOURCE_ANALYZER_INVALID_RESULT: 'Source analyzer returned an invalid result.',
   SOURCE_ANALYZER_INTERNAL: 'Source analyzer failed unexpectedly.',
+  SOURCE_ROUTING_TRANSFORM_FAILED: 'Source routing comparison failed.',
 });
 
 const LIMIT_RANGES: Readonly<Record<keyof SourceAnalysisLimits, Readonly<{ min: number; max: number }>>> = Object.freeze({

@@ -25,6 +25,7 @@ export interface SourceAwareWorkspaceInput {
   source?: {
     tsconfigPath: string;
     authConfig?: unknown;
+    globalPrefix?: string;
     limits?: Partial<SourceAnalysisLimits>;
     cancellationSignal?: AbortSignal;
     cache?: TypeScriptAnalysisCache;
@@ -44,6 +45,7 @@ export interface SourceAwareWorkspaceResult extends SourceAwareInternalResult {
     policy?: InputEvidence & { policyDigest: string; projector: 'allowed-surface@1' };
     // Source digest identifies decoded project input text, not raw bytes or analyzer output.
     source?: { projectDigest: string; analyzer: string; configDigest: string; limits: SourceAnalysisLimits };
+    routingAssumption?: { globalPrefix: string; digest: string; comparisonContractDigest?: string };
   };
   target: AllowedSurfaceTarget;
 }
@@ -76,6 +78,11 @@ function safeCode(error: unknown, kind: 'openapi' | 'policy'): string {
 // Internal adapter only. Each stage retains its own consumed-input evidence; no atomic workspace snapshot is claimed.
 export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInput): Promise<SourceAwareWorkspaceResult> {
   if (!input || !['aws', 'cloudflare'].includes(input.target)) throw new ContractDiffInputError('CONTRACT_DIFF_TARGET_INVALID', 'Target is invalid.');
+  const requestedPrefix = input.source?.globalPrefix;
+  const prefixModule = requestedPrefix === undefined
+    ? undefined : await import('./source-global-prefix');
+  const globalPrefix = requestedPrefix === undefined ? undefined
+    : prefixModule!.normalizeSourceGlobalPrefix(requestedPrefix);
   let inspection: OpenApiInspectionForCli | undefined;
   let declaredFailure: string | undefined;
   try {
@@ -140,6 +147,21 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
     }
   }
 
+  let comparedSource = source;
+  const routingAssumption: SourceAwareWorkspaceResult['evidence']['routingAssumption'] = globalPrefix
+    ? { globalPrefix, digest: prefixModule!.sourceRoutingAssumptionDigest(globalPrefix) } : undefined;
+  if (globalPrefix && source?.status === 'success' && sourceEvidence && routingAssumption) {
+    try {
+      const contract = prefixModule!.prefixSourceContract(source.result.contract, globalPrefix);
+      comparedSource = { status: 'success', result: { ...source.result, contract } };
+      routingAssumption.comparisonContractDigest = prefixModule!.sourceComparisonContractDigest(contract);
+    } catch {
+      comparedSource = { status: 'failed', diagnostics: [{
+        code: 'SOURCE_ROUTING_TRANSFORM_FAILED', safeMessage: 'Source routing comparison failed.',
+      }] };
+    }
+  }
+
   const openapiEvidence = inspection ? openApiEvidence(inspection) : undefined;
   const declaredEvidence = inspection && openapiEvidence ? {
     source: 'openapi' as const,
@@ -148,15 +170,17 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
     complete: Object.values(inspection.report.contract.capabilities).every((status) => status === 'complete'),
   } : undefined;
   const implementedEvidence = sourceEvidence ? {
-    source: 'source-ast' as const, uri: 'source-project', digest: sourceEvidence.projectDigest,
-    analyzer: sourceEvidence.analyzer, capability: 'nestjs-routes-v1',
-    complete: source?.status === 'success'
-      && Object.values(source.result.contract.capabilities).every((status) => status === 'complete')
-      && source.result.unresolvedOperations.length === 0 && source.result.diagnostics.length === 0,
+    source: 'source-ast' as const, uri: 'source-project',
+    digest: routingAssumption?.comparisonContractDigest ?? sourceEvidence.projectDigest,
+    analyzer: routingAssumption?.comparisonContractDigest ? 'explicit-global-prefix@1' : sourceEvidence.analyzer,
+    capability: routingAssumption?.comparisonContractDigest ? 'explicit-routing-assumption-v1' : 'nestjs-routes-v1',
+    complete: comparedSource?.status === 'success'
+      && Object.values(comparedSource.result.contract.capabilities).every((status) => status === 'complete')
+      && comparedSource.result.unresolvedOperations.length === 0 && comparedSource.result.diagnostics.length === 0,
   } : undefined;
   const compared = composeSourceAwareComparisons({
     declared: inspection?.report, declaredEvidence, declaredFailure,
-    allowed, allowedFailure, target: input.target, source, implementedEvidence,
+    allowed, allowedFailure, target: input.target, source: comparedSource, implementedEvidence,
   });
   return {
     ...compared, target: input.target,
@@ -164,6 +188,7 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
       ...(openapiEvidence ? { openapi: openapiEvidence } : {}),
       ...(policyEvidence ? { policy: policyEvidence } : {}),
       ...(sourceEvidence ? { source: sourceEvidence } : {}),
+      ...(routingAssumption ? { routingAssumption } : {}),
     },
   };
 }

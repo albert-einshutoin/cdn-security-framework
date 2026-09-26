@@ -37,6 +37,9 @@ function linesFor(bundle: SourceAwareOutputBundle, top: number): string[] {
       : `**Exit verdict:** ${error?.exitCode ?? 3} (finalization failed)`,
     '', '## Stage status', '', '| Stage | Status | Reason |', '| --- | --- | --- |',
   ];
+  if (bundle.metadata.routingAssumption) {
+    lines.splice(2, 0, `**Routing assumption:** explicit global prefix ${cell(bundle.metadata.routingAssumption.globalPrefix)} (not bootstrap-verified).`);
+  }
   for (const name of ['declared', 'implemented', 'allowed'] as const) {
     const stage = final?.stages[name];
     lines.push(`| ${name} | ${stage?.status ?? error?.stages[name] ?? 'unknown'} | ${stage?.code ?? '-'} |`);
