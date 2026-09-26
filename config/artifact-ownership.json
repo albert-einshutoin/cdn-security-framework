@@ -44,6 +44,17 @@
       "removalCondition": "Remove when the corresponding packaged NestJS example is retired."
     },
     {
+      "category": "fixture-example",
+      "files": [
+        "test/pilot/realworld/pilot.cjs"
+      ],
+      "sourceOfTruth": [
+        "test/pilot/realworld/pilot.cjs"
+      ],
+      "reason": "Authored fixed-source Pilot runner, not a TypeScript compiler output.",
+      "removalCondition": "Remove with the fixed public-source Pilot fixture and its regression test."
+    },
+    {
       "category": "runtime-template",
       "files": [
         "templates/aws/origin-request.js",
