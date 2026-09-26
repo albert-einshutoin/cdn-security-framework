@@ -27,3 +27,16 @@ Source: [lujakob/nestjs-realworld-example-app at c1c2cc4](https://github.com/luj
 All 19 route/method pairs are static local decorator facts to check. Class `@ApiBearerAuth` is Swagger documentation, not a guard. None of these controllers declares `@UseGuards`, `@Public`, or `@Roles`. `src/article/article.module.ts:20-32`, `src/profile/profile.module.ts:18-23`, and `src/user/user.module.ts:16-21` install AuthMiddleware for selected routes; static middleware execution and JWT enforcement are not inferred. The explicit evaluation auth mapping is empty. Therefore authorization mismatch is **not evaluable** from this snapshot with the current analyzer; a diagnostic claiming proven anonymous access would be false.
 
 `GET /tags` (`src/tag/tag.controller.ts:17`) and `GET /` (`src/app.controller.ts:5`) are evaluation-out by the predeclared scope. A source result may include them, but they are not counted in the 19-operation denominator. No existing static OpenAPI file is in this snapshot; runtime Swagger generation is not run. The reference/example app is not evidence of a production deployment. `package.json` declares SPDX ISC; no separate LICENSE file exists in this commit.
+
+## Explicit-prefix evaluation (P02–P05)
+
+The same fixed 19 operations and the two evaluation-out routes are reused. `src/main.ts:8` calls `setGlobalPrefix('api')`; the assessor supplies `/api` explicitly. The Source analyzer does not read the bootstrap or infer that prefix. [`prefix-cases.json`](prefix-cases.json) fixes the inputs and selected finding counts before running the extended Pilot. [`openapi-prefixed-evaluation.json`](openapi-prefixed-evaluation.json) and [`policy-prefixed-evaluation.yml`](policy-prefixed-evaluation.yml) are evaluator contracts, not upstream files.
+
+| Case | Assumption | Controlled difference | Expected selected findings |
+| --- | --- | --- | --- |
+| P02 | `/api` | None | 19 scoped route/method pairs match; `SC-INVENTORY-001` 2 evaluation-out, `SC-INVENTORY-003/004` 0 |
+| P03 | Omitted | None | No automatic correction; `SC-INVENTORY-001` 21, `SC-INVENTORY-003` 19 |
+| P04 | `/wrong` | None | No automatic correction; `SC-INVENTORY-001` 21, `SC-INVENTORY-003` 19 |
+| P05 | `/api` | Change declared feed GET to POST, omit declared profile GET, and disallow DELETE in evaluator Policy | `SC-INVENTORY-001` 3, `SC-INVENTORY-004` 1, `SC-EXPOSURE-004` 5 |
+
+The finding counts include the same two evaluation-out inventory findings and are not additional operation samples. Auth remains unknown for all 19 operations; the global-provider diagnostic remains present. Comparison routes and assumption digests must be labeled separately from decorator-local Source evidence and project/config input digests.

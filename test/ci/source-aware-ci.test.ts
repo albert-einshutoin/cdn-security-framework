@@ -136,6 +136,33 @@ beforeAll(() => {
 afterAll(() => { if (temp) fs.rmSync(temp, { recursive: true, force: true }); });
 
 describe('installed dev-only Source-aware CI connection', () => {
+  it('records explicit routing separately and rejects a no-Source JSON prefix before reports', () => {
+    const { output, record } = runCase('prefix', { sourceGlobalPrefix: 'api' });
+    expect(record.routingAssumption).toMatchObject({ globalPrefix: '/api', origin: 'explicit-option' });
+    expect(record.routingAssumption.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(record.routingAssumption.comparisonContractDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    const summary = fs.readFileSync(path.join(output, 'summary.md'), 'utf8');
+    expect(summary).toContain('explicit global prefix /api');
+    const sarif = JSON.parse(fs.readFileSync(path.join(output, 'source-aware.sarif'), 'utf8'));
+    expect(sarif.runs[0].tool.driver.properties.sourceAware.metadata.routingAssumption.globalPrefix)
+      .toBe('/api');
+    expect(deliver(output, 'prefix').gate.status).toBe(0);
+
+    const invalid = workspace('prefix-no-source', { source: undefined, sourceGlobalPrefix: '/api' });
+    const rejected = command(process.execPath, [driver, 'run', invalid.config, candidate, invalid.output], repo, env());
+    expect(rejected.status).toBe(3);
+    expect(rejected.stdout).toBe('');
+    expect(rejected.stderr).toContain('CI_SOURCE_AWARE_PROCESS_FAILED');
+    expect(fs.readdirSync(invalid.output)).toEqual([]);
+
+    const sensitive = runCase('prefix-sensitive', { sourceGlobalPrefix: 'token-opaquevalue123' });
+    expect(sensitive.record.routingAssumption.globalPrefix).toBe('/[REDACTED_FILENAME]');
+    for (const name of ['ci-record.json', 'summary.md', 'source-aware.sarif']) {
+      expect(fs.readFileSync(path.join(sensitive.output, name), 'utf8')).not.toContain('opaquevalue123');
+    }
+    expect(deliver(sensitive.output, 'prefix-sensitive').gate.status).toBe(0);
+  });
+
   it('W01/W09 uses one installed candidate, saves verified reports, and passes the real gate', () => {
     const { output, record } = runCase('pass', {
       sourceAuthConfig: 'security-analyzer.yml', exceptions: 'exceptions.json',

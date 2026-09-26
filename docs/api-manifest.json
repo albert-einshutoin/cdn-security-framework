@@ -188,6 +188,8 @@
       "contract/source-aware-output.js",
       "contract/source-aware-workspace.d.ts",
       "contract/source-aware-workspace.js",
+      "contract/source-global-prefix.d.ts",
+      "contract/source-global-prefix.js",
       "reporters/source-aware-summary.d.ts",
       "reporters/source-aware-summary.js",
       "schemas/nestjs-source-analysis-options.schema.json",

@@ -31,6 +31,12 @@ explicit workspace-local input paths and its own Finding threshold; `never`
 does not make input, internal, save, or CI failures pass. Source omitted is
 shown as omitted. Partial and unknown do not prove safety.
 
+The same JSON input may contain `"sourceGlobalPrefix":"/api"` only when
+`source` is present. It uses the CLI's fixed-prefix validation and transforms
+only the Source comparison copy. The verified CI record stores a safe routing
+assumption and its digest separately from project/auth and candidate identity;
+omission leaves the previous record shape and decorator-local comparison.
+
 One shared validation/auth/exception/analysis/finalizer execution renders
 Summary Markdown and complete SARIF. The existing safe new-file writer saves
 them under the workspace. It never overwrites inputs or old reports. The CI

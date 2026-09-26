@@ -66,6 +66,51 @@ Guard名と認証種別の対応は利用者が与える静的な前提であり
 middleware順序、runtime認証の証明ではありません。未設定のGuardや他の未解決
 Source事実はpartialのままです。
 
+すべての比較対象Source routeへ同じ固定global prefixが適用されることを**利用者が確認した**
+場合に限り、`--source`とともに`--source-global-prefix /api`を渡せます。
+`api`と`/api`は同義です。bootstrapの`setGlobalPrefix`を製品が自動解析した
+証拠ではなく、明示した比較前提です。省略時は従来のdecorator-local routeと
+report identityを維持します。`--source`なしの指定は入力読込前にstdout空・
+exit `2`で拒否します。空、`/`のみ、末尾/重複slash、URL、query、fragment、
+backslash、制御文字、dot、percent、wildcard、動的parameter、空白を固定診断で
+拒否し、defaultへ戻しません。ASCIIの`[A-Za-z0-9_-]`による1個以上のsegmentに
+限定し、先頭slashは0または1個、正規化後は最大256文字です。大小文字は保持します。
+provider tokenに似た値は入力読込前に拒否します。
+
+| 入力 | 結果 |
+| --- | --- |
+| `api`、`/api` | ともに`/api` |
+| `/API`、`/api/v1` | 大小文字と複数の固定segmentを保持 |
+| 空、`/`、末尾/重複slash | 解析前にexit `2` |
+| URL、符号化・動的・wildcard・dot segment、provider tokenに似た値 | 解析前にexit `2` |
+| 正規化後256文字超 | 解析前にexit `2` |
+
+local `/`は`/api`、`/articles/{slug}`は`/api/articles/{slug}`、既に
+`/api/items`であるrouteは`/api/api/items`になります。
+
+元のSource IR、入力project digest、認証設定digest、file/line、unknown/partialは
+変えません。比較用コピーだけをImplemented–DeclaredとImplemented–Allowedへ
+渡し、OpenAPI/Policy入力およびDeclared–Allowedは変換しません。比較する
+OpenAPI/Policyも、利用者が意図する同じpath体系で用意してください。Swaggerの
+servers/basePathやproxy rewriteをこのoptionで再解釈しません。routing前提と
+変換済みcontractのdigestは入力・認証digestと分離し、Text/JSON preview、SARIF
+properties、Summary、dev CI記録へ安全に表示します。prefixでrouteとFinding
+instanceIdが変わる場合、旧exact例外selectorを自動拡大しません。exclude、URI
+versioning、複数Nest app、reverse proxy rewriteは対象外です。runtime到達可能性、
+middleware/Guardの強制、認証の証明にもなりません。
+
+| 形式 | 明示前提の表示 | Findingの範囲 |
+| --- | --- | --- |
+| Text | 件数制限付きpreviewに安全なprefix | 件数制限付きpreview |
+| JSON | 内部previewに安全なprefixとrouting/contract digest | 件数制限付きpreview |
+| SARIF | 内部tool propertiesに安全なprefix/digest、Source由来結果に前提route | reporter上限内の全結果 |
+| Summary | 安全なprefix表示 | 上位Findingのみ |
+
+dev CI記録には、安全なprefixとdigestを元のSource project/認証digestと分けて
+保存します。Node 24のinstalled-package consumerは、同じtgzでprefixあり・
+省略・不正、4形式、`--out`を検証します。証拠が欠けるとpackage acceptance gateは
+拒否します。
+
 Text/JSONは件数上限のあるpreviewです。JSONは完全な安定公開schemaではありません。
 SARIFは既存reporter制限内の完全結果、Summaryは最大10件/32KiBの表示です。
 形式によって省略表示は異なります。exit `0`は処理成立・Finding閾値未到達、

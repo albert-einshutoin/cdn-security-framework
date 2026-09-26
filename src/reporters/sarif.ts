@@ -1,6 +1,7 @@
 import type { ContractDiffReportV1 } from '../contract/contract-diff';
 import type { FindingEvidenceV1, SecurityFindingV1 } from '../contract/finding';
 import type { SourceAwareOutputBundle } from '../contract/source-aware-output';
+import { previewFinding } from '../contract/source-aware-finalizer';
 import { compareFindings, sortFindings } from '../contract/finding-order';
 import { hasUnsafeSensitiveText, redactEvidenceFilename } from '../contract/sensitive-text';
 
@@ -74,7 +75,8 @@ interface SarifResult {
     evidenceSources?: string[];
     capabilities?: string[];
     sourceAware?: { disposition: 'active' | 'suppressed' | 'governance'; comparisons: string[];
-      omittedSyntheticSourceLocations: number; omittedRelatedLocations: number };
+      omittedSyntheticSourceLocations: number; omittedRelatedLocations: number;
+      route?: { method?: string; path?: string }; routingOrigin?: 'explicit-option' };
   };
 }
 
@@ -930,6 +932,9 @@ export function renderSourceAwareSarif(
           comparisons: [...(membership.get(finding.instanceId) ?? [])],
           omittedSyntheticSourceLocations: finding.evidence.length - physical.length,
           omittedRelatedLocations: Math.max(0, uniquePhysical.length - 1 - maxRelatedLocations),
+          ...(bundle.metadata.routingAssumption && finding.route
+            && finding.evidence.some(({ source, uri }) => source === 'source-ast' && uri !== 'source-project')
+            ? { route: previewFinding(finding, []).route, routingOrigin: 'explicit-option' as const } : {}),
         };
         results.push(item);
       }

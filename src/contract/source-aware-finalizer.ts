@@ -23,6 +23,7 @@ type ComparisonSummary =
 
 export interface SourceAwareFinalizedResult {
   target: 'aws' | 'cloudflare';
+  routingAssumption?: { globalPrefix: string; digest: string; comparisonContractDigest?: string };
   stages: Record<StageName, StageSummary>;
   comparisons: Record<SourceAwareComparisonName, ComparisonSummary>;
   findings: SecurityFindingV1[];
@@ -225,6 +226,7 @@ export function finalizeSourceAwareWorkspace(
   }, options.failOn);
   return {
     target: input.target, stages, comparisons,
+    ...(input.evidence.routingAssumption ? { routingAssumption: input.evidence.routingAssumption } : {}),
     findings, suppressedFindings, exceptionDiagnostics,
     appliedExceptionIds: applied.appliedExceptionIds,
     memberships: ordered.map(({ instanceId }) => ({ instanceId, comparisons: memberships.get(instanceId) ?? [] })),
@@ -291,6 +293,9 @@ function renderText(preview: ReturnType<typeof previewData>): string {
     `threshold=${preview.threshold.failOn} reached=${preview.threshold.reached}`,
     `unique=${preview.summary.unique} active=${preview.summary.active} suppressed=${preview.summary.suppressed} governance=${preview.summary.governance}`,
   ];
+  if (preview.routingAssumption) {
+    lines.push(`routing assumption explicit globalPrefix=${preview.routingAssumption.globalPrefix}`);
+  }
   for (const [name, stage] of Object.entries(preview.stages)) {
     lines.push(`stage ${name}=${stage.status}${stage.code ? ` code=${stage.code}` : ''}`);
   }
@@ -332,6 +337,9 @@ function previewData(result: SourceAwareFinalizedResult) {
   const make = () => ({
     preview: 'source-aware-internal-pre-entry' as const,
     target: result.target, stages: result.stages, comparisons: result.comparisons,
+    ...(result.routingAssumption ? { routingAssumption: {
+      ...result.routingAssumption, globalPrefix: routePath(result.routingAssumption.globalPrefix),
+    } } : {}),
     summary: result.summary, analysis: result.analysis, threshold: result.threshold,
     exitCode: result.exitCode,
     appliedExceptionIds: result.appliedExceptionIds.slice(0, MAX_PREVIEW_EXCEPTION_IDS),

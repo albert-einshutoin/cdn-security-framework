@@ -28,6 +28,12 @@ workflowではworkspace内の入力とFinding閾値を明示して選ぶ必要�
 `never`でも入力・内部・保存・CI失敗は成功になりません。Source省略は
 omittedとして表示し、partial/unknownを安全性の証明とみなしません。
 
+同じJSON入力には`source`がある場合だけ`"sourceGlobalPrefix":"/api"`を
+追加できます。CLIと同じ固定prefix検証を使い、Sourceの比較用コピーだけを
+変換します。検証済みCI記録は安全なrouting前提とそのdigestをproject/auth・
+candidate identityから分けて保存します。省略時は従来のrecord形状と
+decorator-local比較です。
+
 共通の検証、認証設定・例外読込み、解析、finalizerを一度だけ実行し、同じ
 完全結果からSummary MarkdownとSARIFを描画します。既存の新規ファイル専用
 writerでworkspace内へ保存し、入力や旧reportを上書きしません。CI記録は

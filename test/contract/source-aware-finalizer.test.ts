@@ -42,6 +42,27 @@ function exception(instanceId: string, expiresAt = '2026-12-01'): FindingExcepti
 }
 
 describe('internal Source-aware finalizer', () => {
+  test('does not broaden an old exact selector when explicit prefix changes the Finding route', () => {
+    const old = createFinding(base);
+    const prefixed = createFinding({ ...base, route: { method: 'GET', path: '/api/users' } });
+    expect(prefixed.instanceId).not.toBe(old.instanceId);
+    const stale = finalizeSourceAwareWorkspace(workspace([prefixed]), {
+      ...options, exceptions: exception(old.instanceId),
+    });
+    expect(stale.findings.map(({ instanceId }) => instanceId)).toContain(prefixed.instanceId);
+    expect(stale.suppressedFindings).toEqual([]);
+    const current = finalizeSourceAwareWorkspace(workspace([prefixed]), {
+      ...options, exceptions: exception(prefixed.instanceId),
+    });
+    expect(current.suppressedFindings.map(({ instanceId }) => instanceId)).toEqual([prefixed.instanceId]);
+    const protectedFinding = createFinding({ ...base, route: { method: 'GET', path: '/api/users' },
+      tags: ['non-waivable'] });
+    const protectedResult = finalizeSourceAwareWorkspace(workspace([protectedFinding]), {
+      ...options, exceptions: exception(protectedFinding.instanceId),
+    });
+    expect(protectedResult.suppressedFindings).toEqual([]);
+  });
+
   test('deduplicates globally while retaining both comparison memberships and one threshold count', () => {
     const input = workspace();
     const before = structuredClone(input);

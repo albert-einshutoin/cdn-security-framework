@@ -1,0 +1,32 @@
+{
+  "basis": "Fixed source commit c1c2cc4e448b279ff083272df1ac50d20c3304fa src/main.ts:8 declares setGlobalPrefix('api'); this is an assessor's explicit assumption, not analyzer bootstrap evidence.",
+  "cases": [
+    {
+      "name": "P02-correct-prefix",
+      "prefix": "/api",
+      "change": "none",
+      "expect": { "SC-INVENTORY-001": 2, "SC-INVENTORY-003": 0, "SC-INVENTORY-004": 0, "SC-EXPOSURE-004": 0 }
+    },
+    {
+      "name": "P03-omitted-prefix",
+      "prefix": null,
+      "change": "none",
+      "expect": { "SC-INVENTORY-001": 21, "SC-INVENTORY-003": 19, "SC-INVENTORY-004": 0 }
+    },
+    {
+      "name": "P04-wrong-prefix",
+      "prefix": "/wrong",
+      "change": "none",
+      "expect": { "SC-INVENTORY-001": 21, "SC-INVENTORY-003": 19, "SC-INVENTORY-004": 0 }
+    },
+    {
+      "name": "P05-controlled-drift",
+      "prefix": "/api",
+      "change": "controlled-prefix-drift",
+      "methodTarget": { "sourceMethod": "GET", "declaredMethod": "POST", "path": "/api/articles/feed" },
+      "routeTarget": { "method": "GET", "path": "/api/profiles/{username}" },
+      "policyTarget": { "method": "DELETE", "pointer": "/request/allow_methods" },
+      "expect": { "SC-INVENTORY-001": 3, "SC-INVENTORY-003": 0, "SC-INVENTORY-004": 1, "SC-EXPOSURE-004": 5 }
+    }
+  ]
+}

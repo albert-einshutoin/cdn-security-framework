@@ -6,7 +6,8 @@ import { afterEach, describe, expect, test, vi } from 'vitest';
 
 import { analyzeSourceAwareWorkspace } from '../../src/contract/source-aware-workspace';
 import { finalizeSourceAwareWorkspace, formatSourceAwarePreviewJson, formatSourceAwarePreviewText } from '../../src/contract/source-aware-finalizer';
-import { compareSecurityContracts, projectPolicyToAllowedSurface } from '../../src/contract';
+import { compareSecurityContracts, createSecurityContract, projectPolicyToAllowedSurface } from '../../src/contract';
+import { DEFAULT_SOURCE_ANALYSIS_LIMITS } from '../../src/source-analysis';
 import { inspectOpenApi } from '../../src/openapi';
 import * as sourceRunner from '../../src/source/nestjs/analyzer';
 import * as projectLoader from '../../src/source/typescript/project-loader';
@@ -70,6 +71,69 @@ afterEach(() => {
 });
 
 describe('internal single-workspace adapter', () => {
+  test('uses one analyzed Source project for distinct explicit comparison routes', async () => {
+    const root = workspace();
+    const cache = new TypeScriptAnalysisCache();
+    const base = await analyzeSourceAwareWorkspace({ ...args(root), source: { tsconfigPath: 'tsconfig.json', cache } });
+    const prefixed = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', cache, globalPrefix: '/api' } });
+    const prefixedAgain = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', cache, globalPrefix: 'api' } });
+    expect(prefixed.evidence.source?.projectDigest).toBe(base.evidence.source?.projectDigest);
+    expect(prefixed.evidence.source?.configDigest).toBe(base.evidence.source?.configDigest);
+    expect(prefixed.evidence.routingAssumption?.globalPrefix).toBe('/api');
+    expect(prefixed.evidence.routingAssumption?.digest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(prefixed.evidence.routingAssumption?.comparisonContractDigest).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(prefixed.evidence.routingAssumption).toEqual(prefixedAgain.evidence.routingAssumption);
+    expect(base.evidence.routingAssumption).toBeUndefined();
+    expect(prefixed.comparisons.declaredAllowed).toEqual(base.comparisons.declaredAllowed);
+    expect(prefixed.comparisons.implementedDeclared.findings?.some(({ route }) =>
+      route?.path === '/api/users/{id}')).toBe(true);
+    expect(prefixed.comparisons.implementedAllowed.findings?.some(({ route }) =>
+      route?.path?.startsWith('/api/'))).toBe(true);
+    const wrong = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', cache, globalPrefix: '/other' } });
+    expect(wrong.evidence.source?.projectDigest).toBe(prefixed.evidence.source?.projectDigest);
+    expect(wrong.evidence.routingAssumption?.digest).not.toBe(prefixed.evidence.routingAssumption?.digest);
+    expect(wrong.evidence.routingAssumption?.comparisonContractDigest)
+      .not.toBe(prefixed.evidence.routingAssumption?.comparisonContractDigest);
+    const [one, two] = await Promise.all(['/one', '/two'].map((globalPrefix) =>
+      analyzeSourceAwareWorkspace({ ...args(root), source: { tsconfigPath: 'tsconfig.json', cache, globalPrefix } })));
+    expect(one.evidence.routingAssumption?.globalPrefix).toBe('/one');
+    expect(two.evidence.routingAssumption?.globalPrefix).toBe('/two');
+    expect(one.comparisons.implementedDeclared.findings?.some(({ route }) =>
+      route?.path === '/one/users/{id}')).toBe(true);
+    expect(two.comparisons.implementedDeclared.findings?.some(({ route }) =>
+      route?.path === '/two/users/{id}')).toBe(true);
+  });
+
+  test('keeps independent comparison when prefixed Source fails or a copied route exceeds limits', async () => {
+    const root = workspace();
+    const failed = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: '../outside.ts', globalPrefix: '/api' } });
+    expect(failed.comparisons.declaredAllowed.status).toMatch(/complete|partial/);
+    expect(failed.stages.implemented.status).toBe('failed');
+    expect(failed.evidence.routingAssumption?.comparisonContractDigest).toBeUndefined();
+
+    const real = await sourceRunner.runNestJsSourceAnalysisInternal({ workspaceRoot: root,
+      entrypoints: ['tsconfig.json'], limits: DEFAULT_SOURCE_ANALYSIS_LIMITS,
+      logger: { log() {} } });
+    expect(real.execution.status).toBe('success');
+    if (real.execution.status !== 'success') return;
+    const contract = createSecurityContract({ ...real.execution.result.contract,
+      operations: real.execution.result.contract.operations.map((operation, index) =>
+        index === 0 ? { ...operation, path: `/${'x'.repeat(16_380)}` } : operation) });
+    vi.spyOn(sourceRunner, 'runNestJsSourceAnalysisInternal').mockResolvedValueOnce({ ...real,
+      execution: { status: 'success', result: { ...real.execution.result, contract } } });
+    const exceeded = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', globalPrefix: '/api' } });
+    expect(exceeded.stages.implemented).toMatchObject({ status: 'failed', code: 'SOURCE_ROUTING_TRANSFORM_FAILED' });
+    expect(exceeded.comparisons.declaredAllowed.status).toMatch(/complete|partial/);
+    expect(exceeded.comparisons.implementedDeclared.status).toBe('failed');
+    expect(exceeded.evidence.source?.projectDigest).toBe(real.snapshotDigest && `sha256:${real.snapshotDigest}`);
+    expect(exceeded.evidence.routingAssumption?.comparisonContractDigest).toBeUndefined();
+  });
+
   test('finalizes real NestJS/OpenAPI/schema-2 workspace without changing its inputs or executing Source', async () => {
     const root = workspace();
     const names = ['openapi.yaml', 'refs/common.yaml', 'policy.yml', 'tsconfig.json', 'src/controller.ts'];

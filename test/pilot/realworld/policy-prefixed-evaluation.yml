@@ -1,0 +1,14 @@
+# Evaluation-only Policy in the explicit /api path domain; not upstream Policy.
+version: 2
+project: realworld-prefix-technical-pilot
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, POST, PUT, DELETE]
+  block:
+    header_missing: []
+routes:
+  - name: api-evaluation-domain
+    match:
+      path_prefixes: ["/api"]
+response_headers: {}

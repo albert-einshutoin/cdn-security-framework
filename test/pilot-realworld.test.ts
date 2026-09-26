@@ -12,11 +12,31 @@ const runner = require('./pilot/realworld/pilot.cjs') as {
 };
 const expectations = require('./pilot/realworld/expectations.json');
 const cases = require('./pilot/realworld/cases.json');
+const prefixCases = require('./pilot/realworld/prefix-cases.json');
 const originalOpenApi = require('./pilot/realworld/openapi-evaluation.json');
+const prefixedOpenApi = require('./pilot/realworld/openapi-prefixed-evaluation.json');
 const originalAuth = require('./pilot/realworld/auth-evaluation.json');
 const originalPolicy = 'GET, POST, PUT, DELETE';
 
 describe('fixed public NestJS Pilot harness', () => {
+  test('keeps P01 unchanged and declares P02-P05 against the fixed /api path domain', () => {
+    expect(cases.cases).toHaveLength(7);
+    expect(prefixCases.cases.map((entry: { name: string }) => entry.name)).toEqual([
+      'P02-correct-prefix', 'P03-omitted-prefix', 'P04-wrong-prefix', 'P05-controlled-drift',
+    ]);
+    expect(prefixCases.cases.map((entry: { prefix: string | null }) => entry.prefix))
+      .toEqual(['/api', null, '/wrong', '/api']);
+    for (const operation of expectations.scope.operations) {
+      expect(prefixedOpenApi.paths[`/api${operation.path}`]?.[operation.method.toLowerCase()]).toBeDefined();
+    }
+    const mutated = runner.mutate('controlled-prefix-drift', structuredClone(prefixedOpenApi),
+      require('node:fs').readFileSync('test/pilot/realworld/policy-prefixed-evaluation.yml', 'utf8'),
+      structuredClone(originalAuth));
+    expect(mutated.openapi.paths['/api/articles/feed']).toHaveProperty('post');
+    expect(mutated.openapi.paths).not.toHaveProperty('/api/profiles/{username}');
+    expect(mutated.policy).not.toContain('DELETE');
+  });
+
   test('keeps one fixed source snapshot and a prior independent scope', () => {
     runner.verifyArchive();
     expect(expectations.scope.operations).toHaveLength(19);

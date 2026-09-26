@@ -72,6 +72,56 @@ and auth kind express a user-provided static assumption. They do not prove the
 Guard body, token validation, middleware order, or runtime enforcement. Unknown
 Guards and other unresolved Source facts stay partial.
 
+With `--source`, add `--source-global-prefix /api` when **you have confirmed**
+that every compared Source route uses that one fixed global prefix. For example,
+`--source tsconfig.json --source-global-prefix api` and `/api` are equivalent.
+This is an explicit comparison assumption, not detection of `setGlobalPrefix`
+from bootstrap code. Omitting it keeps decorator-local routes and existing
+report identities. Supplying it without `--source` exits `2`, with empty stdout,
+before any input is loaded. Empty, root-only, trailing/repeated slash, URL,
+query, fragment, backslash, control, dot, percent, wildcard, dynamic parameter,
+and whitespace forms are rejected with a fixed diagnostic; no fallback applies.
+Only one or more ASCII `[A-Za-z0-9_-]` segments are accepted, with zero or one
+leading slash and a maximum canonical length of 256 characters. Case is
+preserved. Provider-token-like values are rejected before input loads.
+
+| Input | Result |
+| --- | --- |
+| `api`, `/api` | Both use `/api` |
+| `/API`, `/api/v1` | Preserve case and multiple fixed segments |
+| Empty, `/`, trailing or repeated slash | Exit `2` before analysis |
+| URL, encoded/dynamic/wildcard/dot segment, provider-token-like value | Exit `2` before analysis |
+| Canonical length above 256 | Exit `2` before analysis |
+
+Local `/` becomes `/api`, `/articles/{slug}` becomes
+`/api/articles/{slug}`, and an existing `/api/items` becomes `/api/api/items`.
+
+The original Source IR, input/project digest, auth configuration digest,
+file/line, and unknown/partial status remain unchanged. A comparison-only copy
+gets the prefix for Implemented–Declared and Implemented–Allowed; the OpenAPI
+and Policy inputs and Declared–Allowed comparison are unchanged. Put OpenAPI
+and Policy in the path domain you intend to compare; this option does not
+reinterpret Swagger servers/basePath or proxy rewrites. The internal routing
+assumption and comparison-contract digests are separate from the input and
+auth digests. Text/JSON previews, SARIF properties, Summary, and the dev CI
+record identify the explicit assumption safely. A prefixed route may change a
+Finding instanceId, so an old exact exception selector is not broadened
+automatically. This fixed-prefix mode does not support exclusions, URI
+versioning, multiple Nest apps, or reverse proxy rewrites. It does not prove
+runtime route reachability, middleware/Guard enforcement, or authentication.
+
+| Format | Explicit assumption display | Finding scope |
+| --- | --- | --- |
+| Text | Safe prefix in the bounded preview | Bounded Finding preview |
+| JSON | Safe prefix and routing/contract digests in the internal preview | Bounded Finding preview |
+| SARIF | Safe prefix and digests in internal tool properties; assumed routes on Source-derived results | Full result within reporter limits |
+| Summary | Safe prefix label | Top Findings only |
+
+The dev CI record stores the safe prefix and digests separately from the original
+Source project/auth digests. The Node 24 installed-package consumer checks
+prefix present/omitted/invalid, all four formats, and `--out` with the same tgz;
+the package acceptance gate rejects missing evidence.
+
 Text and JSON are bounded previews; JSON is not a stable complete public
 Source-aware schema. SARIF covers the complete result within existing reporter
 limits. Summary shows up to 10 Findings and 32 KiB. Findings and omissions may

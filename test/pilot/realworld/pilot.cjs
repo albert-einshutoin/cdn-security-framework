@@ -9,6 +9,7 @@ const path = require('node:path');
 const fixture = __dirname;
 const expectation = require('./expectations.json');
 const cases = require('./cases.json');
+const prefixCases = require('./prefix-cases.json');
 const archive = path.join(fixture, 'source.tar.gz');
 const originalLockSha = 'd5e2bbd08d770652e964b0f540b2c3253f948805eefa1bf6e912ecf6999e16c0';
 const preparedLockSha = '215fa0d16ea42b361e450c18eb219da73932658420dbf63933a131a5aca657e8';
@@ -114,6 +115,14 @@ function mutate(name, openapi, policy, auth) {
     case 'policy-method-block':
       policy = policy.replace('GET, POST, PUT, DELETE', 'GET, POST, PUT');
       break;
+    case 'controlled-prefix-drift': {
+      const route = openapi.paths['/api/articles/feed'];
+      route.post = route.get;
+      delete route.get;
+      delete openapi.paths['/api/profiles/{username}'];
+      policy = policy.replace('GET, POST, PUT, DELETE', 'GET, POST, PUT');
+      break;
+    }
     default: throw Error('PILOT_UNKNOWN_MUTATION');
   }
   return { openapi, policy, auth };
@@ -177,6 +186,51 @@ function verifyFindingTargets(scenario, report) {
     matchEach(rule('SC-EXPOSURE-004'), blocked, sourceLocation);
   }
 }
+function policyLocation(result, scenario, pointer) {
+  return [...(result.locations || []), ...(result.relatedLocations || [])].some(location =>
+    location.physicalLocation?.artifactLocation?.uri === `evaluation/${scenario}/policy.yml`
+      && location.logicalLocations?.some(logical => logical.fullyQualifiedName === pointer));
+}
+function explicitRoute(result) {
+  return result.properties?.sourceAware?.route;
+}
+function verifyPrefixTargets(scenario, report) {
+  const findings = report.runs[0].results || [];
+  const rule = id => findings.filter(result => result.ruleId === id);
+  const prefixed = op => ({ ...op, path: `/api${op.path === '/' ? '' : op.path}` });
+  const all = [...expectation.scope.operations, ...expectation.scope.evaluationOut];
+  const out = expectation.scope.evaluationOut.map(prefixed);
+  if (scenario.name === 'P02-correct-prefix') {
+    matchEach(rule('SC-INVENTORY-001'), out, (result, op) =>
+      sourceLocation(result, op) && explicitRoute(result)?.path === op.path);
+  } else if (scenario.name === 'P03-omitted-prefix' || scenario.name === 'P04-wrong-prefix') {
+    matchEach(rule('SC-INVENTORY-001'), all, (result, op) =>
+      sourceLocation(result, op) && (scenario.prefix === null
+        ? explicitRoute(result) === undefined
+        : explicitRoute(result)?.path === `${scenario.prefix}${op.path === '/' ? '' : op.path}`));
+    matchEach(rule('SC-INVENTORY-003'), expectation.scope.operations.map(prefixed), (result, op) =>
+      openApiLocation(result, scenario.name, op.method, op.path));
+  } else if (scenario.name === 'P05-controlled-drift') {
+    const missing = expectation.scope.operations.find(op =>
+      op.method === scenario.routeTarget.method && `/api${op.path}` === scenario.routeTarget.path);
+    const method = expectation.scope.operations.find(op =>
+      op.method === scenario.methodTarget.sourceMethod && `/api${op.path}` === scenario.methodTarget.path);
+    assert.ok(missing && method);
+    matchEach(rule('SC-INVENTORY-001'), [...out, prefixed(missing)], (result, op) =>
+      sourceLocation(result, op) && explicitRoute(result)?.path === op.path);
+    matchEach(rule('SC-INVENTORY-004'), [method], result =>
+      sourceLocation(result, method)
+      && openApiLocation(result, scenario.name, scenario.methodTarget.declaredMethod,
+        scenario.methodTarget.path)
+      && explicitRoute(result)?.path === scenario.methodTarget.path);
+    const blocked = expectation.scope.operations.filter(op => op.method === scenario.policyTarget.method);
+    assert.equal(blocked.length, 5);
+    matchEach(rule('SC-EXPOSURE-004'), blocked, (result, op) =>
+      sourceLocation(result, op) && policyLocation(result, scenario.name, scenario.policyTarget.pointer)
+      && explicitRoute(result)?.method === op.method
+      && explicitRoute(result)?.path === `/api${op.path}`);
+  } else throw Error('PILOT_UNKNOWN_PREFIX_CASE');
+}
 async function inspectOperations(installed, workspace) {
   const { runNestJsSourceAnalysisInternal } = require(path.join(installed, 'source/nestjs/analyzer.js'));
   const { DEFAULT_SOURCE_ANALYSIS_LIMITS } = require(path.join(installed, 'source-analysis/index.js'));
@@ -196,9 +250,10 @@ async function inspectOperations(installed, workspace) {
   for (const op of expectation.scope.evaluationOut) assert.ok(found.has(`${op.method} ${op.path}`));
   assert.deepEqual(result.unresolvedOperations, []);
   assert.deepEqual(result.diagnostics.map(d => d.code), ['SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED']);
-  return { metrics: result.metrics, matchedOperations: expectation.scope.operations.length,
+  return { contract: result.contract, summary: {
+    metrics: result.metrics, matchedOperations: expectation.scope.operations.length,
     evaluationOut: expectation.scope.evaluationOut.length, authUnknown: expectation.scope.operations.length,
-    diagnosticCodes: result.diagnostics.map(d => d.code) };
+    diagnosticCodes: result.diagnostics.map(d => d.code) } };
 }
 function candidateIdentity(candidate) {
   const metadata = JSON.parse(fs.readFileSync(path.join(candidate, 'metadata.json')));
@@ -229,10 +284,21 @@ async function evaluate(candidate, dependencies, workRoot, output) {
   const evaluation = path.join(workspace, 'evaluation');
   fs.mkdirSync(evaluation, { mode: 0o700 });
   const inputHashes = {};
-  for (const name of ['openapi-evaluation.json', 'policy-evaluation.yml', 'auth-evaluation.json']) {
+  for (const name of ['openapi-evaluation.json', 'policy-evaluation.yml', 'auth-evaluation.json',
+    'openapi-prefixed-evaluation.json', 'policy-prefixed-evaluation.yml']) {
     inputHashes[name] = copyInput(name, evaluation);
   }
-  const operations = await inspectOperations(installed, workspace);
+  const { contract: analyzedContract, summary: operations } = await inspectOperations(installed, workspace);
+  const beforeContract = JSON.stringify(analyzedContract);
+  const { prefixSourceContract } = require(path.join(installed, 'contract/source-global-prefix.js'));
+  const comparisonContract = prefixSourceContract(analyzedContract, '/api');
+  assert.equal(JSON.stringify(analyzedContract), beforeContract, 'PILOT_ORIGINAL_IR_CHANGED');
+  assert.equal(comparisonContract.operations.length, 21);
+  for (const op of expectation.scope.operations) {
+    const route = `/api${op.path}`;
+    assert.ok(comparisonContract.operations.some(item => item.method === op.method && item.path === route),
+      'PILOT_PREFIXED_SOURCE_ROUTE_MISSING');
+  }
   const cli = command(process.execPath, [path.join(installed, 'bin/cli.js'), 'contract', 'source-diff',
     '--workspace-root', workspace, '--openapi', 'evaluation/openapi-evaluation.json',
     '--policy', 'evaluation/policy-evaluation.yml', '--source', 'source/tsconfig.json',
@@ -240,6 +306,13 @@ async function evaluate(candidate, dependencies, workRoot, output) {
     '--current-date', '2026-09-25', '--fail-on', 'never', '--format', 'summary']);
   const { hasUnsafeSensitiveText } = require(path.join(installed, 'contract/sensitive-text.js'));
   assert.equal(hasUnsafeSensitiveText(cli.stdout), false, 'PILOT_CLI_PRIVACY');
+  const prefixCli = command(process.execPath, [path.join(installed, 'bin/cli.js'), 'contract', 'source-diff',
+    '--workspace-root', workspace, '--openapi', 'evaluation/openapi-prefixed-evaluation.json',
+    '--policy', 'evaluation/policy-prefixed-evaluation.yml', '--source', 'source/tsconfig.json',
+    '--source-auth-config', 'evaluation/auth-evaluation.json', '--source-global-prefix', '/api',
+    '--target', 'aws', '--current-date', '2026-09-25', '--fail-on', 'never', '--format', 'summary']);
+  assert.match(prefixCli.stdout, /explicit global prefix \/api/);
+  assert.equal(hasUnsafeSensitiveText(prefixCli.stdout), false, 'PILOT_PREFIX_CLI_PRIVACY');
   const results = [];
   for (const scenario of cases.cases) {
     const dir = path.join(evaluation, scenario.name);
@@ -289,6 +362,61 @@ async function evaluate(candidate, dependencies, workRoot, output) {
       targetsVerified: true,
       durationMs: run.durationMs, summarySha256: hash(summary), sarifSha256: hash(sarifText) });
   }
+  const prefixResults = [];
+  for (const scenario of prefixCases.cases) {
+    const dir = path.join(evaluation, scenario.name);
+    fs.mkdirSync(dir, { mode: 0o700 });
+    let openapi = JSON.parse(fs.readFileSync(path.join(evaluation, 'openapi-prefixed-evaluation.json')));
+    let policy = fs.readFileSync(path.join(evaluation, 'policy-prefixed-evaluation.yml'), 'utf8');
+    let auth = JSON.parse(fs.readFileSync(path.join(evaluation, 'auth-evaluation.json')));
+    ({ openapi, policy, auth } = mutate(scenario.change, openapi, policy, auth));
+    fs.writeFileSync(path.join(dir, 'openapi.json'), JSON.stringify(openapi) + '\n', { flag: 'wx' });
+    fs.writeFileSync(path.join(dir, 'policy.yml'), policy, { flag: 'wx' });
+    fs.writeFileSync(path.join(dir, 'auth.json'), JSON.stringify(auth) + '\n', { flag: 'wx' });
+    const config = { workspaceRoot: workspace, openapi: `evaluation/${scenario.name}/openapi.json`,
+      policy: `evaluation/${scenario.name}/policy.yml`, target: 'aws', source: 'source/tsconfig.json',
+      sourceAuthConfig: `evaluation/${scenario.name}/auth.json`, currentDate: '2026-09-25',
+      failOn: 'never', format: 'summary',
+      ...(scenario.prefix === null ? {} : { sourceGlobalPrefix: scenario.prefix }) };
+    fs.writeFileSync(path.join(dir, 'config.json'), JSON.stringify(config) + '\n', { flag: 'wx' });
+    const reports = path.join(workspace, 'reports', scenario.name);
+    fs.mkdirSync(reports, { recursive: true, mode: 0o700 });
+    const stage = path.join(workRoot, 'stage', scenario.name);
+    fs.mkdirSync(stage, { recursive: true, mode: 0o700 });
+    const env = { ...process.env, NODE_PATH: '', NODE_OPTIONS: '',
+      GITHUB_STEP_SUMMARY: path.join(dir, 'step-summary.md'), GITHUB_OUTPUT: path.join(dir, 'step-output.txt') };
+    const run = runDriver(installed, 'run', [path.join(dir, 'config.json'), candidate, reports], env);
+    assert.match(run.stdout, /^CI_ANALYSIS_RECORDED exit=0\n$/);
+    const recordPath = path.join(reports, 'ci-record.json');
+    const record = JSON.parse(fs.readFileSync(recordPath));
+    assert.equal(record.analysis.exitCode, 0);
+    assert.equal(record.analysis.status, 'partial');
+    assert.equal(record.candidate.sha256, metadata.sha256);
+    assert.equal(record.routingAssumption?.globalPrefix, scenario.prefix ?? undefined);
+    runDriver(installed, 'publish', [recordPath, candidate, stage], env);
+    runDriver(installed, 'verify-stage', [recordPath, candidate, path.join(stage, 'delivery.json')], env);
+    const delivery = JSON.parse(fs.readFileSync(path.join(stage, 'delivery.json')));
+    assert.equal(delivery.code, 'CI_OK');
+    assert.equal(delivery.summaryTransfer, 'success');
+    assert.equal(delivery.artifactListVerified, true);
+    const summary = fs.readFileSync(path.join(reports, 'summary.md'), 'utf8');
+    const sarifText = fs.readFileSync(path.join(reports, 'source-aware.sarif'), 'utf8');
+    assert.equal(hasUnsafeSensitiveText(summary), false, 'PILOT_PREFIX_SUMMARY_PRIVACY');
+    assert.equal(hasUnsafeSensitiveText(sarifText), false, 'PILOT_PREFIX_SARIF_PRIVACY');
+    assert.equal(fs.readFileSync(env.GITHUB_STEP_SUMMARY, 'utf8'), summary);
+    const sarif = JSON.parse(sarifText);
+    assert.equal(sarif.runs[0].tool.driver.properties.sourceAware.metadata.routingAssumption?.globalPrefix,
+      scenario.prefix ?? undefined);
+    const counts = ruleCounts(sarif);
+    checkExpectedCounts(counts, scenario.expect);
+    verifyPrefixTargets(scenario, sarif);
+    prefixResults.push({ case: scenario.name, prefix: scenario.prefix,
+      analysisExit: record.analysis.exitCode, analysisStatus: record.analysis.status,
+      stage: delivery.code, findings: counts, targetsVerified: true,
+      routingDigest: record.routingAssumption?.digest ?? null,
+      comparisonContractDigest: record.routingAssumption?.comparisonContractDigest ?? null,
+      durationMs: run.durationMs, summarySha256: hash(summary), sarifSha256: hash(sarifText) });
+  }
   for (const [name, digest] of sourceHashes) assert.equal(fileHash(path.join(source, name)), digest);
   for (const [name, digest] of Object.entries(inputHashes)) assert.equal(fileHash(path.join(evaluation, name)), digest);
   const safe = { schemaVersion: 1, code: 'PILOT_PASS', source: expectation.source,
@@ -296,7 +424,10 @@ async function evaluate(candidate, dependencies, workRoot, output) {
       run: metadata.run, attempt: metadata.attempt, tgzSha256: metadata.sha256,
       lockSha256: metadata.lockSha256 }, targetLockSha256: preparedLockSha,
     inputHashes, operations, cli: { exit: 0, durationMs: cli.durationMs,
-      summarySha256: hash(cli.stdout) }, cases: results };
+      summarySha256: hash(cli.stdout) }, cases: results,
+    prefixEvaluation: { assumption: '/api', basis: 'fixed src/main.ts:8 (assessor-declared)',
+      cli: { exit: 0, durationMs: prefixCli.durationMs, summarySha256: hash(prefixCli.stdout) },
+      cases: prefixResults } };
   assert.equal(hasUnsafeSensitiveText(JSON.stringify(safe)), false, 'PILOT_OUTPUT_PRIVACY');
   fs.writeFileSync(output, JSON.stringify(safe, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
   process.stdout.write('PILOT_PASS\n');
@@ -311,7 +442,7 @@ function verifySafeResult(candidate, workRoot, output, stage) {
   assert.equal(hasUnsafeSensitiveText(safeText), false);
   const safe = JSON.parse(safeText);
   exactKeys(safe, ['schemaVersion', 'code', 'source', 'candidate',
-    'targetLockSha256', 'inputHashes', 'operations', 'cli', 'cases']);
+    'targetLockSha256', 'inputHashes', 'operations', 'cli', 'cases', 'prefixEvaluation']);
   assert.equal(safe.schemaVersion, 1);
   assert.equal(safe.code, 'PILOT_PASS');
   assert.deepEqual(safe.source, expectation.source);
@@ -320,7 +451,8 @@ function verifySafeResult(candidate, workRoot, output, stage) {
     tgzSha256: metadata.sha256, lockSha256: metadata.lockSha256 });
   assert.equal(safe.targetLockSha256, preparedLockSha);
   const expectedHashes = Object.fromEntries(['openapi-evaluation.json', 'policy-evaluation.yml',
-    'auth-evaluation.json'].map(name => [name, fileHash(path.join(fixture, name))]));
+    'auth-evaluation.json', 'openapi-prefixed-evaluation.json',
+    'policy-prefixed-evaluation.yml'].map(name => [name, fileHash(path.join(fixture, name))]));
   assert.deepEqual(safe.inputHashes, expectedHashes);
   exactKeys(safe.operations, ['metrics', 'matchedOperations', 'evaluationOut', 'authUnknown', 'diagnosticCodes']);
   exactKeys(safe.operations.metrics, ['files', 'totalSourceBytes', 'largestFileBytes',
@@ -355,6 +487,45 @@ function verifySafeResult(candidate, workRoot, output, stage) {
     checkExpectedCounts(item.findings, { ...cases.baseline,
       ...cases.cases.find(scenario => scenario.name === item.case).expect });
     verifyFindingTargets(cases.cases.find(scenario => scenario.name === item.case), sarif);
+    const delivery = JSON.parse(fs.readFileSync(path.join(workRoot, 'stage', item.case, 'delivery.json')));
+    assert.equal(delivery.code, 'CI_OK');
+    assert.deepEqual(delivery.files, ['summary.md', 'source-aware.sarif', 'ci-record.json']);
+  }
+  exactKeys(safe.prefixEvaluation, ['assumption', 'basis', 'cli', 'cases']);
+  assert.equal(safe.prefixEvaluation.assumption, '/api');
+  assert.equal(safe.prefixEvaluation.basis, 'fixed src/main.ts:8 (assessor-declared)');
+  exactKeys(safe.prefixEvaluation.cli, ['exit', 'durationMs', 'summarySha256']);
+  assert.equal(safe.prefixEvaluation.cli.exit, 0);
+  assert.ok(Number.isSafeInteger(safe.prefixEvaluation.cli.durationMs)
+    && safe.prefixEvaluation.cli.durationMs >= 0);
+  assert.match(safe.prefixEvaluation.cli.summarySha256, /^[a-f0-9]{64}$/);
+  assert.deepEqual(safe.prefixEvaluation.cases.map(item => item.case),
+    prefixCases.cases.map(item => item.name));
+  for (const item of safe.prefixEvaluation.cases) {
+    exactKeys(item, ['case', 'prefix', 'analysisExit', 'analysisStatus', 'stage',
+      'findings', 'targetsVerified', 'routingDigest', 'comparisonContractDigest',
+      'durationMs', 'summarySha256', 'sarifSha256']);
+    const scenario = prefixCases.cases.find(entry => entry.name === item.case);
+    assert.ok(scenario);
+    assert.equal(item.prefix, scenario.prefix);
+    assert.equal(item.analysisExit, 0);
+    assert.equal(item.analysisStatus, 'partial');
+    assert.equal(item.stage, 'CI_OK');
+    assert.equal(item.targetsVerified, true);
+    for (const digest of [item.routingDigest, item.comparisonContractDigest]) {
+      if (scenario.prefix === null) assert.equal(digest, null);
+      else assert.match(digest, /^sha256:[a-f0-9]{64}$/);
+    }
+    assert.ok(Number.isSafeInteger(item.durationMs) && item.durationMs >= 0);
+    assert.match(item.summarySha256, /^[a-f0-9]{64}$/);
+    assert.match(item.sarifSha256, /^[a-f0-9]{64}$/);
+    const reportDir = path.join(workRoot, 'workspace/reports', item.case);
+    assert.equal(fileHash(path.join(reportDir, 'summary.md')), item.summarySha256);
+    assert.equal(fileHash(path.join(reportDir, 'source-aware.sarif')), item.sarifSha256);
+    const sarif = JSON.parse(fs.readFileSync(path.join(reportDir, 'source-aware.sarif')));
+    assert.deepEqual(item.findings, ruleCounts(sarif));
+    checkExpectedCounts(item.findings, scenario.expect);
+    verifyPrefixTargets(scenario, sarif);
     const delivery = JSON.parse(fs.readFileSync(path.join(workRoot, 'stage', item.case, 'delivery.json')));
     assert.equal(delivery.code, 'CI_OK');
     assert.deepEqual(delivery.files, ['summary.md', 'source-aware.sarif', 'ci-record.json']);

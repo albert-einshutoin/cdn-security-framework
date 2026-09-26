@@ -50,17 +50,35 @@ try {
         : save ? 'cdn-security-source-save' : 'node',
         exit: expectedExit, expectedExit, durationMs: 1 };
     });
+    if (row === '24') steps.push(...[0, 0, 0, 0, 0, 2, 2, 0].map(expectedExit => ({
+      command: 'cdn-security-source-prefix', exit: expectedExit, expectedExit, durationMs: 1,
+    })));
     return { ...m, runtime: { executable: 'node', sha256: 'f'.repeat(64), platform: 'linux', arch: 'x64' },
       row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2',
       switchVerified: true, resolution, dependencies, steps,
       checks: lower ? ['node-rejection','resolution','no-side-effects']
-        : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli','source-auth-config','source-safe-output'],
-      ...(row === '24' ? { journey } : {}) };
+        : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli','source-auth-config','source-safe-output',
+          ...(row === '24' ? ['source-global-prefix'] : [])],
+      ...(row === '24' ? { journey, prefixProof: { globalPrefix: '/api' as const,
+        projectDigest: `sha256:${'a'.repeat(64)}`, configDigest: `sha256:${'b'.repeat(64)}`,
+        routingDigest: `sha256:${'c'.repeat(64)}`,
+        comparisonContractDigest: `sha256:${'d'.repeat(64)}`,
+        savedSha256: 'e'.repeat(64), inputSha256: 'f'.repeat(64),
+        unprefixedInventory: { sourceOnly: 2, declaredOnly: 1, methodMismatch: 1 },
+        prefixedInventory: { sourceOnly: 6, declaredOnly: 5, methodMismatch: 0 } } } : {}) };
   });
   fs.writeFileSync(path.join(temp, 'metadata.json'), JSON.stringify(m));
   test('same candidate and complete rows pass', () => { verifyTarball(temp, e); aggregate(m, rows, e, ['success','success']); });
   test('missing internal Source-aware smoke command fails closed', () => assert.throws(() => aggregate(m,
     rows.map(r => r.row === '24' ? { ...r, steps: r.steps.slice(0, 12) } : r), e, ['success','success'])));
+  test('missing installed prefix command fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, steps: r.steps.filter(s => s.command !== 'cdn-security-source-prefix') } : r), e, ['success','success'])));
+  test('missing installed prefix identity fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, prefixProof: undefined } : r), e, ['success','success'])));
+  test('incorrect decorator-local inventory fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, prefixProof: { ...r.prefixProof!,
+      unprefixedInventory: { sourceOnly: 6, declaredOnly: 5, methodMismatch: 0 } } } : r), e,
+    ['success','success'])));
   test('changed tarball fails', () => { fs.writeFileSync(path.join(temp, 'candidate.tgz'), 'tampered!'); assert.throws(() => verifyTarball(temp, e)); fs.writeFileSync(path.join(temp, 'candidate.tgz'), 'candidate'); });
   test('missing tarball fails', () => { fs.renameSync(path.join(temp,'candidate.tgz'),path.join(temp,'saved')); assert.throws(() => verifyTarball(temp,e));fs.renameSync(path.join(temp,'saved'),path.join(temp,'candidate.tgz')); });
   test('different source fails', () => assert.throws(() => verifyTarball(temp, { ...e, source: 'c'.repeat(40) })));
