@@ -9,7 +9,7 @@ export const matrixRows = ['20.17.0', '22', '24', '18.20.8', '20.16.0'] as const
 type Identity = { schemaVersion: 1; source: string; tree: string; harness: string; run: string; attempt: string; sha256: string; size: number; lockSha256: string;
   schemaSha256: string; validatorSha256: string };
 type Step = { command: string; exit: number; expectedExit: number; durationMs: number };
-type Result = Identity & { runtime: { executable: string; sha256: string; platform: string; arch: string }; row: string; status: 'pass'; node: string; npm: string; switchVerified?: boolean; checks: string[]; resolution: string[]; steps: Step[]; dependencies: Record<string, string>; journey?: import('./package-journey').JourneyResult; prefixProof?: import('./package-smoke-tests').PrefixProof };
+type Result = Identity & { runtime: { executable: string; sha256: string; platform: string; arch: string }; row: string; status: 'pass'; node: string; npm: string; switchVerified?: boolean; checks: string[]; resolution: string[]; steps: Step[]; dependencies: Record<string, string>; journey?: import('./package-journey').JourneyResult; prefixProof?: import('./package-smoke-tests').PrefixProof; controllerOptionsProof?: import('./package-smoke-tests').ControllerOptionsProof };
 const root = path.resolve(__dirname, '..');
 const OFFICIAL_SARIF_SCHEMA_SHA256 = 'c3b4bb2d6093897483348925aaa73af03b3e3f4bd4ca38cef26dcb4212a2682e';
 const sha = (file: string) => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
@@ -68,12 +68,12 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
     assert.ok(r.dependencies && Object.keys(r.dependencies).sort().join() === Object.keys(pkg.dependencies).sort().join(), 'missing dependency evidence');
     assert.ok(Object.values(r.dependencies).every(v => /^\d+\.\d+\.\d+(?:[-+][a-zA-Z0-9.-]+)?$/.test(v)), 'invalid dependency version');
     const lower = row === '18.20.8' || row === '20.16.0';
-    assert.ok(Array.isArray(r.steps) && r.steps.length === (lower ? 26 : row === '24' ? 45 : 37), 'missing command evidence');
-    assert.ok(r.steps.every(s => s && typeof s.command === 'string' && /^[a-zA-Z0-9_.-]+$/.test(s.command) && Number.isFinite(s.durationMs) && s.durationMs >= 0 && s.exit === s.expectedExit && (s.expectedExit === 0 || (lower && s.expectedExit === 1) || (s.command === 'cdn-security-source-diff' && [1, 2, 3].includes(s.expectedExit)) || (s.command === 'cdn-security-source-auth-config' && s.expectedExit === 2) || (s.command === 'cdn-security-source-save' && [1, 2, 3].includes(s.expectedExit)) || (s.command === 'cdn-security-source-prefix' && row === '24' && s.expectedExit === 2))), 'invalid command evidence');
+    assert.ok(Array.isArray(r.steps) && r.steps.length === (lower ? 26 : row === '24' ? 55 : 37), 'missing command evidence');
+    assert.ok(r.steps.every(s => s && typeof s.command === 'string' && /^[a-zA-Z0-9_.-]+$/.test(s.command) && Number.isFinite(s.durationMs) && s.durationMs >= 0 && s.exit === s.expectedExit && (s.expectedExit === 0 || (lower && s.expectedExit === 1) || (s.command === 'cdn-security-source-diff' && [1, 2, 3].includes(s.expectedExit)) || (s.command === 'cdn-security-source-auth-config' && s.expectedExit === 2) || (s.command === 'cdn-security-source-save' && [1, 2, 3].includes(s.expectedExit)) || (s.command === 'cdn-security-source-prefix' && row === '24' && s.expectedExit === 2) || (s.command === 'cdn-security-controller-options' && row === '24' && s.expectedExit === 1))), 'invalid command evidence');
     if (!lower) assert.deepEqual(r.steps.filter(s => s.command === 'cdn-security-source-diff').map(s => s.expectedExit), [0, 0, 0, 0, 1, 2, 3], 'missing installed CLI exit proof');
     if (!lower) assert.deepEqual(r.steps.filter(s => s.command === 'cdn-security-source-auth-config').map(s => s.expectedExit), [0, 0, 0, 0, 0, 0, 2, 2], 'missing configured CLI exit proof');
     if (!lower) assert.deepEqual(r.steps.filter(s => s.command === 'cdn-security-source-save').map(s => s.expectedExit), [0, 0, 0, 0, 0, 1, 2, 2, 3], 'missing installed safe-save exit proof');
-    assert.deepEqual(r.checks, lower ? ['node-rejection', 'resolution', 'no-side-effects'] : ['package-smoke', 'resolution', 'schemas', 'official-sarif-schema', 'source-aware-cli', 'source-auth-config', 'source-safe-output', ...(row === '24' ? ['source-global-prefix'] : [])]);
+    assert.deepEqual(r.checks, lower ? ['node-rejection', 'resolution', 'no-side-effects'] : ['package-smoke', 'resolution', 'schemas', 'official-sarif-schema', 'source-aware-cli', 'source-auth-config', 'source-safe-output', ...(row === '24' ? ['source-global-prefix', 'source-controller-options'] : [])]);
     if (row === '24') {
       assert.deepEqual(r.steps.filter(s => s.command === 'cdn-security-source-prefix').map(s => s.expectedExit),
         [0, 0, 0, 0, 0, 2, 2, 0], 'missing installed prefix scenarios');
@@ -93,6 +93,20 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
         'missing decorator-local comparison evidence');
       assert.deepEqual(prefix.prefixedInventory, { sourceOnly: 6, declaredOnly: 5, methodMismatch: 0 },
         'missing explicit-prefix comparison evidence');
+      assert.deepEqual(r.steps.filter(s => s.command === 'cdn-security-controller-options').map(s => s.expectedExit),
+        [0, 0, 0, 0, 0, 1], 'missing installed Controller object CLI scenarios');
+      assert.deepEqual(r.steps.filter(s => s.command === 'source-aware-ci-object').map(s => s.expectedExit),
+        [0, 0, 0, 0], 'missing installed Controller object CI driver scenarios');
+      const object = r.controllerOptionsProof;
+      assert.ok(object && Object.keys(object).sort().join() === [
+        'inputSha256', 'savedSha256', 'ciRecordSha256', 'routes', 'unsupportedCode', 'ciDelivery',
+      ].sort().join(), 'missing installed Controller object identity');
+      for (const key of ['inputSha256', 'savedSha256', 'ciRecordSha256'] as const) {
+        assert.match(object[key], /^[a-f0-9]{64}$/);
+      }
+      assert.deepEqual(object.routes, ['GET /users/items']);
+      assert.equal(object.unsupportedCode, 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');
+      assert.equal(object.ciDelivery, 'CI_OK');
       const j = r.journey;
       const { requiredChecks: required, requiredStepIds, requiredInputKeys, requiredOutputKeys, expectedFindingProof } = require('./package-journey') as typeof import('./package-journey');
       assert.ok(j && j.status === 'pass' && Array.isArray(j.checks), 'missing onboarding acceptance');
@@ -207,6 +221,7 @@ function consume(directory: string, row: string, output: string): void {
   let steps: Step[] = [];
   let journey: import('./package-journey').JourneyResult | undefined;
   let prefixProof: import('./package-smoke-tests').PrefixProof | undefined;
+  let controllerOptionsProof: import('./package-smoke-tests').ControllerOptionsProof | undefined;
   if (rejected) steps = rejection(consumer);
   else {
     const smoke = require(path.join(directory, 'scripts/package-smoke-tests.js'));
@@ -223,11 +238,15 @@ function consume(directory: string, row: string, output: string): void {
         (value: unknown) => assert.ok(validate(value), 'installed prefixed SARIF failed pinned official schema'));
       steps.push(...prefix.steps);
       prefixProof = prefix.proof;
+      const object = smoke.smokeInstalledControllerOptions(consumer,
+        (value: unknown) => assert.ok(validate(value), 'installed object SARIF failed pinned official schema'));
+      steps.push(...object.steps);
+      controllerOptionsProof = object.proof;
       journey = JSON.parse(run(process.execPath, [path.join(directory, 'scripts/package-journey.js'), directory,
         path.join(consumer, 'node_modules/cdn-security-framework/examples')], consumer));
     }
   }
-  const result: Result = { ...m, runtime: { executable: path.basename(process.execPath), sha256: sha(process.execPath), platform: process.platform, arch: process.arch }, row, status: 'pass', node: process.versions.node, npm: run('npm', ['--version'], consumer).trim(), checks: rejected ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli','source-auth-config','source-safe-output', ...(row === '24' ? ['source-global-prefix'] : [])], ...details, steps, ...(journey ? { journey } : {}), ...(prefixProof ? { prefixProof } : {}) };
+  const result: Result = { ...m, runtime: { executable: path.basename(process.execPath), sha256: sha(process.execPath), platform: process.platform, arch: process.arch }, row, status: 'pass', node: process.versions.node, npm: run('npm', ['--version'], consumer).trim(), checks: rejected ? ['node-rejection','resolution','no-side-effects'] : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli','source-auth-config','source-safe-output', ...(row === '24' ? ['source-global-prefix','source-controller-options'] : [])], ...details, steps, ...(journey ? { journey } : {}), ...(prefixProof ? { prefixProof } : {}), ...(controllerOptionsProof ? { controllerOptionsProof } : {}) };
   if (rejected && process.env.CSF_SWITCH_PROOF) {
     const switched = read(process.env.CSF_SWITCH_PROOF) as Result;
     verifyIdentity(switched, expected());

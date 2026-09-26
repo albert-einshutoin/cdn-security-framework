@@ -136,6 +136,20 @@ beforeAll(() => {
 afterAll(() => { if (temp) fs.rmSync(temp, { recursive: true, force: true }); });
 
 describe('installed dev-only Source-aware CI connection', () => {
+  it('uses the installed candidate for a bounded Controller object CLI and CI proof', () => {
+    const smoke: typeof import('../../src/scripts/package-smoke-tests') =
+      require(path.join(repo, 'scripts/package-smoke-tests.js'));
+    const consumer = path.join(candidate, 'consumer');
+    const validator = require(path.join(candidate, 'validation/official-sarif-test-validator.cjs'))
+      .createOfficialSarifValidator(path.join(candidate, 'validation/sarif-schema-2.1.0.json'));
+    const proof = smoke.smokeInstalledControllerOptions(consumer,
+      (value) => expect(validator(value)).toBe(true), env());
+    expect(proof.steps.map(({ expectedExit }) => expectedExit)).toEqual([
+      0, 0, 0, 0, 0, 1, 0, 0, 0, 0,
+    ]);
+    expect(proof.proof).toMatchObject({ routes: ['GET /users/items'], ciDelivery: 'CI_OK' });
+  }, 120_000);
+
   it('records explicit routing separately and rejects a no-Source JSON prefix before reports', () => {
     const { output, record } = runCase('prefix', { sourceGlobalPrefix: 'api' });
     expect(record.routingAssumption).toMatchObject({ globalPrefix: '/api', origin: 'explicit-option' });

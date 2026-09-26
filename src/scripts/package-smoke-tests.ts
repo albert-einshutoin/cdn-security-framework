@@ -1049,6 +1049,158 @@ export function smokeInstalledPrefix(consumer: string, validateSarif: (value: un
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 }
 
+export type ControllerOptionsProof = {
+  inputSha256: string; savedSha256: string; ciRecordSha256: string;
+  routes: string[]; unsupportedCode: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR';
+  ciDelivery: 'CI_OK';
+};
+
+/** A small independently authored object corpus against the one installed candidate. */
+export function smokeInstalledControllerOptions(consumer: string, validateSarif: (value: unknown) => void,
+  environment: NodeJS.ProcessEnv = process.env):
+  { steps: typeof smokeSteps; proof: ControllerOptionsProof } {
+  const pkgRoot = path.join(consumer, 'node_modules', packageName);
+  const candidate = path.dirname(consumer);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-installed-controller-object-'));
+  const digest = (value: Buffer | string) => crypto.createHash('sha256').update(value).digest('hex');
+  const write = (name: string, value: string) => {
+    const file = path.join(root, name);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, value);
+  };
+  const inputNames = ['tsconfig.json', 'src/controller.ts', 'openapi.yaml', 'policy.yml'];
+  try {
+    write('tsconfig.json', JSON.stringify({ compilerOptions: {
+      experimentalDecorators: true, moduleResolution: 'node', noLib: true, types: [],
+    }, files: ['src/controller.ts'] }));
+    write('src/controller.ts', `import { Controller, Get } from '@nestjs/common';
+@Controller({ path: 'users' }) class Users { @Get('items') read() {} }
+@Controller({ path: 'locked', version: '1' }) class Versioned { @Get() read() {} }
+throw new Error('Source executed');\n`);
+    write('openapi.yaml', `openapi: 3.0.3
+info: {title: Object fixture, version: 1.0.0}
+paths:
+  /declared-only:
+    get: {responses: {'200': {description: OK}}}
+`);
+    write('policy.yml', `version: 2
+defaults: {mode: enforce}
+request:
+  allow_methods: [GET]
+  block: {header_missing: []}
+routes: []
+response_headers: {}
+`);
+    const dependency = path.join(root, 'node_modules/@nestjs/common');
+    fs.mkdirSync(dependency, { recursive: true });
+    fs.writeFileSync(path.join(dependency, 'package.json'), JSON.stringify({
+      name: '@nestjs/common', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+    }));
+    fs.writeFileSync(path.join(dependency, 'index.js'), 'throw new Error("dependency executed");\n');
+    fs.writeFileSync(path.join(dependency, 'index.d.ts'), `export declare function Controller(value?: string | {path?: string; version?: string}): ClassDecorator;
+export declare function Get(path?: string): MethodDecorator;\n`);
+    const inputSha256 = digest(JSON.stringify(inputNames.map(name => digest(fs.readFileSync(path.join(root, name))))));
+    const steps: typeof smokeSteps = [];
+    const invoke = (script: string, args: string[], expectedExit: number, env = environment) => {
+      const start = process.hrtime.bigint();
+      const result = childProcess.spawnSync(process.execPath, [script, ...args], {
+        cwd: root, encoding: 'utf8', timeout: 30_000, maxBuffer: 8 * 1024 * 1024,
+        env: { ...env, NODE_PATH: '', NODE_OPTIONS: '' },
+      });
+      steps.push({ command: script.endsWith('/bin/cli.js') ? 'cdn-security-controller-options'
+        : 'source-aware-ci-object', exit: result.status ?? -1, expectedExit,
+      durationMs: Number(process.hrtime.bigint() - start) / 1e6 });
+      assert.equal(result.error, undefined, 'installed object process error');
+      assert.equal(result.signal, null, 'installed object process signal');
+      assert.equal(result.status, expectedExit, `installed object command exit: ${result.stderr}`);
+      assert.ok(!(result.stdout + result.stderr).includes(root), 'installed object leaked workspace path');
+      return result;
+    };
+    const cli = path.join(pkgRoot, 'bin/cli.js');
+    const base = ['contract', 'source-diff', '--workspace-root', root, '--openapi', 'openapi.yaml',
+      '--policy', 'policy.yml', '--target', 'aws', '--source', 'tsconfig.json',
+      '--current-date', '2026-09-25', '--fail-on', 'never'];
+    let sarif: any;
+    let json: any;
+    let routes: string[] = [];
+    let textReport = '';
+    let summaryReport = '';
+    for (const format of ['text', 'json', 'sarif', 'summary']) {
+      const result = invoke(cli, [...base, '--format', format], 0);
+      assert.equal(result.stderr, '');
+      assert.ok(result.stdout.length > 0, 'missing installed object report');
+      if (format === 'sarif') { sarif = JSON.parse(result.stdout); validateSarif(sarif); }
+      if (format === 'json') {
+        const report = JSON.parse(result.stdout);
+        json = report;
+        assert.equal(report.stages.implemented.status, 'partial');
+        assert.equal(report.omittedFindings, 0, 'installed object report omitted findings');
+        routes = report.findings.active.filter((finding: any) =>
+          finding.ruleId === 'SC-INVENTORY-001').map((finding: any) =>
+          `${finding.route?.method} ${finding.route?.path}`);
+        assert.deepEqual(routes, ['GET /users/items'], 'installed object routes changed');
+        assert.ok(!report.findings.active.some((finding: any) => finding.route?.path === '/locked'),
+          'versioned Controller became an ordinary route');
+      }
+      if (format === 'text') textReport = result.stdout;
+      if (format === 'summary') summaryReport = result.stdout;
+    }
+    const saved = invoke(cli, [...base, '--format', 'json', '--out', 'object-report.json'], 0);
+    assert.equal(saved.stdout, ''); assert.equal(saved.stderr, '');
+    const savedBytes = fs.readFileSync(path.join(root, 'object-report.json'));
+    assert.equal(JSON.parse(savedBytes.toString()).stages.implemented.status, 'partial');
+    invoke(cli, [...base, '--format', 'summary', '--fail-on', 'warning'], 1);
+    const metadata = sarif.runs[0].tool.driver.properties.sourceAware.metadata;
+    const sarifState = sarif.runs[0].tool.driver.properties.sourceAware;
+    assert.ok(json.stages.implemented.diagnosticCodes.includes('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'));
+    assert.equal(json.summary.suppressed, 0);
+    assert.ok(textReport.includes('stage implemented=partial')
+      && textReport.includes('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR')
+      && textReport.includes(`suppressed=${json.summary.suppressed}`));
+    assert.ok(summaryReport.includes('| implemented | partial |')
+      && summaryReport.includes('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR')
+      && summaryReport.includes(`| Suppressed | ${json.summary.suppressed} |`));
+    assert.equal(sarifState.stages.implemented.status, 'partial');
+    assert.ok(sarifState.stages.implemented.diagnosticCodes.includes('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'));
+    assert.equal(sarifState.summary.suppressed, json.summary.suppressed);
+    const results = sarif.runs[0].results;
+    assert.ok(results.some((finding: any) => finding.ruleId === 'SC-INVENTORY-001'
+      && finding.properties?.sourceAware?.comparisons?.includes('implementedDeclared')
+      && finding.relatedLocations?.some((location: any) =>
+        location.physicalLocation?.artifactLocation?.uri === 'src/controller.ts')));
+    assert.ok(results.some((finding: any) => finding.ruleId === 'SC-INVENTORY-003'
+      && finding.message.text.includes('absence is not proven')));
+    assert.equal(results.filter((finding: any) => finding.ruleId === 'SC-INVENTORY-001').length, 1);
+    assert.ok(metadata.source && !JSON.stringify(metadata).includes(root));
+    const driver = path.join(pkgRoot, 'scripts/source-aware-ci.js');
+    const output = path.join(root, 'ci-output');
+    const stage = path.join(root, 'ci-stage');
+    fs.mkdirSync(output); fs.mkdirSync(stage);
+    const config = path.join(root, 'ci-config.json');
+    fs.writeFileSync(config, JSON.stringify({ workspaceRoot: root, openapi: 'openapi.yaml',
+      policy: 'policy.yml', target: 'aws', source: 'tsconfig.json',
+      currentDate: '2026-09-25', failOn: 'never', format: 'summary' }));
+    const record = path.join(output, 'ci-record.json');
+    const delivery = path.join(stage, 'delivery.json');
+    const summaryPath = path.join(root, 'ci-step-summary.md');
+    const ciEnv = { ...environment, GITHUB_STEP_SUMMARY: summaryPath };
+    invoke(driver, ['run', config, candidate, output], 0, ciEnv);
+    invoke(driver, ['publish', record, candidate, stage], 0, ciEnv);
+    invoke(driver, ['verify-stage', record, candidate, delivery], 0, ciEnv);
+    invoke(driver, ['gate', record, candidate, delivery], 0, { ...ciEnv,
+      CSF_PRODUCER_STATE: 'success', CSF_ACCEPTANCE_STATE: 'success',
+      CSF_ANALYZE_OUTCOME: 'success', CSF_PUBLISH_OUTCOME: 'success',
+      CSF_STAGE_OUTCOME: 'success', CSF_ARTIFACT_OUTCOME: 'success' });
+    assert.equal(JSON.parse(fs.readFileSync(delivery, 'utf8')).code, 'CI_OK');
+    validateSarif(JSON.parse(fs.readFileSync(path.join(output, 'source-aware.sarif'), 'utf8')));
+    assert.equal(digest(JSON.stringify(inputNames.map(name => digest(fs.readFileSync(path.join(root, name)))))),
+      inputSha256, 'installed object command changed input');
+    return { steps, proof: { inputSha256, savedSha256: digest(savedBytes),
+      ciRecordSha256: digest(fs.readFileSync(record)), routes,
+      unsupportedCode: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', ciDelivery: 'CI_OK' } };
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+}
+
 if (require.main === module) {
 assertPackageNegativeCases();
 
