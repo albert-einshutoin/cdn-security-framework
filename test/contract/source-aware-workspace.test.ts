@@ -32,7 +32,7 @@ function workspace(): string {
   fs.mkdirSync(dependency, { recursive: true });
   fs.writeFileSync(path.join(dependency, 'package.json'), JSON.stringify({ name: '@nestjs/common', version: '1.0.0', main: 'index.js', types: 'index.d.ts' }));
   fs.writeFileSync(path.join(dependency, 'index.js'), 'throw new Error("Source executed");\n');
-  fs.writeFileSync(path.join(dependency, 'index.d.ts'), `export declare function Controller(path?: string): ClassDecorator;
+  fs.writeFileSync(path.join(dependency, 'index.d.ts'), `export declare function Controller(path?: string | { path?: string; version?: string }): ClassDecorator;
 export declare function Get(path?: string): MethodDecorator;
 export declare function Post(path?: string): MethodDecorator;
 export declare function Head(path?: string): MethodDecorator;\n`);
@@ -71,6 +71,53 @@ afterEach(() => {
 });
 
 describe('internal single-workspace adapter', () => {
+  test('gives string and direct-object Controller paths the same comparison meaning', async () => {
+    const stringRoot = workspace();
+    const objectRoot = workspace();
+    const file = path.join(objectRoot, 'src/controller.ts');
+    const source = fs.readFileSync(file, 'utf8');
+    expect(source).toContain('@HttpController(ROOT)');
+    fs.writeFileSync(file, source.replace('@HttpController(ROOT)', '@HttpController({ path: ROOT })'));
+    const direct = await analyzeSourceAwareWorkspace(args(stringRoot));
+    const object = await analyzeSourceAwareWorkspace(args(objectRoot));
+    const meaning = (value: typeof direct) => Object.fromEntries(Object.entries(value.comparisons).map(
+      ([name, comparison]) => [name, { status: comparison.status,
+        findings: comparison.findings?.map(({ ruleId, route, severity }) =>
+          ({ ruleId, route, severity })) }],
+    ));
+    expect(meaning(object)).toEqual(meaning(direct));
+    expect(object.evidence.source?.projectDigest).not.toBe(direct.evidence.source?.projectDigest);
+  });
+
+  test('compares a static Controller object once while unsupported options stay partial', async () => {
+    const root = workspace();
+    const source = path.join(root, 'src/controller.ts');
+    fs.writeFileSync(source, `import { Controller, Get } from '@nestjs/common';
+      @Controller({ path: 'users' }) class Users { @Get(':id') read() {} }
+      @Controller({ path: 'versioned', version: '1' }) class Versioned { @Get() read() {} }
+      throw new Error('Source executed');\n`);
+    const inputNames = ['openapi.yaml', 'refs/common.yaml', 'policy.yml', 'tsconfig.json', 'src/controller.ts'];
+    const before = inputNames.map((name) => hash(path.join(root, name)));
+    const network = vi.spyOn(globalThis, 'fetch').mockImplementation(() => { throw new Error('network forbidden'); });
+    const local = await analyzeSourceAwareWorkspace(args(root));
+    const prefixed = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', globalPrefix: '/api' } });
+    expect(network).not.toHaveBeenCalled();
+    expect(inputNames.map((name) => hash(path.join(root, name)))).toEqual(before);
+    expect(prefixed.stages.implemented.status).toBe('partial');
+    expect(prefixed.comparisons.implementedDeclared.status).toBe('partial');
+    expect(prefixed.comparisons.declaredAllowed).toEqual(local.comparisons.declaredAllowed);
+    expect(prefixed.evidence.source?.projectDigest).toBe(local.evidence.source?.projectDigest);
+    expect(prefixed.evidence.source?.configDigest).toBe(local.evidence.source?.configDigest);
+    expect(prefixed.evidence.routingAssumption?.globalPrefix).toBe('/api');
+    expect(prefixed.comparisons.implementedDeclared.findings?.some(({ route }) =>
+      route?.path === '/api/users/{id}')).toBe(true);
+    expect(JSON.stringify(prefixed)).not.toContain('/api/versioned');
+    expect(JSON.stringify(prefixed)).toContain('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');
+    expect(prefixed.comparisons.implementedDeclared.findings?.some(({ message }) =>
+      message.includes('absence is not proven'))).toBe(true);
+  });
+
   test('uses one analyzed Source project for distinct explicit comparison routes', async () => {
     const root = workspace();
     const cache = new TypeScriptAnalysisCache();

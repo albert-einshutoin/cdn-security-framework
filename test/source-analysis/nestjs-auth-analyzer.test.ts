@@ -39,7 +39,7 @@ function workspace(source: string, extraFiles: Record<string, string> = {}): str
   }));
   write(root, 'node_modules/@nestjs/common/index.js', 'module.exports = {};\n');
   write(root, 'node_modules/@nestjs/common/index.d.ts', `
-    export declare function Controller(path?: string): ClassDecorator;
+    export declare function Controller(path?: string | { path?: string }): ClassDecorator;
     export declare function Get(path?: string): MethodDecorator;
     export declare function UseGuards(...guards: unknown[]): ClassDecorator & MethodDecorator;
     export declare function applyDecorators(...decorators: Array<ClassDecorator | MethodDecorator>): ClassDecorator & MethodDecorator;
@@ -79,6 +79,35 @@ afterEach(() => {
 });
 
 describe('NestJS auth metadata analyzer', () => {
+  test('keeps Public, Roles, mapped and unknown Guards with a static Controller object', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { Public, Roles, JwtAuthGuard, UnknownGuard } from './auth';
+      @Controller({ path: 'users' }) @UseGuards(JwtAuthGuard)
+      class UsersController {
+        @Get('public') @Public() publicRoute() {}
+        @Get('writer') @Roles('writer') writer() {}
+        @Get('unknown') @UseGuards(UnknownGuard) unknown() {}
+      }
+    `, { 'src/auth.ts': `
+      export class JwtAuthGuard {}
+      export class UnknownGuard {}
+      export const Public = (): MethodDecorator => () => {};
+      export const Roles = (_role: string): MethodDecorator => () => {};
+    ` });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    const operations = Object.fromEntries(execution.result.contract.operations.map((operation) =>
+      [operation.routeKey, operation]));
+    expect(operations['GET /users/public']).toMatchObject({ exposure: 'public',
+      auth: { mode: 'none', analysis: { explicitPublic: true } } });
+    expect(operations['GET /users/writer']).toMatchObject({ exposure: 'authenticated',
+      auth: { mode: 'alternatives', analysis: { roles: ['writer'], enforcementConfidence: 'high' } } });
+    expect(operations['GET /users/unknown']).toMatchObject({ exposure: 'unknown',
+      auth: { mode: 'unknown', analysis: { enforcementConfidence: 'unknown' } } });
+  });
+
   test('composes class and method guards without treating their order as alternatives', async () => {
     const deepReflectAlias = Array.from(
       { length: 65 }, (_, index) => `const invoke${index + 1} = invoke${index};`,

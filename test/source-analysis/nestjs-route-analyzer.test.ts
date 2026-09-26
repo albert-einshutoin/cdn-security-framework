@@ -26,7 +26,9 @@ function installNestJsCommon(root: string, packageRoot = 'node_modules/@nestjs/c
   }));
   write(root, `${packageRoot}/index.js`, 'module.exports = {};\n');
   write(root, `${packageRoot}/index.d.ts`, `
-    export declare function Controller(path?: string | readonly string[]): ClassDecorator;
+    export declare function Controller(path?: string | readonly string[] | {
+      path?: string | readonly string[]; version?: string; host?: string; scope?: number; durable?: boolean;
+    }): ClassDecorator;
     export declare function Get(path?: string | readonly string[]): MethodDecorator;
     export declare function Post(path?: string | readonly string[]): MethodDecorator;
     export declare function Put(path?: string | readonly string[]): MethodDecorator;
@@ -95,6 +97,130 @@ describe('NestJS route analyzer', () => {
     expect(serializeSecurityContract(execution.result.contract)).toBe(fs.readFileSync(
       path.join(root, 'expected/security-ir.json'), 'utf8',
     ));
+  });
+
+  test('extracts a direct Controller options path with the same route meaning as a string path', async () => {
+    const stringRoot = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      @Controller('users') class UsersController { @Get('items') list() {} }
+    `);
+    const objectRoot = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      @Controller({ path: 'users' }) class UsersController { @Get('items') list() {} }
+    `);
+    const stringRun = await runSourceAnalyzer(nestJsSourceAnalyzer, context(stringRoot));
+    const objectRun = await runSourceAnalyzer(nestJsSourceAnalyzer, context(objectRoot));
+    expect(stringRun.status).toBe('success');
+    expect(objectRun.status).toBe('success');
+    if (stringRun.status !== 'success' || objectRun.status !== 'success') return;
+    const meaning = (run: typeof stringRun) => run.result.contract.operations.map(({ method, path, exposure, auth }) => ({
+      method, path, exposure, auth,
+    }));
+    expect(meaning(objectRun)).toEqual(meaning(stringRun));
+    expect(objectRun.result.unresolvedOperations).toEqual([]);
+  });
+
+  test('handles root and static path arrays without treating an empty array as root', async () => {
+    const root = workspace(`
+      import { Controller, Get, Post } from '@nestjs/common';
+      @Controller({}) class RootController { @Get() index() {} }
+      @Controller({ path: '' }) class EmptyController { @Post('create') create() {} }
+      @Controller({ path: ['users', 'members', 'users'] })
+      class MultiController { @Get([':id', 'active']) list() {} }
+      @Controller({ path: [] }) class NoneController { @Get('none') none() {} }
+    `);
+    const execution = await runSourceAnalyzer(nestJsSourceAnalyzer, context(root));
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations.map(({ routeKey }) => routeKey)).toEqual([
+      'GET /', 'GET /members/active', 'GET /members/{id}',
+      'GET /users/active', 'GET /users/{id}', 'POST /create',
+    ]);
+    expect(execution.result.unresolvedOperations).toEqual([
+      expect.objectContaining({ methods: ['GET'], path: null, reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' }),
+    ]);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root, 5))).resolves.toMatchObject({
+      status: 'failed', diagnostics: [{ code: 'SOURCE_ANALYZER_OPERATION_LIMIT' }],
+    });
+  });
+
+  test('reuses project-local static string resolution through transparent object syntax', async () => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      const BASE = 'team'; const SUFFIX = 's';
+      @Controller((({ 'path': BASE + SUFFIX } as const) satisfies { path: string }))
+      class TeamController { @Get('members') list() {} }
+    `);
+    await expect(runSourceAnalyzer(nestJsSourceAnalyzer, context(root))).resolves.toMatchObject({
+      status: 'success', result: {
+        contract: { operations: [{ routeKey: 'GET /teams/members' }] }, unresolvedOperations: [],
+      },
+    });
+  });
+
+  test.each([
+    ['object alias', "const OPTIONS = { path: 'users' }; @Controller(OPTIONS)", 'SOURCE_ANALYZER_DYNAMIC_ROUTE'],
+    ['spread', "@Controller({ path: 'users', ...{ host: 'example.com' } } as any)", 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'],
+    ['computed key', "@Controller({ ['path']: 'users' } as any)", 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'],
+    ['string-key getter', "@Controller({ get 'path'() { return 'users'; } } as any)", 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'],
+    ['dynamic call', '@Controller({ path: getPath() })', 'SOURCE_ANALYZER_DYNAMIC_ROUTE'],
+    ['partly dynamic array', "@Controller({ path: ['users', getPath()] })", 'SOURCE_ANALYZER_DYNAMIC_ROUTE'],
+    ['duplicate path', "@Controller({ path: 'users', path: 'members' } as any)", 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'],
+    ['wrong-type path', '@Controller({ path: 42 as any })', 'SOURCE_ANALYZER_DYNAMIC_ROUTE'],
+    ['unknown field', "@Controller({ path: 'users', unknown: true } as any)", 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'],
+    ['scope field', "@Controller({ path: 'users', scope: 1 } as any)", 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'],
+  ])('keeps %s Controller options unresolved without executing source', async (_name, declaration, reason) => {
+    const root = workspace(`
+      import { Controller, Get } from '@nestjs/common';
+      function getPath() { require('node:fs').writeFileSync('sentinel', 'executed'); return 'users'; }
+      ${declaration} class UsersController { @Get('items') list() {} }
+    `);
+    const execution = await runSourceAnalyzer(nestJsSourceAnalyzer, context(root));
+    expect(execution).toMatchObject({
+      status: 'success', result: {
+        contract: { operations: [] },
+        unresolvedOperations: [{ methods: ['GET'], path: null, reason }],
+      },
+    });
+    expect(fs.existsSync(path.join(root, 'sentinel'))).toBe(false);
+  });
+
+  test('keeps genuine alias and namespace Controller decorators separate from local lookalikes', async () => {
+    const root = workspace(`
+      import { Controller as NestController, Get as NestGet } from '@nestjs/common';
+      import * as Nest from '@nestjs/common';
+      function Controller(_value: unknown) { return () => {}; }
+      @NestController({ path: 'aliased' }) class AliasController { @NestGet() list() {} }
+      @Nest.Controller({ path: 'namespaced' }) class NamespaceController { @Nest.Get() list() {} }
+      @Controller({ path: 'fake' }) class FakeController { @Nest.Get() list() {} }
+    `);
+    const execution = await runSourceAnalyzer(nestJsSourceAnalyzer, context(root));
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations.map(({ routeKey }) => routeKey)).toEqual([
+      'GET /aliased', 'GET /namespaced',
+    ]);
+    expect(execution.result.contract.operations.some(({ routeKey }) => routeKey.includes('fake'))).toBe(false);
+  });
+
+  test('does not compare versioned or host-constrained object routes as ordinary paths', async () => {
+    const root = workspace(`
+      import { Controller, Get, Version } from '@nestjs/common';
+      @Controller({ path: 'users', version: '1' }) class VersionedController { @Get() list() {} }
+      @Controller({ path: 'admin', host: 'admin.example.com' }) class HostController { @Get() list() {} }
+      @Controller({ path: 'items' }) class MethodVersionController {
+        @Version('2') @Get('list') list() {}
+      }
+      @Controller({ path: 'plain' }) class PlainController { @Get() list() {} }
+    `);
+    const execution = await runSourceAnalyzer(nestJsSourceAnalyzer, context(root));
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations.map(({ routeKey }) => routeKey)).toEqual(['GET /plain']);
+    expect(execution.result.unresolvedOperations).toHaveLength(3);
+    expect(execution.result.unresolvedOperations.every(({ reason }) =>
+      reason === 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR')).toBe(true);
+    expect(execution.result.diagnostics.map(({ code }) => code)).toContain('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');
   });
 
   test('extracts only NestJS routes without executing decorators or source', async () => {
