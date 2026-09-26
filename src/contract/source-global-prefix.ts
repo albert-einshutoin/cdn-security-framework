@@ -23,6 +23,13 @@ export function sourceRoutingAssumptionDigest(prefix: string): string {
   return `sha256:${createHash('sha256').update(JSON.stringify({ version: 1, globalPrefix: normalized })).digest('hex')}`;
 }
 
+export function sourceUriRoutingAssumptionDigest(prefix?: string): string {
+  const globalPrefix = prefix === undefined ? undefined : normalizeSourceGlobalPrefix(prefix);
+  return `sha256:${createHash('sha256').update(JSON.stringify({ version: 2,
+    sourceVersioning: 'uri', versionPrefix: 'v', ...(globalPrefix ? { globalPrefix } : {}),
+  })).digest('hex')}`;
+}
+
 /** Return a comparison-only IR copy. The analyzer result and original provenance are left intact. */
 export function prefixSourceContract(contract: SecurityContractV1, prefix: string): SecurityContractV1 {
   const normalized = normalizeSourceGlobalPrefix(prefix);

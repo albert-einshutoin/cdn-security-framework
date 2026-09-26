@@ -10,6 +10,7 @@ export interface SourceDiffOptions {
   target?: string;
   source?: string;
   sourceGlobalPrefix?: string;
+  sourceVersioning?: string;
   sourceAuthConfig?: string;
   out?: string;
   exceptions?: string;
@@ -54,6 +55,12 @@ function validate(options: SourceDiffOptions) {
   }
   if (options.sourceGlobalPrefix !== undefined && !options.source) {
     throw new SourceDiffArgumentError('SOURCE_DIFF_PREFIX_REQUIRES_SOURCE');
+  }
+  if (options.sourceVersioning !== undefined && !options.source) {
+    throw new SourceDiffArgumentError('SOURCE_DIFF_VERSIONING_REQUIRES_SOURCE');
+  }
+  if (options.sourceVersioning !== undefined && options.sourceVersioning !== 'uri') {
+    throw new SourceDiffArgumentError('SOURCE_DIFF_VERSIONING_INVALID');
   }
   if (options.out !== undefined && (!options.out || options.out === '-' || options.out.endsWith('/'))) {
     throw new SourceDiffArgumentError('SOURCE_DIFF_OUTPUT_INVALID');
@@ -163,7 +170,8 @@ export async function prepareSourceDiff(options: SourceDiffOptions): Promise<Pre
       policyPath: input.policyPath, target: input.target,
       onInputPath: outputGuard?.recordInputPath,
       ...(options.source ? { source: { tsconfigPath: options.source, ...(authConfig ? { authConfig } : {}),
-        ...(globalPrefix ? { globalPrefix } : {}) } } : {}),
+        ...(globalPrefix ? { globalPrefix } : {}),
+        ...(options.sourceVersioning ? { versioning: 'uri' as const } : {}) } } : {}),
     });
     const bundle = finalizeSourceAwareOutput(workspace, {
       currentDate: input.currentDate, failOn: input.failOn, environment: options.environment, exceptions,
@@ -241,6 +249,7 @@ export function registerSourceDiffCommand(contract: Command): void {
     .option('--target <target>', 'Target: aws | cloudflare')
     .option('--source <tsconfig-path>', 'Optional NestJS Source tsconfig (no auto-discovery)')
     .option('--source-global-prefix <path>', 'Explicit fixed Source comparison prefix (requires --source)')
+    .option('--source-versioning <mode>', 'Explicit Source URI versioning with default v prefix (requires --source)')
     .option('--source-auth-config <path>', 'Optional YAML/JSON NestJS auth data inside the workspace (requires --source)')
     .option('--out <path>', 'Save the report to one new file inside the workspace')
     .option('--exceptions <path>', 'Optional bounded Finding exceptions file')

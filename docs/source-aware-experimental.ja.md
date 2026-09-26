@@ -70,7 +70,7 @@ NestJS Controllerについては、直接記述した`@Controller({ path: 'users
 静的な`path`文字列配列、同一project内の静的文字列定数、空object（root path）を
 静的解析します。括弧と既存resolverが許容するTypeScriptの型wrapperも対象です。
 Controllerとmethodの配列は、既存の上限付きroute結合を使います。空のpath配列を
-root routeに置き換えません。objectで扱うfieldは`path`のみです。`version`、
+root routeに置き換えません。URI modeを明示しない場合、objectで扱うfieldは`path`のみです。`version`、
 `host`、`scope`、`durable`、未知field、object alias、spread、computed key、
 getter/setter、動的値は診断付きの未解決として残します。これらをversionなし・
 全hostのrouteとして比較せず、宣言済みrouteの実装不存在も証明しません。
@@ -88,7 +88,7 @@ backslash、制御文字、dot、percent、wildcard、動的parameter、空白�
 限定し、先頭slashは0または1個、正規化後は最大256文字です。大小文字は保持します。
 provider tokenに似た値は入力読込前に拒否します。
 静的object pathの抽出後、比較用コピーにprefixを一度だけ適用します。
-versionやhostの制約はprefixで解決しません。
+prefix単独ではversionやhostの制約を解決しません。
 
 | 入力 | 結果 |
 | --- | --- |
@@ -101,6 +101,46 @@ versionやhostの制約はprefixで解決しません。
 local `/`は`/api`、`/articles/{slug}`は`/api/articles/{slug}`、既に
 `/api/items`であるrouteは`/api/api/items`になります。
 
+比較するNestJS applicationが既定の`v` prefixでURI versioningを使うことを
+利用者が確認した場合は、`--source tsconfig.json --source-versioning uri`を指定します。
+例えば`@Controller({ path: 'users', version: '1' })`の`@Get(':id')`は
+`GET /v1/users/{id}`で比較します。`--source-global-prefix /api`も指定すると
+`GET /api/v1/users/{id}`です。global prefix→version→Controller→methodの順に
+一度ずつ合成し、元のController path中の`api`や`v1`は削除しません。
+URI方式は**利用者の明示前提**であり、bootstrapや環境の自動検出結果では
+ありません。option省略時は従来のlocal routeとreport identityを維持しますが、
+実アプリでversioningが無効と証明した意味ではありません。
+
+対象は直接のController options、methodの`@Version('2')`、既存resolverで解決
+できる同一project内constにある単一の静的文字列です。methodのversionをController
+より優先し、`'01'`や大小文字を保持します。versionは最大255文字のASCII
+`[A-Za-z0-9_-]`による固定segmentに限定します。配列、`VERSION_NEUTRAL`、
+version欠落、動的値、非文字列、複数のmethod `@Version`、`host`等の未対応
+Controller optionは理由付き未解決として残します。method versionが存在するが
+解決できない場合、Controller versionへfallbackしません。version未取得を
+未解決にするのは静的比較の制限であり、NestJS runtimeが必ず404にするという
+主張ではありません。独自prefix、`prefix: false`、`defaultVersion`、Header、
+Media Type、Custom、global-prefix exclusion、複数app、proxy rewriteは対象外です。
+`--source`なしでの指定や`uri`以外の値は、入力読込前にexit `2`で拒否します。
+
+静的対応はNestJSの固定commit
+[`112450bb`](https://github.com/nestjs/nest/tree/112450bb0cbb847fbff5bec46a1c493587564305)
+と照合しています。
+
+| NestJSの動作 | 今回の比較mode |
+| --- | --- |
+| `@Controller`がpathと任意のversion metadataを保持 | 直接の静的optionsを読み、未対応fieldは未解決 |
+| methodの`@Version`がversion metadataを保持 | 単一静的文字列をControllerより優先 |
+| URI route factoryの既定prefixは`v` | 明示global prefixの後に`v`と文字列versionを合成 |
+| `defaultVersion`と方式はapplicationが渡す | bootstrapは読まず、欠落versionと他方式は未解決 |
+
+Sourceから抽出したversion metadataはAST根拠、URI方式とglobal prefixは明示
+前提として、project digest・認証設定digest・変換後contract digestと分けて
+Text/JSON/SARIF/Summaryおよびdev CI記録に示します。変換するのは
+Implemented–DeclaredとImplemented–Allowedだけで、Declared–Allowedは従来の
+意味のままです。route変更でFinding instanceIdが変わる場合、旧exact例外
+selectorを自動拡大しません。runtime到達可能性、Guard強制、認証は証明しません。
+
 元のSource IR、入力project digest、認証設定digest、file/line、unknown/partialは
 変えません。比較用コピーだけをImplemented–DeclaredとImplemented–Allowedへ
 渡し、OpenAPI/Policy入力およびDeclared–Allowedは変換しません。比較する
@@ -108,8 +148,8 @@ OpenAPI/Policyも、利用者が意図する同じpath体系で用意してく�
 servers/basePathやproxy rewriteをこのoptionで再解釈しません。routing前提と
 変換済みcontractのdigestは入力・認証digestと分離し、Text/JSON preview、SARIF
 properties、Summary、dev CI記録へ安全に表示します。prefixでrouteとFinding
-instanceIdが変わる場合、旧exact例外selectorを自動拡大しません。exclude、URI
-versioning、複数Nest app、reverse proxy rewriteは対象外です。runtime到達可能性、
+instanceIdが変わる場合、旧exact例外selectorを自動拡大しません。exclude、
+複数Nest app、reverse proxy rewriteは対象外です。runtime到達可能性、
 middleware/Guardの強制、認証の証明にもなりません。
 
 | 形式 | 明示前提の表示 | Findingの範囲 |
@@ -121,7 +161,9 @@ middleware/Guardの強制、認証の証明にもなりません。
 
 dev CI記録には、安全なprefixとdigestを元のSource project/認証digestと分けて
 保存します。Node 24のinstalled-package consumerは、同じtgzでprefixあり・
-省略・不正、4形式、`--out`を検証します。証拠が欠けるとpackage acceptance gateは
+省略・不正、4形式、`--out`を検証します。明示URI mode、比較route集合、負例、
+認証設定、installed CI driverのrun/publish/verify-stage/gateも確認します。
+証拠が欠けるとpackage acceptance gateは
 拒否します。
 
 Text/JSONは件数上限のあるpreviewです。JSONは完全な安定公開schemaではありません。

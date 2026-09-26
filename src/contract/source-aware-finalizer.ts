@@ -23,7 +23,9 @@ type ComparisonSummary =
 
 export interface SourceAwareFinalizedResult {
   target: 'aws' | 'cloudflare';
-  routingAssumption?: { globalPrefix: string; digest: string; comparisonContractDigest?: string };
+  routingAssumption?: { globalPrefix?: string; sourceVersioning?: 'uri'; versionPrefix?: 'v';
+    digest: string; comparisonContractDigest?: string };
+  sourceVersionMetadata?: SourceAwareWorkspaceResult['evidence']['sourceVersionMetadata'];
   stages: Record<StageName, StageSummary>;
   comparisons: Record<SourceAwareComparisonName, ComparisonSummary>;
   findings: SecurityFindingV1[];
@@ -227,6 +229,7 @@ export function finalizeSourceAwareWorkspace(
   return {
     target: input.target, stages, comparisons,
     ...(input.evidence.routingAssumption ? { routingAssumption: input.evidence.routingAssumption } : {}),
+    ...(input.evidence.sourceVersionMetadata ? { sourceVersionMetadata: input.evidence.sourceVersionMetadata } : {}),
     findings, suppressedFindings, exceptionDiagnostics,
     appliedExceptionIds: applied.appliedExceptionIds,
     memberships: ordered.map(({ instanceId }) => ({ instanceId, comparisons: memberships.get(instanceId) ?? [] })),
@@ -294,7 +297,20 @@ function renderText(preview: ReturnType<typeof previewData>): string {
     `unique=${preview.summary.unique} active=${preview.summary.active} suppressed=${preview.summary.suppressed} governance=${preview.summary.governance}`,
   ];
   if (preview.routingAssumption) {
-    lines.push(`routing assumption explicit globalPrefix=${preview.routingAssumption.globalPrefix}`);
+    if (preview.routingAssumption.globalPrefix) {
+      lines.push(`routing assumption explicit globalPrefix=${preview.routingAssumption.globalPrefix}`);
+    }
+    if (preview.routingAssumption.sourceVersioning) {
+      lines.push('routing assumption explicit sourceVersioning=uri versionPrefix=v (not bootstrap-verified)');
+    }
+  }
+  if (preview.sourceVersionMetadata) {
+    lines.push(`source version metadata AST digest=${preview.sourceVersionMetadata.digest} total=${preview.sourceVersionMetadata.total}`);
+    for (const route of preview.sourceVersionMetadata.routes) {
+      lines.push(route.status === 'resolved'
+        ? `  version ${route.method} ${route.localPath} ${route.version} ${route.origin} -> ${route.comparisonPath}`
+        : `  version unresolved ${route.reason}`);
+    }
   }
   for (const [name, stage] of Object.entries(preview.stages)) {
     lines.push(`stage ${name}=${stage.status}${stage.code ? ` code=${stage.code}` : ''}`);
@@ -338,7 +354,21 @@ function previewData(result: SourceAwareFinalizedResult) {
     preview: 'source-aware-internal-pre-entry' as const,
     target: result.target, stages: result.stages, comparisons: result.comparisons,
     ...(result.routingAssumption ? { routingAssumption: {
-      ...result.routingAssumption, globalPrefix: routePath(result.routingAssumption.globalPrefix),
+      ...result.routingAssumption,
+      ...(result.routingAssumption.globalPrefix ? {
+        globalPrefix: routePath(result.routingAssumption.globalPrefix),
+      } : {}),
+    } } : {}),
+    ...(result.sourceVersionMetadata ? { sourceVersionMetadata: {
+      digest: result.sourceVersionMetadata.digest,
+      total: result.sourceVersionMetadata.routes.length,
+      omitted: Math.max(0, result.sourceVersionMetadata.routes.length - 20),
+      routes: result.sourceVersionMetadata.routes.slice(0, 20).map((route) => route.status === 'resolved'
+        ? { status: 'resolved' as const, sourceUri: evidenceUri(route.sourceUri), line: route.line,
+          method: route.method, localPath: routePath(route.localPath!), version: route.version,
+          origin: route.origin, comparisonPath: routePath(route.comparisonPath!) }
+        : { status: 'unresolved' as const, sourceUri: evidenceUri(route.sourceUri), line: route.line,
+          reason: route.reason }),
     } } : {}),
     summary: result.summary, analysis: result.analysis, threshold: result.threshold,
     exitCode: result.exitCode,
