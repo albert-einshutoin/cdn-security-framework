@@ -59,7 +59,7 @@ import { resolveStaticStrings } from './static-string-resolver';
 export { validateNestJsAuthConfig } from './auth-config';
 
 const ANALYZER_ID = 'nestjs-typescript';
-const ANALYZER_VERSION = '1.2.0';
+const ANALYZER_VERSION = '1.3.0';
 const ANALYZER_IDENTITY = `${ANALYZER_ID}@${ANALYZER_VERSION}`;
 const MAX_PROVIDER_SPREAD_ELEMENTS = 4_096;
 const READ_ONLY_ARRAY_METHODS = new Set([
@@ -4122,6 +4122,51 @@ function routePath(controllerPath: string, methodPath: string): { path: string; 
   };
 }
 
+function controllerPaths(
+  argument: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+  maxSteps: number,
+): { paths: string[] | undefined; unsupported: boolean; object: boolean } {
+  let value = argument;
+  while (value && (ts.isParenthesizedExpression(value) || ts.isAsExpression(value)
+    || ts.isTypeAssertionExpression(value) || ts.isSatisfiesExpression(value))) value = value.expression;
+  if (!value || !ts.isObjectLiteralExpression(value)) return {
+    paths: resolveStaticStrings(argument, checker, projectSources, { check, maxSteps }),
+    unsupported: false, object: false,
+  };
+  let pathValue: ts.Expression | undefined;
+  let unsupported = false;
+  let pathMayBeOverridden = false;
+  for (const property of value.properties) {
+    check();
+    if (!ts.isPropertyAssignment(property)) {
+      unsupported = true;
+      if (ts.isSpreadAssignment(property)
+        || (property.name && (ts.isComputedPropertyName(property.name)
+          || ((ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
+            && property.name.text === 'path')))) pathMayBeOverridden = true;
+      continue;
+    }
+    const key = ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)
+      ? property.name.text : undefined;
+    if (key !== 'path') {
+      unsupported = true;
+      if (key === undefined) pathMayBeOverridden = true;
+      continue;
+    }
+    if (pathValue) {
+      unsupported = true;
+      pathMayBeOverridden = true;
+    } else pathValue = property.initializer;
+  }
+  const paths = pathMayBeOverridden ? undefined : resolveStaticStrings(
+    pathValue, checker, projectSources, { check, maxSteps },
+  );
+  return { paths, unsupported: unsupported || paths?.length === 0, object: true };
+}
+
 function directBaseClass(
   node: ts.ClassLikeDeclaration,
   checker: ts.TypeChecker,
@@ -5670,8 +5715,20 @@ async function analyze(
         addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', statement);
       }
       const controllers = trustedController
-        ? [{ decorator: effectiveController.decorator, match: effectiveController.classification.route }]
+        ? [{ decorator: effectiveController.decorator, match: effectiveController.classification.route,
+          resolution: controllerPaths(
+            effectiveController.classification.route!.call.arguments[0], checker, projectSources,
+            check, context.limits.maxAstNodes,
+          ) }]
         : [];
+      for (const controller of controllers) {
+        if (controller.resolution.unsupported) {
+          addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', controller.decorator);
+        }
+        if (controller.resolution.object && !controller.resolution.paths) {
+          addDiagnostic('SOURCE_ANALYZER_DYNAMIC_ROUTE', controller.decorator);
+        }
+      }
       if (unresolvedBase) {
         addUnresolved(HTTP_METHODS, unresolvedBase, 'SOURCE_ANALYZER_DYNAMIC_ROUTE');
         addDiagnostic('SOURCE_ANALYZER_DYNAMIC_ROUTE', unresolvedBase);
@@ -5740,17 +5797,20 @@ async function analyze(
             : undefined;
           for (const controller of controllers) {
             await checkpoint();
-            const controllerPaths = controller.match!.call.arguments.length <= 1
-              ? resolveStaticStrings(controller.match!.call.arguments[0], checker, projectSources, {
-                check, maxSteps: context.limits.maxAstNodes,
-              })
-              : undefined;
-            if (!controllerPaths || !methodPaths) {
-              addDiagnostic('SOURCE_ANALYZER_DYNAMIC_ROUTE', methodDecorator);
+            const resolvedController = controller.match!.call.arguments.length <= 1
+              ? controller.resolution : { paths: undefined, unsupported: false, object: false };
+            if (resolvedController.unsupported) {
+              addUnresolved(methods, controller.decorator, 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');
+              continue;
+            }
+            if (!resolvedController.paths || !methodPaths) {
+              if (!resolvedController.object || !methodPaths) {
+                addDiagnostic('SOURCE_ANALYZER_DYNAMIC_ROUTE', methodDecorator);
+              }
               addUnresolved(methods, methodDecorator, 'SOURCE_ANALYZER_DYNAMIC_ROUTE');
               continue;
             }
-            for (const prefix of controllerPaths) for (const suffix of methodPaths) {
+            for (const prefix of resolvedController.paths) for (const suffix of methodPaths) {
               await checkpoint();
               const route = routePath(prefix, suffix);
               if (!route) {

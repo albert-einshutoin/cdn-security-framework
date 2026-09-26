@@ -53,19 +53,31 @@ try {
     if (row === '24') steps.push(...[0, 0, 0, 0, 0, 2, 2, 0].map(expectedExit => ({
       command: 'cdn-security-source-prefix', exit: expectedExit, expectedExit, durationMs: 1,
     })));
+    if (row === '24') {
+      steps.push(...[0, 0, 0, 0, 0, 1].map(expectedExit => ({
+        command: 'cdn-security-controller-options', exit: expectedExit, expectedExit, durationMs: 1,
+      })));
+      steps.push(...[0, 0, 0, 0].map(expectedExit => ({
+        command: 'source-aware-ci-object', exit: expectedExit, expectedExit, durationMs: 1,
+      })));
+    }
     return { ...m, runtime: { executable: 'node', sha256: 'f'.repeat(64), platform: 'linux', arch: 'x64' },
       row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2',
       switchVerified: true, resolution, dependencies, steps,
       checks: lower ? ['node-rejection','resolution','no-side-effects']
         : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli','source-auth-config','source-safe-output',
-          ...(row === '24' ? ['source-global-prefix'] : [])],
+          ...(row === '24' ? ['source-global-prefix','source-controller-options'] : [])],
       ...(row === '24' ? { journey, prefixProof: { globalPrefix: '/api' as const,
         projectDigest: `sha256:${'a'.repeat(64)}`, configDigest: `sha256:${'b'.repeat(64)}`,
         routingDigest: `sha256:${'c'.repeat(64)}`,
         comparisonContractDigest: `sha256:${'d'.repeat(64)}`,
         savedSha256: 'e'.repeat(64), inputSha256: 'f'.repeat(64),
         unprefixedInventory: { sourceOnly: 2, declaredOnly: 1, methodMismatch: 1 },
-        prefixedInventory: { sourceOnly: 6, declaredOnly: 5, methodMismatch: 0 } } } : {}) };
+        prefixedInventory: { sourceOnly: 6, declaredOnly: 5, methodMismatch: 0 } },
+        controllerOptionsProof: { inputSha256: 'a'.repeat(64), savedSha256: 'b'.repeat(64),
+          ciRecordSha256: 'c'.repeat(64), routes: ['GET /users/items'],
+          unsupportedCode: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' as const,
+          ciDelivery: 'CI_OK' as const } } : {}) };
   });
   fs.writeFileSync(path.join(temp, 'metadata.json'), JSON.stringify(m));
   test('same candidate and complete rows pass', () => { verifyTarball(temp, e); aggregate(m, rows, e, ['success','success']); });
@@ -75,6 +87,13 @@ try {
     rows.map(r => r.row === '24' ? { ...r, steps: r.steps.filter(s => s.command !== 'cdn-security-source-prefix') } : r), e, ['success','success'])));
   test('missing installed prefix identity fails closed', () => assert.throws(() => aggregate(m,
     rows.map(r => r.row === '24' ? { ...r, prefixProof: undefined } : r), e, ['success','success'])));
+  test('missing Controller object command fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, steps: r.steps.filter(s => s.command !== 'cdn-security-controller-options') } : r), e, ['success','success'])));
+  test('missing Controller object proof fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, controllerOptionsProof: undefined } : r), e, ['success','success'])));
+  test('wrong Controller object route fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, controllerOptionsProof: { ...r.controllerOptionsProof!,
+      routes: ['GET /locked'] } } : r), e, ['success','success'])));
   test('incorrect decorator-local inventory fails closed', () => assert.throws(() => aggregate(m,
     rows.map(r => r.row === '24' ? { ...r, prefixProof: { ...r.prefixProof!,
       unprefixedInventory: { sourceOnly: 6, declaredOnly: 5, methodMismatch: 0 } } } : r), e,

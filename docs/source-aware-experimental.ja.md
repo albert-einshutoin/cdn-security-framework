@@ -66,6 +66,17 @@ Guard名と認証種別の対応は利用者が与える静的な前提であり
 middleware順序、runtime認証の証明ではありません。未設定のGuardや他の未解決
 Source事実はpartialのままです。
 
+NestJS Controllerについては、直接記述した`@Controller({ path: 'users' })`、
+静的な`path`文字列配列、同一project内の静的文字列定数、空object（root path）を
+静的解析します。括弧と既存resolverが許容するTypeScriptの型wrapperも対象です。
+Controllerとmethodの配列は、既存の上限付きroute結合を使います。空のpath配列を
+root routeに置き換えません。objectで扱うfieldは`path`のみです。`version`、
+`host`、`scope`、`durable`、未知field、object alias、spread、computed key、
+getter/setter、動的値は診断付きの未解決として残します。これらをversionなし・
+全hostのrouteとして比較せず、宣言済みrouteの実装不存在も証明しません。
+これはdecorator pathの静的抽出であり、runtime routingや認証の証明ではありません。
+Public、Roles、設定済みGuardは従来の静的な意味を維持し、不明な認証はunknownです。
+
 すべての比較対象Source routeへ同じ固定global prefixが適用されることを**利用者が確認した**
 場合に限り、`--source`とともに`--source-global-prefix /api`を渡せます。
 `api`と`/api`は同義です。bootstrapの`setGlobalPrefix`を製品が自動解析した
@@ -76,6 +87,8 @@ backslash、制御文字、dot、percent、wildcard、動的parameter、空白�
 拒否し、defaultへ戻しません。ASCIIの`[A-Za-z0-9_-]`による1個以上のsegmentに
 限定し、先頭slashは0または1個、正規化後は最大256文字です。大小文字は保持します。
 provider tokenに似た値は入力読込前に拒否します。
+静的object pathの抽出後、比較用コピーにprefixを一度だけ適用します。
+versionやhostの制約はprefixで解決しません。
 
 | 入力 | 結果 |
 | --- | --- |

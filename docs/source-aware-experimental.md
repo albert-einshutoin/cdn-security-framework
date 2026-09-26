@@ -72,9 +72,25 @@ and auth kind express a user-provided static assumption. They do not prove the
 Guard body, token validation, middleware order, or runtime enforcement. Unknown
 Guards and other unresolved Source facts stay partial.
 
+For NestJS controllers, the static analyzer reads a direct
+`@Controller({ path: 'users' })` object, a static `path` string array, a
+project-local static string constant, or an empty object (the root path).
+Parentheses and the existing safe TypeScript type wrappers are accepted.
+Controller and method path arrays use the existing bounded route composition.
+An empty path array does not become a root route. The object may contain only
+the `path` field: `version`, `host`, `scope`, `durable`, unknown fields, object
+aliases, spreads, computed keys, accessors, and dynamic values remain unresolved
+with a diagnostic. They do not become unversioned or all-host routes, and an
+unresolved Controller does not prove that its declared routes are absent.
+This is static decorator-path extraction, not proof of runtime routing or
+authentication. `Public`, Roles, and configured Guards retain their existing
+static interpretation; unknown authentication remains unknown.
+
 With `--source`, add `--source-global-prefix /api` when **you have confirmed**
 that every compared Source route uses that one fixed global prefix. For example,
 `--source tsconfig.json --source-global-prefix api` and `/api` are equivalent.
+The prefix is applied once to the comparison copy after a static Controller
+object path is extracted; it does not resolve version or host constraints.
 This is an explicit comparison assumption, not detection of `setGlobalPrefix`
 from bootstrap code. Omitting it keeps decorator-local routes and existing
 report identities. Supplying it without `--source` exits `2`, with empty stdout,
