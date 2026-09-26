@@ -8,6 +8,7 @@ import path from 'node:path';
 import { prepareSourceDiff, type SourceDiffOptions } from '../bin/commands/source-diff';
 import { renderSourceAwareSarif } from '../reporters/sarif';
 import { renderSourceAwareSummary } from '../reporters/source-aware-summary';
+import { HTTP_METHODS, type HttpMethod } from '../contract/canonical-route';
 import { hasUnsafeSensitiveText } from '../contract/sensitive-text';
 import { isSourceAwareDiagnosticCode } from '../contract/source-aware-finalizer';
 
@@ -16,8 +17,8 @@ type Candidate = { source: string; harness: string; tree: string; run: string; a
 type Saved = { status: 'saved'; name: 'summary.md' | 'source-aware.sarif'; sha256: string; bytes: number };
 type Failed = { status: 'failed' | 'not-generated'; code: string };
 type RecordV1 = { schemaVersion: 1; candidate: Candidate; targetEvidenceSha256: string;
-  routingAssumption?: { globalPrefix: string; digest: string; comparisonContractDigest?: string;
-    origin: 'explicit-option' };
+  routingAssumption?: NonNullable<import('../contract/source-aware-output').SourceAwareOutputBundle['metadata']['routingAssumption']>;
+  sourceVersionMetadata?: NonNullable<import('../contract/source-aware-output').SourceAwareOutputBundle['metadata']['sourceVersionMetadata']>;
   analysis: { exitCode: 0 | 1 | 2 | 3; status: 'complete' | 'partial' | 'failed'; codes: string[] };
   reports: { summary: Saved | Failed; sarif: Saved | Failed } };
 type StagedFile = { name: Saved['name'] | 'ci-record.json'; sha256: string; bytes: number };
@@ -60,26 +61,69 @@ function candidateFields(value: any, metadata = false): Candidate {
 
 function recordFields(value: any): RecordV1 {
   exactKeys(value, ['schemaVersion', 'candidate', 'targetEvidenceSha256', 'analysis', 'reports',
-    ...(value?.routingAssumption === undefined ? [] : ['routingAssumption'])]);
+    ...(value?.routingAssumption === undefined ? [] : ['routingAssumption']),
+    ...(value?.sourceVersionMetadata === undefined ? [] : ['sourceVersionMetadata'])]);
   assert.equal(value.schemaVersion, 1);
   candidateFields(value.candidate);
   assert.match(value.targetEvidenceSha256, hex64);
   if (value.routingAssumption !== undefined) {
     const routing = value.routingAssumption;
-    exactKeys(routing, ['globalPrefix', 'digest', 'origin',
+    exactKeys(routing, ['digest', 'origin',
+      ...(routing.globalPrefix === undefined ? [] : ['globalPrefix']),
+      ...(routing.sourceVersioning === undefined ? [] : ['sourceVersioning', 'versionPrefix']),
       ...(routing.comparisonContractDigest === undefined ? [] : ['comparisonContractDigest'])]);
-    assert.ok(typeof routing.globalPrefix === 'string' && routing.globalPrefix.length <= 4096
+    assert.ok(routing.globalPrefix !== undefined || routing.sourceVersioning === 'uri');
+    if (routing.globalPrefix !== undefined) assert.ok(typeof routing.globalPrefix === 'string'
+      && routing.globalPrefix.length <= 4096
       && /^\/(?:[A-Za-z0-9_-]+|\[REDACTED_FILENAME\])(?:\/(?:[A-Za-z0-9_-]+|\[REDACTED_FILENAME\]))*$/.test(routing.globalPrefix)
       && !hasUnsafeSensitiveText(routing.globalPrefix));
+    if (routing.sourceVersioning !== undefined) {
+      assert.equal(routing.sourceVersioning, 'uri');
+      assert.equal(routing.versionPrefix, 'v');
+    }
     assert.match(routing.digest, /^sha256:[a-f0-9]{64}$/);
     if (routing.comparisonContractDigest !== undefined) {
       assert.match(routing.comparisonContractDigest, /^sha256:[a-f0-9]{64}$/);
     }
     assert.equal(routing.origin, 'explicit-option');
   }
+  if (value.sourceVersionMetadata !== undefined) {
+    const metadata = value.sourceVersionMetadata;
+    exactKeys(metadata, ['digest', 'origin', 'total', 'omitted', 'routes']);
+    assert.match(metadata.digest, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(metadata.origin, 'source-ast');
+    assert.ok(Number.isSafeInteger(metadata.total) && metadata.total >= 0);
+    assert.ok(Number.isSafeInteger(metadata.omitted) && metadata.omitted >= 0);
+    assert.ok(Array.isArray(metadata.routes) && metadata.routes.length <= 20
+      && metadata.total === metadata.routes.length + metadata.omitted);
+    for (const route of metadata.routes) {
+      assert.ok(route.status === 'resolved' || route.status === 'unresolved');
+      exactKeys(route, route.status === 'resolved'
+        ? ['status', 'sourceUri', 'line', 'method', 'localPath', 'version', 'versionOrigin', 'comparisonPath']
+        : ['status', 'sourceUri', 'line', 'reason']);
+      assert.ok(typeof route.sourceUri === 'string' && route.sourceUri.length <= 4096
+        && !path.isAbsolute(route.sourceUri) && !route.sourceUri.split('/').includes('..')
+        && !hasUnsafeSensitiveText(route.sourceUri));
+      assert.ok(Number.isSafeInteger(route.line) && route.line > 0);
+      if (route.status === 'resolved') {
+        assert.match(route.version, /^[A-Za-z0-9_-]{1,255}$/);
+        assert.ok(['controller', 'method'].includes(route.versionOrigin));
+        assert.ok(HTTP_METHODS.includes(route.method as HttpMethod));
+        for (const key of ['localPath', 'comparisonPath']) {
+          assert.ok(typeof route[key] === 'string' && route[key].startsWith('/')
+            && route[key].length <= 16_384 && !hasUnsafeSensitiveText(route[key]));
+        }
+      } else assert.ok(['VERSION_MISSING', 'VERSION_UNRESOLVED', 'CONTROLLER_ROUTING_UNSUPPORTED',
+        'ROUTE_PATH_UNRESOLVED', 'VERSIONED_PATH_INVALID'].includes(route.reason));
+    }
+  }
   exactKeys(value.analysis, ['exitCode', 'status', 'codes']);
   assert.ok([0, 1, 2, 3].includes(value.analysis.exitCode));
   assert.ok(['complete', 'partial', 'failed'].includes(value.analysis.status));
+  if (value.routingAssumption?.sourceVersioning === 'uri' && value.analysis.status !== 'failed') {
+    assert.ok(value.sourceVersionMetadata);
+    assert.match(value.routingAssumption.comparisonContractDigest ?? '', /^sha256:[a-f0-9]{64}$/);
+  } else assert.equal(value.sourceVersionMetadata, undefined);
   assert.equal(value.analysis.status === 'failed', value.analysis.exitCode >= 2);
   assert.ok(Array.isArray(value.analysis.codes) && value.analysis.codes.length <= 64);
   for (const code of value.analysis.codes) assert.ok(isSourceAwareDiagnosticCode(code) || code === 'CI_UNKNOWN_ERROR');
@@ -183,6 +227,7 @@ async function run(configFile: string, candidateDir: string, output: string): Pr
     schemaVersion: 1, candidate: identity,
     targetEvidenceSha256: digest(JSON.stringify(bundle.metadata)),
     ...(bundle.metadata.routingAssumption ? { routingAssumption: bundle.metadata.routingAssumption } : {}),
+    ...(bundle.metadata.sourceVersionMetadata ? { sourceVersionMetadata: bundle.metadata.sourceVersionMetadata } : {}),
     analysis: { exitCode: final.exitCode, status: final.analysis.status,
       codes: final.analysis.codes.map(safeCode) },
     reports: { summary: { status: 'not-generated', code: 'CI_NOT_RENDERED' },

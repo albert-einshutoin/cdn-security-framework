@@ -60,13 +60,19 @@ try {
       steps.push(...[0, 0, 0, 0].map(expectedExit => ({
         command: 'source-aware-ci-object', exit: expectedExit, expectedExit, durationMs: 1,
       })));
+      steps.push(...[0, 0, 0, 0, 0, 1, 2, 2, 2].map(expectedExit => ({
+        command: 'cdn-security-uri-version', exit: expectedExit, expectedExit, durationMs: 1,
+      })));
+      steps.push(...[0, 0, 0, 0].map(expectedExit => ({
+        command: 'source-aware-ci-uri', exit: expectedExit, expectedExit, durationMs: 1,
+      })));
     }
     return { ...m, runtime: { executable: 'node', sha256: 'f'.repeat(64), platform: 'linux', arch: 'x64' },
       row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2',
       switchVerified: true, resolution, dependencies, steps,
       checks: lower ? ['node-rejection','resolution','no-side-effects']
         : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli','source-auth-config','source-safe-output',
-          ...(row === '24' ? ['source-global-prefix','source-controller-options'] : [])],
+          ...(row === '24' ? ['source-global-prefix','source-controller-options','source-uri-version'] : [])],
       ...(row === '24' ? { journey, prefixProof: { globalPrefix: '/api' as const,
         projectDigest: `sha256:${'a'.repeat(64)}`, configDigest: `sha256:${'b'.repeat(64)}`,
         routingDigest: `sha256:${'c'.repeat(64)}`,
@@ -77,6 +83,14 @@ try {
         controllerOptionsProof: { inputSha256: 'a'.repeat(64), savedSha256: 'b'.repeat(64),
           ciRecordSha256: 'c'.repeat(64), routes: ['GET /users/items'],
           unsupportedCode: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR' as const,
+          ciDelivery: 'CI_OK' as const },
+        uriVersionProof: { inputSha256: 'a'.repeat(64), savedSha256: 'b'.repeat(64),
+          ciRecordSha256: 'c'.repeat(64), projectDigest: `sha256:${'a'.repeat(64)}`,
+          configDigest: `sha256:${'b'.repeat(64)}`, routingDigest: `sha256:${'c'.repeat(64)}`,
+          comparisonContractDigest: `sha256:${'d'.repeat(64)}`,
+          metadataDigest: `sha256:${'e'.repeat(64)}`,
+          routes: ['GET /api/v1/users', 'GET /api/v2/users', 'GET /api/v2/users/items'],
+          sourceOnly: ['GET /api/v1/users', 'GET /api/v2/users', 'GET /api/v2/users/items'],
           ciDelivery: 'CI_OK' as const } } : {}) };
   });
   fs.writeFileSync(path.join(temp, 'metadata.json'), JSON.stringify(m));
@@ -94,6 +108,14 @@ try {
   test('wrong Controller object route fails closed', () => assert.throws(() => aggregate(m,
     rows.map(r => r.row === '24' ? { ...r, controllerOptionsProof: { ...r.controllerOptionsProof!,
       routes: ['GET /locked'] } } : r), e, ['success','success'])));
+  test('missing installed URI command fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r,
+      steps: r.steps.filter(s => s.command !== 'cdn-security-uri-version') } : r), e, ['success','success'])));
+  test('missing URI proof fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, uriVersionProof: undefined } : r), e, ['success','success'])));
+  test('unversioned URI route fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, uriVersionProof: { ...r.uriVersionProof!,
+      routes: ['GET /api/users'] } } : r), e, ['success','success'])));
   test('incorrect decorator-local inventory fails closed', () => assert.throws(() => aggregate(m,
     rows.map(r => r.row === '24' ? { ...r, prefixProof: { ...r.prefixProof!,
       unprefixedInventory: { sourceOnly: 6, declaredOnly: 5, methodMismatch: 0 } } } : r), e,
