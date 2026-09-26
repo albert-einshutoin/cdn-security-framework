@@ -38,16 +38,20 @@ record contains candidate identity, analysis verdict, output status, relative
 names, byte counts, and SHA-256 hashes; it contains no raw input, absolute
 path, or stack. The workflow validates regular files, hashes, Summary UTF-8,
 size/content and the pinned official SARIF schema before copying the Summary
-as data to `GITHUB_STEP_SUMMARY`. Only the verified explicit file list is
-uploaded as a normal Actions artifact (30-day retention). To check downloads,
-compare each file's SHA-256 to `ci-record.json`; the tarball SHA-256 is a
-separate value from the Actions artifact archive digest.
+as data to `GITHUB_STEP_SUMMARY`. The same verified Summary bytes are staged
+and transferred. Before upload, `verify-stage` checks the exact staged file
+list, candidate/run identity, regular-file type, size, hash, and report format
+against the bounded runtime-validated CI and delivery records. The final gate
+checks that stage again. Only the verified explicit file list is uploaded as a
+normal Actions artifact (30-day retention). To check downloads, compare each
+file's SHA-256 to `ci-record.json` and the staged hashes in `delivery.json`;
+the tarball SHA-256 is separate from the Actions artifact archive digest.
 
 An analysis exit `1` or safely reportable partial exit `2` still produces
 diagnostic outputs, then fails the final gate. Missing/incomplete input
 protection, internal/render/write failure, or failed verification yields a
 fixed-code failure Summary; no prior report or invented clean report is used.
-Summary transfer, artifact upload, skipped/cancelled dependencies, and the
+Summary transfer, stage verification, artifact upload, skipped/cancelled dependencies, and the
 original analysis exit are checked independently. A partial save is not an
 atomic transaction, and verified surviving files may be kept for diagnosis.
 The final gate requires exit `0`, both verified outputs, Summary transfer,

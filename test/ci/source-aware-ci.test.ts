@@ -15,6 +15,12 @@ let temp: string;
 let candidate: string;
 let driver: string;
 
+function changeJson(file: string, change: (value: any) => void) {
+  const value = JSON.parse(fs.readFileSync(file, 'utf8'));
+  change(value);
+  fs.writeFileSync(file, `${JSON.stringify(value)}\n`);
+}
+
 function command(bin: string, args: string[], cwd: string, env = process.env) {
   const result = spawnSync(bin, args, { cwd, env, encoding: 'utf8', timeout: 90_000, maxBuffer: 1024 * 1024 });
   assert.equal(result.error, undefined, 'child process failed or timed out');
@@ -27,7 +33,7 @@ function env(extra: Record<string, string> = {}) {
     GITHUB_RUN_ATTEMPT: '1', CSF_TGZ_SHA256: hash(path.join(candidate, 'candidate.tgz')),
     CSF_PRODUCER_STATE: 'success', CSF_ACCEPTANCE_STATE: 'success',
     CSF_ANALYZE_OUTCOME: 'success', CSF_PUBLISH_OUTCOME: 'success',
-    CSF_ARTIFACT_OUTCOME: 'success', ...extra };
+    CSF_STAGE_OUTCOME: 'success', CSF_ARTIFACT_OUTCOME: 'success', ...extra };
 }
 
 function workspace(name: string, overrides: Record<string, unknown> = {}) {
@@ -76,7 +82,8 @@ function runCase(name: string, overrides: Record<string, unknown> = {}) {
   return { ...target, record };
 }
 
-function deliver(output: string, name: string, extra: Record<string, string> = {}) {
+function deliver(output: string, name: string, extra: Record<string, string> = {},
+  changeStage?: (stage: string) => void) {
   const stage = path.join(temp, `${name}-stage`);
   fs.mkdirSync(stage);
   const step = path.join(temp, `${name}-step.md`);
@@ -84,9 +91,12 @@ function deliver(output: string, name: string, extra: Record<string, string> = {
   const record = path.join(output, 'ci-record.json');
   const publish = command(process.execPath, [driver, 'publish', record, candidate, stage], repo,
     env({ GITHUB_STEP_SUMMARY: step, GITHUB_OUTPUT: outputs, ...extra }));
+  changeStage?.(stage);
+  const verify = command(process.execPath, [driver, 'verify-stage', record, candidate,
+    path.join(stage, 'delivery.json')], repo, env(extra));
   const gate = command(process.execPath, [driver, 'gate', record, candidate,
     path.join(stage, 'delivery.json')], repo, env(extra));
-  return { stage, step, outputs, publish, gate };
+  return { stage, step, outputs, publish, verify, gate };
 }
 
 beforeAll(() => {
@@ -222,6 +232,182 @@ describe('installed dev-only Source-aware CI connection', () => {
     const states = runCase('candidate-state');
     const stage = deliver(states.output, 'candidate', { CSF_TGZ_SHA256: '0'.repeat(64) });
     expect(stage.gate.status).toBe(3);
+  });
+
+  it('W06 rejects a changed staged Summary while original reports remain valid', () => {
+    const current = runCase('stage-summary');
+    const delivery = deliver(current.output, 'stage-summary', {}, stage => {
+      fs.appendFileSync(path.join(stage, 'summary.md'), 'changed after publish\n');
+    });
+    expect(delivery.publish.status).toBe(0);
+    expect(delivery.verify.status).toBe(3);
+    expect(delivery.gate.status).toBe(3);
+    expect(hash(path.join(current.output, 'summary.md'))).toBe(current.record.reports.summary.sha256);
+  });
+
+  it('W06 rejects a missing staged SARIF while original reports remain valid', () => {
+    const current = runCase('stage-sarif');
+    const delivery = deliver(current.output, 'stage-sarif', {}, stage => {
+      fs.unlinkSync(path.join(stage, 'source-aware.sarif'));
+    });
+    expect(delivery.publish.status).toBe(0);
+    expect(delivery.verify.status).toBe(3);
+    expect(delivery.gate.status).toBe(3);
+    expect(JSON.parse(fs.readFileSync(path.join(delivery.stage, 'delivery.json'), 'utf8')).code).toBe('CI_OK');
+    expect(hash(path.join(current.output, 'source-aware.sarif'))).toBe(current.record.reports.sarif.sha256);
+  });
+
+  it('W06 rejects a staged CI record from another run', () => {
+    const current = runCase('stage-record');
+    const delivery = deliver(current.output, 'stage-record', {}, stage => {
+      const file = path.join(stage, 'ci-record.json');
+      const otherRun = JSON.parse(fs.readFileSync(file, 'utf8'));
+      otherRun.candidate.run = '2';
+      fs.writeFileSync(file, `${JSON.stringify(otherRun)}\n`);
+    });
+    expect(delivery.publish.status).toBe(0);
+    expect(delivery.verify.status).toBe(3);
+    expect(delivery.gate.status).toBe(3);
+    expect(current.record.candidate.run).toBe('1');
+  });
+
+  it('W06 rejects a staged symlink before upload and at the gate', () => {
+    const current = runCase('stage-link');
+    const delivery = deliver(current.output, 'stage-link', {}, stage => {
+      fs.unlinkSync(path.join(stage, 'summary.md'));
+      fs.symlinkSync(path.join(current.output, 'summary.md'), path.join(stage, 'summary.md'));
+    });
+    expect(delivery.publish.status).toBe(0);
+    expect(delivery.verify.status).toBe(3);
+    expect(delivery.gate.status).toBe(3);
+  });
+
+  it('W06 rejects a delivery candidate from another run', () => {
+    const current = runCase('delivery-run');
+    const delivery = deliver(current.output, 'delivery-run', {}, stage => {
+      changeJson(path.join(stage, 'delivery.json'), value => { value.candidate.run = '2'; });
+    });
+    expect(delivery.publish.status).toBe(0);
+    expect(delivery.verify.status).toBe(3);
+    expect(delivery.gate.status).toBe(3);
+  });
+
+  it('W06 rejects an altered delivery upload list', () => {
+    const current = runCase('delivery-list');
+    const delivery = deliver(current.output, 'delivery-list', {}, stage => {
+      changeJson(path.join(stage, 'delivery.json'), value => { value.files = ['summary.md']; });
+    });
+    expect(delivery.publish.status).toBe(0);
+    expect(delivery.verify.status).toBe(3);
+    expect(delivery.gate.status).toBe(3);
+  });
+
+  it('W08 refuses an unknown secret-bearing delivery field before upload', () => {
+    const current = runCase('delivery-unknown');
+    const delivery = deliver(current.output, 'delivery-unknown', {}, stage => {
+      changeJson(path.join(stage, 'delivery.json'), value => { value.rawConfig = 'token=hidden-secret'; });
+    });
+    expect(delivery.publish.status).toBe(0);
+    expect(delivery.verify.status).toBe(3);
+    expect(delivery.gate.status).toBe(3);
+  });
+
+  it('W08 refuses an unknown secret-bearing CI record field before staging', () => {
+    const current = runCase('record-unknown');
+    changeJson(path.join(current.output, 'ci-record.json'), value => {
+      value.rawSource = 'token=hidden-secret';
+    });
+    const delivery = deliver(current.output, 'record-unknown');
+    expect(delivery.gate.status).toBe(3);
+    expect(fs.readdirSync(delivery.stage)).toEqual(['delivery.json']);
+    expect(fs.readFileSync(path.join(delivery.stage, 'delivery.json'), 'utf8')).not.toContain('hidden-secret');
+    expect(fs.readFileSync(delivery.step, 'utf8')).toContain('CI_REPORT_UNAVAILABLE');
+  });
+
+  it('W08 refuses an invalid analysis status', () => {
+    const current = runCase('record-status');
+    changeJson(path.join(current.output, 'ci-record.json'), value => {
+      value.analysis.status = 'unknown';
+    });
+    const delivery = deliver(current.output, 'record-status');
+    expect(delivery.gate.status).toBe(3);
+    expect(fs.readdirSync(delivery.stage)).toEqual(['delivery.json']);
+  });
+
+  it('W08 refuses oversized analysis codes', () => {
+    const current = runCase('record-codes');
+    changeJson(path.join(current.output, 'ci-record.json'), value => {
+      value.analysis.codes = Array(65).fill('OPENAPI_CAPABILITY_PARTIAL');
+    });
+    const delivery = deliver(current.output, 'record-codes');
+    expect(delivery.gate.status).toBe(3);
+    expect(fs.readdirSync(delivery.stage)).toEqual(['delivery.json']);
+  });
+
+  it('W08 refuses an invalid analysis code type', () => {
+    const current = runCase('record-code-type');
+    changeJson(path.join(current.output, 'ci-record.json'), value => {
+      value.analysis.codes = ['OPENAPI_CAPABILITY_PARTIAL', 42];
+    });
+    const delivery = deliver(current.output, 'record-code-type');
+    expect(delivery.gate.status).toBe(3);
+    expect(fs.readdirSync(delivery.stage)).toEqual(['delivery.json']);
+  });
+
+  it('W08 refuses an unknown analysis code', () => {
+    const current = runCase('record-unknown-code');
+    changeJson(path.join(current.output, 'ci-record.json'), value => {
+      value.analysis.codes = ['UNRECOGNIZED_CODE'];
+    });
+    const delivery = deliver(current.output, 'record-unknown-code');
+    expect(delivery.gate.status).toBe(3);
+    expect(fs.readdirSync(delivery.stage)).toEqual(['delivery.json']);
+  });
+
+  it('W08 refuses a mismatched saved report name', () => {
+    const current = runCase('record-report-name');
+    changeJson(path.join(current.output, 'ci-record.json'), value => {
+      value.reports.sarif.name = 'summary.md';
+    });
+    const delivery = deliver(current.output, 'record-report-name');
+    expect(delivery.gate.status).toBe(3);
+    expect(fs.readdirSync(delivery.stage)).toEqual(['delivery.json']);
+  });
+
+  it('W08 refuses a nonnumeric saved report size', () => {
+    const current = runCase('record-report-size');
+    changeJson(path.join(current.output, 'ci-record.json'), value => {
+      value.reports.sarif.bytes = '54031';
+    });
+    const delivery = deliver(current.output, 'record-report-size');
+    expect(delivery.gate.status).toBe(3);
+    expect(fs.readdirSync(delivery.stage)).toEqual(['delivery.json']);
+  });
+
+  it('W08 refuses an invalid saved report hash', () => {
+    const current = runCase('record-report-hash');
+    changeJson(path.join(current.output, 'ci-record.json'), value => {
+      value.reports.sarif.sha256 = '0'.repeat(63);
+    });
+    const delivery = deliver(current.output, 'record-report-hash');
+    expect(delivery.gate.status).toBe(3);
+    expect(fs.readdirSync(delivery.stage)).toEqual(['delivery.json']);
+  });
+
+  it('W08 refuses an unknown secret-bearing candidate metadata field', () => {
+    const metadata = path.join(candidate, 'metadata.json');
+    const original = fs.readFileSync(metadata);
+    const target = workspace('metadata-unknown');
+    try {
+      changeJson(metadata, value => { value.rawConfig = 'password=hidden-secret'; });
+      const analysis = command(process.execPath,
+        [driver, 'run', target.config, candidate, target.output], repo, env());
+      expect(analysis.status).toBe(3);
+      expect(analysis.stderr).not.toContain('hidden-secret');
+      expect(fs.readdirSync(target.output)).toEqual([]);
+    } finally {
+      fs.writeFileSync(metadata, original);
+    }
   });
 
   it('W05 never substitutes stale or failed product reports', () => {

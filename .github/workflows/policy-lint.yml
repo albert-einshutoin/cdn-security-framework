@@ -193,9 +193,16 @@ jobs:
           root="$RUNNER_TEMP/csf-source-aware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
           node "$RUNNER_TEMP/csf-candidate/consumer/node_modules/cdn-security-framework/scripts/source-aware-ci.js" \
             publish "$root/workspace/reports/ci-record.json" "$RUNNER_TEMP/csf-candidate" "$root/stage"
+      - name: Verify exact staged files before upload
+        id: stage
+        if: always() && steps.publish.outputs.has-files == 'true'
+        run: |
+          root="$RUNNER_TEMP/csf-source-aware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          node "$RUNNER_TEMP/csf-candidate/consumer/node_modules/cdn-security-framework/scripts/source-aware-ci.js" \
+            verify-stage "$root/workspace/reports/ci-record.json" "$RUNNER_TEMP/csf-candidate" "$root/stage/delivery.json"
       - name: Upload only verified current-run files
         id: upload
-        if: always() && steps.publish.outputs.has-files == 'true'
+        if: always() && steps.stage.outcome == 'success'
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
           name: source-aware-ci-${{ github.run_id }}-${{ github.run_attempt }}
@@ -207,6 +214,7 @@ jobs:
         env:
           CSF_ANALYZE_OUTCOME: ${{ steps.analyze.outcome }}
           CSF_PUBLISH_OUTCOME: ${{ steps.publish.outcome }}
+          CSF_STAGE_OUTCOME: ${{ steps.stage.outcome }}
           CSF_ARTIFACT_OUTCOME: ${{ steps.upload.outcome }}
         run: |
           root="$RUNNER_TEMP/csf-source-aware-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"

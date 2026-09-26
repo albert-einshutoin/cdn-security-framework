@@ -34,14 +34,17 @@ writerでworkspace内へ保存し、入力や旧reportを上書きしません�
 候補identity、解析exit、各出力状態、相対名、byte数、SHA-256を含み、raw入力、
 絶対path、stackは含みません。通常ファイル、hash、SummaryのUTF-8/上限/内容、
 固定した公式SARIF schemaを検証してから、Summaryをデータとして
-`GITHUB_STEP_SUMMARY`へ転記します。検証済み明示リストのみを通常のActions
-artifactに30日保存します。取得後は`ci-record.json`の各hashと照合します。
+`GITHUB_STEP_SUMMARY`へ転記します。検証した同じSummary bytesをstageと転記に使います。
+upload直前の`verify-stage`は、候補/run identity、stageの明示ファイル一覧、
+通常ファイル、サイズ、hash、report形式を、実行時検証済みのCI・転送記録に照合します。
+最終gateもstageを再確認します。検証済み明示リストのみを通常のActions
+artifactに30日保存します。取得後は`ci-record.json`と`delivery.json`の各hashに照合します。
 tgzのSHA-256とActions artifact archiveのdigestは別です。
 
 解析exit `1`と保存可能なpartial exit `2`では診断成果物を残し、最終gateは
 失敗させます。入力保護不完全、内部/render/write失敗、検証失敗では固定codeの
 失敗Summaryを示し、旧reportや架空の正常0件reportを使いません。Summary転記、
-artifact upload、依存jobのskip/cancel、元の解析exitを個別に確認します。
+stage検証、artifact upload、依存jobのskip/cancel、元の解析exitを個別に確認します。
 複数ファイルの保存は原子的transactionではありません。検証済みの残存ファイル
 だけを診断用に残せます。gate成功にはexit `0`、両成果物の検証、Summary転記、
 artifact upload、producer/acceptanceの成功が必要です。
