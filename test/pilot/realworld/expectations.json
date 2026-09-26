@@ -1,0 +1,271 @@
+{
+  "source": {
+    "repository": "https://github.com/lujakob/nestjs-realworld-example-app",
+    "commit": "c1c2cc4e448b279ff083272df1ac50d20c3304fa",
+    "tree": "a35a8d572473ce3aee63f27df114b43686547e21",
+    "tarSha256": "273f824a5cf0553ccbf03c6af8a7aff484a80712b7188e7cf7e40af68274e1e4",
+    "rawTarGzSha256": "8a2448be768be75142ace6a105f15275af4460c14c1707f26d148433d3194019",
+    "tarGzSha256": "0f3bca4a2e2acb472d8280acd2a6857213ca57865ac78de5449d90c833f69970",
+    "license": "ISC (package.json SPDX field; no separate LICENSE file)",
+    "archiveFiles": 118,
+    "excludedFromEvaluationArchive": ["prisma/.env"]
+  },
+  "scope": {
+    "routeSpace": "decorator-local, excludes app.setGlobalPrefix(api)",
+    "operations": [
+      {
+        "method": "GET",
+        "path": "/articles",
+        "source": "src/article/article.controller.ts",
+        "line": 24,
+        "swaggerBearerClassLine": 15,
+        "localGuard": "none",
+        "middleware": null,
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "GET",
+        "path": "/articles/feed",
+        "source": "src/article/article.controller.ts",
+        "line": 33,
+        "swaggerBearerClassLine": 15,
+        "localGuard": "none",
+        "middleware": {
+          "source": "src/article/article.module.ts",
+          "line": 24
+        },
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "GET",
+        "path": "/articles/{slug}",
+        "source": "src/article/article.controller.ts",
+        "line": 38,
+        "swaggerBearerClassLine": 15,
+        "localGuard": "none",
+        "middleware": null,
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "GET",
+        "path": "/articles/{slug}/comments",
+        "source": "src/article/article.controller.ts",
+        "line": 43,
+        "swaggerBearerClassLine": 15,
+        "localGuard": "none",
+        "middleware": null,
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "POST",
+        "path": "/articles",
+        "source": "src/article/article.controller.ts",
+        "line": 51,
+        "swaggerBearerClassLine": 15,
+        "localGuard": "none",
+        "middleware": {
+          "source": "src/article/article.module.ts",
+          "line": 25
+        },
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "PUT",
+        "path": "/articles/{slug}",
+        "source": "src/article/article.controller.ts",
+        "line": 59,
+        "swaggerBearerClassLine": 15,
+        "localGuard": "none",
+        "middleware": {
+          "source": "src/article/article.module.ts",
+          "line": 27
+        },
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "DELETE",
+        "path": "/articles/{slug}",
+        "source": "src/article/article.controller.ts",
+        "line": 68,
+        "swaggerBearerClassLine": 15,
+        "localGuard": "none",
+        "middleware": {
+          "source": "src/article/article.module.ts",
+          "line": 26
+        },
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "POST",
+        "path": "/articles/{slug}/comments",
+        "source": "src/article/article.controller.ts",
+        "line": 76,
+        "swaggerBearerClassLine": 15,
+        "localGuard": "none",
+        "middleware": {
+          "source": "src/article/article.module.ts",
+          "line": 28
+        },
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "DELETE",
+        "path": "/articles/{slug}/comments/{id}",
+        "source": "src/article/article.controller.ts",
+        "line": 84,
+        "swaggerBearerClassLine": 15,
+        "localGuard": "none",
+        "middleware": {
+          "source": "src/article/article.module.ts",
+          "line": 29
+        },
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "POST",
+        "path": "/articles/{slug}/favorite",
+        "source": "src/article/article.controller.ts",
+        "line": 93,
+        "swaggerBearerClassLine": 15,
+        "localGuard": "none",
+        "middleware": {
+          "source": "src/article/article.module.ts",
+          "line": 30
+        },
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "DELETE",
+        "path": "/articles/{slug}/favorite",
+        "source": "src/article/article.controller.ts",
+        "line": 101,
+        "swaggerBearerClassLine": 15,
+        "localGuard": "none",
+        "middleware": {
+          "source": "src/article/article.module.ts",
+          "line": 31
+        },
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "GET",
+        "path": "/profiles/{username}",
+        "source": "src/profile/profile.controller.ts",
+        "line": 18,
+        "swaggerBearerClassLine": 11,
+        "localGuard": "none",
+        "middleware": null,
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "POST",
+        "path": "/profiles/{username}/follow",
+        "source": "src/profile/profile.controller.ts",
+        "line": 23,
+        "swaggerBearerClassLine": 11,
+        "localGuard": "none",
+        "middleware": {
+          "source": "src/profile/profile.module.ts",
+          "line": 22
+        },
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "DELETE",
+        "path": "/profiles/{username}/follow",
+        "source": "src/profile/profile.controller.ts",
+        "line": 28,
+        "swaggerBearerClassLine": 11,
+        "localGuard": "none",
+        "middleware": {
+          "source": "src/profile/profile.module.ts",
+          "line": 22
+        },
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "GET",
+        "path": "/user",
+        "source": "src/user/user.controller.ts",
+        "line": 21,
+        "swaggerBearerClassLine": 14,
+        "localGuard": "none",
+        "middleware": {
+          "source": "src/user/user.module.ts",
+          "line": 20
+        },
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "PUT",
+        "path": "/user",
+        "source": "src/user/user.controller.ts",
+        "line": 26,
+        "swaggerBearerClassLine": 14,
+        "localGuard": "none",
+        "middleware": {
+          "source": "src/user/user.module.ts",
+          "line": 20
+        },
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "POST",
+        "path": "/users",
+        "source": "src/user/user.controller.ts",
+        "line": 32,
+        "swaggerBearerClassLine": 14,
+        "localGuard": "none",
+        "middleware": null,
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "DELETE",
+        "path": "/users/{slug}",
+        "source": "src/user/user.controller.ts",
+        "line": 37,
+        "swaggerBearerClassLine": 14,
+        "localGuard": "none",
+        "middleware": null,
+        "authEnforcement": "unknown"
+      },
+      {
+        "method": "POST",
+        "path": "/users/login",
+        "source": "src/user/user.controller.ts",
+        "line": 43,
+        "swaggerBearerClassLine": 14,
+        "localGuard": "none",
+        "middleware": null,
+        "authEnforcement": "unknown"
+      }
+    ],
+    "evaluationOut": [
+      {
+        "method": "GET",
+        "path": "/tags",
+        "source": "src/tag/tag.controller.ts",
+        "line": 17,
+        "reason": "outside fixed article/profile/user scope"
+      },
+      {
+        "method": "GET",
+        "path": "/",
+        "source": "src/app.controller.ts",
+        "line": 5,
+        "reason": "outside fixed article/profile/user scope"
+      }
+    ]
+  },
+  "assumptions": {
+    "authConfig": {
+      "public_decorators": [],
+      "roles_decorators": [],
+      "guard_mappings": {}
+    },
+    "swaggerBearer": "documentation metadata only; does not prove enforcement",
+    "authMiddleware": "module configuration recorded as evidence, not resolved by analyzer",
+    "globalPrefix": "src/main.ts:8 applies api at runtime; analyzer documents global prefixes unsupported",
+    "runtime": "no app start, target scripts, DB, JWT/JWKS, or network during analysis"
+  }
+}

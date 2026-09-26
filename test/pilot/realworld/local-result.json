@@ -1,0 +1,181 @@
+{
+  "schemaVersion": 1,
+  "code": "PILOT_PASS",
+  "source": {
+    "repository": "https://github.com/lujakob/nestjs-realworld-example-app",
+    "commit": "c1c2cc4e448b279ff083272df1ac50d20c3304fa",
+    "tree": "a35a8d572473ce3aee63f27df114b43686547e21",
+    "tarSha256": "273f824a5cf0553ccbf03c6af8a7aff484a80712b7188e7cf7e40af68274e1e4",
+    "rawTarGzSha256": "8a2448be768be75142ace6a105f15275af4460c14c1707f26d148433d3194019",
+    "tarGzSha256": "0f3bca4a2e2acb472d8280acd2a6857213ca57865ac78de5449d90c833f69970",
+    "license": "ISC (package.json SPDX field; no separate LICENSE file)",
+    "archiveFiles": 118,
+    "excludedFromEvaluationArchive": [
+      "prisma/.env"
+    ]
+  },
+  "candidate": {
+    "source": "48fa059a53afb79c3508d3fdc1b5f14611b883a4",
+    "harness": "48fa059a53afb79c3508d3fdc1b5f14611b883a4",
+    "tree": "956fbb146be87f813614ba4e6658355935fd9ed4",
+    "run": "36222071089",
+    "attempt": "1",
+    "tgzSha256": "24385a95d163cd6bcde9b4deb952feff9b19cd112db5709f251a62a752e6dab0",
+    "lockSha256": "86acfca80fb5a21037a80b29845e9a797e0863cf708ccaae4a360fac0779e7ed"
+  },
+  "targetLockSha256": "215fa0d16ea42b361e450c18eb219da73932658420dbf63933a131a5aca657e8",
+  "inputHashes": {
+    "openapi-evaluation.json": "ec1a2c9a171f860ecdac0ca3240318b1f9d43cf63a54cefdde26e2264e455b2f",
+    "policy-evaluation.yml": "16744ec6ac58434ebcf144eac05f68f13ba8c344b258d3814fb1bb3a8fcc5f7a",
+    "auth-evaluation.json": "dc8cf2b81c641d0c02637d6671338f426d27da3b60e4c0210f9bb9c194a19e69"
+  },
+  "operations": {
+    "metrics": {
+      "files": 623,
+      "totalSourceBytes": 2344310,
+      "largestFileBytes": 218972,
+      "astNodes": 171442,
+      "diagnostics": 1,
+      "operations": 21,
+      "maxDepth": 20
+    },
+    "matchedOperations": 19,
+    "evaluationOut": 2,
+    "authUnknown": 19,
+    "diagnosticCodes": [
+      "SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED"
+    ]
+  },
+  "cli": {
+    "exit": 0,
+    "durationMs": 799,
+    "summarySha256": "9fe251be0249bc06bb7fff3c3752fae3d29db28ebbf2b6651bbeaade186e8be0"
+  },
+  "cases": [
+    {
+      "case": "baseline",
+      "analysisExit": 0,
+      "analysisStatus": "partial",
+      "stage": "CI_OK",
+      "findings": {
+        "SC-EXPOSURE-001": 12,
+        "SC-EXPOSURE-005": 14,
+        "SC-INVENTORY-001": 2,
+        "SC-LIMIT-002": 7,
+        "SC-AUTHN-004": 19
+      },
+      "targetsVerified": true,
+      "durationMs": 857,
+      "summarySha256": "554154363df9b50b779412cce01f2a4be9534d2fefa60f1110d9b96280b0aca1",
+      "sarifSha256": "7a248e841f767a075746cbf8fc17a9b2a6f690340ff720dccfd7bf2c1ca60cf3"
+    },
+    {
+      "case": "method-mismatch",
+      "analysisExit": 0,
+      "analysisStatus": "partial",
+      "stage": "CI_OK",
+      "findings": {
+        "SC-EXPOSURE-001": 12,
+        "SC-EXPOSURE-005": 14,
+        "SC-INVENTORY-001": 2,
+        "SC-INVENTORY-004": 1,
+        "SC-LIMIT-002": 7,
+        "SC-AUTHN-004": 19
+      },
+      "targetsVerified": true,
+      "durationMs": 838,
+      "summarySha256": "b90b616a71fdf542e52d88b41860df4d9d1c0c1b9ae0f709e99c609bb8854ea0",
+      "sarifSha256": "6f0bb11c67cacde6dd789da7282f03e5520765c3fd1b8a0a3001a45ff3433a5b"
+    },
+    {
+      "case": "source-only",
+      "analysisExit": 0,
+      "analysisStatus": "partial",
+      "stage": "CI_OK",
+      "findings": {
+        "SC-EXPOSURE-001": 11,
+        "SC-EXPOSURE-005": 14,
+        "SC-INVENTORY-001": 3,
+        "SC-LIMIT-002": 6,
+        "SC-AUTHN-004": 18
+      },
+      "targetsVerified": true,
+      "durationMs": 859,
+      "summarySha256": "4900fedce6df5af3eace18dba641a134a7888bde27692a3ce5bc36aba48afa16",
+      "sarifSha256": "6106d4336b31225290d10e0f6af996a5b473deeff4d0a92872938bc09433f42f"
+    },
+    {
+      "case": "declared-only",
+      "analysisExit": 0,
+      "analysisStatus": "partial",
+      "stage": "CI_OK",
+      "findings": {
+        "SC-EXPOSURE-001": 13,
+        "SC-EXPOSURE-005": 14,
+        "SC-INVENTORY-001": 2,
+        "SC-INVENTORY-003": 1,
+        "SC-LIMIT-002": 8,
+        "SC-AUTHN-004": 20
+      },
+      "targetsVerified": true,
+      "durationMs": 845,
+      "summarySha256": "2d6026e029b28d98860082281ed9e605f6186d60e0c796cde0dfefdc3e2f9ed7",
+      "sarifSha256": "10743f8967b41ce83ea4daff8470ef9c27819671861726b2bd711869f7b102df"
+    },
+    {
+      "case": "declared-auth-vs-policy",
+      "analysisExit": 0,
+      "analysisStatus": "partial",
+      "stage": "CI_OK",
+      "findings": {
+        "SC-EXPOSURE-001": 12,
+        "SC-AUTHN-001": 1,
+        "SC-EXPOSURE-005": 14,
+        "SC-INVENTORY-001": 2,
+        "SC-LIMIT-002": 7,
+        "SC-AUTHN-004": 18,
+        "SC-REQUEST-001": 1
+      },
+      "targetsVerified": true,
+      "durationMs": 857,
+      "summarySha256": "b3849f1e55437fc01be8c2828b12a8479ee5c8444349092b6748a9b0813ece7d",
+      "sarifSha256": "3e85132edd486eaa09865f1cd6a07e067fce89a3b5d620a63d7cf809638fd58a"
+    },
+    {
+      "case": "policy-method-block",
+      "analysisExit": 0,
+      "analysisStatus": "partial",
+      "stage": "CI_OK",
+      "findings": {
+        "SC-EXPOSURE-001": 12,
+        "SC-EXPOSURE-002": 5,
+        "SC-EXPOSURE-004": 5,
+        "SC-EXPOSURE-005": 14,
+        "SC-INVENTORY-001": 2,
+        "SC-LIMIT-002": 7,
+        "SC-AUTHN-004": 14
+      },
+      "targetsVerified": true,
+      "durationMs": 907,
+      "summarySha256": "992e10b3c109895c40121384b0d0e03bf75ad3e47d6bcf0fb9b665d27920b44a",
+      "sarifSha256": "76ca725c7f9c012795b90bf155898ea1259b1a192b3b84a9e4b3d68322802aed"
+    },
+    {
+      "case": "auth-unknown-control",
+      "analysisExit": 0,
+      "analysisStatus": "partial",
+      "stage": "CI_OK",
+      "findings": {
+        "SC-EXPOSURE-001": 12,
+        "SC-EXPOSURE-005": 14,
+        "SC-INVENTORY-001": 2,
+        "SC-LIMIT-002": 7,
+        "SC-AUTHN-004": 19
+      },
+      "targetsVerified": true,
+      "durationMs": 858,
+      "summarySha256": "8002f493a5478872d0a9ecec758b29b3385c4098e8e98aee47e19fff406c4b37",
+      "sarifSha256": "18bd51f1559205cc50a5178ce326eeb899b18922bb82fceeea32da094f310258"
+    }
+  ]
+}

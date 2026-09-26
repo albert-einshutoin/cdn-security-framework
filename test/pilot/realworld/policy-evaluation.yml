@@ -1,0 +1,12 @@
+# Evaluation-only Edge Policy. No policy from the upstream application is claimed.
+version: 2
+project: realworld-technical-pilot
+# Enforce with globally allowed methods; method-surface extras are expected evaluation findings.
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, POST, PUT, DELETE]
+  block:
+    header_missing: []
+routes: []
+response_headers: {}

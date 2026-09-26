@@ -1,0 +1,52 @@
+{
+  "baseline": {
+    "SC-INVENTORY-001": 2,
+    "SC-INVENTORY-003": 0,
+    "SC-INVENTORY-004": 0,
+    "SC-AUTHN-001": 0,
+    "SC-AUTHN-005": 0,
+    "SC-EXPOSURE-004": 0
+  },
+  "cases": [
+    {
+      "name": "baseline",
+      "change": "none",
+      "expect": {}
+    },
+    {
+      "name": "method-mismatch",
+      "change": "method-mismatch",
+      "target": { "sourceMethod": "GET", "declaredMethod": "POST", "path": "/articles/feed" },
+      "expect": { "SC-INVENTORY-004": 1 }
+    },
+    {
+      "name": "source-only",
+      "change": "source-only",
+      "target": { "method": "GET", "path": "/articles/feed" },
+      "expect": { "SC-INVENTORY-001": 3 }
+    },
+    {
+      "name": "declared-only",
+      "change": "declared-only",
+      "target": { "method": "GET", "path": "/not-implemented" },
+      "expect": { "SC-INVENTORY-003": 1 }
+    },
+    {
+      "name": "declared-auth-vs-policy",
+      "change": "declared-auth-vs-policy",
+      "target": { "method": "GET", "path": "/user" },
+      "expect": { "SC-AUTHN-001": 1, "SC-AUTHN-005": 0 }
+    },
+    {
+      "name": "policy-method-block",
+      "change": "policy-method-block",
+      "target": { "method": "DELETE" },
+      "expect": { "SC-EXPOSURE-004": 5 }
+    },
+    {
+      "name": "auth-unknown-control",
+      "change": "auth-unknown-control",
+      "expect": { "SC-AUTHN-005": 0 }
+    }
+  ]
+}

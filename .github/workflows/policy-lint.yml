@@ -221,6 +221,71 @@ jobs:
           node "$RUNNER_TEMP/csf-candidate/consumer/node_modules/cdn-security-framework/scripts/source-aware-ci.js" \
             gate "$root/workspace/reports/ci-record.json" "$RUNNER_TEMP/csf-candidate" "$root/stage/delivery.json"
 
+  # Fixed public-source Pilot; only its validated aggregate is uploaded.
+  source-aware-pilot:
+    if: >-
+      always() && github.event_name == 'workflow_dispatch' &&
+      startsWith(github.ref, 'refs/heads/feat/source-aware-pilot/')
+    needs: [package-producer, package-acceptance]
+    runs-on: ubuntu-latest
+    env:
+      CSF_SOURCE: ${{ github.sha }}
+      CSF_TGZ_SHA256: ${{ needs.package-producer.outputs.sha256 }}
+      CSF_PRODUCER_STATE: ${{ needs.package-producer.result }}
+      CSF_ACCEPTANCE_STATE: ${{ needs.package-acceptance.result }}
+    steps:
+      - name: Require the accepted single-pack candidate
+        run: test "$CSF_PRODUCER_STATE" = success && test "$CSF_ACCEPTANCE_STATE" = success && test -n "$CSF_TGZ_SHA256"
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: package-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/csf-candidate
+      - name: Prepare installed candidate and fixed target dependencies online
+        run: |
+          node "$RUNNER_TEMP/csf-candidate/scripts/single-pack.js" verify "$RUNNER_TEMP/csf-candidate"
+          cd "$RUNNER_TEMP/csf-candidate/consumer"
+          npm ci --ignore-scripts --no-audit --no-fund --cache "$RUNNER_TEMP/csf-cache"
+          cd "$GITHUB_WORKSPACE"
+          node test/pilot/realworld/pilot.cjs prepare "$RUNNER_TEMP/csf-pilot-dependencies"
+      - name: Evaluate fixed source and mutations with network disabled
+        id: evaluate
+        run: |
+          unset NODE_PATH NODE_OPTIONS
+          sudo unshare --net -- sudo -u "$(id -un)" env PATH="$PATH" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" RUNNER_TEMP="$RUNNER_TEMP" CSF_SOURCE="$CSF_SOURCE" CSF_TGZ_SHA256="$CSF_TGZ_SHA256" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            node "$GITHUB_WORKSPACE/test/pilot/realworld/pilot.cjs" evaluate \
+              "$RUNNER_TEMP/csf-candidate" "$RUNNER_TEMP/csf-pilot-dependencies" \
+              "$RUNNER_TEMP/csf-pilot-evaluation" "$RUNNER_TEMP/csf-pilot-safe.json"
+      - name: Verify and stage only the safe result before upload
+        id: stage
+        if: steps.evaluate.outcome == 'success'
+        run: |
+          node test/pilot/realworld/pilot.cjs verify \
+            "$RUNNER_TEMP/csf-candidate" "$RUNNER_TEMP/csf-pilot-evaluation" \
+            "$RUNNER_TEMP/csf-pilot-safe.json" "$RUNNER_TEMP/csf-pilot-safe-stage"
+      - name: Upload verified aggregate without detailed source reports
+        id: upload
+        if: steps.stage.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: source-aware-pilot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/csf-pilot-safe-stage/safe-result.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Require Pilot evaluation, stage, and upload success
+        if: always()
+        env:
+          EVALUATE: ${{ steps.evaluate.outcome }}
+          STAGE: ${{ steps.stage.outcome }}
+          UPLOAD: ${{ steps.upload.outcome }}
+        run: test "$EVALUATE" = success && test "$STAGE" = success && test "$UPLOAD" = success
+
   pr-selective:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
