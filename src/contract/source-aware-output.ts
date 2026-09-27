@@ -51,6 +51,18 @@ export function finalizeSourceAwareOutput(
   const configDigest = workspace.evidence.source && digest(workspace.evidence.source.configDigest);
   const routing = workspace.evidence.routingAssumption;
   const versions = workspace.evidence.sourceVersionMetadata;
+  const versionRoutes = versions?.routes.slice(0, 20).map((route) => ({
+    status: route.status, sourceUri: redactEvidenceFilename(route.sourceUri), line: route.line,
+    ...(route.status === 'resolved' ? {
+      method: route.method, localPath: redactEvidenceFilename(route.localPath!),
+      version: route.version, versionOrigin: route.origin,
+      comparisonPath: redactEvidenceFilename(route.comparisonPath!),
+    } : { reason: route.reason }),
+  }));
+  // The CI record has a 64 KiB read limit; keep its route preview well below that while preserving the full digest and count.
+  while (versionRoutes && Buffer.byteLength(JSON.stringify(versionRoutes, null, 2)) > 24_576) {
+    versionRoutes.pop();
+  }
   const bundle: SourceAwareOutputBundle = {
     target: workspace.target,
     metadata: {
@@ -69,15 +81,8 @@ export function finalizeSourceAwareOutput(
       } } : {}),
       ...(versions ? { sourceVersionMetadata: {
         digest: versions.digest, origin: 'source-ast' as const,
-        total: versions.routes.length, omitted: Math.max(0, versions.routes.length - 20),
-        routes: versions.routes.slice(0, 20).map((route) => ({
-          status: route.status, sourceUri: redactEvidenceFilename(route.sourceUri), line: route.line,
-          ...(route.status === 'resolved' ? {
-            method: route.method, localPath: redactEvidenceFilename(route.localPath!),
-            version: route.version, versionOrigin: route.origin,
-            comparisonPath: redactEvidenceFilename(route.comparisonPath!),
-          } : { reason: route.reason }),
-        })),
+        total: versions.routes.length, omitted: versions.routes.length - versionRoutes!.length,
+        routes: versionRoutes!,
       } } : {}),
       targetCapabilities: capabilities,
     },

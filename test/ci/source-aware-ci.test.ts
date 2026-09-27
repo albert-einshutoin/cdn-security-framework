@@ -81,8 +81,10 @@ function inputDigests(root: string): Record<string, string> {
   return values;
 }
 
-function runCase(name: string, overrides: Record<string, unknown> = {}) {
+function runCase(name: string, overrides: Record<string, unknown> = {},
+  setup?: (root: string) => void) {
   const target = workspace(name, overrides);
+  setup?.(target.root);
   const before = inputDigests(target.root);
   const analysis = command(process.execPath, [driver, 'run', target.config, candidate, target.output], repo, env());
   expect(analysis.status, analysis.stderr).toBe(0);
@@ -146,6 +148,21 @@ beforeAll(() => {
 afterAll(() => { if (temp) fs.rmSync(temp, { recursive: true, force: true }); });
 
 describe('installed dev-only Source-aware CI connection', () => {
+  it('publishes a URI record with several valid long routes', () => {
+    const current = runCase('uri-large', { sourceVersioning: 'uri' }, root => {
+      const longPath = 'a'.repeat(8_000);
+      fs.appendFileSync(path.join(root, 'src/users.controller.ts'), Array.from({ length: 5 }, (_, index) =>
+        `\n@HttpController({ path: '${longPath}${index}', version: '1' }) class Long${index} { @Read() read() {} }\n`).join(''));
+    });
+    expect(current.record.sourceVersionMetadata.total).toBeGreaterThanOrEqual(5);
+    expect(current.record.sourceVersionMetadata.omitted).toBeGreaterThan(0);
+    expect(current.record.sourceVersionMetadata.routes.length).toBeGreaterThan(0);
+    const recordFile = path.join(current.output, 'ci-record.json');
+    expect(fs.statSync(recordFile).size).toBeLessThanOrEqual(65_536);
+    const delivered = deliver(current.output, 'uri-large');
+    expect(delivered.gate.status).toBe(0);
+  }, 120_000);
+
   it('uses the installed candidate for a bounded Controller object CLI and CI proof', () => {
     const smoke: typeof import('../../src/scripts/package-smoke-tests') =
       require(path.join(repo, 'scripts/package-smoke-tests.js'));
