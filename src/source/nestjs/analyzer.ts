@@ -1720,7 +1720,8 @@ function registeredProviderObjects(
         const unstable = (symbol && (reassignedSymbols.has(symbol)
           || unresolvedAssignments.has(symbol) || assignedValues.has(symbol)))
           || (receiver && (aliasSetHas(escapedSymbols, receiver)
-            || aliasSetHas(unstableContainers, receiver)));
+            // The escape pass runs before unstableContainers is built; aliasSetHas closes the current mutation set.
+            || aliasSetHas(mutatedContainers, receiver)));
         if (declarations.length === 1 && !unstable) {
           const declaration = declarations[0];
           const candidate = ts.isMethodDeclaration(declaration) ? declaration
