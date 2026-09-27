@@ -35,7 +35,10 @@ function workspace(): string {
   fs.writeFileSync(path.join(dependency, 'index.d.ts'), `export declare function Controller(path?: string | { path?: string; version?: string }): ClassDecorator;
 export declare function Get(path?: string): MethodDecorator;
 export declare function Post(path?: string): MethodDecorator;
-export declare function Head(path?: string): MethodDecorator;\n`);
+export declare function Head(path?: string): MethodDecorator;
+export declare function Version(value: string | string[]): MethodDecorator;
+export declare function Search(path?: string): MethodDecorator;
+export declare const VERSION_NEUTRAL: unique symbol;\n`);
   fs.writeFileSync(path.join(root, 'policy.yml'), policy);
   fs.mkdirSync(path.join(root, 'refs'));
   fs.writeFileSync(path.join(root, 'refs/common.yaml'), 'components:\n  parameters:\n    Id:\n      name: id\n      in: path\n      required: true\n      schema: {type: string}\n');
@@ -71,6 +74,321 @@ afterEach(() => {
 });
 
 describe('internal single-workspace adapter', () => {
+  test('compares a declared URI version against a static Controller version', async () => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get } from '@nestjs/common';
+      @Controller({ path: 'users', version: '1' }) class Users { @Get(':id') read() {} }
+    `);
+    const openapi = path.join(root, 'openapi.yaml');
+    fs.writeFileSync(openapi, fs.readFileSync(openapi, 'utf8').replace('/users/{id}', '/v2/users/{id}'));
+    const result = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', versioning: 'uri' } });
+    expect(result.comparisons.implementedDeclared.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ruleId: 'SC-INVENTORY-001',
+        route: expect.objectContaining({ method: 'GET', path: '/v1/users/{id}' }) }),
+    ]));
+    expect(result.comparisons.implementedDeclared.findings?.some((finding: any) =>
+      finding.route?.path === '/users/{id}')).toBe(false);
+  });
+
+  test('keeps single Controller and method versions with original and comparison paths', async () => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get, Version } from '@nestjs/common';
+      const FIRST = '01';
+      @Controller({ path: 'users', version: FIRST }) class Users {
+        @Get(':id') read() {}
+        @Version('2') @Get('list') list() {}
+      }
+      @Controller({ version: 'A' }) class Root { @Get() root() {} }
+    `);
+    const local = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', versioning: 'uri' } });
+    const prefixed = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', versioning: 'uri', globalPrefix: '/api' } });
+    const resolved = prefixed.evidence.sourceVersionMetadata?.routes.filter((route) => route.status === 'resolved');
+    expect(resolved?.map(({ localPath, version, origin, comparisonPath }) =>
+      [localPath, version, origin, comparisonPath])).toEqual([
+      ['/', 'A', 'controller', '/api/vA'],
+      ['/users/{id}', '01', 'controller', '/api/v01/users/{id}'],
+      ['/users/list', '2', 'method', '/api/v2/users/list'],
+    ]);
+    expect(prefixed.evidence.source?.projectDigest).toBe(local.evidence.source?.projectDigest);
+    expect(prefixed.evidence.source?.configDigest).toBe(local.evidence.source?.configDigest);
+    expect(prefixed.evidence.sourceVersionMetadata?.digest).toBe(local.evidence.sourceVersionMetadata?.digest);
+    expect(prefixed.evidence.routingAssumption?.digest).not.toBe(local.evidence.routingAssumption?.digest);
+    expect(prefixed.evidence.routingAssumption?.comparisonContractDigest)
+      .not.toBe(local.evidence.routingAssumption?.comparisonContractDigest);
+  });
+
+  test('retains two versions of the same local route and treats unresolved method version as partial', async () => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get, Version } from '@nestjs/common';
+      const dynamic = () => { throw new Error('Source executed'); };
+      @Controller({ path: 'users', version: '1' }) class One {
+        @Get() read() {}
+        @Version(dynamic()) @Get('bad') bad() {}
+      }
+      @Controller({ path: 'users', version: '2' }) class Two { @Get() read() {} }
+    `);
+    const result = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', versioning: 'uri' } });
+    expect(result.evidence.sourceVersionMetadata?.routes.filter(({ status }) => status === 'resolved')
+      .map(({ comparisonPath }) => comparisonPath)).toEqual(['/v1/users', '/v2/users']);
+    expect(result.evidence.sourceVersionMetadata?.routes.some(({ reason }) =>
+      reason === 'VERSION_UNRESOLVED')).toBe(true);
+    expect(result.evidence.sourceVersionMetadata?.routes.some(({ comparisonPath }) =>
+      comparisonPath === '/v1/users/bad')).toBe(false);
+    expect(result.stages.implemented.status).toBe('partial');
+  });
+
+  test.each([
+    "@Version(['1', '2'])",
+    '@Version(VERSION_NEUTRAL)',
+    "@Version('2') @Version('3')",
+  ])('does not rescue unsupported method version %s with a Controller version', async (metadata) => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get, Version, VERSION_NEUTRAL } from '@nestjs/common';
+      @Controller({ path: 'users', version: '1' }) class Users {
+        ${metadata} @Get('unsafe') read() {}
+      }
+    `);
+    const result = await analyzeSourceAwareWorkspace({ ...args(root), source: {
+      tsconfigPath: 'tsconfig.json', versioning: 'uri',
+    } });
+    expect(result.evidence.sourceVersionMetadata?.routes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'unresolved', reason: 'VERSION_UNRESOLVED' }),
+    ]));
+    expect(result.evidence.sourceVersionMetadata?.routes.some(({ comparisonPath }) =>
+      comparisonPath === '/v1/users/unsafe')).toBe(false);
+  });
+
+  test('does not infer missing versions or erase literal api and v1 segments', async () => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get } from '@nestjs/common';
+      @Controller({ path: 'api/v1/users', version: '1' }) class Literal { @Get() read() {} }
+      @Controller('plain') class Plain { @Get() read() {} }
+    `);
+    const result = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', versioning: 'uri', globalPrefix: '/api' } });
+    expect(result.evidence.sourceVersionMetadata?.routes.map(({ comparisonPath, reason }) =>
+      comparisonPath ?? reason)).toEqual(['/api/v1/api/v1/users', 'VERSION_MISSING']);
+    const withoutSource = await analyzeSourceAwareWorkspace({ ...args(root), source: undefined });
+    expect(result.comparisons.declaredAllowed).toEqual(withoutSource.comparisons.declaredAllowed);
+  });
+
+  test.each([
+    ["['1']", 'VERSION_UNRESOLVED'],
+    ["[]", 'VERSION_UNRESOLVED'],
+    ['VERSION_NEUTRAL', 'VERSION_UNRESOLVED'],
+    ["''", 'VERSION_UNRESOLVED'],
+    ['1', 'VERSION_UNRESOLVED'],
+    ["'1/2'", 'VERSION_UNRESOLVED'],
+    ['dynamic()', 'VERSION_UNRESOLVED'],
+    ["'1'", 'CONTROLLER_ROUTING_UNSUPPORTED', "host: 'example.com', "],
+    ["'1'", 'CONTROLLER_ROUTING_UNSUPPORTED', 'unknown: true, '],
+  ])('keeps unsupported Controller version %s unresolved', async (version, reason, other = '') => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get, VERSION_NEUTRAL } from '@nestjs/common';
+      const dynamic = () => '1';
+      @Controller({ path: 'users', ${other}version: ${version} }) class Users { @Get() read() {} }
+    `);
+    const result = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', versioning: 'uri' } });
+    expect(result.stages.implemented.status).toBe('partial');
+    expect(result.evidence.sourceVersionMetadata?.routes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'unresolved', reason }),
+    ]));
+    expect(result.evidence.sourceVersionMetadata?.routes.some(({ status }) => status === 'resolved')).toBe(false);
+    expect(result.comparisons.implementedDeclared.findings?.some(({ ruleId, route }) =>
+      ruleId === 'SC-INVENTORY-001' && (route?.path === '/v1/users' || route?.path === '/users'))).toBe(false);
+  });
+
+  test('does not treat a same-named local Version decorator as NestJS version metadata', async () => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get } from '@nestjs/common';
+      function Version(_value: string): MethodDecorator { return () => {}; }
+      @Controller({ path: 'users', version: '1' }) class Users {
+        @Version('2') @Get() read() {}
+      }
+    `);
+    const result = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', versioning: 'uri' } });
+    expect(result.evidence.sourceVersionMetadata?.routes.filter(({ status }) => status === 'resolved')
+      .map(({ version, comparisonPath }) => [version, comparisonPath])).toEqual([['1', '/v1/users']]);
+  });
+
+  test.each([
+    ["@Search('unknown') @Get('reported')", 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'],
+    ["@Get(':id(\\\\d+)')", 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR'],
+  ])('keeps unsupported route evidence in URI mode for %s', async (decorators, diagnostic) => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get, Search } from '@nestjs/common';
+      @Controller({ path: 'users', version: '1' }) class Users { ${decorators} read() {} }
+    `);
+    const result = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', versioning: 'uri' } });
+    expect(result.stages.implemented.status).toBe('partial');
+    expect(result.evidence.sourceVersionMetadata?.routes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'unresolved', reason: 'ROUTE_PATH_UNRESOLVED' }),
+    ]));
+    expect(result.evidence.sourceVersionMetadata?.routes.some(({ status }) => status === 'resolved')).toBe(false);
+    if (decorators.startsWith('@Search')) {
+      expect(result.stages.implemented.diagnosticCodes).toContain(diagnostic);
+    }
+  });
+
+  test('keeps route meaning when same-path versioned Controllers change order', async () => {
+    const root = workspace();
+    const file = path.join(root, 'src/controller.ts');
+    const header = "import { Controller, Get } from '@nestjs/common';\n";
+    const first = "@Controller({ path: 'users', version: '1' }) class One { @Get() read() {} }\n";
+    const second = "@Controller({ path: 'users', version: '2' }) class Two { @Get() read() {} }\n";
+    const inspect = async () => {
+      const result = await analyzeSourceAwareWorkspace({ ...args(root),
+        source: { tsconfigPath: 'tsconfig.json', versioning: 'uri' } });
+      return result.evidence.sourceVersionMetadata?.routes.filter(({ status }) => status === 'resolved')
+        .map(({ method, comparisonPath }) => `${method} ${comparisonPath}`).sort();
+    };
+    fs.writeFileSync(file, header + first + second);
+    const original = await inspect();
+    fs.writeFileSync(file, header + second + first);
+    expect(await inspect()).toEqual(original);
+    expect(original).toEqual(['GET /v1/users', 'GET /v2/users']);
+  });
+
+  test('finds a wrong declared version, method mismatch, Source-only route and Policy rejection', async () => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get, Post } from '@nestjs/common';
+      @Controller({ path: 'users', version: '1' }) class Users {
+        @Get() read() {}
+        @Post('extra') write() {}
+      }
+    `);
+    const openapi = path.join(root, 'openapi.yaml');
+    fs.writeFileSync(openapi, `openapi: 3.0.3
+info: {title: Version comparison, version: 1.0.0}
+paths:
+  /v2/users:
+    get: {responses: {'200': {description: OK}}}
+  /v1/users:
+    post: {responses: {'200': {description: OK}}}
+`);
+    const result = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', versioning: 'uri' } });
+    const inventory = result.comparisons.implementedDeclared.findings ?? [];
+    expect(inventory).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ruleId: 'SC-INVENTORY-001',
+        route: expect.objectContaining({ method: 'POST', path: '/v1/users/extra' }) }),
+      expect.objectContaining({ ruleId: 'SC-INVENTORY-003',
+        route: expect.objectContaining({ method: 'GET', path: '/v2/users' }) }),
+      expect.objectContaining({ ruleId: 'SC-INVENTORY-004',
+        route: expect.objectContaining({ path: '/v1/users' }),
+        expected: { methods: ['POST'] }, actual: { methods: ['GET'] } }),
+    ]));
+    expect(result.comparisons.implementedAllowed.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ruleId: 'SC-EXPOSURE-004',
+        route: expect.objectContaining({ method: 'POST', path: '/v1/users/extra' }) }),
+    ]));
+    expect(result.comparisons.declaredAllowed.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ ruleId: 'SC-EXPOSURE-002',
+        route: expect.objectContaining({ method: 'POST', path: '/v1/users' }) }),
+    ]));
+  });
+
+  test('matches a correctly declared version without a false inventory finding', async () => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get } from '@nestjs/common';
+      @Controller({ path: 'users', version: '1' }) class Users { @Get(':id') read() {} }
+    `);
+    const file = path.join(root, 'openapi.yaml');
+    fs.writeFileSync(file, fs.readFileSync(file, 'utf8').replace('/users/{id}', '/v1/users/{id}'));
+    const result = await analyzeSourceAwareWorkspace({ ...args(root), source: {
+      tsconfigPath: 'tsconfig.json', versioning: 'uri',
+    } });
+    expect(result.evidence.sourceVersionMetadata?.routes).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'resolved', localPath: '/users/{id}',
+        comparisonPath: '/v1/users/{id}' }),
+    ]));
+    expect(result.comparisons.implementedDeclared.findings?.some(({ ruleId, route }) =>
+      ruleId.startsWith('SC-INVENTORY-') && route?.path === '/v1/users/{id}')).toBe(false);
+  });
+
+  test('separates URI invocation evidence on cached concurrent runs and preserves independent failure', async () => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get } from '@nestjs/common';
+      @Controller({ path: 'users', version: '1' }) class Users { @Get() read() {} }
+    `);
+    const cache = new TypeScriptAnalysisCache();
+    const before = hash(path.join(root, 'src/controller.ts'));
+    const [uri, local, prefixed] = await Promise.all([
+      analyzeSourceAwareWorkspace({ ...args(root), source: { tsconfigPath: 'tsconfig.json', cache,
+        versioning: 'uri' } }),
+      analyzeSourceAwareWorkspace({ ...args(root), source: { tsconfigPath: 'tsconfig.json', cache } }),
+      analyzeSourceAwareWorkspace({ ...args(root), source: { tsconfigPath: 'tsconfig.json', cache,
+        versioning: 'uri', globalPrefix: '/api' } }),
+    ]);
+    expect(hash(path.join(root, 'src/controller.ts'))).toBe(before);
+    expect(uri.evidence.source).toEqual(local.evidence.source);
+    expect(prefixed.evidence.source).toEqual(local.evidence.source);
+    expect(local.evidence.routingAssumption).toBeUndefined();
+    expect(uri.evidence.sourceVersionMetadata?.routes[0].comparisonPath).toBe('/v1/users');
+    expect(prefixed.evidence.sourceVersionMetadata?.routes[0].comparisonPath).toBe('/api/v1/users');
+    expect(uri.evidence.routingAssumption?.comparisonContractDigest)
+      .not.toBe(prefixed.evidence.routingAssumption?.comparisonContractDigest);
+    const failed = await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: '../outside.ts', versioning: 'uri' } });
+    expect(failed.stages.implemented.status).toBe('failed');
+    expect(failed.comparisons.declaredAllowed).toEqual(uri.comparisons.declaredAllowed);
+    expect(failed.evidence.routingAssumption?.comparisonContractDigest).toBeUndefined();
+  });
+
+  test('does not extend an old exact exception selector to the URI comparison identity', async () => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get } from '@nestjs/common';
+      @Controller({ path: 'users', version: '1' }) class Users { @Get() read() {} }
+    `);
+    const old = finalizeSourceAwareWorkspace(await analyzeSourceAwareWorkspace(args(root)), {
+      currentDate: '2026-09-25', failOn: 'never',
+    });
+    const selected = old.findings.find(({ ruleId, route }) =>
+      ruleId === 'SC-INVENTORY-003' && route?.path === '/users/{id}');
+    expect(selected).toBeDefined();
+    if (!selected) return;
+    const exceptions = { version: 1 as const, exceptions: [{ id: 'EXC-2026-URI-OLD',
+      rule_id: selected.ruleId, selector: { instance_id: selected.instanceId },
+      reason: 'Reviewed old exact route.', owner: 'security-team', expires_at: '2026-12-01',
+    }] };
+    const options = { currentDate: '2026-09-25', failOn: 'never' as const, exceptions };
+    expect(finalizeSourceAwareWorkspace(await analyzeSourceAwareWorkspace(args(root)), options)
+      .suppressedFindings.map(({ instanceId }) => instanceId)).toContain(selected.instanceId);
+    const uri = finalizeSourceAwareWorkspace(await analyzeSourceAwareWorkspace({ ...args(root),
+      source: { tsconfigPath: 'tsconfig.json', versioning: 'uri' } }), options);
+    expect(uri.suppressedFindings.map(({ instanceId }) => instanceId)).not.toContain(selected.instanceId);
+    expect(uri.findings.some(({ ruleId, route }) =>
+      ruleId === 'SC-INVENTORY-001' && route?.path === '/v1/users')).toBe(true);
+  });
+
+  test('fails URI comparison at operation limits or cancellation without losing independent work', async () => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get } from '@nestjs/common';
+      @Controller({ path: 'users', version: '1' }) class One { @Get() read() {} }
+      @Controller({ path: 'users', version: '2' }) class Two { @Get() read() {} }
+    `);
+    const baseline = await analyzeSourceAwareWorkspace({ ...args(root), source: undefined });
+    const limited = await analyzeSourceAwareWorkspace({ ...args(root), source: {
+      tsconfigPath: 'tsconfig.json', versioning: 'uri', limits: { maxOperations: 1 },
+    } });
+    expect(limited.stages.implemented).toMatchObject({ status: 'failed',
+      code: 'SOURCE_ANALYZER_OPERATION_LIMIT' });
+    expect(limited.comparisons.declaredAllowed).toEqual(baseline.comparisons.declaredAllowed);
+    const controller = new AbortController(); controller.abort();
+    const cancelled = await analyzeSourceAwareWorkspace({ ...args(root), source: {
+      tsconfigPath: 'tsconfig.json', versioning: 'uri', cancellationSignal: controller.signal,
+    } });
+    expect(cancelled.stages.implemented).toMatchObject({ status: 'failed', code: 'SOURCE_ANALYZER_CANCELLED' });
+    expect(cancelled.comparisons.declaredAllowed).toEqual(baseline.comparisons.declaredAllowed);
+  });
+
   test('gives string and direct-object Controller paths the same comparison meaning', async () => {
     const stringRoot = workspace();
     const objectRoot = workspace();

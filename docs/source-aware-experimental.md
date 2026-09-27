@@ -77,8 +77,8 @@ For NestJS controllers, the static analyzer reads a direct
 project-local static string constant, or an empty object (the root path).
 Parentheses and the existing safe TypeScript type wrappers are accepted.
 Controller and method path arrays use the existing bounded route composition.
-An empty path array does not become a root route. The object may contain only
-the `path` field: `version`, `host`, `scope`, `durable`, unknown fields, object
+An empty path array does not become a root route. Without explicit URI mode,
+the object may contain only the `path` field: `version`, `host`, `scope`, `durable`, unknown fields, object
 aliases, spreads, computed keys, accessors, and dynamic values remain unresolved
 with a diagnostic. They do not become unversioned or all-host routes, and an
 unresolved Controller does not prove that its declared routes are absent.
@@ -90,7 +90,7 @@ With `--source`, add `--source-global-prefix /api` when **you have confirmed**
 that every compared Source route uses that one fixed global prefix. For example,
 `--source tsconfig.json --source-global-prefix api` and `/api` are equivalent.
 The prefix is applied once to the comparison copy after a static Controller
-object path is extracted; it does not resolve version or host constraints.
+object path is extracted; the prefix alone does not resolve version or host constraints.
 This is an explicit comparison assumption, not detection of `setGlobalPrefix`
 from bootstrap code. Omitting it keeps decorator-local routes and existing
 report identities. Supplying it without `--source` exits `2`, with empty stdout,
@@ -112,6 +112,50 @@ preserved. Provider-token-like values are rejected before input loads.
 Local `/` becomes `/api`, `/articles/{slug}` becomes
 `/api/articles/{slug}`, and an existing `/api/items` becomes `/api/api/items`.
 
+Use `--source tsconfig.json --source-versioning uri` only when the compared app
+uses NestJS URI versioning with the default `v` version prefix. For example,
+`@Controller({ path: 'users', version: '1' })` with `@Get(':id')` is compared as
+`GET /v1/users/{id}`. With `--source-global-prefix /api`, it becomes
+`GET /api/v1/users/{id}`. The prefix is applied once before the version; literal
+`api` or `v1` segments in a Controller path are retained. The URI mode is an
+**explicit user assumption**, not a bootstrap or environment inspection.
+Without the option, existing local-route analysis and report identity remain
+unchanged; omission does not prove that the app has versioning disabled.
+
+The analyzer extracts one static string version from direct Controller options,
+`@Version('2')` on a method, or a project-local constant resolved by the existing
+string resolver. A method version takes precedence over its Controller version.
+The exact string is preserved, including case and leading zeros. Only one
+`[A-Za-z0-9_-]` segment of at most 255 characters is accepted. Version arrays,
+`VERSION_NEUTRAL`, missing/dynamic/non-string values, multiple method `@Version`
+decorators, and a Controller with `host` or other unsupported options remain
+reasoned unresolved candidates. A method version that is present but unresolved
+does not fall back to the Controller version. An unresolved missing version is a
+limit of this static comparison, not a claim that NestJS returns HTTP 404.
+Custom version prefixes, `prefix: false`, `defaultVersion`, Header, Media Type,
+Custom versioning, global-prefix exclusions, multiple apps, and proxy rewrites
+are outside this mode. Supplying `--source-versioning` without `--source`, or
+supplying a value other than `uri`, exits `2` before inputs are read.
+
+The static mapping is checked against NestJS commit
+[`112450bb`](https://github.com/nestjs/nest/tree/112450bb0cbb847fbff5bec46a1c493587564305).
+
+| NestJS behavior | This comparison mode |
+| --- | --- |
+| `@Controller` stores path and optional version metadata | Reads direct static options; keeps unsupported options unresolved |
+| Method `@Version` stores version metadata | Uses one static string and gives it priority over Controller metadata |
+| URI route factory uses the default `v` prefix | Builds `v` + the exact version string after any explicit global prefix |
+| The application supplies `defaultVersion` and the versioning strategy | Does not inspect bootstrap; missing versions and other strategies remain unresolved |
+
+The Source version metadata is AST evidence; URI mode and global prefix are
+explicit assumptions. Text/JSON/SARIF/Summary and the dev CI record keep these
+distinct from project and auth-config digests and from the transformed comparison
+contract digest. Only Implemented–Declared and Implemented–Allowed use the
+transformed routes. Declared–Allowed keeps its original meaning. A changed route
+can change its Finding instanceId; an old exact exception selector does not
+expand to the new route. Neither URI mode nor the auth configuration proves
+runtime reachability, Guard enforcement, or authentication.
+
 The original Source IR, input/project digest, auth configuration digest,
 file/line, and unknown/partial status remain unchanged. A comparison-only copy
 gets the prefix for Implemented–Declared and Implemented–Allowed; the OpenAPI
@@ -122,8 +166,7 @@ assumption and comparison-contract digests are separate from the input and
 auth digests. Text/JSON previews, SARIF properties, Summary, and the dev CI
 record identify the explicit assumption safely. A prefixed route may change a
 Finding instanceId, so an old exact exception selector is not broadened
-automatically. This fixed-prefix mode does not support exclusions, URI
-versioning, multiple Nest apps, or reverse proxy rewrites. It does not prove
+automatically. This fixed-prefix mode does not support exclusions, multiple Nest apps, or reverse proxy rewrites. It does not prove
 runtime route reachability, middleware/Guard enforcement, or authentication.
 
 | Format | Explicit assumption display | Finding scope |
@@ -135,7 +178,9 @@ runtime route reachability, middleware/Guard enforcement, or authentication.
 
 The dev CI record stores the safe prefix and digests separately from the original
 Source project/auth digests. The Node 24 installed-package consumer checks
-prefix present/omitted/invalid, all four formats, and `--out` with the same tgz;
+prefix present/omitted/invalid, all four formats, and `--out` with the same tgz.
+It also checks the explicit URI mode, compared route set, negative inputs,
+auth-config, and installed CI driver run/publish/verify-stage/gate;
 the package acceptance gate rejects missing evidence.
 
 Text and JSON are bounded previews; JSON is not a stable complete public

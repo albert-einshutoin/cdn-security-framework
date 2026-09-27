@@ -14,7 +14,9 @@ import {
   type ApiAuthAnalysisV1,
   type ApiAuthenticationContractV1,
   type ApiOperationInputV1,
+  type SecurityContractV1,
 } from '../../contract/security-ir';
+import { hasUnsafeSensitiveText } from '../../contract/sensitive-text';
 import {
   SourceAnalyzerContractError,
   runSourceAnalyzer,
@@ -4128,21 +4130,25 @@ function controllerPaths(
   projectSources: ReadonlySet<ts.SourceFile>,
   check: () => void,
   maxSteps: number,
-): { paths: string[] | undefined; unsupported: boolean; object: boolean } {
+): { paths: string[] | undefined; unsupported: boolean; unsupportedOther: boolean;
+  object: boolean; version?: ts.Expression } {
   let value = argument;
   while (value && (ts.isParenthesizedExpression(value) || ts.isAsExpression(value)
     || ts.isTypeAssertionExpression(value) || ts.isSatisfiesExpression(value))) value = value.expression;
   if (!value || !ts.isObjectLiteralExpression(value)) return {
     paths: resolveStaticStrings(argument, checker, projectSources, { check, maxSteps }),
-    unsupported: false, object: false,
+    unsupported: false, unsupportedOther: false, object: false,
   };
   let pathValue: ts.Expression | undefined;
+  let version: ts.Expression | undefined;
   let unsupported = false;
+  let unsupportedOther = false;
   let pathMayBeOverridden = false;
   for (const property of value.properties) {
     check();
     if (!ts.isPropertyAssignment(property)) {
       unsupported = true;
+      unsupportedOther = true;
       if (ts.isSpreadAssignment(property)
         || (property.name && (ts.isComputedPropertyName(property.name)
           || ((ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
@@ -4151,20 +4157,49 @@ function controllerPaths(
     }
     const key = ts.isIdentifier(property.name) || ts.isStringLiteral(property.name)
       ? property.name.text : undefined;
+    if (key === 'version') {
+      unsupported = true;
+      if (version) unsupportedOther = true;
+      else version = property.initializer;
+      continue;
+    }
     if (key !== 'path') {
       unsupported = true;
+      unsupportedOther = true;
       if (key === undefined) pathMayBeOverridden = true;
       continue;
     }
     if (pathValue) {
       unsupported = true;
+      unsupportedOther = true;
       pathMayBeOverridden = true;
     } else pathValue = property.initializer;
   }
   const paths = pathMayBeOverridden ? undefined : resolveStaticStrings(
     pathValue, checker, projectSources, { check, maxSteps },
   );
-  return { paths, unsupported: unsupported || paths?.length === 0, object: true };
+  return { paths, unsupported: unsupported || paths?.length === 0,
+    unsupportedOther: unsupportedOther || pathMayBeOverridden || paths?.length === 0,
+    object: true, ...(version ? { version } : {}) };
+}
+
+function staticUriVersion(
+  expression: ts.Expression | undefined,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+  maxSteps: number,
+): string | undefined {
+  if (!expression) return undefined;
+  let node = expression;
+  while (ts.isParenthesizedExpression(node) || ts.isAsExpression(node)
+    || ts.isTypeAssertionExpression(node) || ts.isSatisfiesExpression(node)) node = node.expression;
+  if (ts.isArrayLiteralExpression(node)) return undefined;
+  const values = resolveStaticStrings(expression, checker, projectSources, { check, maxSteps,
+    maxStringLength: 255 });
+  const value = values?.length === 1 ? values[0] : undefined;
+  return value && /^[A-Za-z0-9_-]{1,255}$/.test(value) && !hasUnsafeSensitiveText(value)
+    ? value : undefined;
 }
 
 function directBaseClass(
@@ -5303,12 +5338,24 @@ async function loadProject(
   }
 }
 
+export interface UriComparison {
+  contract: SecurityContractV1;
+  diagnostics: AnalyzerDiagnostic[];
+  unresolvedOperations: UnresolvedSourceOperationCandidate[];
+  routes: Array<{
+    status: 'resolved' | 'unresolved'; sourceUri: string; line: number; column: number;
+    reason?: string; method?: HttpMethod; localPath?: string; version?: string;
+    origin?: 'controller' | 'method'; comparisonPath?: string;
+  }>;
+}
+
 async function analyze(
   context: Parameters<SourceAnalyzerPlugin['analyze']>[0],
   authConfig: Readonly<NestJsAuthConfig>,
   onProjectLoaded?: (digest: string) => void,
   cache?: TypeScriptAnalysisCache,
   onInputPath?: (path: string) => void,
+  onUriComparison?: (comparison: UriComparison) => void,
 ) {
   if (context.entrypoints.length !== 1) {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INPUT_INVALID');
@@ -5544,7 +5591,12 @@ async function analyze(
   const operations = new Map<string, ApiOperationInputV1>();
   const diagnostics: AnalyzerDiagnostic[] = [];
   const unresolvedOperations: UnresolvedSourceOperationCandidate[] = [];
+  const uriOperations = new Map<string, ApiOperationInputV1>();
+  const uriDiagnostics: AnalyzerDiagnostic[] = [];
+  const uriUnresolved: UnresolvedSourceOperationCandidate[] = [];
+  const uriRoutes: UriComparison['routes'] = [];
   let unresolvedMethodCount = 0;
+  let uriUnresolvedMethodCount = 0;
   let inspectedNodes = 0;
   let globalGuardFound = false;
 
@@ -5564,11 +5616,12 @@ async function analyze(
     code: 'SOURCE_ANALYZER_DYNAMIC_ROUTE' | 'SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA'
       | 'SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED' | 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR',
     node: ts.Node,
+    omitUri = false,
   ) => {
     if (diagnostics.length >= context.limits.maxDiagnostics) {
       throw new SourceAnalyzerContractError('SOURCE_ANALYZER_DIAGNOSTIC_LIMIT');
     }
-    diagnostics.push({
+    const diagnostic = {
       code,
       safeMessage: code === 'SOURCE_ANALYZER_DYNAMIC_ROUTE'
         ? 'A dynamic route expression could not be resolved statically.'
@@ -5578,7 +5631,11 @@ async function analyze(
             ? 'Global NestJS guards are not analyzed.'
             : 'A source decorator is not supported by this analyzer.',
       ...sourceLocation(node, context.workspaceRoot),
-    });
+    };
+    diagnostics.push(diagnostic);
+    if (onUriComparison && !omitUri) {
+      uriDiagnostics.push(diagnostic);
+    }
   };
   const unsupportedGlobalGuard = potentialGlobalProvider
     ?? providerRegistrations.externalModuleImport
@@ -5593,6 +5650,51 @@ async function analyze(
     unresolvedOperations.push({
       methods: [...methods], path: null, reason, ...sourceLocation(node, context.workspaceRoot),
     });
+  };
+  const addUriRoute = (route: UriComparison['routes'][number]) => {
+    if (uriRoutes.length >= context.limits.maxOperations) {
+      throw new SourceAnalyzerContractError('SOURCE_ANALYZER_OPERATION_LIMIT');
+    }
+    uriRoutes.push(route);
+  };
+  const addUriUnresolved = (methods: readonly HttpMethod[], node: ts.Node, reason: string) => {
+    if (!onUriComparison) return;
+    uriUnresolvedMethodCount += methods.length;
+    if (uriOperations.size + uriUnresolvedMethodCount > context.limits.maxOperations) {
+      throw new SourceAnalyzerContractError('SOURCE_ANALYZER_OPERATION_LIMIT');
+    }
+    uriUnresolved.push({ methods: [...methods], path: null,
+      reason: 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', ...sourceLocation(node, context.workspaceRoot) });
+    addUriRoute({ status: 'unresolved', reason, ...sourceLocation(node, context.workspaceRoot) });
+  };
+  const putOperation = (target: Map<string, ApiOperationInputV1>, key: string,
+    operation: ApiOperationInputV1) => {
+    const previous = target.get(key);
+    if (previous) {
+      previous.provenance.push(...operation.provenance);
+      if (comparableAuth(previous.exposure, previous.auth)
+        !== comparableAuth(operation.exposure, operation.auth)) {
+        const left = previous.auth.analysis!;
+        const right = operation.auth.analysis!;
+        previous.exposure = 'unknown';
+        previous.auth = {
+          mode: 'unknown', alternatives: [], analysis: {
+            guards: [...left.guards, ...right.guards],
+            explicitPublic: left.explicitPublic || right.explicitPublic,
+            roles: [...left.roles, ...right.roles],
+            enforcementConfidence: 'unknown',
+            capabilityReasons: [...left.capabilityReasons, ...right.capabilityReasons,
+              'Conflicting NestJS auth metadata was found for the same route.'],
+          },
+        };
+      }
+      return;
+    }
+    if (target === operations) consume();
+    else if (target.size + uriUnresolvedMethodCount + 1 > context.limits.maxOperations) {
+      throw new SourceAnalyzerContractError('SOURCE_ANALYZER_OPERATION_LIMIT');
+    }
+    target.set(key, operation);
   };
   for (const sourceFile of projectSources) {
     const nodes: ts.Node[] = [sourceFile];
@@ -5685,6 +5787,7 @@ async function analyze(
               const methods = candidate && routeMethods(candidate.name);
               if (methods?.length) {
                 addUnresolved(methods, decorator, 'SOURCE_ANALYZER_DYNAMIC_ROUTE');
+                addUriUnresolved(methods, decorator, 'CONTROLLER_ROUTING_UNSUPPORTED');
                 foundRoute = true;
                 break;
               }
@@ -5698,6 +5801,7 @@ async function analyze(
             || ownAuth.rolesPresent || ownAuth.dynamic;
           if (foundRoute || hasAuthEvidence) {
             addUnresolved(HTTP_METHODS, unresolvedBase, 'SOURCE_ANALYZER_DYNAMIC_ROUTE');
+            addUriUnresolved(HTTP_METHODS, unresolvedBase, 'CONTROLLER_ROUTING_UNSUPPORTED');
             addDiagnostic('SOURCE_ANALYZER_DYNAMIC_ROUTE', unresolvedBase);
             if (hasAuthEvidence) addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', statement);
           }
@@ -5723,7 +5827,9 @@ async function analyze(
         : [];
       for (const controller of controllers) {
         if (controller.resolution.unsupported) {
-          addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', controller.decorator);
+          addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', controller.decorator,
+            Boolean(onUriComparison && controller.resolution.version
+              && !controller.resolution.unsupportedOther));
         }
         if (controller.resolution.object && !controller.resolution.paths) {
           addDiagnostic('SOURCE_ANALYZER_DYNAMIC_ROUTE', controller.decorator);
@@ -5731,6 +5837,7 @@ async function analyze(
       }
       if (unresolvedBase) {
         addUnresolved(HTTP_METHODS, unresolvedBase, 'SOURCE_ANALYZER_DYNAMIC_ROUTE');
+        addUriUnresolved(HTTP_METHODS, unresolvedBase, 'CONTROLLER_ROUTING_UNSUPPORTED');
         addDiagnostic('SOURCE_ANALYZER_DYNAMIC_ROUTE', unresolvedBase);
       }
       for (const method of methodsIncludingBaseChain(
@@ -5752,7 +5859,8 @@ async function analyze(
         if (effectiveRoute === -1) continue;
         for (const [index, methodDecorator] of methodDecorators.entries()) {
           if (classifications[index]?.unsupported) {
-            addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
+            addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator,
+              Boolean(onUriComparison && candidates[index]?.name === 'Version'));
           }
         }
         const effectiveCandidate = candidates[effectiveRoute]!;
@@ -5760,6 +5868,7 @@ async function analyze(
         if (controllers.length === 0 || !effectiveCandidate.trusted) {
           if (effectiveMethods.length > 0) {
             addUnresolved(effectiveMethods, methodDecorators[effectiveRoute]!, 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');
+            addUriUnresolved(effectiveMethods, methodDecorators[effectiveRoute]!, 'CONTROLLER_ROUTING_UNSUPPORTED');
           }
           continue;
         }
@@ -5781,20 +5890,112 @@ async function analyze(
             if ((match?.name === 'RequestMapping' || match?.name === 'Search') && index !== effectiveRoute) continue;
             if (match?.name === 'RequestMapping') {
               addUnresolved(HTTP_METHODS, methodDecorator, 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');
-            }
+              addUriUnresolved(HTTP_METHODS, methodDecorator, 'ROUTE_PATH_UNRESOLVED');
+            } else if (match?.name === 'Search') addUriUnresolved(HTTP_METHODS,
+              methodDecorator, 'ROUTE_PATH_UNRESOLVED');
             continue;
           }
           if (index !== effectiveRoute) continue;
-          if (versioned) {
-            addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator);
-            addUnresolved(methods, methodDecorator, 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');
-            continue;
-          }
-          const methodPaths = match.call.arguments.length <= 1
+          const methodPaths = (onUriComparison || !versioned) && match.call.arguments.length <= 1
             ? resolveStaticStrings(match.call.arguments[0], checker, projectSources, {
               check, maxSteps: context.limits.maxAstNodes,
             })
             : undefined;
+          if (onUriComparison) {
+            const versionIndices = candidates.map((candidate, candidateIndex) => (
+              candidate?.name === 'Version' || candidate?.name === 'Unknown' ? candidateIndex : -1
+            )).filter((candidateIndex) => candidateIndex >= 0);
+            for (const controller of controllers) {
+              const resolvedController = controller.match!.call.arguments.length <= 1
+                ? controller.resolution : { paths: undefined, unsupported: true,
+                  unsupportedOther: true, object: false, version: undefined };
+              if (classVersioned || resolvedController.unsupportedOther) {
+                addUriUnresolved(methods, controller.decorator, 'CONTROLLER_ROUTING_UNSUPPORTED');
+                continue;
+              }
+              if (!resolvedController.paths || !methodPaths) {
+                addUriUnresolved(methods, methodDecorator, 'ROUTE_PATH_UNRESOLVED');
+                continue;
+              }
+              const methodVersionIndex = versionIndices[0];
+              const methodVersion = methodVersionIndex === undefined ? undefined
+                : matches[methodVersionIndex];
+              const versionExpression = methodVersionIndex === undefined
+                ? resolvedController.version : methodVersion?.call.arguments[0];
+              const versionNode = methodVersionIndex === undefined
+                ? resolvedController.version ?? controller.decorator
+                : methodDecorators[methodVersionIndex]!;
+              const version = versionIndices.length > 1
+                || (methodVersionIndex !== undefined
+                  && (!methodVersion || methodVersion.call.arguments.length !== 1))
+                ? undefined : staticUriVersion(versionExpression, checker, projectSources,
+                  check, context.limits.maxAstNodes);
+              if (!version) {
+                addUriUnresolved(methods, versionNode,
+                  versionExpression || methodVersionIndex !== undefined
+                    ? 'VERSION_UNRESOLVED' : 'VERSION_MISSING');
+                continue;
+              }
+              for (const prefix of resolvedController.paths) for (const suffix of methodPaths) {
+                await checkpoint();
+                const route = routePath(prefix, suffix);
+                if (!route) {
+                  addUriUnresolved(methods, methodDecorator, 'ROUTE_PATH_UNRESOLVED');
+                  continue;
+                }
+                if (!route.complete) {
+                  addUriUnresolved(methods, methodDecorator, 'ROUTE_PATH_UNRESOLVED');
+                  continue;
+                }
+                let comparisonPath: string;
+                try { comparisonPath = canonicalizePath(`/v${version}${route.path === '/' ? '' : route.path}`); }
+                catch {
+                  addUriUnresolved(methods, versionNode, 'VERSIONED_PATH_INVALID');
+                  continue;
+                }
+                const controllerLocation = sourceLocation(controller.decorator, context.workspaceRoot);
+                const methodLocation = sourceLocation(methodDecorator, context.workspaceRoot);
+                const versionLocation = sourceLocation(versionNode, context.workspaceRoot);
+                for (const httpMethod of methods) {
+                  await checkpoint();
+                  const provenance = [
+                    { source: 'source-ast' as const, uri: controllerLocation.sourceUri,
+                      pointer: `line:${controllerLocation.line}:column:${controllerLocation.column}`,
+                      digest: digest(controller.decorator.getSourceFile()), analyzer: ANALYZER_IDENTITY,
+                      capability: 'routerPrefixes', complete: route.complete },
+                    { source: 'source-ast' as const, uri: methodLocation.sourceUri,
+                      pointer: `line:${methodLocation.line}:column:${methodLocation.column}`,
+                      digest: digest(methodDecorator.getSourceFile()), analyzer: ANALYZER_IDENTITY,
+                      capability: 'httpMethods', complete: route.complete },
+                    { source: 'source-ast' as const, uri: versionLocation.sourceUri,
+                      pointer: `line:${versionLocation.line}:column:${versionLocation.column}`,
+                      digest: digest(versionNode.getSourceFile()), analyzer: ANALYZER_IDENTITY,
+                      capability: 'routerPrefixes', complete: route.complete },
+                    ...operationAuth.evidence.map(({ decorator: authDecorator, capability }) => {
+                      const location = sourceLocation(authDecorator, context.workspaceRoot);
+                      return { source: 'source-ast' as const, uri: location.sourceUri,
+                        pointer: `line:${location.line}:column:${location.column}`,
+                        digest: digest(authDecorator.getSourceFile()), analyzer: ANALYZER_IDENTITY,
+                        capability, complete: operationAuth.auth.analysis?.enforcementConfidence === 'high' };
+                    }),
+                  ];
+                  const key = createRouteKey(httpMethod, comparisonPath);
+                  putOperation(uriOperations, key, { method: httpMethod, path: comparisonPath,
+                    exposure: operationAuth.exposure, auth: operationAuth.auth,
+                    request: { ...EMPTY_REQUEST }, provenance });
+                  addUriRoute({ status: 'resolved', method: httpMethod, localPath: route.path,
+                    version, origin: methodVersionIndex === undefined ? 'controller' : 'method',
+                    comparisonPath, ...versionLocation });
+                }
+              }
+            }
+          }
+          if (versioned) {
+            addDiagnostic('SOURCE_ANALYZER_UNSUPPORTED_DECORATOR', methodDecorator,
+              Boolean(onUriComparison));
+            addUnresolved(methods, methodDecorator, 'SOURCE_ANALYZER_UNSUPPORTED_DECORATOR');
+            continue;
+          }
           for (const controller of controllers) {
             await checkpoint();
             const resolvedController = controller.match!.call.arguments.length <= 1
@@ -5858,34 +6059,7 @@ async function analyze(
                     };
                   }),
                 ];
-                const previous = operations.get(key);
-                if (previous) {
-                  previous.provenance.push(...provenance);
-                  if (comparableAuth(previous.exposure, previous.auth)
-                    !== comparableAuth(operationAuth.exposure, operationAuth.auth)) {
-                    const left = previous.auth.analysis!;
-                    const right = operationAuth.auth.analysis!;
-                    previous.exposure = 'unknown';
-                    previous.auth = {
-                      mode: 'unknown',
-                      alternatives: [],
-                      analysis: {
-                        guards: [...left.guards, ...right.guards],
-                        explicitPublic: left.explicitPublic || right.explicitPublic,
-                        roles: [...left.roles, ...right.roles],
-                        enforcementConfidence: 'unknown',
-                        capabilityReasons: [
-                          ...left.capabilityReasons,
-                          ...right.capabilityReasons,
-                          'Conflicting NestJS auth metadata was found for the same route.',
-                        ],
-                      },
-                    };
-                  }
-                  continue;
-                }
-                consume();
-                operations.set(key, {
+                putOperation(operations, key, {
                   method: httpMethod,
                   path: route.path,
                   exposure: operationAuth.exposure,
@@ -5917,6 +6091,16 @@ async function analyze(
     const rightKey = `${right.sourceUri}\0${right.line.toString().padStart(10, '0')}\0${right.column.toString().padStart(10, '0')}\0${right.reason}\0${right.methods.join(',')}`;
     return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
   });
+  if (onUriComparison) {
+    onUriComparison({
+      contract: createSecurityContract({ source: 'source-ast', capabilities: {
+        routes: 'partial', parameters: 'unsupported', requestBodies: 'unsupported', authentication: 'partial',
+      }, operations: [...uriOperations.values()] }),
+      unresolvedOperations: uriUnresolved,
+      diagnostics: uriDiagnostics,
+      routes: uriRoutes.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
+    });
+  }
   return {
     contract,
     diagnostics,
@@ -5967,14 +6151,17 @@ export async function runNestJsSourceAnalysisInternal(
   config?: unknown,
   cache?: TypeScriptAnalysisCache,
   onInputPath?: (path: string) => void,
-): Promise<{ execution: SourceAnalysisExecution; snapshotDigest?: string; analyzer: string; configDigest: string }> {
+  sourceVersioning?: 'uri',
+): Promise<{ execution: SourceAnalysisExecution; snapshotDigest?: string; analyzer: string;
+  configDigest: string; uriComparison?: UriComparison }> {
   const plugin = createNestJsSourceAnalyzer(config);
   const authConfig = config === undefined ? EMPTY_NESTJS_AUTH_CONFIG : validateNestJsAuthConfig(config);
   let snapshotDigest: string | undefined;
+  let uriComparison: UriComparison | undefined;
   const execution = await runSourceAnalyzer({
     ...plugin,
     analyze: (runContext) => analyze(runContext, authConfig, (digest) => { snapshotDigest = digest; }, cache,
-      onInputPath),
+      onInputPath, sourceVersioning === 'uri' ? (comparison) => { uriComparison = comparison; } : undefined),
   }, context);
   // Decorator arrays are membership sets and guard mappings are key lookups; input order is not execution identity.
   const canonicalConfig = {
@@ -5987,6 +6174,7 @@ export async function runNestJsSourceAnalysisInternal(
   return {
     execution,
     ...(execution.status === 'success' && snapshotDigest ? { snapshotDigest } : {}),
+    ...(execution.status === 'success' && uriComparison ? { uriComparison } : {}),
     analyzer: `${plugin.id}@${plugin.version}`,
     configDigest: `sha256:${createHash('sha256').update(JSON.stringify(canonicalConfig)).digest('hex')}`,
   };

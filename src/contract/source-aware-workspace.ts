@@ -9,6 +9,8 @@ import {
   type SourceAnalysisLimits,
 } from '../source-analysis';
 import type { TypeScriptAnalysisCache } from '../source/typescript/project-loader';
+import type { UriComparison } from '../source/nestjs/analyzer';
+import { canonicalizePath } from './canonical-route';
 import { projectPolicyToAllowedSurface, type AllowedSurfaceModelV1, type AllowedSurfaceTarget } from './allowed-surface';
 import { ContractDiffInputError, loadPolicyForInternal } from './contract-diff';
 import { redactEvidenceFilename } from './sensitive-text';
@@ -26,6 +28,7 @@ export interface SourceAwareWorkspaceInput {
     tsconfigPath: string;
     authConfig?: unknown;
     globalPrefix?: string;
+    versioning?: 'uri';
     limits?: Partial<SourceAnalysisLimits>;
     cancellationSignal?: AbortSignal;
     cache?: TypeScriptAnalysisCache;
@@ -45,7 +48,9 @@ export interface SourceAwareWorkspaceResult extends SourceAwareInternalResult {
     policy?: InputEvidence & { policyDigest: string; projector: 'allowed-surface@1' };
     // Source digest identifies decoded project input text, not raw bytes or analyzer output.
     source?: { projectDigest: string; analyzer: string; configDigest: string; limits: SourceAnalysisLimits };
-    routingAssumption?: { globalPrefix: string; digest: string; comparisonContractDigest?: string };
+    routingAssumption?: { globalPrefix?: string; sourceVersioning?: 'uri'; versionPrefix?: 'v';
+      digest: string; comparisonContractDigest?: string };
+    sourceVersionMetadata?: { digest: string; routes: UriComparison['routes'] };
   };
   target: AllowedSurfaceTarget;
 }
@@ -79,7 +84,11 @@ function safeCode(error: unknown, kind: 'openapi' | 'policy'): string {
 export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInput): Promise<SourceAwareWorkspaceResult> {
   if (!input || !['aws', 'cloudflare'].includes(input.target)) throw new ContractDiffInputError('CONTRACT_DIFF_TARGET_INVALID', 'Target is invalid.');
   const requestedPrefix = input.source?.globalPrefix;
-  const prefixModule = requestedPrefix === undefined
+  const sourceVersioning = input.source?.versioning;
+  if (sourceVersioning !== undefined && sourceVersioning !== 'uri') {
+    throw new ContractDiffInputError('CONTRACT_DIFF_SOURCE_INVALID', 'Source versioning is invalid.');
+  }
+  const prefixModule = requestedPrefix === undefined && sourceVersioning === undefined
     ? undefined : await import('./source-global-prefix');
   const globalPrefix = requestedPrefix === undefined ? undefined
     : prefixModule!.normalizeSourceGlobalPrefix(requestedPrefix);
@@ -112,6 +121,7 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
   } catch (error) { allowedFailure = safeCode(error, 'policy'); }
 
   let source: SourceAnalysisExecution | undefined;
+  let uriComparison: UriComparison | undefined;
   let sourceEvidence: SourceAwareWorkspaceResult['evidence']['source'];
   if (input.source) {
     const { runNestJsSourceAnalysisInternal, validateNestJsAuthConfig } = await import('../source/nestjs/analyzer');
@@ -130,8 +140,9 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
           entrypoints: [input.source.tsconfigPath], limits,
           cancellationSignal: input.source.cancellationSignal,
           logger: { log() {} },
-        }, input.source.authConfig, input.source.cache, input.onInputPath);
+        }, input.source.authConfig, input.source.cache, input.onInputPath, sourceVersioning);
         source = analyzed.execution;
+        uriComparison = analyzed.uriComparison;
         if (source.status === 'success' && analyzed.snapshotDigest) {
           sourceEvidence = {
             projectDigest: `sha256:${analyzed.snapshotDigest}`, analyzer: analyzed.analyzer,
@@ -148,13 +159,34 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
   }
 
   let comparedSource = source;
-  const routingAssumption: SourceAwareWorkspaceResult['evidence']['routingAssumption'] = globalPrefix
-    ? { globalPrefix, digest: prefixModule!.sourceRoutingAssumptionDigest(globalPrefix) } : undefined;
-  if (globalPrefix && source?.status === 'success' && sourceEvidence && routingAssumption) {
+  const routingAssumption: SourceAwareWorkspaceResult['evidence']['routingAssumption'] =
+    globalPrefix || sourceVersioning ? {
+      ...(globalPrefix ? { globalPrefix } : {}),
+      ...(sourceVersioning ? { sourceVersioning, versionPrefix: 'v' as const } : {}),
+      digest: sourceVersioning ? prefixModule!.sourceUriRoutingAssumptionDigest(globalPrefix)
+        : prefixModule!.sourceRoutingAssumptionDigest(globalPrefix!),
+    } : undefined;
+  let sourceVersionMetadata: SourceAwareWorkspaceResult['evidence']['sourceVersionMetadata'];
+  if (routingAssumption && source?.status === 'success' && sourceEvidence) {
     try {
-      const contract = prefixModule!.prefixSourceContract(source.result.contract, globalPrefix);
-      comparedSource = { status: 'success', result: { ...source.result, contract } };
+      if (sourceVersioning && !uriComparison) throw new Error('missing URI candidates');
+      const original = sourceVersioning ? uriComparison!.contract : source.result.contract;
+      const contract = globalPrefix ? prefixModule!.prefixSourceContract(original, globalPrefix) : original;
+      const unresolvedOperations = sourceVersioning
+        ? uriComparison!.unresolvedOperations : source.result.unresolvedOperations;
+      const diagnostics = sourceVersioning ? uriComparison!.diagnostics : source.result.diagnostics;
+      comparedSource = { status: 'success', result: { ...source.result,
+        contract, unresolvedOperations, diagnostics } };
       routingAssumption.comparisonContractDigest = prefixModule!.sourceComparisonContractDigest(contract);
+      if (sourceVersioning) {
+        const routes = uriComparison!.routes.map((route) => ({ ...route,
+          ...(route.comparisonPath && globalPrefix ? { comparisonPath: canonicalizePath(
+            `${globalPrefix}${route.comparisonPath}`,
+          ) } : {}),
+        }));
+        const astMetadata = uriComparison!.routes.map(({ comparisonPath: _path, ...route }) => route);
+        sourceVersionMetadata = { digest: digest(astMetadata), routes };
+      }
     } catch {
       comparedSource = { status: 'failed', diagnostics: [{
         code: 'SOURCE_ROUTING_TRANSFORM_FAILED', safeMessage: 'Source routing comparison failed.',
@@ -172,7 +204,9 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
   const implementedEvidence = sourceEvidence ? {
     source: 'source-ast' as const, uri: 'source-project',
     digest: routingAssumption?.comparisonContractDigest ?? sourceEvidence.projectDigest,
-    analyzer: routingAssumption?.comparisonContractDigest ? 'explicit-global-prefix@1' : sourceEvidence.analyzer,
+    analyzer: routingAssumption?.comparisonContractDigest
+      ? sourceVersioning ? 'explicit-uri-version@1' : 'explicit-global-prefix@1'
+      : sourceEvidence.analyzer,
     capability: routingAssumption?.comparisonContractDigest ? 'explicit-routing-assumption-v1' : 'nestjs-routes-v1',
     complete: comparedSource?.status === 'success'
       && Object.values(comparedSource.result.contract.capabilities).every((status) => status === 'complete')
@@ -189,6 +223,7 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
       ...(policyEvidence ? { policy: policyEvidence } : {}),
       ...(sourceEvidence ? { source: sourceEvidence } : {}),
       ...(routingAssumption ? { routingAssumption } : {}),
+      ...(sourceVersionMetadata ? { sourceVersionMetadata } : {}),
     },
   };
 }

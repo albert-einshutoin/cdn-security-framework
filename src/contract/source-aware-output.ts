@@ -17,8 +17,12 @@ export interface SourceAwareOutputBundle {
     openapi?: { graphDigest: string; digestKind: 'raw-document-graph' };
     policy?: { inputDigest: string; semanticDigest: string; digestKind: 'decoded-input-text' };
     source?: { projectDigest: string; configDigest: string; digestKind: 'decoded-project-text' };
-    routingAssumption?: { globalPrefix: string; digest: string; comparisonContractDigest?: string;
-      origin: 'explicit-option' };
+    routingAssumption?: { globalPrefix?: string; sourceVersioning?: 'uri'; versionPrefix?: 'v';
+      digest: string; comparisonContractDigest?: string; origin: 'explicit-option' };
+    sourceVersionMetadata?: { digest: string; origin: 'source-ast'; total: number; omitted: number;
+      routes: Array<{ status: 'resolved' | 'unresolved'; sourceUri: string; line: number;
+        reason?: string; method?: string; localPath?: string; version?: string;
+        versionOrigin?: 'controller' | 'method'; comparisonPath?: string }> };
     targetCapabilities: AllowedTargetCapabilityV1[];
   };
   finalized?: SourceAwareFinalizedResult;
@@ -46,6 +50,19 @@ export function finalizeSourceAwareOutput(
   const projectDigest = workspace.evidence.source && digest(workspace.evidence.source.projectDigest);
   const configDigest = workspace.evidence.source && digest(workspace.evidence.source.configDigest);
   const routing = workspace.evidence.routingAssumption;
+  const versions = workspace.evidence.sourceVersionMetadata;
+  const versionRoutes = versions?.routes.slice(0, 20).map((route) => ({
+    status: route.status, sourceUri: redactEvidenceFilename(route.sourceUri), line: route.line,
+    ...(route.status === 'resolved' ? {
+      method: route.method, localPath: redactEvidenceFilename(route.localPath!),
+      version: route.version, versionOrigin: route.origin,
+      comparisonPath: redactEvidenceFilename(route.comparisonPath!),
+    } : { reason: route.reason }),
+  }));
+  // The CI record has a 64 KiB read limit; keep its route preview well below that while preserving the full digest and count.
+  while (versionRoutes && Buffer.byteLength(JSON.stringify(versionRoutes, null, 2)) > 24_576) {
+    versionRoutes.pop();
+  }
   const bundle: SourceAwareOutputBundle = {
     target: workspace.target,
     metadata: {
@@ -55,10 +72,17 @@ export function finalizeSourceAwareOutput(
       ...(projectDigest && configDigest ? { source: { projectDigest, configDigest,
         digestKind: 'decoded-project-text' } as const } : {}),
       ...(routing ? { routingAssumption: {
-        globalPrefix: redactEvidenceFilename(routing.globalPrefix),
+        ...(routing.globalPrefix ? { globalPrefix: redactEvidenceFilename(routing.globalPrefix) } : {}),
+        ...(routing.sourceVersioning ? { sourceVersioning: routing.sourceVersioning,
+          versionPrefix: 'v' as const } : {}),
         digest: routing.digest,
         ...(routing.comparisonContractDigest ? { comparisonContractDigest: routing.comparisonContractDigest } : {}),
         origin: 'explicit-option' as const,
+      } } : {}),
+      ...(versions ? { sourceVersionMetadata: {
+        digest: versions.digest, origin: 'source-ast' as const,
+        total: versions.routes.length, omitted: versions.routes.length - versionRoutes!.length,
+        routes: versionRoutes!,
       } } : {}),
       targetCapabilities: capabilities,
     },

@@ -26,10 +26,11 @@ function workspace(): string {
   }));
   fs.writeFileSync(path.join(dependency, 'index.js'), 'throw new Error("Source executed");\n');
   fs.writeFileSync(path.join(dependency, 'index.d.ts'), [
-    'export declare function Controller(path?: string): ClassDecorator;',
+    'export declare function Controller(path?: string | {path?: string; version?: string}): ClassDecorator;',
     'export declare function Get(path?: string): MethodDecorator;',
     'export declare function Post(path?: string): MethodDecorator;',
     'export declare function Head(path?: string): MethodDecorator;',
+    'export declare function Version(value: string): MethodDecorator;',
   ].join('\n'));
   fs.writeFileSync(path.join(root, 'policy.yml'), `version: 2
 defaults: {mode: enforce}
@@ -93,6 +94,51 @@ afterEach(() => {
 });
 
 describe('Experimental source-diff CLI', () => {
+  test('requires an explicit valid URI mode and shows AST version evidence in four formats', () => {
+    const root = workspace();
+    fs.writeFileSync(path.join(root, 'src/controller.ts'), `import { Controller, Get } from '@nestjs/common';
+      @Controller({ path: 'users', version: '1' }) class Users { @Get(':id') read() {} }
+    `);
+    const openapi = path.join(root, 'openapi.yaml');
+    fs.writeFileSync(openapi, fs.readFileSync(openapi, 'utf8').replace('/users/{id}', '/v2/users/{id}'));
+    for (const [extra, code] of [
+      [['--source-versioning', 'uri'], 'SOURCE_DIFF_VERSIONING_REQUIRES_SOURCE'],
+      [['--source', 'tsconfig.json', '--source-versioning', 'header'], 'SOURCE_DIFF_VERSIONING_INVALID'],
+      [['--source', 'tsconfig.json', '--source-versioning', ''], 'SOURCE_DIFF_VERSIONING_INVALID'],
+    ] as const) {
+      const result = invoke(root, [...extra]);
+      expect(result.status).toBe(2);
+      expect(result.stdout).toBe('');
+      expect(result.stderr).toContain(code);
+    }
+    for (const format of ['text', 'json', 'sarif', 'summary']) {
+      const result = invoke(root, ['--source', 'tsconfig.json', '--source-versioning', 'uri',
+        '--format', format, '--fail-on', 'never']);
+      expect(result.status, result.stderr).toBe(0);
+      expect(result.stdout.toLowerCase()).toContain('uri');
+      if (format === 'json') {
+        const report = JSON.parse(result.stdout);
+        expect(report.routingAssumption).toMatchObject({ sourceVersioning: 'uri', versionPrefix: 'v' });
+        expect(report.sourceVersionMetadata.routes).toEqual(expect.arrayContaining([
+          expect.objectContaining({ version: '1', localPath: '/users/{id}',
+            comparisonPath: '/v1/users/{id}', origin: 'controller' }),
+        ]));
+      }
+      if (format === 'sarif') {
+        const report = JSON.parse(result.stdout);
+        validateSarif(report);
+        const metadata = report.runs[0].tool.driver.properties.sourceAware.metadata;
+        expect(metadata.routingAssumption.sourceVersioning).toBe('uri');
+        expect(metadata.sourceVersionMetadata.origin).toBe('source-ast');
+      }
+    }
+    const saved = invoke(root, ['--source', 'tsconfig.json', '--source-versioning', 'uri',
+      '--format', 'json', '--out', 'version-report.json', '--fail-on', 'never']);
+    expect(saved.status, saved.stderr).toBe(0);
+    expect(JSON.parse(fs.readFileSync(path.join(root, 'version-report.json'), 'utf8'))
+      .sourceVersionMetadata.routes[0].comparisonPath).toBe('/v1/users/{id}');
+  }, 30_000);
+
   test('validates explicit routing before input loads and reports the same assumption in four formats', () => {
     const root = workspace();
     const withoutSource = invoke(root, ['--source-global-prefix', '/api']);

@@ -1201,6 +1201,163 @@ export declare function Get(path?: string): MethodDecorator;\n`);
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 }
 
+export type UriVersionProof = {
+  inputSha256: string; savedSha256: string; ciRecordSha256: string;
+  projectDigest: string; configDigest: string; routingDigest: string;
+  comparisonContractDigest: string; metadataDigest: string;
+  routes: string[]; sourceOnly: string[]; ciDelivery: 'CI_OK';
+};
+
+/** Check URI routes through the installed candidate and the CI delivery path. */
+export function smokeInstalledUriVersion(consumer: string, validateSarif: (value: unknown) => void,
+  environment: NodeJS.ProcessEnv = process.env):
+  { steps: typeof smokeSteps; proof: UriVersionProof } {
+  const pkgRoot = path.join(consumer, 'node_modules', packageName);
+  const candidate = path.dirname(consumer);
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-installed-uri-'));
+  const digest = (value: Buffer | string) => crypto.createHash('sha256').update(value).digest('hex');
+  const write = (name: string, value: string) => {
+    const file = path.join(root, name); fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, value);
+  };
+  const inputs = ['tsconfig.json', 'src/controller.ts', 'openapi.yaml', 'policy.yml', 'security-analyzer.json'];
+  try {
+    write('tsconfig.json', JSON.stringify({ compilerOptions: {
+      experimentalDecorators: true, moduleResolution: 'node', noLib: true, types: [],
+    }, files: ['src/controller.ts'] }));
+    write('src/controller.ts', [
+      "import { Controller, Get, Version } from '@nestjs/common';",
+      "@Controller({ path: 'users', version: '1' }) class First { @Get() read() {}",
+      "  @Version('2') @Get('items') items() {} }",
+      "@Controller({ path: 'users', version: '2' }) class Second { @Get() read() {} }",
+      "throw new Error('Source executed');",
+    ].join('\n'));
+    write('openapi.yaml', [
+      'openapi: 3.0.3', 'info: {title: URI fixture, version: 1.0.0}', 'paths:',
+      '  /api/users:', "    get: {responses: {'200': {description: OK}}}",
+      '  /api/v3/users:', "    get: {responses: {'200': {description: OK}}}",
+    ].join('\n'));
+    write('policy.yml', [
+      'version: 2', 'defaults: {mode: enforce}', 'request:', '  allow_methods: [GET]',
+      '  block: {header_missing: []}', 'routes: []', 'response_headers: {}',
+    ].join('\n'));
+    write('security-analyzer.json', JSON.stringify({ public_decorators: [], roles_decorators: [],
+      guard_mappings: {} }));
+    const dependency = path.join(root, 'node_modules/@nestjs/common');
+    fs.mkdirSync(dependency, { recursive: true });
+    fs.writeFileSync(path.join(dependency, 'package.json'), JSON.stringify({
+      name: '@nestjs/common', version: '1.0.0', main: 'index.js', types: 'index.d.ts',
+    }));
+    fs.writeFileSync(path.join(dependency, 'index.js'), 'throw new Error("dependency executed");\n');
+    fs.writeFileSync(path.join(dependency, 'index.d.ts'), [
+      'export declare function Controller(value?: string | {path?: string; version?: string}): ClassDecorator;',
+      'export declare function Get(path?: string): MethodDecorator;',
+      'export declare function Version(value: string): MethodDecorator;',
+    ].join('\n'));
+    const inputSha256 = digest(JSON.stringify(inputs.map(name => digest(fs.readFileSync(path.join(root, name))))));
+    const steps: typeof smokeSteps = [];
+    const cli = path.join(pkgRoot, 'bin/cli.js');
+    const invoke = (script: string, args: string[], expectedExit: number, env = environment) => {
+      const start = process.hrtime.bigint();
+      const result = childProcess.spawnSync(process.execPath, [script, ...args], {
+        cwd: root, encoding: 'utf8', timeout: 30_000, maxBuffer: 8 * 1024 * 1024,
+        env: { ...env, NODE_PATH: '', NODE_OPTIONS: '' },
+      });
+      steps.push({ command: script === cli ? 'cdn-security-uri-version' : 'source-aware-ci-uri',
+        exit: result.status ?? -1, expectedExit,
+        durationMs: Number(process.hrtime.bigint() - start) / 1e6 });
+      assert.equal(result.error, undefined, 'installed URI process error');
+      assert.equal(result.signal, null, 'installed URI process signal');
+      assert.equal(result.status, expectedExit, `installed URI command exit: ${result.stderr}`);
+      assert.ok(!(result.stdout + result.stderr).includes(root), 'installed URI leaked workspace path');
+      return result;
+    };
+    const base = ['contract', 'source-diff', '--workspace-root', root, '--openapi', 'openapi.yaml',
+      '--policy', 'policy.yml', '--target', 'aws', '--source', 'tsconfig.json',
+      '--source-auth-config', 'security-analyzer.json', '--source-global-prefix', '/api',
+      '--current-date', '2026-09-25', '--fail-on', 'never'];
+    const uri = [...base, '--source-versioning', 'uri'];
+    let sarif: any; let json: any;
+    for (const format of ['text', 'json', 'sarif', 'summary']) {
+      const result = invoke(cli, [...uri, '--format', format], 0);
+      assert.equal(result.stderr, '');
+      assert.ok(result.stdout.length > 0, 'installed URI report missing');
+      if (format === 'sarif') { sarif = JSON.parse(result.stdout); validateSarif(sarif); }
+      if (format === 'json') json = JSON.parse(result.stdout);
+      if (format === 'text' || format === 'summary') {
+        assert.ok(result.stdout.toLowerCase().includes('uri')
+          && result.stdout.toLowerCase().includes('ast'),
+          'installed URI assumption or AST evidence missing');
+      }
+    }
+    const routes = json.sourceVersionMetadata.routes.filter((route: any) => route.status === 'resolved')
+      .map((route: any) => `${route.method} ${route.comparisonPath}`).sort();
+    assert.deepEqual(routes, ['GET /api/v1/users', 'GET /api/v2/users', 'GET /api/v2/users/items']);
+    assert.ok(!routes.includes('GET /api/users') && !routes.includes('GET /api/v3/users'));
+    const sourceOnly = json.findings.active.filter((finding: any) => finding.ruleId === 'SC-INVENTORY-001')
+      .map((finding: any) => `${finding.route?.method} ${finding.route?.path}`).sort();
+    assert.deepEqual(sourceOnly, routes, 'installed URI Source-only comparison changed');
+    assert.ok(json.findings.active.some((finding: any) => finding.ruleId === 'SC-INVENTORY-003'
+      && finding.route?.path === '/api/users'), 'unversioned declared route was incorrectly satisfied');
+    const metadata = sarif.runs[0].tool.driver.properties.sourceAware.metadata;
+    assert.deepEqual(metadata.sourceVersionMetadata.routes.filter((route: any) => route.status === 'resolved')
+      .map((route: any) => `${route.method} ${route.comparisonPath}`).sort(), routes);
+    assert.equal(metadata.routingAssumption.sourceVersioning, 'uri');
+    assert.equal(metadata.routingAssumption.origin, 'explicit-option');
+    assert.equal(metadata.sourceVersionMetadata.origin, 'source-ast');
+    const saved = invoke(cli, [...uri, '--format', 'json', '--out', 'uri-report.json'], 0);
+    assert.equal(saved.stdout, ''); assert.equal(saved.stderr, '');
+    const savedBytes = fs.readFileSync(path.join(root, 'uri-report.json'));
+    assert.deepEqual(JSON.parse(savedBytes.toString()).sourceVersionMetadata.routes,
+      json.sourceVersionMetadata.routes);
+    invoke(cli, [...uri, '--format', 'summary', '--fail-on', 'warning'], 1);
+    for (const [value, code] of [['header', 'SOURCE_DIFF_VERSIONING_INVALID'],
+      ['', 'SOURCE_DIFF_VERSIONING_INVALID']] as const) {
+      const result = invoke(cli, [...base, '--source-versioning', value], 2);
+      assert.equal(result.stdout, ''); assert.ok(result.stderr.includes(code));
+    }
+    const noSource = invoke(cli, ['contract', 'source-diff', '--workspace-root', root,
+      '--openapi', 'missing-openapi.yaml', '--policy', 'missing-policy.yml', '--target', 'aws',
+      '--current-date', '2026-09-25', '--source-versioning', 'uri'], 2);
+    assert.equal(noSource.stdout, '');
+    assert.ok(noSource.stderr.includes('SOURCE_DIFF_VERSIONING_REQUIRES_SOURCE'));
+    const driver = path.join(pkgRoot, 'scripts/source-aware-ci.js');
+    const output = path.join(root, 'ci-output'); const stage = path.join(root, 'ci-stage');
+    fs.mkdirSync(output); fs.mkdirSync(stage);
+    const config = path.join(root, 'ci-config.json');
+    fs.writeFileSync(config, JSON.stringify({ workspaceRoot: root, openapi: 'openapi.yaml',
+      policy: 'policy.yml', target: 'aws', source: 'tsconfig.json',
+      sourceAuthConfig: 'security-analyzer.json', sourceVersioning: 'uri',
+      sourceGlobalPrefix: '/api', currentDate: '2026-09-25', failOn: 'never', format: 'summary' }));
+    const record = path.join(output, 'ci-record.json');
+    const delivery = path.join(stage, 'delivery.json');
+    const ciEnv = { ...environment, GITHUB_STEP_SUMMARY: path.join(root, 'ci-step-summary.md') };
+    invoke(driver, ['run', config, candidate, output], 0, ciEnv);
+    invoke(driver, ['publish', record, candidate, stage], 0, ciEnv);
+    invoke(driver, ['verify-stage', record, candidate, delivery], 0, ciEnv);
+    assert.equal(JSON.parse(fs.readFileSync(delivery, 'utf8')).code, 'CI_OK',
+      'installed URI CI delivery incomplete');
+    invoke(driver, ['gate', record, candidate, delivery], 0, { ...ciEnv,
+      CSF_PRODUCER_STATE: 'success', CSF_ACCEPTANCE_STATE: 'success',
+      CSF_ANALYZE_OUTCOME: 'success', CSF_PUBLISH_OUTCOME: 'success',
+      CSF_STAGE_OUTCOME: 'success', CSF_ARTIFACT_OUTCOME: 'success' });
+    const ciRecord = JSON.parse(fs.readFileSync(record, 'utf8'));
+    assert.deepEqual(ciRecord.sourceVersionMetadata.routes.filter((route: any) => route.status === 'resolved')
+      .map((route: any) => `${route.method} ${route.comparisonPath}`).sort(), routes);
+    assert.equal(JSON.parse(fs.readFileSync(delivery, 'utf8')).code, 'CI_OK');
+    validateSarif(JSON.parse(fs.readFileSync(path.join(output, 'source-aware.sarif'), 'utf8')));
+    assert.equal(digest(JSON.stringify(inputs.map(name => digest(fs.readFileSync(path.join(root, name)))))),
+      inputSha256, 'installed URI command changed an input');
+    return { steps, proof: { inputSha256, savedSha256: digest(savedBytes),
+      ciRecordSha256: digest(fs.readFileSync(record)),
+      projectDigest: metadata.source.projectDigest, configDigest: metadata.source.configDigest,
+      routingDigest: metadata.routingAssumption.digest,
+      comparisonContractDigest: metadata.routingAssumption.comparisonContractDigest,
+      metadataDigest: metadata.sourceVersionMetadata.digest,
+      routes, sourceOnly, ciDelivery: 'CI_OK' } };
+  } finally { fs.rmSync(root, { recursive: true, force: true }); }
+}
+
 if (require.main === module) {
 assertPackageNegativeCases();
 

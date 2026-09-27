@@ -40,6 +40,16 @@ function workspace(name: string, overrides: Record<string, unknown> = {}) {
   const root = path.join(temp, name);
   fs.mkdirSync(root);
   fs.cpSync(fixture, root, { recursive: true });
+  if (name.startsWith('uri')) {
+    const dependency = path.join(root, 'node_modules/@nestjs/common');
+    fs.mkdirSync(path.dirname(dependency), { recursive: true });
+    fs.cpSync(path.join(root, 'stubs/nestjs-common'), dependency, { recursive: true });
+    const declaration = path.join(dependency, 'index.d.ts');
+    fs.writeFileSync(declaration, fs.readFileSync(declaration, 'utf8').replace(
+      'Controller(path?: string)', 'Controller(path?: string | { path?: string; version?: string })'));
+    fs.appendFileSync(path.join(root, 'src/users.controller.ts'),
+      "\n@HttpController({ path: 'safe', version: '1' }) class Versioned { @Read() read() {} }\n");
+  }
   if (name === 'encoded') {
     fs.renameSync(path.join(root, 'policy/security.yml'),
       path.join(root, 'policy/token=opaquevalue123.yml'));
@@ -71,8 +81,10 @@ function inputDigests(root: string): Record<string, string> {
   return values;
 }
 
-function runCase(name: string, overrides: Record<string, unknown> = {}) {
+function runCase(name: string, overrides: Record<string, unknown> = {},
+  setup?: (root: string) => void) {
   const target = workspace(name, overrides);
+  setup?.(target.root);
   const before = inputDigests(target.root);
   const analysis = command(process.execPath, [driver, 'run', target.config, candidate, target.output], repo, env());
   expect(analysis.status, analysis.stderr).toBe(0);
@@ -136,6 +148,21 @@ beforeAll(() => {
 afterAll(() => { if (temp) fs.rmSync(temp, { recursive: true, force: true }); });
 
 describe('installed dev-only Source-aware CI connection', () => {
+  it('publishes a URI record with several valid long routes', () => {
+    const current = runCase('uri-large', { sourceVersioning: 'uri' }, root => {
+      const longPath = 'a'.repeat(8_000);
+      fs.appendFileSync(path.join(root, 'src/users.controller.ts'), Array.from({ length: 5 }, (_, index) =>
+        `\n@HttpController({ path: '${longPath}${index}', version: '1' }) class Long${index} { @Read() read() {} }\n`).join(''));
+    });
+    expect(current.record.sourceVersionMetadata.total).toBeGreaterThanOrEqual(5);
+    expect(current.record.sourceVersionMetadata.omitted).toBeGreaterThan(0);
+    expect(current.record.sourceVersionMetadata.routes.length).toBeGreaterThan(0);
+    const recordFile = path.join(current.output, 'ci-record.json');
+    expect(fs.statSync(recordFile).size).toBeLessThanOrEqual(65_536);
+    const delivered = deliver(current.output, 'uri-large');
+    expect(delivered.gate.status).toBe(0);
+  }, 120_000);
+
   it('uses the installed candidate for a bounded Controller object CLI and CI proof', () => {
     const smoke: typeof import('../../src/scripts/package-smoke-tests') =
       require(path.join(repo, 'scripts/package-smoke-tests.js'));
@@ -176,6 +203,43 @@ describe('installed dev-only Source-aware CI connection', () => {
     }
     expect(deliver(sensitive.output, 'prefix-sensitive').gate.status).toBe(0);
   });
+
+  it('keeps URI assumption and AST evidence separate in the installed CI record and rejects unknown nested data', () => {
+    const current = runCase('uri', { sourceVersioning: 'uri' });
+    expect(current.record.routingAssumption).toMatchObject({
+      sourceVersioning: 'uri', versionPrefix: 'v', origin: 'explicit-option',
+    });
+    expect(current.record.sourceVersionMetadata).toMatchObject({ origin: 'source-ast' });
+    expect(current.record.sourceVersionMetadata.routes.some((route: any) =>
+      route.status === 'unresolved')).toBe(true);
+    expect(current.record.sourceVersionMetadata.routes.some((route: any) =>
+      route.status === 'resolved' && route.comparisonPath === '/v1/safe')).toBe(true);
+    expect(deliver(current.output, 'uri').gate.status).toBe(0);
+
+    const tampered = runCase('uri-unknown', { sourceVersioning: 'uri' });
+    changeJson(path.join(tampered.output, 'ci-record.json'), value => {
+      value.sourceVersionMetadata.rawVersion = 'token=hidden-secret';
+    });
+    const delivery = deliver(tampered.output, 'uri-unknown');
+    expect(delivery.gate.status).toBe(3);
+    expect(fs.readdirSync(delivery.stage)).toEqual(['delivery.json']);
+    expect(fs.readFileSync(path.join(delivery.stage, 'delivery.json'), 'utf8'))
+      .not.toContain('hidden-secret');
+
+    for (const [name, change] of [
+      ['status', (value: any) => { value.sourceVersionMetadata.routes.find((route: any) =>
+        route.status === 'unresolved').status = 'mystery'; }],
+      ['method', (value: any) => { value.sourceVersionMetadata.routes.find((route: any) =>
+        route.status === 'resolved').method = 'BREW'; }],
+      ['digest', (value: any) => { delete value.routingAssumption.comparisonContractDigest; }],
+    ] as const) {
+      const caseData = runCase(`uri-${name}`, { sourceVersioning: 'uri' });
+      changeJson(path.join(caseData.output, 'ci-record.json'), change);
+      const rejected = deliver(caseData.output, `uri-${name}`);
+      expect(rejected.gate.status, name).toBe(3);
+      expect(fs.readdirSync(rejected.stage)).toEqual(['delivery.json']);
+    }
+  }, 120_000);
 
   it('W01/W09 uses one installed candidate, saves verified reports, and passes the real gate', () => {
     const { output, record } = runCase('pass', {

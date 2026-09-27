@@ -38,7 +38,15 @@ function linesFor(bundle: SourceAwareOutputBundle, top: number): string[] {
     '', '## Stage status', '', '| Stage | Status | Reason |', '| --- | --- | --- |',
   ];
   if (bundle.metadata.routingAssumption) {
-    lines.splice(2, 0, `**Routing assumption:** explicit global prefix ${cell(bundle.metadata.routingAssumption.globalPrefix)} (not bootstrap-verified).`);
+    const routing = bundle.metadata.routingAssumption;
+    if (routing.globalPrefix) lines.splice(2, 0,
+      `**Routing assumption:** explicit global prefix ${cell(routing.globalPrefix)} (not bootstrap-verified).`);
+    if (routing.sourceVersioning) lines.splice(2, 0,
+      '**Routing assumption:** explicit URI versioning with default v prefix (not bootstrap-verified).');
+  }
+  if (bundle.metadata.sourceVersionMetadata) {
+    const versions = bundle.metadata.sourceVersionMetadata;
+    lines.splice(3, 0, `**Source AST versions:** ${versions.total} route candidates; SHA-256 ${versions.digest}.`);
   }
   for (const name of ['declared', 'implemented', 'allowed'] as const) {
     const stage = final?.stages[name];
