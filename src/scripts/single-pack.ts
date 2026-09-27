@@ -115,7 +115,7 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
       assert.ok(uri && Object.keys(uri).sort().join() === [
         'inputSha256', 'savedSha256', 'ciRecordSha256', 'projectDigest', 'configDigest',
         'routingDigest', 'comparisonContractDigest', 'metadataDigest', 'routes', 'sourceOnly',
-        'ciDelivery'].sort().join(), 'missing installed URI proof');
+        'ciDelivery', 'passport'].sort().join(), 'missing installed URI proof');
       for (const key of ['inputSha256', 'savedSha256', 'ciRecordSha256'] as const) {
         assert.match(uri[key], /^[a-f0-9]{64}$/);
       }
@@ -126,6 +126,11 @@ export function aggregate(m: Identity, results: Result[], e: ReturnType<typeof e
       assert.deepEqual(uri.routes, ['GET /api/v1/users', 'GET /api/v2/users', 'GET /api/v2/users/items']);
       assert.deepEqual(uri.sourceOnly, uri.routes);
       assert.equal(uri.ciDelivery, 'CI_OK');
+      assert.deepEqual(uri.passport, { digest: uri.passport.digest,
+        callSites: 1, associations: 2, strategies: ['jwt'],
+        associatedRoutes: ['GET /api/v1/users', 'GET /api/v2/users/items'],
+        authUnknown: 2 }, 'missing installed Passport factory proof');
+      assert.match(uri.passport.digest, /^sha256:[a-f0-9]{64}$/);
       const j = r.journey;
       const { requiredChecks: required, requiredStepIds, requiredInputKeys, requiredOutputKeys, expectedFindingProof } = require('./package-journey') as typeof import('./package-journey');
       assert.ok(j && j.status === 'pass' && Array.isArray(j.checks), 'missing onboarding acceptance');

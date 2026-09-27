@@ -19,6 +19,7 @@ type Failed = { status: 'failed' | 'not-generated'; code: string };
 type RecordV1 = { schemaVersion: 1; candidate: Candidate; targetEvidenceSha256: string;
   routingAssumption?: NonNullable<import('../contract/source-aware-output').SourceAwareOutputBundle['metadata']['routingAssumption']>;
   sourceVersionMetadata?: NonNullable<import('../contract/source-aware-output').SourceAwareOutputBundle['metadata']['sourceVersionMetadata']>;
+  passportFactoryObservation?: NonNullable<import('../contract/source-aware-output').SourceAwareOutputBundle['metadata']['passportFactoryObservation']>;
   analysis: { exitCode: 0 | 1 | 2 | 3; status: 'complete' | 'partial' | 'failed'; codes: string[] };
   reports: { summary: Saved | Failed; sarif: Saved | Failed } };
 type StagedFile = { name: Saved['name'] | 'ci-record.json'; sha256: string; bytes: number };
@@ -62,7 +63,8 @@ function candidateFields(value: any, metadata = false): Candidate {
 function recordFields(value: any): RecordV1 {
   exactKeys(value, ['schemaVersion', 'candidate', 'targetEvidenceSha256', 'analysis', 'reports',
     ...(value?.routingAssumption === undefined ? [] : ['routingAssumption']),
-    ...(value?.sourceVersionMetadata === undefined ? [] : ['sourceVersionMetadata'])]);
+    ...(value?.sourceVersionMetadata === undefined ? [] : ['sourceVersionMetadata']),
+    ...(value?.passportFactoryObservation === undefined ? [] : ['passportFactoryObservation'])]);
   assert.equal(value.schemaVersion, 1);
   candidateFields(value.candidate);
   assert.match(value.targetEvidenceSha256, hex64);
@@ -115,6 +117,74 @@ function recordFields(value: any): RecordV1 {
         }
       } else assert.ok(['VERSION_MISSING', 'VERSION_UNRESOLVED', 'CONTROLLER_ROUTING_UNSUPPORTED',
         'ROUTE_PATH_UNRESOLVED', 'VERSIONED_PATH_INVALID'].includes(route.reason));
+    }
+  }
+  if (value.passportFactoryObservation !== undefined) {
+    const observation = value.passportFactoryObservation;
+    exactKeys(observation, ['observer', 'digest', 'totalCallSites', 'totalAssociations',
+      'totalOperations', 'omittedCallSites', 'omittedAssociations', 'omittedOperations',
+      'callSites', 'associations', 'operations', 'runtimeStrategyRegistrationVerified',
+      'runtimeEnforcementVerified']);
+    assert.equal(observation.observer, 'nestjs-passport-direct-factory@1');
+    assert.match(observation.digest, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(observation.runtimeStrategyRegistrationVerified, false);
+    assert.equal(observation.runtimeEnforcementVerified, false);
+    for (const [total, omitted, items, max] of [
+      ['totalCallSites', 'omittedCallSites', 'callSites', 20],
+      ['totalAssociations', 'omittedAssociations', 'associations', 40],
+      ['totalOperations', 'omittedOperations', 'operations', 40],
+    ] as const) {
+      assert.ok(Number.isSafeInteger(observation[total]) && observation[total] >= 0
+        && observation[total] <= 10_000);
+      assert.ok(Array.isArray(observation[items]) && observation[items].length <= max);
+      assert.equal(observation[omitted], observation[total] - observation[items].length);
+    }
+    const safeRoute = (route: string) => route === '[REDACTED_ROUTE]'
+      || typeof route === 'string' && route.length <= 256
+      && /^\/[A-Za-z0-9._~{}:/-]*$/u.test(route)
+      && !route.split('/').includes('..') && !hasUnsafeSensitiveText(route);
+    for (const site of observation.callSites) {
+      exactKeys(site, ['id', 'scope', 'sourceUri', 'line', 'column', 'sourceDigest',
+        ...(site.module === undefined ? [] : ['module', 'export']),
+        ...(site.strategy === undefined ? [] : ['strategy']),
+        ...(site.reason === undefined ? [] : ['reason'])]);
+      assert.match(site.id, /^sha256:[a-f0-9]{64}$/);
+      assert.match(site.sourceDigest, /^sha256:[a-f0-9]{64}$/);
+      assert.ok(site.scope === 'class' || site.scope === 'method');
+      assert.ok(typeof site.sourceUri === 'string' && site.sourceUri.length <= 256
+        && (site.sourceUri === '[REDACTED_URI]' || site.sourceUri.split('/').every((part: string) => (
+          part === '[REDACTED_FILENAME]' || /^[A-Za-z0-9._-]+$/u.test(part)
+        ))) && !site.sourceUri.split('/').includes('..')
+        && !hasUnsafeSensitiveText(site.sourceUri));
+      assert.ok(Number.isSafeInteger(site.line) && site.line > 0
+        && Number.isSafeInteger(site.column) && site.column > 0);
+      if (site.module !== undefined) {
+        assert.equal(site.module, '@nestjs/passport');
+        assert.equal(site.export, 'AuthGuard');
+      }
+      if (site.strategy !== undefined) {
+        assert.equal(site.module, '@nestjs/passport');
+        assert.equal(site.export, 'AuthGuard');
+        assert.match(site.strategy, /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u);
+        assert.equal(/^(?:sk-|gh[opsur]_|github_pat_|AKIA|(?:sk|pk)_)/iu.test(site.strategy), false);
+        assert.equal(hasUnsafeSensitiveText(site.strategy), false);
+        assert.equal(site.reason, undefined);
+      } else assert.ok(['factory-origin-unverified', 'factory-arguments-unsupported',
+        'strategy-not-literal', 'strategy-unsafe', 'indirect-guard-value'].includes(site.reason));
+    }
+    for (const item of observation.associations) {
+      exactKeys(item, ['callSiteId', 'method', 'localPath', 'comparisonPath', 'authMode']);
+      assert.match(item.callSiteId, /^sha256:[a-f0-9]{64}$/);
+      assert.ok(HTTP_METHODS.includes(item.method as HttpMethod));
+      assert.ok(safeRoute(item.localPath) && safeRoute(item.comparisonPath));
+      assert.ok(['none', 'alternatives', 'unknown'].includes(item.authMode));
+    }
+    for (const item of observation.operations) {
+      exactKeys(item, ['method', 'comparisonPath', 'status', 'authMode']);
+      assert.ok(HTTP_METHODS.includes(item.method as HttpMethod));
+      assert.ok(safeRoute(item.comparisonPath));
+      assert.ok(['observed', 'unsupported', 'no-direct-factory'].includes(item.status));
+      assert.ok(['none', 'alternatives', 'unknown'].includes(item.authMode));
     }
   }
   exactKeys(value.analysis, ['exitCode', 'status', 'codes']);
@@ -228,6 +298,8 @@ async function run(configFile: string, candidateDir: string, output: string): Pr
     targetEvidenceSha256: digest(JSON.stringify(bundle.metadata)),
     ...(bundle.metadata.routingAssumption ? { routingAssumption: bundle.metadata.routingAssumption } : {}),
     ...(bundle.metadata.sourceVersionMetadata ? { sourceVersionMetadata: bundle.metadata.sourceVersionMetadata } : {}),
+    ...(bundle.metadata.passportFactoryObservation
+      ? { passportFactoryObservation: bundle.metadata.passportFactoryObservation } : {}),
     analysis: { exitCode: final.exitCode, status: final.analysis.status,
       codes: final.analysis.codes.map(safeCode) },
     reports: { summary: { status: 'not-generated', code: 'CI_NOT_RENDERED' },
@@ -282,13 +354,23 @@ function validateSummary(bytes: Buffer): void {
   assert.ok(!hasUnsafeSensitiveText(text));
 }
 
-function validateSarif(bytes: Buffer, candidateDir: string): void {
+function validateSarif(bytes: Buffer, candidateDir: string): any {
   assert.ok(bytes.length > 0 && bytes.length <= 1_048_576);
   const validator = require(path.join(fs.realpathSync(candidateDir), 'validation/official-sarif-test-validator.cjs')) as
     { createOfficialSarifValidator: (schemaPath: string) => (value: unknown) => boolean };
   const validate = validator.createOfficialSarifValidator(path.join(candidateDir, 'validation/sarif-schema-2.1.0.json'));
   const report = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
   assert.ok(validate(report), 'official SARIF schema failed');
+  return report;
+}
+
+function verifyMetadataBinding(report: any, record: RecordV1): void {
+  const metadata = report?.runs?.[0]?.tool?.driver?.properties?.sourceAware?.metadata;
+  assert.ok(metadata && typeof metadata === 'object' && !Array.isArray(metadata));
+  assert.equal(digest(JSON.stringify(metadata)), record.targetEvidenceSha256);
+  assert.deepEqual(metadata.passportFactoryObservation, record.passportFactoryObservation);
+  assert.deepEqual(metadata.routingAssumption, record.routingAssumption);
+  assert.deepEqual(metadata.sourceVersionMetadata, record.sourceVersionMetadata);
 }
 
 function writeNew(file: string, value: string | Buffer): void {
@@ -315,7 +397,7 @@ function publish(recordFile: string, candidateDir: string, stage: string): void 
     const summary = verifiedReport(output, record.reports.summary, 'summary.md');
     const sarif = verifiedReport(output, record.reports.sarif, 'source-aware.sarif');
     if (summary) validateSummary(summary);
-    if (sarif) validateSarif(sarif, candidateDir);
+    if (sarif) verifyMetadataBinding(validateSarif(sarif, candidateDir), record);
     if (summary) stageFile('summary.md', summary);
     if (sarif) stageFile('source-aware.sarif', sarif);
     stageFile('ci-record.json', stored.bytes);
@@ -377,6 +459,9 @@ function verifyStage(recordFile: string, candidateDir: string, deliveryFile: str
   const original = readJsonBytes(recordFile);
   recordFields(original.value);
   assert.deepEqual(recorded, original.bytes);
+  if (bytes.has('source-aware.sarif')) {
+    verifyMetadataBinding(validateSarif(bytes.get('source-aware.sarif')!, candidateDir), record);
+  }
   for (const [name, report] of [['summary.md', record.reports.summary],
     ['source-aware.sarif', record.reports.sarif]] as const) {
     const stagedBytes = bytes.get(name);
@@ -415,7 +500,7 @@ function gate(recordFile: string, candidateDir: string, deliveryFile: string): v
   const sarif = verifiedReport(path.dirname(recordFile), record.reports.sarif, 'source-aware.sarif');
   assert.ok(summary && sarif);
   validateSummary(summary);
-  validateSarif(sarif, candidateDir);
+  verifyMetadataBinding(validateSarif(sarif, candidateDir), record);
   assert.ok([0, 1, 2, 3].includes(record.analysis.exitCode));
   if (record.analysis.exitCode !== 0) {
     console.error(`CI_SOURCE_AWARE_ANALYSIS_EXIT_${record.analysis.exitCode}`);

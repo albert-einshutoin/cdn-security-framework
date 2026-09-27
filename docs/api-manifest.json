@@ -180,6 +180,8 @@
       "examples/openapi/openapi.yaml"
     ],
     "experimental": [
+      "contract/passport-factory-observation.d.ts",
+      "contract/passport-factory-observation.js",
       "contract/source-aware-finalizer.d.ts",
       "contract/source-aware-finalizer.js",
       "contract/source-aware-internal.d.ts",

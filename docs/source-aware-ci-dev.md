@@ -2,7 +2,8 @@
 
 The runnable example is the `source-aware-ci` job in the repository's
 `.github/workflows/policy-lint.yml`. It runs only on a
-manual dispatch of `dev/2.1-source-aware` or a `feat/source-aware-ci/` branch.
+manual dispatch of `dev/2.1-source-aware`, a `feat/source-aware-ci/` branch,
+or a `feat/source-passport-factory/` branch.
 Ordinary PRs targeting `main`, scheduled runs, and release refs skip this job.
 It uses only synthetic `examples/nestjs-contract` data and `contents: read`.
 The standard 2.0 `examples/github-actions/contract-diff.yml` is separate.

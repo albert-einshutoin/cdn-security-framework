@@ -10,13 +10,15 @@ const { command, hash, fileHash, candidateIdentity, runDriver, ruleCounts, match
 const fixture = __dirname;
 const manifest = require('./source-manifest.json');
 const expected = require('./expectations.json');
+const passportExpected = require('./passport-expectations.json');
 const cases = require('./cases.json');
 const archive = path.join(fixture, 'source.tar.gz');
 const preparedLock = path.join(fixture, 'prepared-package-lock.json');
 const originalLockSha = manifest.fileSha256['package-lock.json'];
 const preparedLockSha = '78f85d33ed84ad7214ea81e4996a2a3741c5670c9f199137b1e91dbc056919b6';
 const inputNames = ['openapi-api.json', 'openapi-no-prefix.json', 'policy-api.yml',
-  'policy-no-prefix.yml', 'auth-empty.json', 'cases.json', 'expectations.json'];
+  'policy-no-prefix.yml', 'auth-empty.json', 'cases.json', 'expectations.json',
+  'passport-expectations.json'];
 const operationKey = op => `${op.method} ${op.path}`;
 const targetKey = (op, prefix) => `${op.method} ${prefix ? op.uriApiPrefixPath : op.uriNoPrefixPath}`;
 const sorted = values => [...values].sort();
@@ -83,6 +85,63 @@ function assertExpectedRoutes(comparison, prefix) {
     'PILOT_UNVERSIONED_ROUTE');
   return evaluationOut;
 }
+function assertPassportObservation(observation) {
+  assert.ok(observation, 'PILOT_PASSPORT_OBSERVATION_MISSING');
+  assert.equal(observation.observer, 'nestjs-passport-direct-factory@1');
+  assert.match(observation.digest, /^sha256:[a-f0-9]{64}$/);
+  const target = new Map(expected.operations.map(op => [targetKey(op, false), op]));
+  const expectedSites = passportExpected.callSites.map(site => ({
+    sourceUri: `source/${site.source}`, line: site.line, scope: site.scope,
+    strategy: site.strategy,
+    operations: sorted(site.operations.map(key => key.replace(' /api/', ' /'))),
+  }));
+  const byId = new Map(observation.callSites.map(site => [site.id, site]));
+  assert.equal(byId.size, observation.callSites.length, 'PILOT_PASSPORT_DUPLICATE_SITE');
+  const scoped = observation.associations.filter(item => target.has(`${item.method} ${item.comparisonPath}`));
+  const actualBySite = new Map();
+  for (const item of scoped) {
+    const site = byId.get(item.callSiteId);
+    assert.ok(site?.strategy, 'PILOT_PASSPORT_ASSOCIATION_SITE');
+    assert.equal(site.module, '@nestjs/passport');
+    assert.equal(site.export, 'AuthGuard');
+    assert.equal(site.reason, undefined);
+    assert.equal(item.authMode, 'unknown', 'PILOT_PASSPORT_AUTH_PROMOTED');
+    const key = `${item.method} ${item.comparisonPath}`;
+    assert.equal(item.localPath, target.get(key).localPath.replace(':id', '{id}'));
+    const routes = actualBySite.get(site.id) ?? [];
+    routes.push(key);
+    actualBySite.set(site.id, routes);
+  }
+  const actualSites = [...actualBySite].map(([id, routes]) => {
+    const site = byId.get(id);
+    return { sourceUri: site.sourceUri, line: site.line, scope: site.scope,
+      strategy: site.strategy, operations: sorted(routes) };
+  });
+  const normalize = value => JSON.stringify(value);
+  assert.deepEqual(sorted(actualSites.map(normalize)), sorted(expectedSites.map(normalize)),
+    'PILOT_PASSPORT_EXACT_ASSOCIATIONS');
+  const operationStatuses = observation.operations.filter(item => target.has(
+    `${item.method} ${item.comparisonPath}`));
+  assert.deepEqual(sorted(operationStatuses.map(item => JSON.stringify({
+    route: `${item.method} ${item.comparisonPath}`, status: item.status, authMode: item.authMode,
+  }))), sorted(expected.operations.map(op => JSON.stringify({
+    route: targetKey(op, false), status: op.guardSyntax ? 'observed' : 'no-direct-factory',
+    authMode: 'unknown',
+  }))), 'PILOT_PASSPORT_OPERATION_STATUS');
+  assert.equal(scoped.length, passportExpected.expected.operationAssociations);
+  assert.equal(actualSites.length, passportExpected.expected.callSites);
+  const counts = Object.fromEntries(Object.keys(passportExpected.expected.strategyAssociations).map(strategy => (
+    [strategy, scoped.filter(item => byId.get(item.callSiteId).strategy === strategy).length]
+  )));
+  assert.deepEqual(counts, passportExpected.expected.strategyAssociations);
+  const noDirect = operationStatuses.filter(item => item.status === 'no-direct-factory').length;
+  assert.equal(noDirect, passportExpected.withoutDirectFactory.length);
+  return { summary: { observer: observation.observer, digest: observation.digest,
+    callSites: actualSites.length, operationAssociations: scoped.length,
+    strategyAssociations: counts, noDirectOperations: noDirect,
+    authUnknown: operationStatuses.filter(item => item.authMode === 'unknown').length },
+  evidence: observation };
+}
 async function inspect(installed, workspace) {
   const { runNestJsSourceAnalysisInternal } = require(path.join(installed, 'source/nestjs/analyzer.js'));
   const { DEFAULT_SOURCE_ANALYSIS_LIMITS } = require(path.join(installed, 'source-analysis/index.js'));
@@ -106,6 +165,7 @@ async function inspect(installed, workspace) {
   assert.ok(uri.uriComparison, 'PILOT_URI_METADATA_MISSING');
   const comparison = uri.uriComparison;
   const out = assertExpectedRoutes(comparison, false);
+  const passport = assertPassportObservation(uri.passportFactoryObservation);
   for (const op of expected.operations) {
     const matched = comparison.routes.filter(route => route.status === 'resolved'
       && route.method === op.method && route.sourceUri === sourceFile(op)
@@ -134,7 +194,8 @@ async function inspect(installed, workspace) {
     prefixedKeys: sorted(prefixed.contract.operations.map(op => op.routeKey)),
     targetAuthUnknown: sorted(comparison.contract.operations.filter(op =>
       expectedKeys(false).includes(op.routeKey) && op.auth.mode === 'unknown').map(op => op.routeKey)),
-    evaluationOut: out, uriUnresolved: comparison.unresolvedOperations.map(item => ({
+    evaluationOut: out, passport: passport.evidence,
+    uriUnresolved: comparison.unresolvedOperations.map(item => ({
       sourceUri: item.sourceUri, reason: item.reason })) };
   return { summary: { noUriMs, uriMs: Date.now() - uriStarted,
     metrics: uri.execution.result.metrics, noUriResolved: plain.size,
@@ -143,7 +204,7 @@ async function inspect(installed, workspace) {
     evaluationOut: out, prefixedEvaluationOut: prefixedOut,
     uriUnresolved: comparison.unresolvedOperations.length,
     authUnknown: expected.operations.length, diagnosticCodes, rssBytes: process.memoryUsage().rss },
-  routeEvidence };
+  routeEvidence, passport: passport.summary };
 }
 function mutate(change, openapi, policy) {
   const pathKey = '/api/v1/auth/me';
@@ -267,7 +328,7 @@ async function evaluate(candidate, dependencies, workRoot, output) {
   const evaluation = path.join(workspace, 'evaluation');
   fs.mkdirSync(evaluation, { mode: 0o700 });
   const inputHashes = copyInputs(evaluation);
-  const { summary: operations, routeEvidence } = await inspect(installed, workspace);
+  const { summary: operations, routeEvidence, passport } = await inspect(installed, workspace);
   const routeEvidenceFile = path.join(workRoot, 'route-evidence.json');
   fs.writeFileSync(routeEvidenceFile, JSON.stringify(routeEvidence) + '\n', { flag: 'wx', mode: 0o600 });
   const { hasUnsafeSensitiveText } = require(path.join(installed, 'contract/sensitive-text.js'));
@@ -362,7 +423,7 @@ async function evaluate(candidate, dependencies, workRoot, output) {
   candidate: { source: metadata.source, harness: metadata.harness, tree: metadata.tree,
     run: metadata.run, attempt: metadata.attempt, tgzSha256: metadata.sha256,
     lockSha256: metadata.lockSha256 }, targetDependencies: preparation,
-  inputHashes, operations, routeEvidenceSha256: fileHash(routeEvidenceFile),
+  inputHashes, operations, passport, routeEvidenceSha256: fileHash(routeEvidenceFile),
   cases: caseResults, R07: r07,
   score: { exactRouteTP: 16, exactRouteFP: 0, exactRouteFN: 0,
     unit: cases.denominator.routeTruePositiveUnit, denominator: 16,
@@ -389,7 +450,7 @@ function verify(candidate, workRoot, output, stage) {
   const digest = value => assert.match(value, /^[a-f0-9]{64}$/);
   const finite = value => assert.ok(Number.isSafeInteger(value) && value >= 0 && value <= 1_000_000_000_000);
   exactKeys(value, ['schemaVersion', 'code', 'source', 'candidate', 'targetDependencies',
-    'inputHashes', 'operations', 'routeEvidenceSha256', 'cases', 'R07', 'score']);
+    'inputHashes', 'operations', 'passport', 'routeEvidenceSha256', 'cases', 'R07', 'score']);
   assert.equal(value.schemaVersion, 1);
   assert.equal(value.code, 'PILOT_PASS');
   exactKeys(value.source, ['repository', 'commit', 'tree', 'archiveSha256', 'fileCount']);
@@ -429,6 +490,9 @@ function verify(candidate, workRoot, output, stage) {
   const routeEvidenceFile = path.join(workRoot, 'route-evidence.json');
   assert.equal(fileHash(routeEvidenceFile), value.routeEvidenceSha256, 'PILOT_ROUTE_EVIDENCE_HASH');
   const proof = JSON.parse(fs.readFileSync(routeEvidenceFile, 'utf8'));
+  assert.deepEqual(assertPassportObservation(proof.passport).summary, value.passport,
+    'PILOT_PASSPORT_SAFE_RESULT');
+  assert.equal(value.passport.authUnknown, passportExpected.expected.sourceAuthUnknown);
   assert.deepEqual(proof.noUriKeys, ['GET /']);
   assert.deepEqual(proof.targetAuthUnknown, expectedKeys(false));
   for (const prefix of [false, true]) {
@@ -510,4 +574,5 @@ if (require.main === module) {
     throw Error('BROCODERS_PILOT_ARGUMENTS');
   }).catch(() => { console.error('BROCODERS_PILOT_FAILED'); process.exitCode = 1; });
 }
-module.exports = { verifyArchive, mutate, assertExpectedRoutes, assertFindingTarget };
+module.exports = { verifyArchive, mutate, assertExpectedRoutes, assertFindingTarget,
+  assertPassportObservation };

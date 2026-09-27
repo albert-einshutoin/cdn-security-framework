@@ -1953,6 +1953,61 @@ export function isStaticSymbolFrom(
     && isResolvedSymbolFrom(symbol, expression, moduleName, importedName));
 }
 
+// A direct import is required for observation: a re-export may resolve to the same type symbol
+// without proving which runtime value the application imports.
+export function isDirectImportedSymbolFrom(
+  expression: ts.Expression,
+  checker: ts.TypeChecker,
+  check: () => void,
+  moduleName: string,
+  importedName: string,
+  projectSources?: ReadonlySet<ts.SourceFile>,
+): boolean {
+  const reference = unwrapExpression(expression);
+  if (ts.isIdentifier(reference)) {
+    const declared = checker.getSymbolAtLocation(reference)?.declarations?.some((declaration) => {
+      const imported = importDeclaration(declaration);
+      return ts.isImportSpecifier(declaration) && imported
+        && ts.isStringLiteral(imported.moduleSpecifier)
+        && imported.moduleSpecifier.text === moduleName
+        && (declaration.propertyName?.text ?? declaration.name.text) === importedName;
+    });
+    return Boolean(declared && isStaticSymbolFrom(reference, checker, check, moduleName, importedName));
+  }
+  if (ts.isPropertyAccessExpression(reference) && reference.name.text === importedName
+    && ts.isIdentifier(reference.expression)) {
+    const declared = checker.getSymbolAtLocation(reference.expression)?.declarations?.some((declaration) => {
+      const imported = importDeclaration(declaration);
+      return ts.isNamespaceImport(declaration) && imported
+        && ts.isStringLiteral(imported.moduleSpecifier)
+        && imported.moduleSpecifier.text === moduleName;
+    });
+    if (!declared || !isStaticSymbolFrom(reference, checker, check, moduleName, importedName)
+      || !projectSources) return false;
+    const namespace = checker.getSymbolAtLocation(reference.expression);
+    if (!namespace) return false;
+    for (const file of projectSources) {
+      const nodes: ts.Node[] = [file];
+      while (nodes.length) {
+        const node = nodes.pop()!;
+        check();
+        if (ts.isIdentifier(node) && checker.getSymbolAtLocation(node) === namespace
+          && !(ts.isNamespaceImport(node.parent) && node.parent.name === node)) {
+          const parent = node.parent;
+          if (!ts.isPropertyAccessExpression(parent) || parent.expression !== node
+            || parent.name.text === importedName
+              && !(ts.isCallExpression(parent.parent) && parent.parent.expression === parent)) {
+            return false;
+          }
+        }
+        ts.forEachChild(node, child => { nodes.push(child); });
+      }
+    }
+    return true;
+  }
+  return false;
+}
+
 export function containsStaticSymbolFrom(
   expression: ts.Expression,
   checker: ts.TypeChecker,

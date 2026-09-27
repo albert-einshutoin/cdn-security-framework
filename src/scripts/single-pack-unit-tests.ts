@@ -91,7 +91,10 @@ try {
           metadataDigest: `sha256:${'e'.repeat(64)}`,
           routes: ['GET /api/v1/users', 'GET /api/v2/users', 'GET /api/v2/users/items'],
           sourceOnly: ['GET /api/v1/users', 'GET /api/v2/users', 'GET /api/v2/users/items'],
-          ciDelivery: 'CI_OK' as const } } : {}) };
+          ciDelivery: 'CI_OK' as const,
+          passport: { digest: `sha256:${'f'.repeat(64)}`, callSites: 1, associations: 2,
+            strategies: ['jwt'], associatedRoutes: ['GET /api/v1/users', 'GET /api/v2/users/items'],
+            authUnknown: 2 } } } : {}) };
   });
   fs.writeFileSync(path.join(temp, 'metadata.json'), JSON.stringify(m));
   test('same candidate and complete rows pass', () => { verifyTarball(temp, e); aggregate(m, rows, e, ['success','success']); });
@@ -113,6 +116,10 @@ try {
       steps: r.steps.filter(s => s.command !== 'cdn-security-uri-version') } : r), e, ['success','success'])));
   test('missing URI proof fails closed', () => assert.throws(() => aggregate(m,
     rows.map(r => r.row === '24' ? { ...r, uriVersionProof: undefined } : r), e, ['success','success'])));
+  test('incorrect Passport association fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, uriVersionProof: { ...r.uriVersionProof!,
+      passport: { ...r.uriVersionProof!.passport, associatedRoutes: ['GET /api/v1/users'] } } }
+      : r), e, ['success','success'])));
   test('unversioned URI route fails closed', () => assert.throws(() => aggregate(m,
     rows.map(r => r.row === '24' ? { ...r, uriVersionProof: { ...r.uriVersionProof!,
       routes: ['GET /api/users'] } } : r), e, ['success','success'])));

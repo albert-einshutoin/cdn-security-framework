@@ -1,0 +1,74 @@
+{
+  "basis": "Fixed source archive and expectations.json inspected before Passport observation implementation",
+  "sourceCommit": "9620f159eefe38f47747d02ab162852367c5472c",
+  "dependencies": {
+    "@nestjs/common": "11.1.18",
+    "@nestjs/passport": "11.0.5"
+  },
+  "callSites": [
+    {
+      "source": "src/auth/auth.controller.ts",
+      "line": 95,
+      "scope": "method",
+      "strategy": "jwt",
+      "operations": ["GET /api/v1/auth/me"]
+    },
+    {
+      "source": "src/auth/auth.controller.ts",
+      "line": 114,
+      "scope": "method",
+      "strategy": "jwt-refresh",
+      "operations": ["POST /api/v1/auth/refresh"]
+    },
+    {
+      "source": "src/auth/auth.controller.ts",
+      "line": 127,
+      "scope": "method",
+      "strategy": "jwt",
+      "operations": ["POST /api/v1/auth/logout"]
+    },
+    {
+      "source": "src/auth/auth.controller.ts",
+      "line": 142,
+      "scope": "method",
+      "strategy": "jwt",
+      "operations": ["PATCH /api/v1/auth/me"]
+    },
+    {
+      "source": "src/auth/auth.controller.ts",
+      "line": 156,
+      "scope": "method",
+      "strategy": "jwt",
+      "operations": ["DELETE /api/v1/auth/me"]
+    },
+    {
+      "source": "src/users/users.controller.ts",
+      "line": 41,
+      "scope": "class",
+      "strategy": "jwt",
+      "operations": [
+        "POST /api/v1/users",
+        "GET /api/v1/users",
+        "GET /api/v1/users/{id}",
+        "PATCH /api/v1/users/{id}",
+        "DELETE /api/v1/users/{id}"
+      ]
+    }
+  ],
+  "withoutDirectFactory": [
+    "POST /api/v1/auth/email/login",
+    "POST /api/v1/auth/email/register",
+    "POST /api/v1/auth/email/confirm",
+    "POST /api/v1/auth/email/confirm/new",
+    "POST /api/v1/auth/forgot/password",
+    "POST /api/v1/auth/reset/password"
+  ],
+  "expected": {
+    "callSites": 6,
+    "operationAssociations": 10,
+    "strategyAssociations": { "jwt": 9, "jwt-refresh": 1 },
+    "sourceAuthUnknown": 16,
+    "routeTP": 16,
+    "controlledFindingTP": 7
+  }
+}
