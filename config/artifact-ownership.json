@@ -55,6 +55,17 @@
       "removalCondition": "Remove with the fixed public-source Pilot fixture and its regression test."
     },
     {
+      "category": "fixture-example",
+      "files": [
+        "test/pilot/brocoders/pilot.cjs"
+      ],
+      "sourceOfTruth": [
+        "test/pilot/brocoders/pilot.cjs"
+      ],
+      "reason": "Authored second fixed-source Pilot runner, not a TypeScript compiler output.",
+      "removalCondition": "Remove with the fixed brocoders Pilot fixture and its regression test."
+    },
+    {
       "category": "runtime-template",
       "files": [
         "templates/aws/origin-request.js",

@@ -1,0 +1,14 @@
+# Evaluation only; not upstream or production Edge Policy.
+version: 2
+project: brocoders-uri-pilot-api
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, POST, PUT, PATCH, DELETE]
+  block:
+    header_missing: []
+routes:
+  - name: evaluated-versioned-routes
+    match:
+      path_prefixes: ["/api/v1"]
+response_headers: {}

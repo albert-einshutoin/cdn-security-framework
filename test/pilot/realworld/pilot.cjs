@@ -547,4 +547,6 @@ if (require.main === module) {
   }).catch(() => { console.error('PILOT_FAILED'); process.exitCode = 1; });
 }
 
-module.exports = { mutate, ruleCounts, checkExpectedCounts, verifyFindingTargets, verifyArchive };
+module.exports = { mutate, ruleCounts, checkExpectedCounts, verifyFindingTargets, verifyArchive,
+  command, hash, fileHash, candidateIdentity, runDriver, matchEach, sourceLocation, openApiLocation,
+  exactKeys };
