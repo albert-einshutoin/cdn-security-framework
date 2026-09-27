@@ -1,0 +1,173 @@
+{
+  "openapi": "3.1.0",
+  "info": {
+    "title": "Independent fixed brocoders 16-operation evaluation; not upstream contract",
+    "version": "0.0.0-evaluation"
+  },
+  "paths": {
+    "/api/v1/auth/email/login": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/email/register": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/email/confirm": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/email/confirm/new": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/forgot/password": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/reset/password": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/me": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      },
+      "patch": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      },
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/refresh": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      }
+    },
+    "/api/v1/auth/logout": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      }
+    },
+    "/api/v1/users": {
+      "post": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      },
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        }
+      }
+    },
+    "/api/v1/users/{id}": {
+      "get": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "patch": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      },
+      "delete": {
+        "responses": {
+          "200": {
+            "description": "Independent fixed-source evaluation only"
+          }
+        },
+        "parameters": [
+          {
+            "in": "path",
+            "name": "id",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ]
+      }
+    }
+  }
+}
