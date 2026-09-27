@@ -20,6 +20,7 @@ type RecordV1 = { schemaVersion: 1; candidate: Candidate; targetEvidenceSha256: 
   routingAssumption?: NonNullable<import('../contract/source-aware-output').SourceAwareOutputBundle['metadata']['routingAssumption']>;
   sourceVersionMetadata?: NonNullable<import('../contract/source-aware-output').SourceAwareOutputBundle['metadata']['sourceVersionMetadata']>;
   passportFactoryObservation?: NonNullable<import('../contract/source-aware-output').SourceAwareOutputBundle['metadata']['passportFactoryObservation']>;
+  passportStrategyObservation?: NonNullable<import('../contract/source-aware-output').SourceAwareOutputBundle['metadata']['passportStrategyObservation']>;
   analysis: { exitCode: 0 | 1 | 2 | 3; status: 'complete' | 'partial' | 'failed'; codes: string[] };
   reports: { summary: Saved | Failed; sarif: Saved | Failed } };
 type StagedFile = { name: Saved['name'] | 'ci-record.json'; sha256: string; bytes: number };
@@ -64,7 +65,8 @@ function recordFields(value: any): RecordV1 {
   exactKeys(value, ['schemaVersion', 'candidate', 'targetEvidenceSha256', 'analysis', 'reports',
     ...(value?.routingAssumption === undefined ? [] : ['routingAssumption']),
     ...(value?.sourceVersionMetadata === undefined ? [] : ['sourceVersionMetadata']),
-    ...(value?.passportFactoryObservation === undefined ? [] : ['passportFactoryObservation'])]);
+    ...(value?.passportFactoryObservation === undefined ? [] : ['passportFactoryObservation']),
+    ...(value?.passportStrategyObservation === undefined ? [] : ['passportStrategyObservation'])]);
   assert.equal(value.schemaVersion, 1);
   candidateFields(value.candidate);
   assert.match(value.targetEvidenceSha256, hex64);
@@ -187,6 +189,109 @@ function recordFields(value: any): RecordV1 {
       assert.ok(['none', 'alternatives', 'unknown'].includes(item.authMode));
     }
   }
+  if (value.passportStrategyObservation !== undefined) {
+    const strategy = value.passportStrategyObservation;
+    const factory = value.passportFactoryObservation;
+    assert.ok(factory, 'strategy observation requires factory observation');
+    exactKeys(strategy, ['observer', 'digest', 'factoryDigest', 'incompleteDefinitionNames', 'totalDefinitions',
+      'totalProviders', 'totalMatches', 'omittedDefinitions', 'omittedProviders',
+      'omittedMatches', 'definitions', 'providers', 'matches',
+      'runtimeRegistrationVerified', 'runtimeEnforcementVerified']);
+    assert.equal(strategy.observer, 'nestjs-passport-static-strategy-link@1');
+    assert.match(strategy.digest, /^sha256:[a-f0-9]{64}$/);
+    assert.equal(strategy.factoryDigest, factory.digest);
+    assert.ok(Number.isSafeInteger(strategy.incompleteDefinitionNames)
+      && strategy.incompleteDefinitionNames >= 0 && strategy.incompleteDefinitionNames <= 10_000);
+    assert.equal(strategy.runtimeRegistrationVerified, false);
+    assert.equal(strategy.runtimeEnforcementVerified, false);
+    for (const [total, omitted, items, max] of [
+      ['totalDefinitions', 'omittedDefinitions', 'definitions', 20],
+      ['totalProviders', 'omittedProviders', 'providers', 40],
+      ['totalMatches', 'omittedMatches', 'matches', 40],
+    ] as const) {
+      assert.ok(Number.isSafeInteger(strategy[total]) && strategy[total] >= 0
+        && strategy[total] <= 10_000);
+      assert.ok(Array.isArray(strategy[items]) && strategy[items].length <= max);
+      assert.equal(strategy[omitted], strategy[total] - strategy[items].length);
+    }
+    assert.equal(strategy.totalMatches, factory.totalCallSites);
+    const safeName = (name: any) => typeof name === 'string'
+      && (name === '[REDACTED_NAME]' || /^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(name)
+        && !hasUnsafeSensitiveText(name)
+        && !/^(?:sk-|gh[opsur]_|github_pat_|AKIA|(?:sk|pk)_)/iu.test(name));
+    const safeUri = (uri: any) => typeof uri === 'string' && uri.length <= 256
+      && (uri === '[REDACTED_URI]' || uri.split('/').every((part: string) => (
+        part === '[REDACTED_FILENAME]' || /^[A-Za-z0-9._-]+$/u.test(part)
+      ))) && !uri.split('/').includes('..') && !hasUnsafeSensitiveText(uri);
+    const site = (item: any) => {
+      assert.match(item.id, /^sha256:[a-f0-9]{64}$/);
+      assert.match(item.sourceDigest, /^sha256:[a-f0-9]{64}$/);
+      assert.ok(safeUri(item.sourceUri));
+      assert.ok(Number.isSafeInteger(item.line) && item.line > 0
+        && Number.isSafeInteger(item.column) && item.column > 0);
+    };
+    const knownDefinitions = new Map<string, any>();
+    for (const definition of strategy.definitions) {
+      exactKeys(definition, ['id', 'strategy', 'className', 'sourceUri', 'line',
+        'column', 'sourceDigest', 'baseStatus', 'extractor',
+        ...(definition.baseModule === undefined ? [] : ['baseModule'])]);
+      site(definition);
+      assert.ok(safeName(definition.strategy) && safeName(definition.className));
+      assert.ok(['verified', 'unverified'].includes(definition.baseStatus));
+      assert.equal(definition.baseModule, definition.baseStatus === 'verified' ? 'passport-jwt' : undefined);
+      const extractor = definition.extractor;
+      if (extractor.status === 'observed') {
+        exactKeys(extractor, ['status', 'kind', 'id', 'sourceUri', 'line', 'column', 'sourceDigest']);
+        assert.equal(definition.baseStatus, 'verified');
+        assert.equal(extractor.kind, 'bearer-header-call');
+        site(extractor);
+      } else {
+        exactKeys(extractor, ['status']);
+        assert.equal(extractor.status, 'unconfirmed');
+      }
+      assert.equal(knownDefinitions.has(definition.id), false);
+      knownDefinitions.set(definition.id, definition);
+    }
+    for (const provider of strategy.providers) {
+      exactKeys(provider, ['id', 'definitionId', 'moduleClass', 'sourceUri',
+        'line', 'column', 'sourceDigest']);
+      site(provider);
+      assert.match(provider.definitionId, /^sha256:[a-f0-9]{64}$/);
+      assert.ok(safeName(provider.moduleClass));
+      if (strategy.omittedDefinitions === 0) assert.ok(knownDefinitions.has(provider.definitionId));
+    }
+    for (const match of strategy.matches) {
+      exactKeys(match, ['callSiteId', 'status', 'candidateIds', 'totalCandidates',
+        'omittedCandidates', ...(match.strategy === undefined ? [] : ['strategy']),
+        ...(match.reason === undefined ? [] : ['reason'])]);
+      assert.match(match.callSiteId, /^sha256:[a-f0-9]{64}$/);
+      assert.ok(['one', 'multiple', 'none', 'unmatchable'].includes(match.status));
+      assert.ok(Array.isArray(match.candidateIds) && match.candidateIds.length <= 20);
+      assert.ok(Number.isSafeInteger(match.totalCandidates)
+        && match.totalCandidates >= 0 && match.totalCandidates <= 10_000);
+      assert.equal(match.omittedCandidates, match.totalCandidates - match.candidateIds.length);
+      if (match.status === 'one') assert.equal(match.totalCandidates, 1);
+      if (match.status === 'multiple') assert.ok(match.totalCandidates > 1);
+      if (match.status === 'none' || match.status === 'unmatchable') assert.equal(match.totalCandidates, 0);
+      if (match.status === 'unmatchable') {
+        assert.ok(match.reason === 'factory-input' && match.strategy === undefined
+          || match.reason === 'definition-name-unverified' && match.strategy !== undefined
+            && strategy.incompleteDefinitionNames > 0);
+      } else assert.equal(match.reason, undefined);
+      if (match.strategy === undefined) assert.equal(match.status, 'unmatchable');
+      if (match.strategy !== undefined) assert.ok(safeName(match.strategy));
+      for (const id of match.candidateIds) {
+        assert.match(id, /^sha256:[a-f0-9]{64}$/);
+        if (strategy.omittedDefinitions === 0) {
+          const definition = knownDefinitions.get(id);
+          assert.ok(definition);
+          if (match.strategy !== '[REDACTED_NAME]' && definition.strategy !== '[REDACTED_NAME]') {
+            assert.equal(definition.strategy, match.strategy);
+          }
+        }
+      }
+    }
+  }
   exactKeys(value.analysis, ['exitCode', 'status', 'codes']);
   assert.ok([0, 1, 2, 3].includes(value.analysis.exitCode));
   assert.ok(['complete', 'partial', 'failed'].includes(value.analysis.status));
@@ -300,6 +405,8 @@ async function run(configFile: string, candidateDir: string, output: string): Pr
     ...(bundle.metadata.sourceVersionMetadata ? { sourceVersionMetadata: bundle.metadata.sourceVersionMetadata } : {}),
     ...(bundle.metadata.passportFactoryObservation
       ? { passportFactoryObservation: bundle.metadata.passportFactoryObservation } : {}),
+    ...(bundle.metadata.passportStrategyObservation
+      ? { passportStrategyObservation: bundle.metadata.passportStrategyObservation } : {}),
     analysis: { exitCode: final.exitCode, status: final.analysis.status,
       codes: final.analysis.codes.map(safeCode) },
     reports: { summary: { status: 'not-generated', code: 'CI_NOT_RENDERED' },
@@ -369,6 +476,7 @@ function verifyMetadataBinding(report: any, record: RecordV1): void {
   assert.ok(metadata && typeof metadata === 'object' && !Array.isArray(metadata));
   assert.equal(digest(JSON.stringify(metadata)), record.targetEvidenceSha256);
   assert.deepEqual(metadata.passportFactoryObservation, record.passportFactoryObservation);
+  assert.deepEqual(metadata.passportStrategyObservation, record.passportStrategyObservation);
   assert.deepEqual(metadata.routingAssumption, record.routingAssumption);
   assert.deepEqual(metadata.sourceVersionMetadata, record.sourceVersionMetadata);
 }

@@ -182,6 +182,8 @@
     "experimental": [
       "contract/passport-factory-observation.d.ts",
       "contract/passport-factory-observation.js",
+      "contract/passport-strategy-observation.d.ts",
+      "contract/passport-strategy-observation.js",
       "contract/source-aware-finalizer.d.ts",
       "contract/source-aware-finalizer.js",
       "contract/source-aware-internal.d.ts",
@@ -205,6 +207,8 @@
       "source/nestjs/decorator-symbols.js",
       "source/nestjs/index.d.ts",
       "source/nestjs/index.js",
+      "source/nestjs/passport-strategy.d.ts",
+      "source/nestjs/passport-strategy.js",
       "source/nestjs/static-string-resolver.d.ts",
       "source/nestjs/static-string-resolver.js",
       "source/typescript/project-loader.d.ts",

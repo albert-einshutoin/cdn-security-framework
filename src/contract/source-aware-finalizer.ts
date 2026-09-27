@@ -8,6 +8,7 @@ import type { SecurityFindingV1 } from './finding';
 import { sortFindings } from './finding-order';
 import { redactEvidenceFilename, redactSensitiveText } from './sensitive-text';
 import { previewPassportFactoryObservation } from './passport-factory-observation';
+import { previewPassportStrategyObservation } from './passport-strategy-observation';
 import type { SourceAwareWorkspaceResult } from './source-aware-workspace';
 
 export const SOURCE_AWARE_COMPARISONS = [
@@ -28,6 +29,7 @@ export interface SourceAwareFinalizedResult {
     digest: string; comparisonContractDigest?: string };
   sourceVersionMetadata?: SourceAwareWorkspaceResult['evidence']['sourceVersionMetadata'];
   passportFactoryObservation?: SourceAwareWorkspaceResult['evidence']['passportFactoryObservation'];
+  passportStrategyObservation?: SourceAwareWorkspaceResult['evidence']['passportStrategyObservation'];
   stages: Record<StageName, StageSummary>;
   comparisons: Record<SourceAwareComparisonName, ComparisonSummary>;
   findings: SecurityFindingV1[];
@@ -234,6 +236,8 @@ export function finalizeSourceAwareWorkspace(
     ...(input.evidence.sourceVersionMetadata ? { sourceVersionMetadata: input.evidence.sourceVersionMetadata } : {}),
     ...(input.evidence.passportFactoryObservation
       ? { passportFactoryObservation: input.evidence.passportFactoryObservation } : {}),
+    ...(input.evidence.passportStrategyObservation
+      ? { passportStrategyObservation: input.evidence.passportStrategyObservation } : {}),
     findings, suppressedFindings, exceptionDiagnostics,
     appliedExceptionIds: applied.appliedExceptionIds,
     memberships: ordered.map(({ instanceId }) => ({ instanceId, comparisons: memberships.get(instanceId) ?? [] })),
@@ -327,6 +331,20 @@ function renderText(preview: ReturnType<typeof previewData>): string {
     );
     lines.push(`  omitted calls=${passport.omittedCallSites} associations=${passport.omittedAssociations} operations=${passport.omittedOperations}`);
   }
+  if (preview.passportStrategyObservation) {
+    const strategy = preview.passportStrategyObservation;
+    lines.push(`Passport strategy declarations ${strategy.observer} digest=${strategy.digest} definitions=${strategy.totalDefinitions} providers=${strategy.totalProviders} matches=${strategy.totalMatches} unknown-names=${strategy.incompleteDefinitionNames} (registration, reachability, authentication, and runtime enforcement unverified)`);
+    for (const item of strategy.matches) lines.push(
+      `  strategy ${item.strategy ?? 'unmatchable'} ${item.status}${item.reason ? `:${item.reason}` : ''} candidates=${item.candidateIds.join(',')}`,
+    );
+    for (const item of strategy.definitions) lines.push(
+      `  declaration ${item.strategy} ${item.className} ${item.baseStatus} ${item.sourceUri}:${item.line} extractor=${item.extractor.status}`,
+    );
+    for (const item of strategy.providers) lines.push(
+      `  provider ${item.definitionId} ${item.moduleClass} ${item.sourceUri}:${item.line}`,
+    );
+    lines.push(`  omitted definitions=${strategy.omittedDefinitions} providers=${strategy.omittedProviders} matches=${strategy.omittedMatches}`);
+  }
   for (const [name, stage] of Object.entries(preview.stages)) {
     lines.push(`stage ${name}=${stage.status}${stage.code ? ` code=${stage.code}` : ''}`);
   }
@@ -351,6 +369,8 @@ function renderText(preview: ReturnType<typeof previewData>): string {
 function previewData(result: SourceAwareFinalizedResult) {
   const passport = result.passportFactoryObservation
     ? previewPassportFactoryObservation(result.passportFactoryObservation) : undefined;
+  const strategy = result.passportStrategyObservation
+    ? previewPassportStrategyObservation(result.passportStrategyObservation) : undefined;
   const byId = new Map(result.memberships.map(({ instanceId, comparisons }) => [instanceId, comparisons]));
   const groups = {
     active: result.findings,
@@ -392,6 +412,11 @@ function previewData(result: SourceAwareFinalizedResult) {
       omittedAssociations: passport.totalAssociations - passport.associations.length,
       omittedOperations: passport.totalOperations - passport.operations.length,
     } } : {}),
+    ...(strategy ? { passportStrategyObservation: { ...strategy,
+      omittedDefinitions: strategy.totalDefinitions - strategy.definitions.length,
+      omittedProviders: strategy.totalProviders - strategy.providers.length,
+      omittedMatches: strategy.totalMatches - strategy.matches.length,
+    } } : {}),
     summary: result.summary, analysis: result.analysis, threshold: result.threshold,
     exitCode: result.exitCode,
     appliedExceptionIds: result.appliedExceptionIds.slice(0, MAX_PREVIEW_EXCEPTION_IDS),
@@ -402,8 +427,12 @@ function previewData(result: SourceAwareFinalizedResult) {
   while ((Buffer.byteLength(JSON.stringify(preview, null, 2)) + 1 > MAX_PREVIEW_BYTES
     || Buffer.byteLength(renderText(preview)) > MAX_PREVIEW_BYTES)
     && (Object.values(selected).some((items) => items.length > 0)
-      || passport && (passport.operations.length || passport.associations.length || passport.callSites.length))) {
-    if (passport?.operations.length) passport.operations.pop();
+      || passport && (passport.operations.length || passport.associations.length || passport.callSites.length)
+      || strategy && (strategy.matches.length || strategy.providers.length || strategy.definitions.length))) {
+    if (strategy?.matches.length) strategy.matches.pop();
+    else if (strategy?.providers.length) strategy.providers.pop();
+    else if (strategy?.definitions.length) strategy.definitions.pop();
+    else if (passport?.operations.length) passport.operations.pop();
     else if (passport?.associations.length) passport.associations.pop();
     else if (passport?.callSites.length) passport.callSites.pop();
     else if (Object.values(selected).some((items) => items.length > 0)) {

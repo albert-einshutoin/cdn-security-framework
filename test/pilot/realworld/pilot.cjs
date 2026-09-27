@@ -243,6 +243,8 @@ async function inspectOperations(installed, workspace) {
     'PILOT_PASSPORT_FALSE_CALL_SITE');
   assert.equal(analysis.passportFactoryObservation?.associations.length, 0,
     'PILOT_PASSPORT_FALSE_ASSOCIATION');
+  assert.equal(analysis.passportStrategyObservation?.matches.length, 0,
+    'PILOT_STRATEGY_FALSE_LINK');
   const result = analysis.execution.result;
   const found = new Map(result.contract.operations.map(op => [op.routeKey, op]));
   assert.equal(found.size, 21);
@@ -257,7 +259,7 @@ async function inspectOperations(installed, workspace) {
   return { contract: result.contract, summary: {
     metrics: result.metrics, matchedOperations: expectation.scope.operations.length,
     evaluationOut: expectation.scope.evaluationOut.length, authUnknown: expectation.scope.operations.length,
-    passportCallSites: 0, passportAssociations: 0,
+    passportCallSites: 0, passportAssociations: 0, passportStrategyMatches: 0,
     diagnosticCodes: result.diagnostics.map(d => d.code) } };
 }
 function candidateIdentity(candidate) {
@@ -460,7 +462,7 @@ function verifySafeResult(candidate, workRoot, output, stage) {
     'policy-prefixed-evaluation.yml'].map(name => [name, fileHash(path.join(fixture, name))]));
   assert.deepEqual(safe.inputHashes, expectedHashes);
   exactKeys(safe.operations, ['metrics', 'matchedOperations', 'evaluationOut', 'authUnknown',
-    'passportCallSites', 'passportAssociations', 'diagnosticCodes']);
+    'passportCallSites', 'passportAssociations', 'passportStrategyMatches', 'diagnosticCodes']);
   exactKeys(safe.operations.metrics, ['files', 'totalSourceBytes', 'largestFileBytes',
     'astNodes', 'diagnostics', 'operations', 'maxDepth']);
   for (const value of Object.values(safe.operations.metrics)) {
@@ -471,6 +473,7 @@ function verifySafeResult(candidate, workRoot, output, stage) {
   assert.equal(safe.operations.authUnknown, 19);
   assert.equal(safe.operations.passportCallSites, 0);
   assert.equal(safe.operations.passportAssociations, 0);
+  assert.equal(safe.operations.passportStrategyMatches, 0);
   assert.deepEqual(safe.operations.diagnosticCodes, ['SOURCE_ANALYZER_GLOBAL_GUARD_UNSUPPORTED']);
   exactKeys(safe.cli, ['exit', 'durationMs', 'summarySha256']);
   assert.equal(safe.cli.exit, 0);

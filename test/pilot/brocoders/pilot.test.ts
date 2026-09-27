@@ -6,8 +6,9 @@ import { describe, expect, test } from 'vitest';
 const root = path.join(process.cwd(), 'test/pilot/brocoders');
 const expected = JSON.parse(fs.readFileSync(path.join(root, 'expectations.json'), 'utf8'));
 const cases = JSON.parse(fs.readFileSync(path.join(root, 'cases.json'), 'utf8'));
-const { verifyArchive, mutate, assertPassportObservation } = require('./pilot.cjs');
+const { verifyArchive, mutate, assertPassportObservation, assertStrategyObservation } = require('./pilot.cjs');
 const passport = JSON.parse(fs.readFileSync(path.join(root, 'passport-expectations.json'), 'utf8'));
+const strategy = JSON.parse(fs.readFileSync(path.join(root, 'strategy-expectations.json'), 'utf8'));
 const archive = path.join(root, 'source.tar.gz');
 const sourceLines = (name: string): string[] => cp.execFileSync('tar', ['-xOzf', archive, name],
   { encoding: 'utf8' }).split('\n');
@@ -98,5 +99,58 @@ describe('fixed brocoders technical Pilot inputs', () => {
     changed(value => { value.associations[0].comparisonPath = '/v1/auth/logout'; });
     changed(value => { value.callSites[0].strategy = 'local'; });
     changed(value => { value.operations[0].authMode = 'alternatives'; });
+  });
+
+  test('strategy expectations are fixed to the archive before product analysis', () => {
+    const moduleSource = sourceLines('src/auth/auth.module.ts');
+    for (const item of strategy.definitions) {
+      const lines = sourceLines(item.source);
+      expect(lines[item.line - 1]).toContain(`class ${item.className} extends PassportStrategy(`);
+      expect(lines.join('\n')).toContain(`'${item.strategy}'`);
+      expect(lines[item.extractorLine - 1]).toContain('ExtractJwt.fromAuthHeaderAsBearerToken()');
+      expect(moduleSource[item.providerLine - 1]).toContain(item.className);
+    }
+    expect(strategy.expected).toMatchObject({ definitions: 2, extractorCalls: 2,
+      providerEntries: 2, callSites: 6, operationAssociations: 10,
+      authUnknown: 16, routeTP: 16, controlledFindingTP: 7 });
+  });
+
+  test('strategy Pilot rejects swapped class, wrong provider, and Bearer promotion', () => {
+    const definitions = strategy.definitions.map((item: any, index: number) => ({
+      id: `definition-${index}`, strategy: item.strategy, className: item.className,
+      sourceUri: `source/${item.source}`, line: item.line, baseStatus: 'verified',
+      baseModule: item.baseModule, extractor: { status: 'observed', kind: item.extractor,
+        sourceUri: `source/${item.extractorSource}`, line: item.extractorLine },
+    }));
+    const providers = strategy.definitions.map((item: any, index: number) => ({
+      definitionId: definitions[index].id, moduleClass: item.providerModule,
+      sourceUri: `source/${item.providerSource}`, line: item.providerLine,
+    }));
+    const callSites = passport.callSites.map((item: any, index: number) => ({
+      id: `site-${index}`, strategy: item.strategy,
+    }));
+    const associations = passport.callSites.flatMap((item: any, index: number) =>
+      item.operations.map(() => ({ callSiteId: `site-${index}`, authMode: 'unknown' })));
+    const factory = { digest: `sha256:${'a'.repeat(64)}`, callSites, associations };
+    const links = { observer: 'nestjs-passport-static-strategy-link@1',
+      digest: `sha256:${'b'.repeat(64)}`, factoryDigest: factory.digest,
+      definitions, providers, matches: callSites.map((site: any) => ({
+        callSiteId: site.id, strategy: site.strategy, status: 'one',
+        candidateIds: [definitions.find((item: any) => item.strategy === site.strategy).id],
+      })) };
+    expect(assertStrategyObservation(links, factory)).toMatchObject({
+      definitions: 2, extractorCalls: 2, providerEntries: 2,
+      strategyAssociations: { jwt: 9, 'jwt-refresh': 1 },
+    });
+    const changed = (edit: (links: any, factory: any) => void) => {
+      const value = structuredClone(links);
+      const observed = structuredClone(factory);
+      edit(value, observed);
+      expect(() => assertStrategyObservation(value, observed)).toThrow();
+    };
+    changed(value => { value.matches[0].candidateIds = [definitions[1].id]; });
+    changed(value => { value.providers[0].definitionId = definitions[1].id; });
+    changed(value => { value.definitions[0].extractor.status = 'unconfirmed'; });
+    changed((_value, observed) => { observed.associations[0].authMode = 'alternatives'; });
   });
 });

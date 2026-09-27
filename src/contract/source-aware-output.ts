@@ -5,6 +5,7 @@ import {
 } from './source-aware-finalizer';
 import type { SourceAwareWorkspaceResult } from './source-aware-workspace';
 import { previewPassportFactoryObservation } from './passport-factory-observation';
+import { previewPassportStrategyObservation } from './passport-strategy-observation';
 import { redactEvidenceFilename } from './sensitive-text';
 
 type StageName = 'declared' | 'implemented' | 'allowed';
@@ -25,6 +26,7 @@ export interface SourceAwareOutputBundle {
         reason?: string; method?: string; localPath?: string; version?: string;
         versionOrigin?: 'controller' | 'method'; comparisonPath?: string }> };
     passportFactoryObservation?: ReturnType<typeof previewPassportFactoryObservation>;
+    passportStrategyObservation?: ReturnType<typeof previewPassportStrategyObservation>;
     targetCapabilities: AllowedTargetCapabilityV1[];
   };
   finalized?: SourceAwareFinalizedResult;
@@ -88,6 +90,8 @@ export function finalizeSourceAwareOutput(
       } } : {}),
       ...(workspace.evidence.passportFactoryObservation ? { passportFactoryObservation:
         previewPassportFactoryObservation(workspace.evidence.passportFactoryObservation) } : {}),
+      ...(workspace.evidence.passportStrategyObservation ? { passportStrategyObservation:
+        previewPassportStrategyObservation(workspace.evidence.passportStrategyObservation) } : {}),
       targetCapabilities: capabilities,
     },
   };

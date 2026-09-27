@@ -157,6 +157,8 @@ describe('installed dev-only Source-aware CI connection', () => {
       (value) => expect(validator(value)).toBe(true), env());
     expect(result.proof.passport).toMatchObject({ callSites: 1, associations: 2,
       strategies: ['jwt'], authUnknown: 2 });
+    expect(result.proof.strategy).toMatchObject({ definitions: 1, providers: 1,
+      matches: 1, extractor: 'bearer-header-call' });
   }, 120_000);
 
   it('preserves direct Passport evidence across installed CI reports and rejects altered records', () => {
@@ -170,9 +172,24 @@ describe('installed dev-only Source-aware CI connection', () => {
       }));
       fs.writeFileSync(path.join(dependency, 'index.js'), 'throw Error("Passport executed");');
       fs.writeFileSync(path.join(dependency, 'index.d.ts'),
-        'export declare function AuthGuard(strategy: string): unknown;');
+        'export declare function AuthGuard(strategy: string): unknown; export declare function PassportStrategy(base: unknown, name: string): new (...args: any[]) => any;');
+      fs.appendFileSync(path.join(root, 'node_modules/@nestjs/common/index.d.ts'),
+        '\nexport declare function Module(metadata: {providers?: unknown[]}): ClassDecorator;\n');
+      const jwt = path.join(root, 'node_modules/passport-jwt');
+      fs.mkdirSync(jwt);
+      fs.writeFileSync(path.join(jwt, 'package.json'), JSON.stringify({
+        name: 'passport-jwt', version: '4.0.1', main: 'index.js', types: 'index.d.ts',
+      }));
+      fs.writeFileSync(path.join(jwt, 'index.js'), 'throw Error("passport-jwt executed");');
+      fs.writeFileSync(path.join(jwt, 'index.d.ts'),
+        'export declare class Strategy {} export declare const ExtractJwt: {fromAuthHeaderAsBearerToken(): unknown};');
       fs.appendFileSync(path.join(root, 'src/users.controller.ts'),
         "\nimport { AuthGuard as PassportGuard } from '@nestjs/passport';\n"
+        + "import { PassportStrategy } from '@nestjs/passport';\n"
+        + "import { Module } from '@nestjs/common';\n"
+        + "import { Strategy, ExtractJwt } from 'passport-jwt';\n"
+        + "class JwtStrategy extends PassportStrategy(Strategy, 'jwt') { constructor() { super({jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken()}); } }\n"
+        + "@Module({providers: [JwtStrategy]}) class AuthModule {}\n"
         + "@HttpController({ path: 'passport', version: '1' })\n"
         + "@UseGuards(PassportGuard('jwt')) class PassportController { @Read() list() {} }\n");
     });
@@ -185,12 +202,25 @@ describe('installed dev-only Source-aware CI connection', () => {
       export: 'AuthGuard', strategy: 'jwt', scope: 'class' });
     expect(observed.associations).toEqual([{ callSiteId: observed.callSites[0].id,
       method: 'GET', localPath: '/passport', comparisonPath: '/api/v1/passport', authMode: 'unknown' }]);
+    const links = current.record.passportStrategyObservation;
+    expect(links).toMatchObject({ observer: 'nestjs-passport-static-strategy-link@1',
+      factoryDigest: observed.digest, totalDefinitions: 1, totalProviders: 1,
+      totalMatches: 1, runtimeRegistrationVerified: false,
+      runtimeEnforcementVerified: false });
+    expect(links.definitions[0]).toMatchObject({ strategy: 'jwt', className: 'JwtStrategy',
+      baseModule: 'passport-jwt', extractor: { status: 'observed', kind: 'bearer-header-call' } });
+    expect(links.matches[0]).toMatchObject({ strategy: 'jwt', status: 'one',
+      candidateIds: [links.definitions[0].id] });
+    expect(links.providers[0].definitionId).toBe(links.definitions[0].id);
     const summary = fs.readFileSync(path.join(current.output, 'summary.md'), 'utf8');
     expect(summary).toContain('Passport');
     expect(summary).toContain('jwt');
+    expect(summary).toContain('JwtStrategy');
     const sarif = JSON.parse(fs.readFileSync(path.join(current.output, 'source-aware.sarif'), 'utf8'));
     expect(sarif.runs[0].tool.driver.properties.sourceAware.metadata.passportFactoryObservation)
       .toEqual(observed);
+    expect(sarif.runs[0].tool.driver.properties.sourceAware.metadata.passportStrategyObservation)
+      .toEqual(links);
     expect(deliver(current.output, 'uri-passport').gate.status).toBe(0);
     for (const [suffix, mutate] of [
       ['extra', (value: any) => { value.passportFactoryObservation.rawStrategy = 'hidden'; }],
@@ -198,6 +228,9 @@ describe('installed dev-only Source-aware CI connection', () => {
       ['valid-strategy', (value: any) => { value.passportFactoryObservation.callSites[0].strategy = 'session'; }],
       ['valid-digest', (value: any) => { value.passportFactoryObservation.digest = `sha256:${'0'.repeat(64)}`; }],
       ['route', (value: any) => { value.passportFactoryObservation.associations[0].comparisonPath = 'token=hidden'; }],
+      ['strategy-extra', (value: any) => { value.passportStrategyObservation.definitions[0].rawKey = 'hidden'; }],
+      ['strategy-link', (value: any) => { value.passportStrategyObservation.matches[0].candidateIds[0] = `sha256:${'0'.repeat(64)}`; }],
+      ['strategy-name', (value: any) => { value.passportStrategyObservation.definitions[0].className = 'sk-synthetic-secret'; }],
     ] as const) {
       const altered = make(`uri-passport-${suffix}`);
       changeJson(path.join(altered.output, 'ci-record.json'), mutate);

@@ -92,6 +92,9 @@ try {
           routes: ['GET /api/v1/users', 'GET /api/v2/users', 'GET /api/v2/users/items'],
           sourceOnly: ['GET /api/v1/users', 'GET /api/v2/users', 'GET /api/v2/users/items'],
           ciDelivery: 'CI_OK' as const,
+          strategy: { digest: `sha256:${'a'.repeat(64)}`, definitions: 1, providers: 1,
+            matches: 1, candidateIds: [`sha256:${'b'.repeat(64)}`],
+            extractor: 'bearer-header-call' },
           passport: { digest: `sha256:${'f'.repeat(64)}`, callSites: 1, associations: 2,
             strategies: ['jwt'], associatedRoutes: ['GET /api/v1/users', 'GET /api/v2/users/items'],
             authUnknown: 2 } } } : {}) };
@@ -124,6 +127,10 @@ try {
     rows.map(r => r.row === '24' ? { ...r, uriVersionProof: { ...r.uriVersionProof!,
       passport: { ...r.uriVersionProof!.passport, associatedRoutes: ['GET /api/v1/users'] } } }
       : r), e, ['success','success'])));
+  test('missing strategy declaration proof fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, uriVersionProof: { ...r.uriVersionProof!,
+      strategy: { ...r.uriVersionProof!.strategy, definitions: 0 } } } : r), e,
+    ['success','success'])));
   test('unversioned URI route fails closed', () => assert.throws(() => aggregate(m,
     rows.map(r => r.row === '24' ? { ...r, uriVersionProof: { ...r.uriVersionProof!,
       routes: ['GET /api/users'] } } : r), e, ['success','success'])));

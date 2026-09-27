@@ -1206,6 +1206,8 @@ export type UriVersionProof = {
   projectDigest: string; configDigest: string; routingDigest: string;
   comparisonContractDigest: string; metadataDigest: string;
   routes: string[]; sourceOnly: string[]; ciDelivery: 'CI_OK';
+  strategy: { digest: string; definitions: number; providers: number;
+    matches: number; candidateIds: string[]; extractor: string };
   passport: { digest: string; callSites: number; associations: number;
     strategies: string[]; associatedRoutes: string[]; authUnknown: number };
 };
@@ -1228,8 +1230,11 @@ export function smokeInstalledUriVersion(consumer: string, validateSarif: (value
       experimentalDecorators: true, moduleResolution: 'node', noLib: true, types: [],
     }, files: ['src/controller.ts'] }));
     write('src/controller.ts', [
-      "import { Controller, Get, Version, UseGuards } from '@nestjs/common';",
-      "import { AuthGuard as PassportGuard } from '@nestjs/passport';",
+      "import { Controller, Get, Version, UseGuards, Module } from '@nestjs/common';",
+      "import { AuthGuard as PassportGuard, PassportStrategy } from '@nestjs/passport';",
+      "import { Strategy, ExtractJwt } from 'passport-jwt';",
+      "class JwtStrategy extends PassportStrategy(Strategy, 'jwt') { constructor() { super({jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken()}); } }",
+      '@Module({providers: [JwtStrategy]}) class AuthModule {}',
       "@Controller({ path: 'users', version: '1' }) @UseGuards(PassportGuard('jwt')) class First { @Get() read() {}",
       "  @Version('2') @Get('items') items() {} }",
       "@Controller({ path: 'users', version: '2' }) class Second { @Get() read() {} }",
@@ -1257,6 +1262,7 @@ export function smokeInstalledUriVersion(consumer: string, validateSarif: (value
       'export declare function Get(path?: string): MethodDecorator;',
       'export declare function Version(value: string): MethodDecorator;',
       'export declare function UseGuards(...guards: unknown[]): ClassDecorator & MethodDecorator;',
+      'export declare function Module(metadata: {providers?: unknown[]}): ClassDecorator;',
     ].join('\n'));
     const passportDependency = path.join(root, 'node_modules/@nestjs/passport');
     fs.mkdirSync(passportDependency, { recursive: true });
@@ -1265,7 +1271,15 @@ export function smokeInstalledUriVersion(consumer: string, validateSarif: (value
     }));
     fs.writeFileSync(path.join(passportDependency, 'index.js'), 'throw Error("Passport executed");');
     fs.writeFileSync(path.join(passportDependency, 'index.d.ts'),
-      'export declare function AuthGuard(strategy: string): unknown;');
+      'export declare function AuthGuard(strategy: string): unknown; export declare function PassportStrategy(base: unknown, name: string): new (...args: any[]) => any;');
+    const jwtDependency = path.join(root, 'node_modules/passport-jwt');
+    fs.mkdirSync(jwtDependency, { recursive: true });
+    fs.writeFileSync(path.join(jwtDependency, 'package.json'), JSON.stringify({
+      name: 'passport-jwt', version: '4.0.1', main: 'index.js', types: 'index.d.ts',
+    }));
+    fs.writeFileSync(path.join(jwtDependency, 'index.js'), 'throw Error("passport-jwt executed");');
+    fs.writeFileSync(path.join(jwtDependency, 'index.d.ts'),
+      'export declare class Strategy {} export declare const ExtractJwt: {fromAuthHeaderAsBearerToken(): unknown};');
     const inputSha256 = digest(JSON.stringify(inputs.map(name => digest(fs.readFileSync(path.join(root, name))))));
     const steps: typeof smokeSteps = [];
     const cli = path.join(pkgRoot, 'bin/cli.js');
@@ -1302,6 +1316,8 @@ export function smokeInstalledUriVersion(consumer: string, validateSarif: (value
           'installed URI assumption or AST evidence missing');
         assert.ok(result.stdout.includes('Passport') && result.stdout.includes('jwt'),
           'installed Passport observation missing from text or Summary');
+        assert.ok(result.stdout.includes('JwtStrategy') && result.stdout.includes('extractor'),
+          'installed strategy declaration missing from text or Summary');
       }
     }
     const routes = json.sourceVersionMetadata.routes.filter((route: any) => route.status === 'resolved')
@@ -1327,6 +1343,18 @@ export function smokeInstalledUriVersion(consumer: string, validateSarif: (value
     ['GET /api/v1/users', 'GET /api/v2/users/items']);
     assert.ok(passport.associations.every((item: any) => item.authMode === 'unknown'));
     assert.deepEqual(metadata.passportFactoryObservation, passport);
+    const strategy = json.passportStrategyObservation;
+    assert.equal(strategy.observer, 'nestjs-passport-static-strategy-link@1');
+    assert.equal(strategy.factoryDigest, passport.digest);
+    assert.equal(strategy.totalDefinitions, 1);
+    assert.equal(strategy.totalProviders, 1);
+    assert.equal(strategy.totalMatches, 1);
+    assert.equal(strategy.matches[0].status, 'one');
+    assert.deepEqual(strategy.matches[0].candidateIds, [strategy.definitions[0].id]);
+    assert.equal(strategy.definitions[0].extractor.kind, 'bearer-header-call');
+    assert.equal(strategy.providers[0].definitionId, strategy.definitions[0].id);
+    assert.ok(passport.associations.every((item: any) => item.authMode === 'unknown'));
+    assert.deepEqual(metadata.passportStrategyObservation, strategy);
     assert.deepEqual(metadata.sourceVersionMetadata.routes.filter((route: any) => route.status === 'resolved')
       .map((route: any) => `${route.method} ${route.comparisonPath}`).sort(), routes);
     assert.equal(metadata.routingAssumption.sourceVersioning, 'uri');
@@ -1337,6 +1365,7 @@ export function smokeInstalledUriVersion(consumer: string, validateSarif: (value
     const savedBytes = fs.readFileSync(path.join(root, 'uri-report.json'));
     assert.deepEqual(JSON.parse(savedBytes.toString()).sourceVersionMetadata.routes,
       json.sourceVersionMetadata.routes);
+    assert.deepEqual(JSON.parse(savedBytes.toString()).passportStrategyObservation, strategy);
     invoke(cli, [...uri, '--format', 'summary', '--fail-on', 'warning'], 1);
     for (const [value, code] of [['header', 'SOURCE_DIFF_VERSIONING_INVALID'],
       ['', 'SOURCE_DIFF_VERSIONING_INVALID']] as const) {
@@ -1370,6 +1399,7 @@ export function smokeInstalledUriVersion(consumer: string, validateSarif: (value
       CSF_STAGE_OUTCOME: 'success', CSF_ARTIFACT_OUTCOME: 'success' });
     const ciRecord = JSON.parse(fs.readFileSync(record, 'utf8'));
     assert.deepEqual(ciRecord.passportFactoryObservation, passport);
+    assert.deepEqual(ciRecord.passportStrategyObservation, strategy);
     assert.deepEqual(ciRecord.sourceVersionMetadata.routes.filter((route: any) => route.status === 'resolved')
       .map((route: any) => `${route.method} ${route.comparisonPath}`).sort(), routes);
     assert.equal(JSON.parse(fs.readFileSync(delivery, 'utf8')).code, 'CI_OK');
@@ -1383,6 +1413,10 @@ export function smokeInstalledUriVersion(consumer: string, validateSarif: (value
       comparisonContractDigest: metadata.routingAssumption.comparisonContractDigest,
       metadataDigest: metadata.sourceVersionMetadata.digest,
       routes, sourceOnly, ciDelivery: 'CI_OK',
+      strategy: { digest: strategy.digest, definitions: strategy.totalDefinitions,
+        providers: strategy.totalProviders, matches: strategy.totalMatches,
+        candidateIds: strategy.matches[0].candidateIds,
+        extractor: strategy.definitions[0].extractor.kind },
       passport: { digest: passport.digest, callSites: passport.totalCallSites,
         associations: passport.totalAssociations,
         strategies: passport.callSites.map((site: any) => site.strategy),

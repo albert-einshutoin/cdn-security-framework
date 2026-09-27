@@ -6,6 +6,7 @@ import { afterEach, expect, test } from 'vitest';
 import { DEFAULT_SOURCE_ANALYSIS_LIMITS } from '../../src/source-analysis';
 import { runNestJsSourceAnalysisInternal } from '../../src/source/nestjs/analyzer';
 import { TypeScriptAnalysisCache } from '../../src/source/typescript/project-loader';
+import { previewPassportStrategyObservation } from '../../src/contract/passport-strategy-observation';
 
 const roots: string[] = [];
 
@@ -30,11 +31,23 @@ function fixture(source: string, extraFiles: Record<string, string> = {}): { roo
     export declare function Controller(path?: string | { path: string; version?: string }): ClassDecorator;
     export declare function Get(path?: string): MethodDecorator;
     export declare function UseGuards(...guards: unknown[]): ClassDecorator & MethodDecorator;
+    export declare function Module(metadata: { providers?: unknown[] }): ClassDecorator;
   `);
   write('node_modules/@nestjs/passport/package.json', JSON.stringify({
     name: '@nestjs/passport', version: '11.0.5', main: 'index.js', types: 'index.d.ts',
   }));
-  write('node_modules/@nestjs/passport/index.d.ts', 'export declare function AuthGuard(strategy: string): unknown;');
+  write('node_modules/@nestjs/passport/index.d.ts', `
+    export declare function AuthGuard(strategy: string): unknown;
+    export declare function PassportStrategy(base: unknown, name?: string): new (...args: any[]) => any;
+  `);
+  write('node_modules/passport-jwt/package.json', JSON.stringify({
+    name: 'passport-jwt', version: '4.0.1', main: 'index.js', types: 'index.d.ts',
+  }));
+  write('node_modules/passport-jwt/index.d.ts', `
+    export declare class Strategy {}
+    export declare const ExtractJwt: { fromAuthHeaderAsBearerToken(): unknown };
+  `);
+  write('node_modules/passport-jwt/index.js', `require('node:fs').writeFileSync(${JSON.stringify(path.join(root, 'executed'))}, 'bad');`);
   const sentinel = path.join(root, 'executed');
   write('node_modules/@nestjs/passport/index.js', `require('node:fs').writeFileSync(${JSON.stringify(sentinel)}, 'bad');`);
   return { root, sentinel };
@@ -54,6 +67,160 @@ async function observe(source: string, config?: unknown, extraFiles?: Record<str
 
 afterEach(() => {
   for (const root of roots.splice(0)) fs.rmSync(root, { recursive: true, force: true });
+});
+
+test('links the observed factory to a direct strategy, extractor call, and provider declaration', async () => {
+  const analyzed = await observe(`
+    import { Controller, Get, UseGuards, Module } from '@nestjs/common';
+    import { AuthGuard, PassportStrategy } from '@nestjs/passport';
+    import { Strategy, ExtractJwt } from 'passport-jwt';
+    class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
+      constructor() { super({ jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken() }); }
+    }
+    @Module({ providers: [JwtStrategy] }) class AuthModule {}
+    @Controller({ path: 'users', version: '1' }) @UseGuards(AuthGuard('jwt')) class UsersController {
+      @Get() list() {}
+    }
+  `);
+  const links = analyzed.passportStrategyObservation;
+  expect(links?.definitions).toMatchObject([{
+    strategy: 'jwt', className: 'JwtStrategy', baseModule: 'passport-jwt',
+    extractor: { status: 'observed', kind: 'bearer-header-call' },
+  }]);
+  expect(links?.providers).toMatchObject([{ moduleClass: 'AuthModule' }]);
+  expect(links?.matches).toMatchObject([{ strategy: 'jwt', status: 'one' }]);
+  expect(links?.matches[0].candidateIds).toEqual([links?.definitions[0].id]);
+  expect(analyzed.uriComparison?.contract.operations[0].auth.mode).toBe('unknown');
+});
+
+test('keeps same-name unverified bases as ambiguous candidates', async () => {
+  const analyzed = await observe(`
+    import { Controller, Get, UseGuards, Module } from '@nestjs/common';
+    import { AuthGuard, PassportStrategy as P } from '@nestjs/passport';
+    import * as Jwt from 'passport-jwt';
+    function PassportStrategy(base: unknown, name: string): any { throw Error('not executed'); }
+    class Trusted extends P(Jwt.Strategy, 'jwt') {
+      constructor() { super({ jwtFromRequest: Jwt.ExtractJwt.fromAuthHeaderAsBearerToken() }); }
+    }
+    class Unverified extends PassportStrategy(Jwt.Strategy, 'jwt') {}
+    @Module({ providers: [Trusted] }) class AuthModule {}
+    @Controller({ path: 'users', version: '1' }) @UseGuards(AuthGuard('jwt')) class Users {
+      @Get() list() {}
+    }
+  `);
+  const links = analyzed.passportStrategyObservation!;
+  expect(links.definitions.map(({ baseStatus }) => baseStatus).sort())
+    .toEqual(['unverified', 'verified']);
+  expect(links.matches).toMatchObject([{ status: 'multiple', candidateIds: expect.arrayContaining(
+    links.definitions.map(({ id }) => id),
+  ) }]);
+  expect(links.providers).toHaveLength(1);
+  expect(links.providers[0].definitionId).toBe(links.definitions.find(({ className }) =>
+    className === 'Trusted')?.id);
+  expect(links.definitions.find(({ className }) => className === 'Trusted')?.extractor.status)
+    .toBe('observed');
+});
+
+test('verifies only stable direct namespace members for strategy and extractor', async () => {
+  const source = (extra: string) => `
+    import { Controller, Get, UseGuards, Module } from '@nestjs/common';
+    import * as Passport from '@nestjs/passport';
+    import * as Jwt from 'passport-jwt';
+    ${extra}
+    class JwtStrategy extends Passport.PassportStrategy(Jwt.Strategy, 'jwt') {
+      constructor() { super({jwtFromRequest: Jwt.ExtractJwt.fromAuthHeaderAsBearerToken()}); }
+    }
+    @Module({providers: [JwtStrategy]}) class AuthModule {}
+    @Controller({path: 'users', version: '1'}) @UseGuards(Passport.AuthGuard('jwt'))
+    class Users { @Get() list() {} }
+  `;
+  const stable = await observe(source(''));
+  expect(stable.passportStrategyObservation?.definitions).toMatchObject([{
+    baseStatus: 'verified', extractor: { status: 'observed' },
+  }]);
+  expect(stable.passportStrategyObservation?.matches[0].status).toBe('one');
+  const escaped = await observe(source('const escapedJwt = Jwt;'));
+  expect(escaped.passportStrategyObservation?.definitions).toMatchObject([{
+    baseStatus: 'unverified', extractor: { status: 'unconfirmed' },
+  }]);
+  const mutated = await observe(source('Jwt.ExtractJwt.fromAuthHeaderAsBearerToken = () => null;'));
+  expect(mutated.passportStrategyObservation?.definitions).toMatchObject([{
+    baseStatus: 'unverified', extractor: { status: 'unconfirmed' },
+  }]);
+});
+
+test.each([
+  ['name-only', 'class A extends PassportStrategy(Strategy, "jwt") {}'],
+  ['different-extractor', 'class A extends PassportStrategy(Strategy, "jwt") { constructor() { super({jwtFromRequest: ExtractJwt.fromExtractors([])}); } }'],
+  ['spread', 'class A extends PassportStrategy(Strategy, "jwt") { constructor() { super({...{}, jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken()}); } }'],
+  ['getter', 'class A extends PassportStrategy(Strategy, "jwt") { constructor() { super({get jwtFromRequest() { return ExtractJwt.fromAuthHeaderAsBearerToken(); }}); } }'],
+  ['duplicate', 'class A extends PassportStrategy(Strategy, "jwt") { constructor() { super({jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(), jwtFromRequest: null}); } }'],
+])('does not turn %s extractor syntax into a Bearer observation', async (_name, declaration) => {
+  const analyzed = await observe(`
+    import { Controller, Get, UseGuards } from '@nestjs/common';
+    import { AuthGuard, PassportStrategy } from '@nestjs/passport';
+    import { Strategy, ExtractJwt } from 'passport-jwt';
+    ${declaration}
+    @Controller({ path: 'users', version: '1' }) @UseGuards(AuthGuard('jwt')) class Users {
+      @Get() list() {}
+    }
+  `);
+  expect(analyzed.passportStrategyObservation?.definitions).toMatchObject([{
+    strategy: 'jwt', extractor: { status: 'unconfirmed' },
+  }]);
+  expect(analyzed.passportStrategyObservation?.matches[0].status).toBe('one');
+});
+
+test('distinguishes no observed candidate from a factory with no safe literal name', async () => {
+  const analyzed = await observe(`
+    import { Controller, Get, UseGuards } from '@nestjs/common';
+    import { AuthGuard } from '@nestjs/passport';
+    declare const runtimeName: string;
+    @Controller({ path: 'users', version: '1' }) @UseGuards(AuthGuard('missing')) class Users {
+      @Get() list() {}
+      @Get('dynamic') @UseGuards(AuthGuard(runtimeName)) dynamic() {}
+    }
+  `);
+  expect(analyzed.passportStrategyObservation?.matches.map(({ status }) => status).sort())
+    .toEqual(['none', 'unmatchable']);
+});
+
+test('does not claim absence when a direct PassportStrategy declaration has an unknown name', async () => {
+  const analyzed = await observe(`
+    import { Controller, Get, UseGuards } from '@nestjs/common';
+    import { AuthGuard, PassportStrategy } from '@nestjs/passport';
+    import { Strategy } from 'passport-jwt';
+    declare const runtimeName: string;
+    class Dynamic extends PassportStrategy(Strategy, runtimeName) {}
+    @Controller({ path: 'users', version: '1' }) @UseGuards(AuthGuard('jwt')) class Users {
+      @Get() list() {}
+    }
+  `);
+  expect(analyzed.passportStrategyObservation).toMatchObject({
+    incompleteDefinitionNames: 1, definitions: [],
+    matches: [{ strategy: 'jwt', status: 'unmatchable', reason: 'definition-name-unverified' }],
+  });
+});
+
+test('redacts strategy evidence only after full candidate matching', async () => {
+  const analyzed = await observe(`
+    import { Controller, Get, UseGuards } from '@nestjs/common';
+    import { AuthGuard, PassportStrategy } from '@nestjs/passport';
+    import { Strategy } from 'passport-jwt';
+    class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {}
+    @Controller({ path: 'items', version: '1' }) @UseGuards(AuthGuard('jwt')) class Items {
+      @Get() read() {}
+    }
+  `);
+  const observation = structuredClone(analyzed.passportStrategyObservation!);
+  observation.definitions[0].className = 'AKIA1234567890';
+  observation.definitions[0].sourceUri = 'src/sk-synthetic-secret.ts';
+  const preview = previewPassportStrategyObservation(observation);
+  expect(observation.matches[0].candidateIds).toEqual([observation.definitions[0].id]);
+  expect(preview.matches[0].candidateIds).toEqual([observation.definitions[0].id]);
+  expect(preview.definitions[0].className).toBe('[REDACTED_NAME]');
+  expect(preview.definitions[0].sourceUri).toBe('[REDACTED_URI]');
+  expect(JSON.stringify(preview)).not.toContain('sk-synthetic-secret');
 });
 
 test('observes direct Passport call sites separately from URI operations without promoting auth', async () => {
@@ -247,6 +414,39 @@ test('keeps concurrent and cached Passport observations scoped to their inputs',
   expect(changed.passportFactoryObservation?.digest).not.toBe(jwt.passportFactoryObservation?.digest);
 });
 
+test('binds strategy evidence to changed declarations and cache-scoped inputs', async () => {
+  const source = (strategy: string, provider: boolean) => `
+    import { Controller, Get, UseGuards, Module } from '@nestjs/common';
+    import { AuthGuard, PassportStrategy } from '@nestjs/passport';
+    import { Strategy, ExtractJwt } from 'passport-jwt';
+    class LocalStrategy extends PassportStrategy(Strategy, '${strategy}') {
+      constructor() { super({ jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken() }); }
+    }
+    @Module({ providers: [${provider ? 'LocalStrategy' : ''}] }) class LocalModule {}
+    @Controller({ path: 'items', version: '1' }) @UseGuards(AuthGuard('jwt')) class Items {
+      @Get() read() {}
+    }
+  `;
+  const first = fixture(source('jwt', true));
+  const second = fixture(source('session', false));
+  const cache = new TypeScriptAnalysisCache();
+  const analyze = (root: string) => runNestJsSourceAnalysisInternal({
+    workspaceRoot: root, entrypoints: ['tsconfig.json'],
+    limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS }, logger: { log() {} },
+  }, undefined, cache, undefined, 'uri');
+  const [one, other] = await Promise.all([analyze(first.root), analyze(second.root)]);
+  expect(one.passportStrategyObservation?.matches[0].status).toBe('one');
+  expect(other.passportStrategyObservation?.matches[0].status).toBe('none');
+  expect((await analyze(first.root)).passportStrategyObservation?.digest)
+    .toBe(one.passportStrategyObservation?.digest);
+  fs.writeFileSync(path.join(first.root, 'src/controller.ts'), source('jwt', false));
+  const changed = await analyze(first.root);
+  expect(changed.passportStrategyObservation?.providers).toEqual([]);
+  expect(changed.passportStrategyObservation?.digest).not.toBe(one.passportStrategyObservation?.digest);
+  expect(changed.passportStrategyObservation?.factoryDigest)
+    .toBe(changed.passportFactoryObservation?.digest);
+});
+
 test('does not publish Passport evidence after cancellation or an operation limit', async () => {
   const { root } = fixture(`
     import { Controller, Get, UseGuards } from '@nestjs/common';
@@ -264,10 +464,12 @@ test('does not publish Passport evidence after cancellation or an operation limi
   }, undefined, undefined, undefined, 'uri');
   expect(interrupted.execution.status).toBe('failed');
   expect(interrupted.passportFactoryObservation).toBeUndefined();
+  expect(interrupted.passportStrategyObservation).toBeUndefined();
   const limited = await runNestJsSourceAnalysisInternal({
     ...base, limits: { ...base.limits, maxOperations: 1 },
   }, undefined, undefined, undefined, 'uri');
   expect(limited.execution.status).toBe('failed');
   expect(limited.passportFactoryObservation).toBeUndefined();
+  expect(limited.passportStrategyObservation).toBeUndefined();
   expect(base.entrypoints).toEqual(originalEntrypoints);
 });
