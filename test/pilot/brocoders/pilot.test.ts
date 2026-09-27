@@ -6,7 +6,8 @@ import { describe, expect, test } from 'vitest';
 const root = path.join(process.cwd(), 'test/pilot/brocoders');
 const expected = JSON.parse(fs.readFileSync(path.join(root, 'expectations.json'), 'utf8'));
 const cases = JSON.parse(fs.readFileSync(path.join(root, 'cases.json'), 'utf8'));
-const { verifyArchive, mutate } = require('./pilot.cjs');
+const { verifyArchive, mutate, assertPassportObservation } = require('./pilot.cjs');
+const passport = JSON.parse(fs.readFileSync(path.join(root, 'passport-expectations.json'), 'utf8'));
 const archive = path.join(root, 'source.tar.gz');
 const sourceLines = (name: string): string[] => cp.execFileSync('tar', ['-xOzf', archive, name],
   { encoding: 'utf8' }).split('\n');
@@ -62,5 +63,40 @@ describe('fixed brocoders technical Pilot inputs', () => {
     expect(route.policy).toContain('/api/v1/evaluation-only-policy');
     expect(route.policy).toContain('exact_path: true');
     expect(route.openapi).toEqual(base);
+  });
+
+  test('Passport Pilot rejects missing sites, swapped routes, wrong strategies and auth promotion', () => {
+    const callSites = passport.callSites.map((site: any, index: number) => ({
+      id: `site-${index}`, sourceUri: `source/${site.source}`, line: site.line,
+      scope: site.scope, strategy: site.strategy, module: '@nestjs/passport', export: 'AuthGuard',
+    }));
+    const associations = passport.callSites.flatMap((site: any, index: number) =>
+      site.operations.map((key: string) => {
+        const [method, prefixedPath] = key.split(' ');
+        const comparisonPath = prefixedPath.replace(/^\/api/, '');
+        const op = expected.operations.find((item: any) => item.method === method
+          && item.uriNoPrefixPath === comparisonPath);
+        return { callSiteId: `site-${index}`, method, comparisonPath,
+          localPath: op.localPath.replace(':id', '{id}'), authMode: 'unknown' };
+      }));
+    const operations = expected.operations.map((op: any) => ({
+      method: op.method, comparisonPath: op.uriNoPrefixPath,
+      status: op.guardSyntax ? 'observed' : 'no-direct-factory', authMode: 'unknown',
+    }));
+    const observation = { observer: 'nestjs-passport-direct-factory@1',
+      digest: `sha256:${'a'.repeat(64)}`, callSites, associations, operations };
+    expect(assertPassportObservation(observation).summary).toMatchObject({
+      callSites: 6, operationAssociations: 10, noDirectOperations: 6, authUnknown: 16,
+      strategyAssociations: { jwt: 9, 'jwt-refresh': 1 },
+    });
+    const changed = (edit: (value: any) => void) => {
+      const value = structuredClone(observation);
+      edit(value);
+      expect(() => assertPassportObservation(value)).toThrow();
+    };
+    changed(value => value.associations.pop());
+    changed(value => { value.associations[0].comparisonPath = '/v1/auth/logout'; });
+    changed(value => { value.callSites[0].strategy = 'local'; });
+    changed(value => { value.operations[0].authMode = 'alternatives'; });
   });
 });

@@ -148,6 +148,65 @@ beforeAll(() => {
 afterAll(() => { if (temp) fs.rmSync(temp, { recursive: true, force: true }); });
 
 describe('installed dev-only Source-aware CI connection', () => {
+  it('runs the Node 24 installed URI and Passport proof from one candidate', () => {
+    const smoke: typeof import('../../src/scripts/package-smoke-tests') =
+      require(path.join(repo, 'scripts/package-smoke-tests.js'));
+    const validator = require(path.join(candidate, 'validation/official-sarif-test-validator.cjs'))
+      .createOfficialSarifValidator(path.join(candidate, 'validation/sarif-schema-2.1.0.json'));
+    const result = smoke.smokeInstalledUriVersion(path.join(candidate, 'consumer'),
+      (value) => expect(validator(value)).toBe(true), env());
+    expect(result.proof.passport).toMatchObject({ callSites: 1, associations: 2,
+      strategies: ['jwt'], authUnknown: 2 });
+  }, 120_000);
+
+  it('preserves direct Passport evidence across installed CI reports and rejects altered records', () => {
+    const make = (name: string) => runCase(name, {
+      sourceVersioning: 'uri', sourceGlobalPrefix: '/api',
+    }, root => {
+      const dependency = path.join(root, 'node_modules/@nestjs/passport');
+      fs.mkdirSync(dependency, { recursive: true });
+      fs.writeFileSync(path.join(dependency, 'package.json'), JSON.stringify({
+        name: '@nestjs/passport', version: '11.0.5', main: 'index.js', types: 'index.d.ts',
+      }));
+      fs.writeFileSync(path.join(dependency, 'index.js'), 'throw Error("Passport executed");');
+      fs.writeFileSync(path.join(dependency, 'index.d.ts'),
+        'export declare function AuthGuard(strategy: string): unknown;');
+      fs.appendFileSync(path.join(root, 'src/users.controller.ts'),
+        "\nimport { AuthGuard as PassportGuard } from '@nestjs/passport';\n"
+        + "@HttpController({ path: 'passport', version: '1' })\n"
+        + "@UseGuards(PassportGuard('jwt')) class PassportController { @Read() list() {} }\n");
+    });
+    const current = make('uri-passport');
+    const observed = current.record.passportFactoryObservation;
+    expect(observed).toMatchObject({ observer: 'nestjs-passport-direct-factory@1',
+      totalCallSites: 1, totalAssociations: 1,
+      runtimeStrategyRegistrationVerified: false, runtimeEnforcementVerified: false });
+    expect(observed.callSites[0]).toMatchObject({ module: '@nestjs/passport',
+      export: 'AuthGuard', strategy: 'jwt', scope: 'class' });
+    expect(observed.associations).toEqual([{ callSiteId: observed.callSites[0].id,
+      method: 'GET', localPath: '/passport', comparisonPath: '/api/v1/passport', authMode: 'unknown' }]);
+    const summary = fs.readFileSync(path.join(current.output, 'summary.md'), 'utf8');
+    expect(summary).toContain('Passport');
+    expect(summary).toContain('jwt');
+    const sarif = JSON.parse(fs.readFileSync(path.join(current.output, 'source-aware.sarif'), 'utf8'));
+    expect(sarif.runs[0].tool.driver.properties.sourceAware.metadata.passportFactoryObservation)
+      .toEqual(observed);
+    expect(deliver(current.output, 'uri-passport').gate.status).toBe(0);
+    for (const [suffix, mutate] of [
+      ['extra', (value: any) => { value.passportFactoryObservation.rawStrategy = 'hidden'; }],
+      ['strategy', (value: any) => { value.passportFactoryObservation.callSites[0].strategy = 'sk-secretvalue123'; }],
+      ['valid-strategy', (value: any) => { value.passportFactoryObservation.callSites[0].strategy = 'session'; }],
+      ['valid-digest', (value: any) => { value.passportFactoryObservation.digest = `sha256:${'0'.repeat(64)}`; }],
+      ['route', (value: any) => { value.passportFactoryObservation.associations[0].comparisonPath = 'token=hidden'; }],
+    ] as const) {
+      const altered = make(`uri-passport-${suffix}`);
+      changeJson(path.join(altered.output, 'ci-record.json'), mutate);
+      const rejected = deliver(altered.output, `uri-passport-${suffix}`);
+      expect(rejected.gate.status).toBe(3);
+      expect(fs.readdirSync(rejected.stage)).toEqual(['delivery.json']);
+    }
+  }, 120_000);
+
   it('publishes a URI record with several valid long routes', () => {
     const current = runCase('uri-large', { sourceVersioning: 'uri' }, root => {
       const longPath = 'a'.repeat(8_000);

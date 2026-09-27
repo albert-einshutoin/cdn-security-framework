@@ -10,6 +10,7 @@ import {
 } from '../source-analysis';
 import type { TypeScriptAnalysisCache } from '../source/typescript/project-loader';
 import type { UriComparison } from '../source/nestjs/analyzer';
+import type { PassportFactoryObservation } from './passport-factory-observation';
 import { canonicalizePath } from './canonical-route';
 import { projectPolicyToAllowedSurface, type AllowedSurfaceModelV1, type AllowedSurfaceTarget } from './allowed-surface';
 import { ContractDiffInputError, loadPolicyForInternal } from './contract-diff';
@@ -51,6 +52,7 @@ export interface SourceAwareWorkspaceResult extends SourceAwareInternalResult {
     routingAssumption?: { globalPrefix?: string; sourceVersioning?: 'uri'; versionPrefix?: 'v';
       digest: string; comparisonContractDigest?: string };
     sourceVersionMetadata?: { digest: string; routes: UriComparison['routes'] };
+    passportFactoryObservation?: PassportFactoryObservation;
   };
   target: AllowedSurfaceTarget;
 }
@@ -122,6 +124,7 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
 
   let source: SourceAnalysisExecution | undefined;
   let uriComparison: UriComparison | undefined;
+  let passportFactoryObservation: PassportFactoryObservation | undefined;
   let sourceEvidence: SourceAwareWorkspaceResult['evidence']['source'];
   if (input.source) {
     const { runNestJsSourceAnalysisInternal, validateNestJsAuthConfig } = await import('../source/nestjs/analyzer');
@@ -143,6 +146,7 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
         }, input.source.authConfig, input.source.cache, input.onInputPath, sourceVersioning);
         source = analyzed.execution;
         uriComparison = analyzed.uriComparison;
+        passportFactoryObservation = analyzed.passportFactoryObservation;
         if (source.status === 'success' && analyzed.snapshotDigest) {
           sourceEvidence = {
             projectDigest: `sha256:${analyzed.snapshotDigest}`, analyzer: analyzed.analyzer,
@@ -187,10 +191,23 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
         const astMetadata = uriComparison!.routes.map(({ comparisonPath: _path, ...route }) => route);
         sourceVersionMetadata = { digest: digest(astMetadata), routes };
       }
+      if (passportFactoryObservation && globalPrefix) {
+        const associations = passportFactoryObservation.associations.map((item) => ({ ...item,
+          comparisonPath: canonicalizePath(`${globalPrefix}${item.comparisonPath}`),
+        }));
+        const operations = passportFactoryObservation.operations.map((item) => ({ ...item,
+          comparisonPath: canonicalizePath(`${globalPrefix}${item.comparisonPath}`),
+        }));
+        passportFactoryObservation = { ...passportFactoryObservation, associations, operations,
+          digest: digest({ astDigest: passportFactoryObservation.digest,
+            routingDigest: routingAssumption.digest, associations, operations }),
+        };
+      }
     } catch {
       comparedSource = { status: 'failed', diagnostics: [{
         code: 'SOURCE_ROUTING_TRANSFORM_FAILED', safeMessage: 'Source routing comparison failed.',
       }] };
+      passportFactoryObservation = undefined;
     }
   }
 
@@ -224,6 +241,8 @@ export async function analyzeSourceAwareWorkspace(input: SourceAwareWorkspaceInp
       ...(sourceEvidence ? { source: sourceEvidence } : {}),
       ...(routingAssumption ? { routingAssumption } : {}),
       ...(sourceVersionMetadata ? { sourceVersionMetadata } : {}),
+      ...(comparedSource?.status === 'success' && passportFactoryObservation
+        ? { passportFactoryObservation } : {}),
     },
   };
 }

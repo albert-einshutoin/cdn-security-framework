@@ -91,10 +91,17 @@ try {
           metadataDigest: `sha256:${'e'.repeat(64)}`,
           routes: ['GET /api/v1/users', 'GET /api/v2/users', 'GET /api/v2/users/items'],
           sourceOnly: ['GET /api/v1/users', 'GET /api/v2/users', 'GET /api/v2/users/items'],
-          ciDelivery: 'CI_OK' as const } } : {}) };
+          ciDelivery: 'CI_OK' as const,
+          passport: { digest: `sha256:${'f'.repeat(64)}`, callSites: 1, associations: 2,
+            strategies: ['jwt'], associatedRoutes: ['GET /api/v1/users', 'GET /api/v2/users/items'],
+            authUnknown: 2 } } } : {}) };
   });
   fs.writeFileSync(path.join(temp, 'metadata.json'), JSON.stringify(m));
   test('same candidate and complete rows pass', () => { verifyTarball(temp, e); aggregate(m, rows, e, ['success','success']); });
+  test('lower Node rejection with expected exit 1 is accepted', () => assert.doesNotThrow(() => aggregate(m,
+    rows.map(r => r.row === '18.20.8' || r.row === '20.16.0'
+      ? { ...r, steps: [{ ...r.steps[0], exit: 1, expectedExit: 1 }, ...r.steps.slice(1)] }
+      : r), e, ['success','success'])));
   test('missing internal Source-aware smoke command fails closed', () => assert.throws(() => aggregate(m,
     rows.map(r => r.row === '24' ? { ...r, steps: r.steps.slice(0, 12) } : r), e, ['success','success'])));
   test('missing installed prefix command fails closed', () => assert.throws(() => aggregate(m,
@@ -113,6 +120,10 @@ try {
       steps: r.steps.filter(s => s.command !== 'cdn-security-uri-version') } : r), e, ['success','success'])));
   test('missing URI proof fails closed', () => assert.throws(() => aggregate(m,
     rows.map(r => r.row === '24' ? { ...r, uriVersionProof: undefined } : r), e, ['success','success'])));
+  test('incorrect Passport association fails closed', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, uriVersionProof: { ...r.uriVersionProof!,
+      passport: { ...r.uriVersionProof!.passport, associatedRoutes: ['GET /api/v1/users'] } } }
+      : r), e, ['success','success'])));
   test('unversioned URI route fails closed', () => assert.throws(() => aggregate(m,
     rows.map(r => r.row === '24' ? { ...r, uriVersionProof: { ...r.uriVersionProof!,
       routes: ['GET /api/users'] } } : r), e, ['success','success'])));
@@ -133,6 +144,12 @@ try {
   for (const key of ['executable','sha256','platform','arch']) test(`malformed runtime ${key} fails`, () => assert.throws(() => aggregate(m, rows.map(r => ({...r,runtime:{...r.runtime,[key]:''}})), e, ['success','success'])));
   for (const key of ['npm','resolution','dependencies','steps']) test(`missing ${key} evidence fails`, () => assert.throws(() => aggregate(m, rows.map(r => ({...r,[key]:undefined} as any)), e, ['success','success'])));
   test('empty steps fail', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,steps:[]})), e, ['success','success'])));
+  test('null command evidence fails before checking its fields', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, steps: [null as any, ...r.steps.slice(1)] } : r),
+    e, ['success','success'])));
+  test('unsupported successful-looking exit evidence fails', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, steps: [{ ...r.steps[0], exit: 7, expectedExit: 7 },
+      ...r.steps.slice(1)] } : r), e, ['success','success'])));
   test('failed command fails', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,steps:r.steps.map(s=>({...s,exit:3}))})), e, ['success','success'])));
   test('missing runtime subfields fail without string coercion', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,runtime:{...r.runtime,platform:undefined} as any})), e, ['success','success'])));
   test('missing command fails without string coercion', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,steps:r.steps.map(s=>({...s,command:undefined} as any))})), e, ['success','success'])));

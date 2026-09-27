@@ -60,6 +60,23 @@ function linesFor(bundle: SourceAwareOutputBundle, top: number): string[] {
       ? `| ${name} | ${comparison.status} | ${comparison.count} | ${comparison.active} | ${comparison.suppressed} | - |`
       : `| ${name} | ${comparison?.status ?? error?.comparisons[name] ?? 'not evaluated'} | - | - | - | ${comparison && 'code' in comparison ? comparison.code : error?.code ?? '-'} |`);
   }
+  const passport = bundle.metadata.passportFactoryObservation;
+  lines.push('', '## Passport direct factory observation', '');
+  if (!passport) lines.push('Source factory observation not available.');
+  else {
+    const authUnknown = final?.passportFactoryObservation?.operations.filter(({ authMode }) => (
+      authMode === 'unknown'
+    )).length;
+    lines.push(`Call sites: ${passport.totalCallSites}; operation associations: ${passport.totalAssociations}; inspected operations: ${passport.totalOperations}; Source auth unknown: ${authUnknown ?? 'not evaluated'}.`,
+      'Strategy names are static syntax only; strategy registration, auth kind, and runtime enforcement are unverified.');
+    for (const site of passport.callSites.slice(0, top)) {
+      lines.push(`- ${site.scope} ${cell(site.strategy ?? `unsupported: ${site.reason ?? 'unknown'}`)} at ${cell(site.sourceUri)}:${site.line}`);
+    }
+    for (const item of passport.associations.slice(0, top)) {
+      lines.push(`- operation ${cell(item.method)} ${cell(item.comparisonPath)}: ${cell(item.callSiteId)}; auth ${item.authMode}`);
+    }
+    lines.push(`Call sites omitted: ${passport.totalCallSites - Math.min(passport.callSites.length, top)}; associations omitted: ${passport.totalAssociations - Math.min(passport.associations.length, top)}.`);
+  }
   lines.push('', '## Overall findings', '', '| Kind | Count |', '| --- | ---: |',
     `| Unique | ${final?.summary.unique ?? 'not evaluated'} |`,
     `| Active | ${final?.summary.active ?? 'not evaluated'} |`,

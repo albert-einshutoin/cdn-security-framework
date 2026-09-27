@@ -2,7 +2,8 @@
 
 実行可能な例はrepositoryの`.github/workflows/policy-lint.yml`の
 `source-aware-ci` jobです。`dev/2.1-source-aware`または
-`feat/source-aware-ci/` branchを手動dispatchした場合だけ実行します。通常の
+`feat/source-aware-ci/`または`feat/source-passport-factory/` branchを
+手動dispatchした場合だけ実行します。通常の
 `main`向けPR、schedule、release refではskipします。合成fixture
 `examples/nestjs-contract`だけを使い、権限は`contents: read`です。
 標準2.0の`examples/github-actions/contract-diff.yml`とは分離しています。

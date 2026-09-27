@@ -7,6 +7,7 @@ import { applyFindingExceptions, validateFindingExceptionSet, type FindingExcept
 import type { SecurityFindingV1 } from './finding';
 import { sortFindings } from './finding-order';
 import { redactEvidenceFilename, redactSensitiveText } from './sensitive-text';
+import { previewPassportFactoryObservation } from './passport-factory-observation';
 import type { SourceAwareWorkspaceResult } from './source-aware-workspace';
 
 export const SOURCE_AWARE_COMPARISONS = [
@@ -26,6 +27,7 @@ export interface SourceAwareFinalizedResult {
   routingAssumption?: { globalPrefix?: string; sourceVersioning?: 'uri'; versionPrefix?: 'v';
     digest: string; comparisonContractDigest?: string };
   sourceVersionMetadata?: SourceAwareWorkspaceResult['evidence']['sourceVersionMetadata'];
+  passportFactoryObservation?: SourceAwareWorkspaceResult['evidence']['passportFactoryObservation'];
   stages: Record<StageName, StageSummary>;
   comparisons: Record<SourceAwareComparisonName, ComparisonSummary>;
   findings: SecurityFindingV1[];
@@ -230,6 +232,8 @@ export function finalizeSourceAwareWorkspace(
     target: input.target, stages, comparisons,
     ...(input.evidence.routingAssumption ? { routingAssumption: input.evidence.routingAssumption } : {}),
     ...(input.evidence.sourceVersionMetadata ? { sourceVersionMetadata: input.evidence.sourceVersionMetadata } : {}),
+    ...(input.evidence.passportFactoryObservation
+      ? { passportFactoryObservation: input.evidence.passportFactoryObservation } : {}),
     findings, suppressedFindings, exceptionDiagnostics,
     appliedExceptionIds: applied.appliedExceptionIds,
     memberships: ordered.map(({ instanceId }) => ({ instanceId, comparisons: memberships.get(instanceId) ?? [] })),
@@ -312,6 +316,17 @@ function renderText(preview: ReturnType<typeof previewData>): string {
         : `  version unresolved ${route.reason}`);
     }
   }
+  if (preview.passportFactoryObservation) {
+    const passport = preview.passportFactoryObservation;
+    lines.push(`Passport direct factory observation ${passport.observer} digest=${passport.digest} calls=${passport.totalCallSites} associations=${passport.totalAssociations} operations=${passport.totalOperations} (strategy registration and runtime enforcement unverified)`);
+    for (const site of passport.callSites) lines.push(
+      `  factory ${site.scope} ${site.strategy ?? `unsupported:${site.reason}`} ${site.sourceUri}:${site.line}:${site.column}`,
+    );
+    for (const item of passport.associations) lines.push(
+      `  factory operation ${item.callSiteId} ${item.method} ${item.comparisonPath} auth=${item.authMode}`,
+    );
+    lines.push(`  omitted calls=${passport.omittedCallSites} associations=${passport.omittedAssociations} operations=${passport.omittedOperations}`);
+  }
   for (const [name, stage] of Object.entries(preview.stages)) {
     lines.push(`stage ${name}=${stage.status}${stage.code ? ` code=${stage.code}` : ''}`);
   }
@@ -334,6 +349,8 @@ function renderText(preview: ReturnType<typeof previewData>): string {
 }
 
 function previewData(result: SourceAwareFinalizedResult) {
+  const passport = result.passportFactoryObservation
+    ? previewPassportFactoryObservation(result.passportFactoryObservation) : undefined;
   const byId = new Map(result.memberships.map(({ instanceId, comparisons }) => [instanceId, comparisons]));
   const groups = {
     active: result.findings,
@@ -370,6 +387,11 @@ function previewData(result: SourceAwareFinalizedResult) {
         : { status: 'unresolved' as const, sourceUri: evidenceUri(route.sourceUri), line: route.line,
           reason: route.reason }),
     } } : {}),
+    ...(passport ? { passportFactoryObservation: { ...passport,
+      omittedCallSites: passport.totalCallSites - passport.callSites.length,
+      omittedAssociations: passport.totalAssociations - passport.associations.length,
+      omittedOperations: passport.totalOperations - passport.operations.length,
+    } } : {}),
     summary: result.summary, analysis: result.analysis, threshold: result.threshold,
     exitCode: result.exitCode,
     appliedExceptionIds: result.appliedExceptionIds.slice(0, MAX_PREVIEW_EXCEPTION_IDS),
@@ -379,9 +401,15 @@ function previewData(result: SourceAwareFinalizedResult) {
   let preview = make();
   while ((Buffer.byteLength(JSON.stringify(preview, null, 2)) + 1 > MAX_PREVIEW_BYTES
     || Buffer.byteLength(renderText(preview)) > MAX_PREVIEW_BYTES)
-    && Object.values(selected).some((items) => items.length > 0)) {
-    for (const kind of ['exceptionDiagnostics', 'suppressed', 'active'] as const) {
-      if (selected[kind].length > 0) { selected[kind].pop(); break; }
+    && (Object.values(selected).some((items) => items.length > 0)
+      || passport && (passport.operations.length || passport.associations.length || passport.callSites.length))) {
+    if (passport?.operations.length) passport.operations.pop();
+    else if (passport?.associations.length) passport.associations.pop();
+    else if (passport?.callSites.length) passport.callSites.pop();
+    else if (Object.values(selected).some((items) => items.length > 0)) {
+      for (const kind of ['exceptionDiagnostics', 'suppressed', 'active'] as const) {
+        if (selected[kind].length > 0) { selected[kind].pop(); break; }
+      }
     }
     preview = make();
   }

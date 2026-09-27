@@ -134,6 +134,38 @@ Media Type、Custom、global-prefix exclusion、複数app、proxy rewriteは対�
 | URI route factoryの既定prefixは`v` | 明示global prefixの後に`v`と文字列versionを合成 |
 | `defaultVersion`と方式はapplicationが渡す | bootstrapは読まず、欠落versionと他方式は未解決 |
 
+### Passport Factoryの直接観測
+
+Source reportは、`@nestjs/common`から直接importした`UseGuards`と、
+`@nestjs/passport`から直接importした`AuthGuard`による
+`@UseGuards(AuthGuard('jwt'))`も表示します。named aliasと変更されていない
+namespace importに対応します。strategy引数は、機微情報検査を通る単一の
+ASCII文字列literal `[A-Za-z][A-Za-z0-9._-]{0,63}`に限定します。
+
+| strategy入力 | 観測結果 |
+| --- | --- |
+| 許容ASCII 1～64文字の単一literalで機微情報markerなし | `jwt`と`jwt-refresh`を区別して名前を保持 |
+| 空・長すぎる・非ASCII・制御文字・markup・秘密様literal | `strategy-unsafe`とし値を省略 |
+| 引数欠落・複数・spread・配列・変数・関数呼出し・動的template | 範囲限定の未対応理由、strategy identityなし |
+
+再export、変更されたbinding、動的・複数引数、危険なliteralは範囲を限定した
+未対応理由として扱います。間接Guard値、配列、wrapperは直接Passport呼び出しと
+みなしません。いずれも既知strategyに推定しません。
+classの呼び出しはそのclassのmethodに、methodの呼び出しはそのoperationに
+結び付けます。Source URI、行・列、Source digest、routeとの対応、観測digestを
+記録します。Text・JSON・SARIF metadata・Summary・dev CI記録は、全件数と省略件数を
+添えた安全な範囲限定表示です。
+
+これは構文上の証拠です。Passport strategy登録やruntimeでの強制を確認せず、
+Source authの`unknown`を既知の種類に変更しません。Finding、公開API、設定も
+追加しません。固定Brocoders Pilotの期待値は直接call site 6、operation対応10
+（`jwt` 9、`jwt-refresh` 1）で、採点対象16 operationのauthはすべて`unknown`です。
+固定Pilotの依存版は`@nestjs/common` 11.1.18と`@nestjs/passport` 11.0.5で、
+派生lockがartifactを固定します。確認したPassportの`dist/auth.guard.js`の
+SHA-256は`3023e9b9e5e6ce99ab819946101ceb85643fda86c7018f5de698d3ad2b754116`です。
+Factoryは渡されたtypeをruntimeの`passport.authenticate`へ渡しますが、
+静的構文だけではstrategy登録を確認できません。
+
 Sourceから抽出したversion metadataはAST根拠、URI方式とglobal prefixは明示
 前提として、project digest・認証設定digest・変換後contract digestと分けて
 Text/JSON/SARIF/Summaryおよびdev CI記録に示します。変換するのは

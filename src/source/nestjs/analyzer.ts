@@ -18,6 +18,14 @@ import {
 } from '../../contract/security-ir';
 import { hasUnsafeSensitiveText } from '../../contract/sensitive-text';
 import {
+  PASSPORT_FACTORY_OBSERVER,
+  type PassportFactoryAssociation,
+  type PassportFactoryCallSite,
+  type PassportFactoryObservation,
+  type PassportFactoryOperation,
+  type PassportFactoryReason,
+} from '../../contract/passport-factory-observation';
+import {
   SourceAnalyzerContractError,
   runSourceAnalyzer,
   type AnalyzerDiagnostic,
@@ -38,6 +46,7 @@ import {
   containsStaticSymbolFrom,
   isBareDecoratorBindingStable,
   isDefinitelyNonProvidePropertyKey,
+  isDirectImportedSymbolFrom,
   isNestJsUseGlobalGuardsCall,
   isStaticShorthandSymbolFrom,
   isStaticSymbolFrom,
@@ -114,6 +123,59 @@ function sourceLocation(node: ts.Node, workspaceRoot: string): {
 
 function digest(sourceFile: ts.SourceFile): string {
   return `sha256:${createHash('sha256').update(sourceFile.text).digest('hex')}`;
+}
+
+function directPassportFactorySites(
+  node: ts.Node,
+  scope: 'class' | 'method',
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  workspaceRoot: string,
+  check: () => void,
+): PassportFactoryCallSite[] {
+  const sites: PassportFactoryCallSite[] = [];
+  for (const decorator of decorators(node)) {
+    check();
+    if (!ts.isCallExpression(decorator.expression)) continue;
+    const resolved = resolveDecoratorSymbol(decorator, checker, check, projectSources, true);
+    if (resolved?.name !== 'UseGuards' || !resolved.trustedNestJsCommon
+      || resolved.call !== decorator.expression) continue;
+    for (const argument of decorator.expression.arguments) {
+      check();
+      const factory = ts.isCallExpression(argument) ? argument : undefined;
+      if (!factory) continue;
+      const trusted = Boolean(factory && isDirectImportedSymbolFrom(
+        factory.expression, checker, check, '@nestjs/passport', 'AuthGuard', projectSources,
+      ));
+      const callee = factory.expression;
+      const namedAuthGuard = ts.isIdentifier(callee) && (callee.text === 'AuthGuard'
+        || checker.getSymbolAtLocation(callee)?.declarations?.some((declaration) => (
+          ts.isImportSpecifier(declaration)
+          && (declaration.propertyName?.text ?? declaration.name.text) === 'AuthGuard'
+        )));
+      if (!trusted && !namedAuthGuard
+        && !(ts.isPropertyAccessExpression(callee) && callee.name.text === 'AuthGuard')) continue;
+      const location = sourceLocation(argument, workspaceRoot);
+      const id = `sha256:${createHash('sha256').update(JSON.stringify([
+        location.sourceUri, location.line, location.column, scope,
+      ])).digest('hex')}`;
+      let strategy: string | undefined;
+      let reason: PassportFactoryReason | undefined;
+      if (!trusted) reason = 'factory-origin-unverified';
+      else if (factory.arguments.length !== 1 || factory.arguments.some(ts.isSpreadElement)) {
+        reason = 'factory-arguments-unsupported';
+      } else if (!ts.isStringLiteral(factory.arguments[0])) reason = 'strategy-not-literal';
+      else if (!/^[A-Za-z][A-Za-z0-9._-]{0,63}$/u.test(factory.arguments[0].text)
+        || /^(?:sk-|gh[opsur]_|github_pat_|AKIA|(?:sk|pk)_)/iu.test(factory.arguments[0].text)
+        || hasUnsafeSensitiveText(factory.arguments[0].text)) reason = 'strategy-unsafe';
+      else strategy = factory.arguments[0].text;
+      sites.push({ id, scope, ...location, sourceDigest: digest(argument.getSourceFile()),
+        ...(trusted ? { module: '@nestjs/passport' as const, export: 'AuthGuard' as const } : {}),
+        ...(strategy ? { strategy } : {}), ...(reason ? { reason } : {}),
+      });
+    }
+  }
+  return sites;
 }
 
 function staticTruth(
@@ -5357,6 +5419,7 @@ async function analyze(
   cache?: TypeScriptAnalysisCache,
   onInputPath?: (path: string) => void,
   onUriComparison?: (comparison: UriComparison) => void,
+  onPassportObservation?: (observation: PassportFactoryObservation) => void,
 ) {
   if (context.entrypoints.length !== 1) {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INPUT_INVALID');
@@ -5596,6 +5659,40 @@ async function analyze(
   const uriDiagnostics: AnalyzerDiagnostic[] = [];
   const uriUnresolved: UnresolvedSourceOperationCandidate[] = [];
   const uriRoutes: UriComparison['routes'] = [];
+  const passportCallSites = new Map<string, PassportFactoryCallSite>();
+  const passportAssociations: PassportFactoryAssociation[] = [];
+  const passportOperations = new Map<string, PassportFactoryOperation>();
+  const registerPassportSites = (sites: PassportFactoryCallSite[]) => {
+    if (!onPassportObservation) return;
+    for (const site of sites) {
+      passportCallSites.set(site.id, site);
+      if (passportCallSites.size > Math.min(10_000, context.limits.maxOperations)) {
+        throw new SourceAnalyzerContractError('SOURCE_ANALYZER_OPERATION_LIMIT');
+      }
+    }
+  };
+  const associatePassport = (
+    sites: PassportFactoryCallSite[], method: HttpMethod,
+    localPath: string, comparisonPath: string,
+    authMode: PassportFactoryAssociation['authMode'],
+  ) => {
+    if (!onPassportObservation) return;
+    const routeKey = createRouteKey(method, comparisonPath);
+    const status = sites.some(({ strategy }) => strategy) ? 'observed'
+      : sites.length ? 'unsupported' : 'no-direct-factory';
+    const previous = passportOperations.get(routeKey);
+    if (previous) {
+      if (status === 'unsupported' || (status === 'observed'
+        && previous.status === 'no-direct-factory')) previous.status = status;
+    } else passportOperations.set(routeKey, { method, comparisonPath, status, authMode });
+    for (const site of sites) {
+      if (!site.strategy) continue;
+      passportAssociations.push({ callSiteId: site.id, method, localPath, comparisonPath, authMode });
+      if (passportAssociations.length > Math.min(10_000, context.limits.maxOperations * 8)) {
+        throw new SourceAnalyzerContractError('SOURCE_ANALYZER_OPERATION_LIMIT');
+      }
+    }
+  };
   let unresolvedMethodCount = 0;
   let uriUnresolvedMethodCount = 0;
   let inspectedNodes = 0;
@@ -5816,6 +5913,11 @@ async function analyze(
           context.limits.maxAstNodes, context.limits.maxAnalysisDepth,
         )
         : emptyAuthMetadata();
+      const classPassportSites = onPassportObservation && trustedController
+        ? directPassportFactorySites(
+          statement, 'class', checker, projectSources, context.workspaceRoot, check,
+        ) : [];
+      registerPassportSites(classPassportSites);
       if (trustedController && classAuthMetadata.dynamic) {
         addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', statement);
       }
@@ -5877,6 +5979,11 @@ async function analyze(
           method, checker, projectSources, authConfig, check,
           context.limits.maxAstNodes, context.limits.maxAnalysisDepth,
         );
+        const methodPassportSites = onPassportObservation ? directPassportFactorySites(
+          method, 'method', checker, projectSources, context.workspaceRoot, check,
+        ) : [];
+        registerPassportSites(methodPassportSites);
+        const operationPassportSites = [...classPassportSites, ...methodPassportSites];
         if (methodAuthMetadata.dynamic) {
           addDiagnostic('SOURCE_ANALYZER_DYNAMIC_AUTH_METADATA', method);
         }
@@ -5984,6 +6091,8 @@ async function analyze(
                   putOperation(uriOperations, key, { method: httpMethod, path: comparisonPath,
                     exposure: operationAuth.exposure, auth: operationAuth.auth,
                     request: { ...EMPTY_REQUEST }, provenance });
+                  associatePassport(operationPassportSites, httpMethod, route.path,
+                    comparisonPath, operationAuth.auth.mode);
                   addUriRoute({ status: 'resolved', method: httpMethod, localPath: route.path,
                     version, origin: methodVersionIndex === undefined ? 'controller' : 'method',
                     comparisonPath, ...versionLocation });
@@ -6068,6 +6177,8 @@ async function analyze(
                   request: { ...EMPTY_REQUEST },
                   provenance,
                 });
+                if (!onUriComparison) associatePassport(operationPassportSites, httpMethod,
+                  route.path, route.path, operationAuth.auth.mode);
               }
             }
           }
@@ -6092,15 +6203,50 @@ async function analyze(
     const rightKey = `${right.sourceUri}\0${right.line.toString().padStart(10, '0')}\0${right.column.toString().padStart(10, '0')}\0${right.reason}\0${right.methods.join(',')}`;
     return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
   });
-  if (onUriComparison) {
+  const uriContract = onUriComparison ? createSecurityContract({ source: 'source-ast', capabilities: {
+    routes: 'partial', parameters: 'unsupported', requestBodies: 'unsupported', authentication: 'partial',
+  }, operations: [...uriOperations.values()] }) : undefined;
+  if (onUriComparison && uriContract) {
     onUriComparison({
-      contract: createSecurityContract({ source: 'source-ast', capabilities: {
-        routes: 'partial', parameters: 'unsupported', requestBodies: 'unsupported', authentication: 'partial',
-      }, operations: [...uriOperations.values()] }),
+      contract: uriContract,
       unresolvedOperations: uriUnresolved,
       diagnostics: uriDiagnostics,
       routes: uriRoutes.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
     });
+  }
+  if (onPassportObservation) {
+    const order = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
+    const finalAuthModes = new Map((uriContract ?? contract).operations.map(({ method, path, auth }) => (
+      [createRouteKey(method, path), auth.mode]
+    )));
+    const finalAuthMode = (method: string, path: string): PassportFactoryAssociation['authMode'] => {
+      const mode = finalAuthModes.get(createRouteKey(method, path));
+      if (!mode) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INTERNAL');
+      return mode;
+    };
+    const callSites = [...passportCallSites.values()].sort((left, right) => order(
+      `${left.sourceUri}\0${left.line.toString().padStart(10, '0')}\0${left.column.toString().padStart(10, '0')}`,
+      `${right.sourceUri}\0${right.line.toString().padStart(10, '0')}\0${right.column.toString().padStart(10, '0')}`,
+    ));
+    const associations = [...new Map(passportAssociations.map((item) => [
+      `${item.callSiteId}\0${item.method}\0${item.comparisonPath}`, item,
+    ])).values()].map((item) => ({ ...item,
+      authMode: finalAuthMode(item.method, item.comparisonPath),
+    })).sort((left, right) => order(
+      `${left.callSiteId}\0${left.method}\0${left.comparisonPath}`,
+      `${right.callSiteId}\0${right.method}\0${right.comparisonPath}`,
+    ));
+    const operationObservations = [...passportOperations.values()].map((item) => ({ ...item,
+      authMode: finalAuthMode(item.method, item.comparisonPath),
+    })).sort((left, right) => order(
+      `${left.method}\0${left.comparisonPath}`, `${right.method}\0${right.comparisonPath}`,
+    ));
+    const observer = PASSPORT_FACTORY_OBSERVER;
+    const observationDigest = `sha256:${createHash('sha256').update(JSON.stringify({
+      observer, input: loaded.snapshotDigest, callSites, associations, operations: operationObservations,
+    })).digest('hex')}`;
+    onPassportObservation({ observer, digest: observationDigest,
+      callSites, associations, operations: operationObservations });
   }
   return {
     contract,
@@ -6154,15 +6300,18 @@ export async function runNestJsSourceAnalysisInternal(
   onInputPath?: (path: string) => void,
   sourceVersioning?: 'uri',
 ): Promise<{ execution: SourceAnalysisExecution; snapshotDigest?: string; analyzer: string;
-  configDigest: string; uriComparison?: UriComparison }> {
+  configDigest: string; uriComparison?: UriComparison;
+  passportFactoryObservation?: PassportFactoryObservation }> {
   const plugin = createNestJsSourceAnalyzer(config);
   const authConfig = config === undefined ? EMPTY_NESTJS_AUTH_CONFIG : validateNestJsAuthConfig(config);
   let snapshotDigest: string | undefined;
   let uriComparison: UriComparison | undefined;
+  let passportFactoryObservation: PassportFactoryObservation | undefined;
   const execution = await runSourceAnalyzer({
     ...plugin,
     analyze: (runContext) => analyze(runContext, authConfig, (digest) => { snapshotDigest = digest; }, cache,
-      onInputPath, sourceVersioning === 'uri' ? (comparison) => { uriComparison = comparison; } : undefined),
+      onInputPath, sourceVersioning === 'uri' ? (comparison) => { uriComparison = comparison; } : undefined,
+      (observation) => { passportFactoryObservation = observation; }),
   }, context);
   // Decorator arrays are membership sets and guard mappings are key lookups; input order is not execution identity.
   const canonicalConfig = {
@@ -6176,6 +6325,7 @@ export async function runNestJsSourceAnalysisInternal(
     execution,
     ...(execution.status === 'success' && snapshotDigest ? { snapshotDigest } : {}),
     ...(execution.status === 'success' && uriComparison ? { uriComparison } : {}),
+    ...(execution.status === 'success' && passportFactoryObservation ? { passportFactoryObservation } : {}),
     analyzer: `${plugin.id}@${plugin.version}`,
     configDigest: `sha256:${createHash('sha256').update(JSON.stringify(canonicalConfig)).digest('hex')}`,
   };

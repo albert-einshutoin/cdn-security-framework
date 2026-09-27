@@ -147,6 +147,41 @@ The static mapping is checked against NestJS commit
 | URI route factory uses the default `v` prefix | Builds `v` + the exact version string after any explicit global prefix |
 | The application supplies `defaultVersion` and the versioning strategy | Does not inspect bootstrap; missing versions and other strategies remain unresolved |
 
+### Direct Passport factory observation
+
+Source reports also show direct `@UseGuards(AuthGuard('jwt'))` syntax when
+`UseGuards` is imported from `@nestjs/common` and `AuthGuard` is imported
+directly from `@nestjs/passport`. Named aliases and stable namespace imports
+are supported. The single strategy argument must be a literal ASCII
+`[A-Za-z][A-Za-z0-9._-]{0,63}` value that passes the sensitive-text check.
+
+| Strategy input | Observation |
+| --- | --- |
+| One literal, 1–64 permitted ASCII characters, no sensitive marker | Preserve the exact name, including `jwt` versus `jwt-refresh` |
+| Empty, long, non-ASCII, control, markup, or secret-like literal | `strategy-unsafe`; omit the value |
+| Missing, multiple, spread, array, variable, call, or dynamic template | Bounded unsupported reason; no strategy identity |
+
+Re-exports, changed bindings, dynamic or multiple arguments, and unsafe
+literals get a bounded unsupported reason. Indirect guard values, arrays, and
+wrappers are not treated as direct Passport calls. None are inferred as a
+known strategy. A class call site is associated
+with its own methods, and a method call site with its own operation. The report
+keeps the Source URI, line, column, source digest, route association, and
+observation digest. Text, JSON, SARIF metadata, Summary, and the dev CI record
+carry a bounded safe projection with full counts and omitted counts.
+
+This is syntax evidence. It does not check Passport strategy registration or
+runtime enforcement, does not turn Source auth `unknown` into a known kind,
+and adds no Finding, public API, or configuration. The fixed Brocoders Pilot
+expects six direct call sites and ten operation associations (`jwt` nine,
+`jwt-refresh` one), while all 16 scored operations remain auth `unknown`.
+The fixed Pilot uses `@nestjs/common` 11.1.18 and `@nestjs/passport` 11.0.5;
+the prepared lock pins their artifacts. The inspected Passport
+`dist/auth.guard.js` has SHA-256
+`3023e9b9e5e6ce99ab819946101ceb85643fda86c7018f5de698d3ad2b754116`.
+Its factory passes the supplied type to `passport.authenticate` at runtime,
+but static syntax alone cannot verify that a strategy is registered.
+
 The Source version metadata is AST evidence; URI mode and global prefix are
 explicit assumptions. Text/JSON/SARIF/Summary and the dev CI record keep these
 distinct from project and auth-config digests and from the transformed comparison
