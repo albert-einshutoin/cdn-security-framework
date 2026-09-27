@@ -79,6 +79,22 @@ afterEach(() => {
 });
 
 describe('NestJS auth metadata analyzer', () => {
+  test('keeps provider escape analysis defined for a nested property call', async () => {
+    const root = workspace(`
+      import { Controller, Get, Module } from '@nestjs/common';
+      const factory = { make() { return []; } };
+      function accept(_value: unknown) {}
+      accept(factory.make());
+      @Module({ providers: [] }) class AppModule {}
+      @Controller('users') class UsersController { @Get() read() {} }
+    `);
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(), context(root));
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    expect(execution.result.contract.operations.map((operation) => operation.routeKey))
+      .toContain('GET /users');
+  });
+
   test('keeps Public, Roles, mapped and unknown Guards with a static Controller object', async () => {
     const root = workspace(`
       import { Controller, Get, UseGuards } from '@nestjs/common';
