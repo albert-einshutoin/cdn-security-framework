@@ -5678,9 +5678,13 @@ async function analyze(
   ) => {
     if (!onPassportObservation) return;
     const routeKey = createRouteKey(method, comparisonPath);
-    passportOperations.set(routeKey, { method, comparisonPath,
-      status: sites.some(({ strategy }) => strategy) ? 'observed'
-        : sites.length ? 'unsupported' : 'no-direct-factory', authMode });
+    const status = sites.some(({ strategy }) => strategy) ? 'observed'
+      : sites.length ? 'unsupported' : 'no-direct-factory';
+    const previous = passportOperations.get(routeKey);
+    if (previous) {
+      if (status === 'unsupported' || (status === 'observed'
+        && previous.status === 'no-direct-factory')) previous.status = status;
+    } else passportOperations.set(routeKey, { method, comparisonPath, status, authMode });
     for (const site of sites) {
       if (!site.strategy) continue;
       passportAssociations.push({ callSiteId: site.id, method, localPath, comparisonPath, authMode });
@@ -6199,11 +6203,12 @@ async function analyze(
     const rightKey = `${right.sourceUri}\0${right.line.toString().padStart(10, '0')}\0${right.column.toString().padStart(10, '0')}\0${right.reason}\0${right.methods.join(',')}`;
     return leftKey < rightKey ? -1 : leftKey > rightKey ? 1 : 0;
   });
-  if (onUriComparison) {
+  const uriContract = onUriComparison ? createSecurityContract({ source: 'source-ast', capabilities: {
+    routes: 'partial', parameters: 'unsupported', requestBodies: 'unsupported', authentication: 'partial',
+  }, operations: [...uriOperations.values()] }) : undefined;
+  if (onUriComparison && uriContract) {
     onUriComparison({
-      contract: createSecurityContract({ source: 'source-ast', capabilities: {
-        routes: 'partial', parameters: 'unsupported', requestBodies: 'unsupported', authentication: 'partial',
-      }, operations: [...uriOperations.values()] }),
+      contract: uriContract,
       unresolvedOperations: uriUnresolved,
       diagnostics: uriDiagnostics,
       routes: uriRoutes.sort((left, right) => JSON.stringify(left).localeCompare(JSON.stringify(right))),
@@ -6211,17 +6216,29 @@ async function analyze(
   }
   if (onPassportObservation) {
     const order = (left: string, right: string) => left < right ? -1 : left > right ? 1 : 0;
+    const finalAuthModes = new Map((uriContract ?? contract).operations.map(({ method, path, auth }) => (
+      [createRouteKey(method, path), auth.mode]
+    )));
+    const finalAuthMode = (method: string, path: string): PassportFactoryAssociation['authMode'] => {
+      const mode = finalAuthModes.get(createRouteKey(method, path));
+      if (!mode) throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INTERNAL');
+      return mode;
+    };
     const callSites = [...passportCallSites.values()].sort((left, right) => order(
       `${left.sourceUri}\0${left.line.toString().padStart(10, '0')}\0${left.column.toString().padStart(10, '0')}`,
       `${right.sourceUri}\0${right.line.toString().padStart(10, '0')}\0${right.column.toString().padStart(10, '0')}`,
     ));
     const associations = [...new Map(passportAssociations.map((item) => [
       `${item.callSiteId}\0${item.method}\0${item.comparisonPath}`, item,
-    ])).values()].sort((left, right) => order(
+    ])).values()].map((item) => ({ ...item,
+      authMode: finalAuthMode(item.method, item.comparisonPath),
+    })).sort((left, right) => order(
       `${left.callSiteId}\0${left.method}\0${left.comparisonPath}`,
       `${right.callSiteId}\0${right.method}\0${right.comparisonPath}`,
     ));
-    const operationObservations = [...passportOperations.values()].sort((left, right) => order(
+    const operationObservations = [...passportOperations.values()].map((item) => ({ ...item,
+      authMode: finalAuthMode(item.method, item.comparisonPath),
+    })).sort((left, right) => order(
       `${left.method}\0${left.comparisonPath}`, `${right.method}\0${right.comparisonPath}`,
     ));
     const observer = PASSPORT_FACTORY_OBSERVER;

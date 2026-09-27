@@ -9,7 +9,7 @@ import { TypeScriptAnalysisCache } from '../../src/source/typescript/project-loa
 
 const roots: string[] = [];
 
-function fixture(source: string): { root: string; sentinel: string } {
+function fixture(source: string, extraFiles: Record<string, string> = {}): { root: string; sentinel: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-passport-factory-'));
   roots.push(root);
   const write = (relative: string, value: string) => {
@@ -21,6 +21,7 @@ function fixture(source: string): { root: string; sentinel: string } {
     experimentalDecorators: true, moduleResolution: 'node', noLib: true, types: [],
   }, files: ['src/controller.ts'] }));
   write('src/controller.ts', source);
+  for (const [name, contents] of Object.entries(extraFiles)) write(name, contents);
   write('node_modules/@nestjs/common/package.json', JSON.stringify({
     name: '@nestjs/common', version: '11.1.18', main: 'index.js', types: 'index.d.ts',
   }));
@@ -39,12 +40,13 @@ function fixture(source: string): { root: string; sentinel: string } {
   return { root, sentinel };
 }
 
-async function observe(source: string) {
-  const { root, sentinel } = fixture(source);
+async function observe(source: string, config?: unknown, extraFiles?: Record<string, string>,
+  versioning: 'uri' | 'none' = 'uri') {
+  const { root, sentinel } = fixture(source, extraFiles);
   const analyzed = await runNestJsSourceAnalysisInternal({
     workspaceRoot: root, entrypoints: ['tsconfig.json'],
     limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS }, logger: { log() {} },
-  }, undefined, undefined, undefined, 'uri');
+  }, config, undefined, undefined, versioning === 'uri' ? 'uri' : undefined);
   expect(analyzed.execution.status).toBe('success');
   expect(fs.existsSync(sentinel)).toBe(false);
   return analyzed;
@@ -77,6 +79,83 @@ test('observes direct Passport call sites separately from URI operations without
     ['jwt', 'GET', '/v1/users/refresh'], ['jwt-refresh', 'GET', '/v1/users/refresh'],
   ].sort());
   expect(analyzed.uriComparison?.contract.operations.every(({ auth }) => auth.mode === 'unknown')).toBe(true);
+});
+
+test('merges Passport status and auth mode for duplicate Source routes', async () => {
+  const analyzed = await observe(`
+    import { Controller, Get, UseGuards } from '@nestjs/common';
+    import { AuthGuard } from '@nestjs/passport';
+    import { Public, JwtAuthGuard } from './auth';
+    @Controller({ path: 'same', version: '1' }) class Guarded {
+      @Get() @UseGuards(AuthGuard('jwt'), JwtAuthGuard) read() {}
+    }
+    @Controller({ path: 'same', version: '1' }) class PublicRoute {
+      @Get() @Public() read() {}
+    }
+  `, { public_decorators: ['Public'], roles_decorators: [],
+    guard_mappings: { JwtAuthGuard: { auth_kind: 'bearer' } } }, {
+    'src/auth.ts': 'export function Public(): MethodDecorator { return () => {}; } export class JwtAuthGuard {}',
+  });
+  const operation = analyzed.uriComparison?.contract.operations[0];
+  expect(operation).toMatchObject({ auth: { mode: 'unknown' }, exposure: 'unknown' });
+  expect(analyzed.passportFactoryObservation?.associations).toMatchObject([{
+    comparisonPath: '/v1/same', authMode: 'unknown',
+  }]);
+  expect(analyzed.passportFactoryObservation?.operations).toEqual([{
+    method: 'GET', comparisonPath: '/v1/same', status: 'observed', authMode: 'unknown',
+  }]);
+});
+
+test('keeps an unsupported direct factory visible beside a duplicate route without one', async () => {
+  const analyzed = await observe(`
+    import { Controller, Get, UseGuards } from '@nestjs/common';
+    import { AuthGuard } from '@nestjs/passport';
+    declare const dynamicStrategy: string;
+    @Controller({ path: 'same', version: '1' }) class Dynamic {
+      @Get() @UseGuards(AuthGuard(dynamicStrategy)) read() {}
+    }
+    @Controller({ path: 'same', version: '1' }) class Plain { @Get() read() {} }
+  `);
+  expect(analyzed.passportFactoryObservation?.callSites).toMatchObject([
+    { reason: 'strategy-not-literal' },
+  ]);
+  expect(analyzed.passportFactoryObservation?.operations).toMatchObject([
+    { status: 'unsupported', authMode: analyzed.uriComparison?.contract.operations[0].auth.mode },
+  ]);
+});
+
+test.each([false, true])('keeps mixed direct factory routes unsupported in either order (%s)', async (reverse) => {
+  const observed = `@Controller({ path: 'same', version: '1' }) class Observed {
+    @Get() @UseGuards(AuthGuard('jwt')) read() {}
+  }`;
+  const unsupported = `@Controller({ path: 'same', version: '1' }) class Unsupported {
+    @Get() @UseGuards(AuthGuard(dynamicStrategy)) read() {}
+  }`;
+  const analyzed = await observe(`
+    import { Controller, Get, UseGuards } from '@nestjs/common';
+    import { AuthGuard } from '@nestjs/passport';
+    declare const dynamicStrategy: string;
+    ${reverse ? `${unsupported}\n${observed}` : `${observed}\n${unsupported}`}
+  `);
+  expect(analyzed.passportFactoryObservation?.callSites).toHaveLength(2);
+  expect(analyzed.passportFactoryObservation?.associations).toHaveLength(1);
+  expect(analyzed.passportFactoryObservation?.operations).toMatchObject([
+    { comparisonPath: '/v1/same', status: 'unsupported' },
+  ]);
+});
+
+test('merges duplicate unversioned routes against the finalized Source operation', async () => {
+  const analyzed = await observe(`
+    import { Controller, Get, UseGuards } from '@nestjs/common';
+    import { AuthGuard } from '@nestjs/passport';
+    @Controller('same') class Guarded { @Get() @UseGuards(AuthGuard('jwt')) read() {} }
+    @Controller('same') class Plain { @Get() read() {} }
+  `, undefined, undefined, 'none');
+  if (analyzed.execution.status !== 'success') return;
+  const authMode = analyzed.execution.result.contract.operations[0].auth.mode;
+  expect(analyzed.passportFactoryObservation?.operations).toMatchObject([
+    { comparisonPath: '/same', status: 'observed', authMode },
+  ]);
 });
 
 test.each([
