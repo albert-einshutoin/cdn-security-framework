@@ -226,7 +226,8 @@ jobs:
     if: >-
       always() && github.event_name == 'workflow_dispatch' &&
       (startsWith(github.ref, 'refs/heads/feat/source-aware-pilot/') ||
-       startsWith(github.ref, 'refs/heads/feat/source-global-prefix/'))
+       startsWith(github.ref, 'refs/heads/feat/source-global-prefix/') ||
+       startsWith(github.ref, 'refs/heads/feat/source-brocoders-pilot/'))
     needs: [package-producer, package-acceptance]
     runs-on: ubuntu-latest
     env:
@@ -280,6 +281,72 @@ jobs:
           if-no-files-found: error
           retention-days: 30
       - name: Require Pilot evaluation, stage, and upload success
+        if: always()
+        env:
+          EVALUATE: ${{ steps.evaluate.outcome }}
+          STAGE: ${{ steps.stage.outcome }}
+          UPLOAD: ${{ steps.upload.outcome }}
+        run: test "$EVALUATE" = success && test "$STAGE" = success && test "$UPLOAD" = success
+
+  # Second fixed public-source Pilot; the accepted single-pack candidate is the only product install.
+  source-brocoders-pilot:
+    if: >-
+      always() && github.event_name == 'workflow_dispatch' &&
+      startsWith(github.ref, 'refs/heads/feat/source-brocoders-pilot/')
+    needs: [package-producer, package-acceptance]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      CSF_SOURCE: ${{ github.sha }}
+      CSF_TGZ_SHA256: ${{ needs.package-producer.outputs.sha256 }}
+      CSF_PRODUCER_STATE: ${{ needs.package-producer.result }}
+      CSF_ACCEPTANCE_STATE: ${{ needs.package-acceptance.result }}
+    steps:
+      - name: Require accepted single-pack candidate
+        run: test "$CSF_PRODUCER_STATE" = success && test "$CSF_ACCEPTANCE_STATE" = success && test -n "$CSF_TGZ_SHA256"
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          name: package-candidate-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/csf-candidate
+      - name: Prepare installed candidate and fixed target dependencies online without scripts
+        run: |
+          node "$RUNNER_TEMP/csf-candidate/scripts/single-pack.js" verify "$RUNNER_TEMP/csf-candidate"
+          cd "$RUNNER_TEMP/csf-candidate/consumer"
+          npm ci --ignore-scripts --no-audit --no-fund --cache "$RUNNER_TEMP/csf-cache"
+          cd "$GITHUB_WORKSPACE"
+          node test/pilot/brocoders/pilot.cjs prepare "$RUNNER_TEMP/csf-brocoders-dependencies"
+      - name: Analyze fixed snapshot and evaluation mutations without network
+        id: evaluate
+        run: |
+          unset NODE_PATH NODE_OPTIONS
+          sudo unshare --net -- sudo -u "$(id -un)" env PATH="$PATH" GITHUB_WORKSPACE="$GITHUB_WORKSPACE" RUNNER_TEMP="$RUNNER_TEMP" CSF_SOURCE="$CSF_SOURCE" CSF_TGZ_SHA256="$CSF_TGZ_SHA256" GITHUB_RUN_ID="$GITHUB_RUN_ID" GITHUB_RUN_ATTEMPT="$GITHUB_RUN_ATTEMPT" \
+            node "$GITHUB_WORKSPACE/test/pilot/brocoders/pilot.cjs" evaluate \
+              "$RUNNER_TEMP/csf-candidate" "$RUNNER_TEMP/csf-brocoders-dependencies" \
+              "$RUNNER_TEMP/csf-brocoders-evaluation" "$RUNNER_TEMP/csf-brocoders-safe.json"
+      - name: Verify fixed inputs and stage only inspected aggregate
+        id: stage
+        if: steps.evaluate.outcome == 'success'
+        run: |
+          node test/pilot/brocoders/pilot.cjs verify \
+            "$RUNNER_TEMP/csf-candidate" "$RUNNER_TEMP/csf-brocoders-evaluation" \
+            "$RUNNER_TEMP/csf-brocoders-safe.json" "$RUNNER_TEMP/csf-brocoders-safe-stage"
+      - name: Upload only the verified aggregate
+        id: upload
+        if: steps.stage.outcome == 'success'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: source-brocoders-pilot-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/csf-brocoders-safe-stage/safe-result.json
+          if-no-files-found: error
+          retention-days: 30
+      - name: Require evaluation, stage, and upload success
         if: always()
         env:
           EVALUATE: ${{ steps.evaluate.outcome }}
