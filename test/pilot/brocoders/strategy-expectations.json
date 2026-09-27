@@ -1,0 +1,54 @@
+{
+  "basis": "Fixed source.tar.gz inspected before strategy-link analyzer execution",
+  "sourceCommit": "9620f159eefe38f47747d02ab162852367c5472c",
+  "dependencies": {
+    "@nestjs/common": "11.1.18",
+    "@nestjs/passport": "11.0.5",
+    "passport-jwt": "4.0.1",
+    "passport-anonymous": "1.0.1"
+  },
+  "definitions": [
+    {
+      "source": "src/auth/strategies/jwt.strategy.ts",
+      "line": 10,
+      "className": "JwtStrategy",
+      "strategy": "jwt",
+      "baseModule": "passport-jwt",
+      "extractorSource": "src/auth/strategies/jwt.strategy.ts",
+      "extractorLine": 13,
+      "extractor": "bearer-header-call",
+      "providerSource": "src/auth/auth.module.ts",
+      "providerLine": 22,
+      "providerModule": "AuthModule",
+      "operations": 9
+    },
+    {
+      "source": "src/auth/strategies/jwt-refresh.strategy.ts",
+      "line": 10,
+      "className": "JwtRefreshStrategy",
+      "strategy": "jwt-refresh",
+      "baseModule": "passport-jwt",
+      "extractorSource": "src/auth/strategies/jwt-refresh.strategy.ts",
+      "extractorLine": 16,
+      "extractor": "bearer-header-call",
+      "providerSource": "src/auth/auth.module.ts",
+      "providerLine": 22,
+      "providerModule": "AuthModule",
+      "operations": 1
+    }
+  ],
+  "expected": {
+    "definitions": 2,
+    "extractorCalls": 2,
+    "providerEntries": 2,
+    "callSites": 6,
+    "operationAssociations": 10,
+    "authUnknown": 16,
+    "routeTP": 16,
+    "routeFP": 0,
+    "routeFN": 0,
+    "controlledFindingTP": 7,
+    "controlledFindingFP": 0,
+    "controlledFindingFN": 0
+  }
+}
