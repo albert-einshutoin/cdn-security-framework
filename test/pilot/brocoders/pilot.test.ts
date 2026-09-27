@@ -130,7 +130,14 @@ describe('fixed brocoders technical Pilot inputs', () => {
       id: `site-${index}`, strategy: item.strategy,
     }));
     const associations = passport.callSites.flatMap((item: any, index: number) =>
-      item.operations.map(() => ({ callSiteId: `site-${index}`, authMode: 'unknown' })));
+      item.operations.map((key: string) => {
+        const [method, prefixedPath] = key.split(' ');
+        return { callSiteId: `site-${index}`, method,
+          comparisonPath: prefixedPath.replace(/^\/api/, ''), authMode: 'unknown' };
+      }));
+    callSites.push({ id: 'site-outside', strategy: 'jwt' });
+    associations.push({ callSiteId: 'site-outside', method: 'GET',
+      comparisonPath: '/outside', authMode: 'unknown' });
     const factory = { digest: `sha256:${'a'.repeat(64)}`, callSites, associations };
     const links = { observer: 'nestjs-passport-static-strategy-link@1',
       digest: `sha256:${'b'.repeat(64)}`, factoryDigest: factory.digest,
@@ -140,6 +147,7 @@ describe('fixed brocoders technical Pilot inputs', () => {
       })) };
     expect(assertStrategyObservation(links, factory)).toMatchObject({
       definitions: 2, extractorCalls: 2, providerEntries: 2,
+      callSites: 6, operationAssociations: 10,
       strategyAssociations: { jwt: 9, 'jwt-refresh': 1 },
     });
     const changed = (edit: (links: any, factory: any) => void) => {

@@ -10,7 +10,8 @@ import { previewPassportStrategyObservation } from '../../src/contract/passport-
 
 const roots: string[] = [];
 
-function fixture(source: string, extraFiles: Record<string, string> = {}): { root: string; sentinel: string } {
+function fixture(source: string, extraFiles: Record<string, string> = {},
+  definitelyTypedJwt = false): { root: string; sentinel: string } {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-passport-factory-'));
   roots.push(root);
   const write = (relative: string, value: string) => {
@@ -47,6 +48,19 @@ function fixture(source: string, extraFiles: Record<string, string> = {}): { roo
     export declare class Strategy {}
     export declare const ExtractJwt: { fromAuthHeaderAsBearerToken(): unknown };
   `);
+  if (definitelyTypedJwt) {
+    fs.rmSync(path.join(root, 'node_modules/passport-jwt/index.d.ts'));
+    write('node_modules/passport-jwt/package.json', JSON.stringify({
+      name: 'passport-jwt', version: '4.0.1', main: 'index.js',
+    }));
+    write('node_modules/@types/passport-jwt/package.json', JSON.stringify({
+      name: '@types/passport-jwt', version: '4.0.1', types: 'index.d.ts',
+    }));
+    write('node_modules/@types/passport-jwt/index.d.ts', `
+      export declare class Strategy {}
+      export declare const ExtractJwt: { fromAuthHeaderAsBearerToken(): unknown };
+    `);
+  }
   write('node_modules/passport-jwt/index.js', `require('node:fs').writeFileSync(${JSON.stringify(path.join(root, 'executed'))}, 'bad');`);
   const sentinel = path.join(root, 'executed');
   write('node_modules/@nestjs/passport/index.js', `require('node:fs').writeFileSync(${JSON.stringify(sentinel)}, 'bad');`);
@@ -54,8 +68,8 @@ function fixture(source: string, extraFiles: Record<string, string> = {}): { roo
 }
 
 async function observe(source: string, config?: unknown, extraFiles?: Record<string, string>,
-  versioning: 'uri' | 'none' = 'uri') {
-  const { root, sentinel } = fixture(source, extraFiles);
+  versioning: 'uri' | 'none' = 'uri', definitelyTypedJwt = false) {
+  const { root, sentinel } = fixture(source, extraFiles, definitelyTypedJwt);
   const analyzed = await runNestJsSourceAnalysisInternal({
     workspaceRoot: root, entrypoints: ['tsconfig.json'],
     limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS }, logger: { log() {} },
@@ -91,6 +105,24 @@ test('links the observed factory to a direct strategy, extractor call, and provi
   expect(links?.matches).toMatchObject([{ strategy: 'jwt', status: 'one' }]);
   expect(links?.matches[0].candidateIds).toEqual([links?.definitions[0].id]);
   expect(analyzed.uriComparison?.contract.operations[0].auth.mode).toBe('unknown');
+});
+
+test('authenticates passport-jwt runtime imports backed by DefinitelyTyped declarations', async () => {
+  const analyzed = await observe(`
+    import { Controller, Get, UseGuards, Module } from '@nestjs/common';
+    import { AuthGuard, PassportStrategy } from '@nestjs/passport';
+    import { Strategy, ExtractJwt } from 'passport-jwt';
+    class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
+      constructor() { super({ jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken() }); }
+    }
+    @Module({ providers: [JwtStrategy] }) class AuthModule {}
+    @Controller({ path: 'users', version: '1' }) @UseGuards(AuthGuard('jwt')) class UsersController {
+      @Get() list() {}
+    }
+  `, undefined, undefined, 'uri', true);
+  expect(analyzed.passportStrategyObservation?.definitions).toMatchObject([{
+    baseStatus: 'verified', baseModule: 'passport-jwt', extractor: { status: 'observed' },
+  }]);
 });
 
 test('keeps same-name unverified bases as ambiguous candidates', async () => {

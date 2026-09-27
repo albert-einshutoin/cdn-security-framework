@@ -150,7 +150,7 @@ function assertStrategyObservation(observation, factory) {
   assert.equal(observation.factoryDigest, factory.digest, 'PILOT_STRATEGY_FACTORY_BINDING');
   assert.equal(observation.definitions.length, strategyExpected.expected.definitions);
   assert.equal(observation.providers.length, strategyExpected.expected.providerEntries);
-  assert.equal(observation.matches.length, strategyExpected.expected.callSites);
+  assert.equal(observation.matches.length, factory.callSites.length);
   const definitions = new Map(observation.definitions.map(item => [item.strategy, item]));
   assert.deepEqual(sorted([...definitions.keys()]), sorted(strategyExpected.definitions.map(item => item.strategy)));
   const providers = new Map();
@@ -178,8 +178,14 @@ function assertStrategyObservation(observation, factory) {
   }
   const matches = new Map(observation.matches.map(item => [item.callSiteId, item]));
   assert.equal(matches.size, factory.callSites.length);
+  const scoredRoutes = new Set(expected.operations.map(op => targetKey(op, false)));
+  const scoped = factory.associations.filter(item => scoredRoutes.has(
+    `${item.method} ${item.comparisonPath}`));
+  const scoredSites = new Set(scoped.map(item => item.callSiteId));
+  assert.equal(scoredSites.size, strategyExpected.expected.callSites);
+  assert.equal(scoped.length, strategyExpected.expected.operationAssociations);
   const counts = Object.fromEntries(strategyExpected.definitions.map(item => [item.strategy, 0]));
-  for (const association of factory.associations) {
+  for (const association of scoped) {
     const site = factory.callSites.find(item => item.id === association.callSiteId);
     const match = matches.get(association.callSiteId);
     assert.ok(site && match && definitions.has(site.strategy), 'PILOT_STRATEGY_ASSOCIATION');
@@ -193,8 +199,8 @@ function assertStrategyObservation(observation, factory) {
   return { observer: observation.observer, digest: observation.digest,
     definitions: observation.definitions.length,
     extractorCalls: observation.definitions.filter(item => item.extractor.status === 'observed').length,
-    providerEntries: observation.providers.length, callSites: observation.matches.length,
-    operationAssociations: factory.associations.length, strategyAssociations: counts };
+    providerEntries: observation.providers.length, callSites: scoredSites.size,
+    operationAssociations: scoped.length, strategyAssociations: counts };
 }
 async function inspect(installed, workspace) {
   const { runNestJsSourceAnalysisInternal } = require(path.join(installed, 'source/nestjs/analyzer.js'));
