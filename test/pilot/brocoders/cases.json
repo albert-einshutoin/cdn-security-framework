@@ -1,0 +1,170 @@
+{
+  "denominator": {
+    "scoredSourceOperations": 16,
+    "independentRealApplications": 1,
+    "routeTruePositiveUnit": "one exact method plus normalized comparison path in the fixed 16-operation set",
+    "findingTruePositiveUnit": "one intentionally changed method/path in an evaluation-only declaration or Policy",
+    "unknownPolicy": "record separately; never count as a negative or remove silently from a denominator"
+  },
+  "cases": [
+    {
+      "name": "R01-no-uri",
+      "group": "R01",
+      "sourceVersioning": null,
+      "prefix": null,
+      "contract": "no-prefix",
+      "change": "none",
+      "expect": "versioned targets unresolved, no unversioned 16"
+    },
+    {
+      "name": "R02-uri",
+      "group": "R02",
+      "sourceVersioning": "uri",
+      "prefix": null,
+      "contract": "no-prefix",
+      "change": "none",
+      "expect": "16 exact matches under /v1"
+    },
+    {
+      "name": "R03-uri-api",
+      "group": "R03",
+      "sourceVersioning": "uri",
+      "prefix": "/api",
+      "contract": "api",
+      "change": "none",
+      "expect": "16 exact matches under /api/v1"
+    },
+    {
+      "name": "R04-omitted-prefix",
+      "group": "R04",
+      "sourceVersioning": "uri",
+      "prefix": null,
+      "contract": "api",
+      "change": "none",
+      "expect": "no automatic /api correction"
+    },
+    {
+      "name": "R04-wrong-prefix",
+      "group": "R04",
+      "sourceVersioning": "uri",
+      "prefix": "/wrong",
+      "contract": "api",
+      "change": "none",
+      "expect": "no automatic /api correction"
+    },
+    {
+      "name": "R04-wrong-version",
+      "group": "R04",
+      "sourceVersioning": "uri",
+      "prefix": "/api",
+      "contract": "api",
+      "change": "wrong-version",
+      "target": {
+        "method": "GET",
+        "sourcePath": "/api/v1/auth/me",
+        "declaredPath": "/api/v2/auth/me"
+      },
+      "expect": "one wrong-version target remains unmatched"
+    },
+    {
+      "name": "R05-method",
+      "group": "R05",
+      "sourceVersioning": "uri",
+      "prefix": "/api",
+      "contract": "api",
+      "change": "method-mismatch",
+      "target": {
+        "sourceMethod": "GET",
+        "declaredMethod": "PUT",
+        "path": "/api/v1/auth/me"
+      },
+      "expectRule": "SC-INVENTORY-004"
+    },
+    {
+      "name": "R05-source-only",
+      "group": "R05",
+      "sourceVersioning": "uri",
+      "prefix": "/api",
+      "contract": "api",
+      "change": "source-only",
+      "target": {
+        "method": "POST",
+        "path": "/api/v1/auth/email/login"
+      },
+      "expectRule": "SC-INVENTORY-001"
+    },
+    {
+      "name": "R05-declared-only",
+      "group": "R05",
+      "sourceVersioning": "uri",
+      "prefix": "/api",
+      "contract": "api",
+      "change": "declared-only",
+      "target": {
+        "method": "GET",
+        "path": "/api/v1/evaluation-only"
+      },
+      "expectRule": "SC-INVENTORY-003"
+    },
+    {
+      "name": "R05-policy-method",
+      "group": "R05",
+      "sourceVersioning": "uri",
+      "prefix": "/api",
+      "contract": "api",
+      "change": "policy-method",
+      "target": {
+        "method": "DELETE",
+        "paths": [
+          "/api/v1/auth/me",
+          "/api/v1/users/{id}"
+        ]
+      },
+      "expectRule": "SC-EXPOSURE-004"
+    },
+    {
+      "name": "R05-policy-route",
+      "group": "R05",
+      "sourceVersioning": "uri",
+      "prefix": "/api",
+      "contract": "api",
+      "change": "policy-route",
+      "target": {
+        "path": "/api/v1/evaluation-only-policy"
+      },
+      "expectRule": "SC-INVENTORY-002"
+    },
+    {
+      "name": "R06-declared-auth",
+      "group": "R06",
+      "sourceVersioning": "uri",
+      "prefix": "/api",
+      "contract": "api",
+      "change": "declared-auth",
+      "target": {
+        "method": "GET",
+        "path": "/api/v1/auth/me"
+      },
+      "expectRule": "SC-AUTHN-001",
+      "sourceAuthClaim": "unknown remains; this is OpenAPI-Policy only"
+    }
+  ],
+  "R07": "Run four formats, --out, installed driver run/publish/verify-stage/gate, input/hash/privacy and strict safe staging on the R03 candidate",
+  "observedEvaluationOut": {
+    "uriNoPrefix": [
+      "GET /v1/files/{path}",
+      "POST /v1/auth/apple/login",
+      "POST /v1/auth/facebook/login",
+      "POST /v1/auth/google/login",
+      "POST /v1/files/upload"
+    ],
+    "uriApiPrefix": [
+      "GET /api/v1/files/{path}",
+      "POST /api/v1/auth/apple/login",
+      "POST /api/v1/auth/facebook/login",
+      "POST /api/v1/auth/google/login",
+      "POST /api/v1/files/upload"
+    ],
+    "unresolvedSource": "src/home/home.controller.ts:7"
+  }
+}
