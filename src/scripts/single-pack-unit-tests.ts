@@ -98,6 +98,10 @@ try {
   });
   fs.writeFileSync(path.join(temp, 'metadata.json'), JSON.stringify(m));
   test('same candidate and complete rows pass', () => { verifyTarball(temp, e); aggregate(m, rows, e, ['success','success']); });
+  test('lower Node rejection with expected exit 1 is accepted', () => assert.doesNotThrow(() => aggregate(m,
+    rows.map(r => r.row === '18.20.8' || r.row === '20.16.0'
+      ? { ...r, steps: [{ ...r.steps[0], exit: 1, expectedExit: 1 }, ...r.steps.slice(1)] }
+      : r), e, ['success','success'])));
   test('missing internal Source-aware smoke command fails closed', () => assert.throws(() => aggregate(m,
     rows.map(r => r.row === '24' ? { ...r, steps: r.steps.slice(0, 12) } : r), e, ['success','success'])));
   test('missing installed prefix command fails closed', () => assert.throws(() => aggregate(m,
@@ -140,6 +144,12 @@ try {
   for (const key of ['executable','sha256','platform','arch']) test(`malformed runtime ${key} fails`, () => assert.throws(() => aggregate(m, rows.map(r => ({...r,runtime:{...r.runtime,[key]:''}})), e, ['success','success'])));
   for (const key of ['npm','resolution','dependencies','steps']) test(`missing ${key} evidence fails`, () => assert.throws(() => aggregate(m, rows.map(r => ({...r,[key]:undefined} as any)), e, ['success','success'])));
   test('empty steps fail', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,steps:[]})), e, ['success','success'])));
+  test('null command evidence fails before checking its fields', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, steps: [null as any, ...r.steps.slice(1)] } : r),
+    e, ['success','success'])));
+  test('unsupported successful-looking exit evidence fails', () => assert.throws(() => aggregate(m,
+    rows.map(r => r.row === '24' ? { ...r, steps: [{ ...r.steps[0], exit: 7, expectedExit: 7 },
+      ...r.steps.slice(1)] } : r), e, ['success','success'])));
   test('failed command fails', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,steps:r.steps.map(s=>({...s,exit:3}))})), e, ['success','success'])));
   test('missing runtime subfields fail without string coercion', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,runtime:{...r.runtime,platform:undefined} as any})), e, ['success','success'])));
   test('missing command fails without string coercion', () => assert.throws(() => aggregate(m, rows.map(r => ({...r,steps:r.steps.map(s=>({...s,command:undefined} as any))})), e, ['success','success'])));
