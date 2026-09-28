@@ -46,8 +46,29 @@ function directImportedValue(
   projectSources: ReadonlySet<ts.SourceFile>, check: () => void,
   moduleName: string, importedName: string,
 ): boolean {
-  if (ts.isIdentifier(expression)) return isDirectImportedSymbolFrom(expression, checker, check,
-    moduleName, importedName, projectSources);
+  if (ts.isIdentifier(expression)) {
+    if (!isDirectImportedSymbolFrom(expression, checker, check,
+      moduleName, importedName, projectSources)) return false;
+    if (moduleName !== 'passport-jwt' || importedName !== 'ExtractJwt') return true;
+    const binding = checker.getSymbolAtLocation(expression);
+    if (!binding) return false;
+    for (const file of projectSources) {
+      const nodes: ts.Node[] = [file];
+      while (nodes.length) {
+        const node = nodes.pop()!;
+        check();
+        if (ts.isIdentifier(node) && checker.getSymbolAtLocation(node) === binding
+          && !ts.isImportSpecifier(node.parent)) {
+          const member = node.parent;
+          if (!ts.isPropertyAccessExpression(member) || member.expression !== node
+            || member.name.text !== 'fromAuthHeaderAsBearerToken'
+            || !ts.isCallExpression(member.parent) || member.parent.expression !== member) return false;
+        }
+        ts.forEachChild(node, child => { nodes.push(child); });
+      }
+    }
+    return true;
+  }
   if (!ts.isPropertyAccessExpression(expression) || expression.name.text !== importedName
     || !ts.isIdentifier(expression.expression)) return false;
   const binding = checker.getSymbolAtLocation(expression.expression);
@@ -116,7 +137,7 @@ function directBearerExtractor(
   if (object.properties.some((property) => ts.isSpreadAssignment(property)
     || ts.isGetAccessorDeclaration(property) || ts.isSetAccessorDeclaration(property)
     || 'name' in property && ts.isComputedPropertyName(property.name))) return { status: 'unconfirmed' };
-  const properties = object.properties.filter((property) => ts.isPropertyAssignment(property)
+  const properties = object.properties.filter((property) => 'name' in property && property.name
     && (ts.isIdentifier(property.name) || ts.isStringLiteral(property.name))
     && property.name.text === 'jwtFromRequest');
   if (properties.length !== 1 || !ts.isPropertyAssignment(properties[0])) return { status: 'unconfirmed' };
@@ -178,7 +199,7 @@ export function createPassportStrategyCollector(
         if (members.some((member) => ts.isSpreadAssignment(member)
           || 'name' in member && ts.isComputedPropertyName(member.name)
           || ts.isGetAccessorDeclaration(member) || ts.isSetAccessorDeclaration(member))) continue;
-        const providers = members.filter((member) => ts.isPropertyAssignment(member)
+        const providers = members.filter((member) => 'name' in member && member.name
           && (ts.isIdentifier(member.name) || ts.isStringLiteral(member.name))
           && member.name.text === 'providers');
         if (providers.length !== 1 || !ts.isPropertyAssignment(providers[0])

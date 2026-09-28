@@ -181,12 +181,30 @@ test('verifies only stable direct namespace members for strategy and extractor',
   }]);
 });
 
+test('does not observe a rewritten named ExtractJwt member as the bearer extractor', async () => {
+  const analyzed = await observe(`
+    import { PassportStrategy } from '@nestjs/passport';
+    import { Strategy, ExtractJwt as JwtExtractor } from 'passport-jwt';
+    JwtExtractor.fromAuthHeaderAsBearerToken = () => null;
+    class JwtStrategy extends PassportStrategy(Strategy, 'jwt') {
+      constructor() { super({ jwtFromRequest: JwtExtractor.fromAuthHeaderAsBearerToken() }); }
+    }
+  `);
+  expect(analyzed.passportStrategyObservation?.definitions).toMatchObject([{
+    baseStatus: 'verified', extractor: { status: 'unconfirmed' },
+  }]);
+});
+
 test.each([
   ['name-only', 'class A extends PassportStrategy(Strategy, "jwt") {}'],
   ['different-extractor', 'class A extends PassportStrategy(Strategy, "jwt") { constructor() { super({jwtFromRequest: ExtractJwt.fromExtractors([])}); } }'],
   ['spread', 'class A extends PassportStrategy(Strategy, "jwt") { constructor() { super({...{}, jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken()}); } }'],
   ['getter', 'class A extends PassportStrategy(Strategy, "jwt") { constructor() { super({get jwtFromRequest() { return ExtractJwt.fromAuthHeaderAsBearerToken(); }}); } }'],
   ['duplicate', 'class A extends PassportStrategy(Strategy, "jwt") { constructor() { super({jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(), jwtFromRequest: null}); } }'],
+  ['duplicate-method', 'class A extends PassportStrategy(Strategy, "jwt") { constructor() { super({jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(), jwtFromRequest() { return null; }}); } }'],
+  ['duplicate-shorthand', 'class A extends PassportStrategy(Strategy, "jwt") { constructor() { const jwtFromRequest = null; super({jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(), jwtFromRequest}); } }'],
+  ['string-key-method', 'class A extends PassportStrategy(Strategy, "jwt") { constructor() { super({"jwtFromRequest": ExtractJwt.fromAuthHeaderAsBearerToken(), "jwtFromRequest"() { return null; }}); } }'],
+  ['string-key-shorthand', 'class A extends PassportStrategy(Strategy, "jwt") { constructor() { const jwtFromRequest = null; super({"jwtFromRequest": ExtractJwt.fromAuthHeaderAsBearerToken(), jwtFromRequest}); } }'],
 ])('does not turn %s extractor syntax into a Bearer observation', async (_name, declaration) => {
   const analyzed = await observe(`
     import { Controller, Get, UseGuards } from '@nestjs/common';
@@ -201,6 +219,24 @@ test.each([
     strategy: 'jwt', extractor: { status: 'unconfirmed' },
   }]);
   expect(analyzed.passportStrategyObservation?.matches[0].status).toBe('one');
+});
+
+test.each([
+  ['duplicate-method', 'providers: [A], providers() { return []; }'],
+  ['duplicate-shorthand', 'providers: [A], providers'],
+  ['string-key-method', '"providers": [A], "providers"() { return []; }'],
+  ['string-key-shorthand', '"providers": [A], providers'],
+])('does not observe %s as a direct provider entry', async (_name, members) => {
+  const analyzed = await observe(`
+    import { Module } from '@nestjs/common';
+    import { PassportStrategy } from '@nestjs/passport';
+    import { Strategy } from 'passport-jwt';
+    class A extends PassportStrategy(Strategy, 'jwt') {}
+    const providers: unknown[] = [];
+    @Module({ ${members} }) class AuthModule {}
+  `);
+  expect(analyzed.passportStrategyObservation?.definitions).toMatchObject([{ strategy: 'jwt' }]);
+  expect(analyzed.passportStrategyObservation?.providers).toEqual([]);
 });
 
 test('distinguishes no observed candidate from a factory with no safe literal name', async () => {
