@@ -373,6 +373,10 @@ function runCliFormats(installed, workspace) {
 }
 async function evaluate(candidate, dependencies, workRoot, output) {
   const { metadata, installed } = candidateIdentity(candidate);
+  const installedRequire = require('node:module').createRequire(path.join(candidate, 'consumer/package.json'));
+  const apiSubpath = 'cdn-security-framework/experimental/source-aware';
+  assert.equal(installedRequire.resolve(apiSubpath), path.join(installed, 'experimental/source-aware.js'));
+  const { analyzeSourceDiff } = installedRequire(apiSubpath);
   assert.equal(fs.realpathSync(path.join(candidate, 'consumer/node_modules/.bin/cdn-security')),
     path.join(installed, 'bin/cli.js'), 'PILOT_BINARY_NOT_INSTALLED');
   verifyArchive();
@@ -430,6 +434,24 @@ async function evaluate(candidate, dependencies, workRoot, output) {
     assert.equal(record.candidate.sha256, metadata.sha256);
     assert.equal(record.routingAssumption?.sourceVersioning, scenario.sourceVersioning ?? undefined);
     assert.equal(record.routingAssumption?.globalPrefix, scenario.prefix ?? undefined);
+    if (scenario.name === 'R03-uri-api') {
+      const api = await analyzeSourceDiff({ workspaceRoot: workspace,
+        openapiPath: `evaluation/${scenario.name}/openapi.json`,
+        policyPath: `evaluation/${scenario.name}/policy.yml`, target: 'aws',
+        currentDate: '2026-09-27', failOn: 'never',
+        source: { tsconfigPath: 'source/tsconfig.build.json',
+          authConfigPath: `evaluation/${scenario.name}/auth.json`,
+          globalPrefix: '/api', versioning: 'uri' } });
+      assert.equal(api.kind, 'report', 'PILOT_API_NO_REPORT');
+      assert.equal(api.analysis.status, record.analysis.status);
+      assert.deepEqual(api.analysis.codes, record.analysis.codes);
+      assert.equal(api.exitCode, record.analysis.exitCode);
+      assert.equal(api.metadata.passportStrategyObservation?.totalDefinitions, 2);
+      assert.equal(api.metadata.passportStrategyObservation?.totalProviders, 2);
+      assert.equal(api.metadata.passportFactoryObservation?.totalCallSites, 6);
+      assert.equal(api.metadata.passportFactoryObservation?.totalAssociations, 10);
+      assert.equal(JSON.stringify(api).includes(workspace), false, 'PILOT_API_PATH_LEAK');
+    }
     runDriver(installed, 'publish', [recordPath, candidate, stage], env);
     runDriver(installed, 'verify-stage', [recordPath, candidate, path.join(stage, 'delivery.json')], env);
     const gate = runDriver(installed, 'gate', [recordPath, candidate, path.join(stage, 'delivery.json')], env);

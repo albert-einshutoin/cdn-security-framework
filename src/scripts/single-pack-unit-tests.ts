@@ -40,7 +40,7 @@ try {
     findings: expectedFindingProof.map(finding => ({ ...finding, evidence: [...finding.evidence] })) };
   const rows = matrixRows.map(row => {
     const lower = row === '18.20.8' || row === '20.16.0';
-    const steps = Array.from({ length: lower ? 26 : 37 }, (_, index) => {
+    const steps = Array.from({ length: lower ? 27 : 37 }, (_, index) => {
       const cli = !lower && index >= 13 && index < 20;
       const auth = !lower && index >= 20 && index < 28;
       const save = !lower && index >= 28;
@@ -50,6 +50,7 @@ try {
         : save ? 'cdn-security-source-save' : 'node',
         exit: expectedExit, expectedExit, durationMs: 1 };
     });
+    if (!lower) steps.push({ command: 'node', exit: 0, expectedExit: 0, durationMs: 1 });
     if (row === '24') steps.push(...[0, 0, 0, 0, 0, 2, 2, 0].map(expectedExit => ({
       command: 'cdn-security-source-prefix', exit: expectedExit, expectedExit, durationMs: 1,
     })));
@@ -71,7 +72,7 @@ try {
       row, status: 'pass' as const, node: row.includes('.') ? row : `${row}.1.0`, npm: '10.8.2',
       switchVerified: true, resolution, dependencies, steps,
       checks: lower ? ['node-rejection','resolution','no-side-effects']
-        : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli','source-auth-config','source-safe-output',
+        : ['package-smoke','resolution','schemas','official-sarif-schema','source-aware-cli','source-aware-api','source-auth-config','source-safe-output',
           ...(row === '24' ? ['source-global-prefix','source-controller-options','source-uri-version'] : [])],
       ...(row === '24' ? { journey, prefixProof: { globalPrefix: '/api' as const,
         projectDigest: `sha256:${'a'.repeat(64)}`, configDigest: `sha256:${'b'.repeat(64)}`,
@@ -174,6 +175,7 @@ try {
   test('validation not executed fails', () => assert.throws(() => aggregate(m, rows.map((r,i) => i ? r : {...r,checks:[]}), e, ['success','success'])));
   test('official schema evidence missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, checks: r.checks.filter(check => check !== 'official-sarif-schema') } : r), e, ['success','success'])));
   test('installed source-diff CLI evidence missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, checks: r.checks.filter(check => check !== 'source-aware-cli') } : r), e, ['success','success'])));
+  test('installed Source-aware API evidence missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, checks: r.checks.filter(check => check !== 'source-aware-api') } : r), e, ['success','success'])));
   test('configured CLI evidence missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, checks: r.checks.filter(check => check !== 'source-auth-config') } : r), e, ['success','success'])));
   test('configured CLI command missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, steps: r.steps.filter(step => step.command !== 'cdn-security-source-auth-config') } : r), e, ['success','success'])));
   test('safe-save check missing fails', () => assert.throws(() => aggregate(m, rows.map(r => r.row === '24' ? { ...r, checks: r.checks.filter(check => check !== 'source-safe-output') } : r), e, ['success','success'])));

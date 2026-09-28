@@ -55,6 +55,11 @@
       "require": "./source/nestjs/index.js",
       "default": "./source/nestjs/index.js"
     },
+    "./experimental/source-aware": {
+      "types": "./experimental/source-aware.d.ts",
+      "require": "./experimental/source-aware.js",
+      "default": "./experimental/source-aware.js"
+    },
     "./schemas/security-ir-v1.schema.json": "./schemas/security-ir-v1.schema.json",
     "./schemas/openapi-inspection-v1.schema.json": "./schemas/openapi-inspection-v1.schema.json",
     "./schemas/finding-v1.schema.json": "./schemas/finding-v1.schema.json",
@@ -139,6 +144,7 @@
     "recommendation/",
     "source-analysis/",
     "source/",
+    "experimental/",
     "emitter/",
     "lib/",
     "parser/",

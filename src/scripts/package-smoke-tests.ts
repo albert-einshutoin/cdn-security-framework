@@ -263,6 +263,8 @@ export function assertPackageContents(pack: PackResult) {
     'source/nestjs/index.d.ts',
     'source/nestjs/analyzer.js',
     'source/nestjs/auth-config.js',
+    'experimental/source-aware.js',
+    'experimental/source-aware.d.ts',
     'openapi/inspect.js',
     'openapi/inspect.d.ts',
     'openapi/policy-candidate.js',
@@ -437,6 +439,7 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
       const { loadSourceAuthConfig } = require(path.join(pkgRoot, 'bin/commands/source-auth-config.js'));
       const { runNestJsSourceAnalysisInternal } = require(path.join(pkgRoot, 'source/nestjs/analyzer.js'));
       const { DEFAULT_SOURCE_ANALYSIS_LIMITS } = require(path.join(pkgRoot, 'source-analysis/index.js'));
+      const sourceApi = require(${JSON.stringify(`${packageName}/experimental/source-aware`)});
       const root = fs.mkdtempSync(path.join(process.cwd(), 'source-aware-'));
       (async () => {
         try {
@@ -460,6 +463,20 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
           const workspace = await analyzeSourceAwareWorkspace({ workspaceRoot: root, openapiPath: 'openapi.yaml', policyPath: 'policy.yml', target: 'aws', source: { tsconfigPath: 'tsconfig.json' } });
           const bundle = finalizeSourceAwareOutput(workspace, { currentDate: '2026-09-25', failOn: 'never' });
           assert.ok(bundle.finalized);
+          assert.deepEqual(Object.keys(sourceApi), ['analyzeSourceDiff']);
+          const esmApi = await import(${JSON.stringify(`${packageName}/experimental/source-aware`)});
+          assert.equal(typeof esmApi.analyzeSourceDiff, 'function');
+          const apiOptions = { workspaceRoot: root, openapiPath: 'openapi.yaml', policyPath: 'policy.yml',
+            target: 'aws', currentDate: '2026-09-25', failOn: 'never', source: { tsconfigPath: 'tsconfig.json' } };
+          const apiResult = await sourceApi.analyzeSourceDiff(apiOptions);
+          assert.equal(apiResult.kind, 'report');
+          assert.deepEqual(apiResult.summary, bundle.finalized.summary);
+          assert.deepEqual(apiResult.stages, bundle.finalized.stages);
+          assert.deepEqual(apiResult.comparisons, bundle.finalized.comparisons);
+          assert.equal(apiResult.findings.length + apiResult.suppressedFindings.length,
+            apiResult.summary.unique);
+          assert.equal(apiResult.metadata.source.projectDigest, bundle.metadata.source.projectDigest);
+          assert.ok(!JSON.stringify(apiResult).includes(root));
           assert.notEqual(bundle.finalized.stages.implemented.status, 'failed');
           const json = JSON.parse(formatSourceAwarePreviewJson(bundle.finalized));
           const text = formatSourceAwarePreviewText(bundle.finalized);
@@ -825,6 +842,29 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
       import { recommendRequestLimits } from '${packageName}/recommendation';
       import { runSourceAnalyzer } from '${packageName}/source-analysis';
       import { createNestJsSourceAnalyzer } from '${packageName}/source/nestjs';
+      import { analyzeSourceDiff, type SourceDiffOptions, type SourceDiffResult } from '${packageName}/experimental/source-aware';
+      const sourceOptions: SourceDiffOptions = {
+        workspaceRoot: process.cwd() + '/node_modules/${packageName}',
+        openapiPath: 'examples/github-actions/fixtures/openapi.yaml',
+        policyPath: 'examples/github-actions/fixtures/policy.yml',
+        target: 'aws', currentDate: '2026-09-25', failOn: 'never',
+      };
+      async function runSourceApi(): Promise<void> {
+        const result: SourceDiffResult = await analyzeSourceDiff(sourceOptions);
+        if (result.kind !== 'report') throw new Error(result.code);
+        if (result.stages.implemented.status !== 'omitted' || result.exitCode !== 0) {
+          throw new Error('installed TypeScript API result mismatch');
+        }
+        if (false) {
+          // @ts-expect-error unknown input field
+          await analyzeSourceDiff({ ...sourceOptions, out: 'report.json' });
+          // @ts-expect-error invalid target
+          await analyzeSourceDiff({ ...sourceOptions, target: 'invalid' });
+          // @ts-expect-error report has no error code
+          result.code;
+        }
+      }
+      void runSourceApi().catch(() => { process.exitCode = 1; });
       void [compile, compileArtifacts, parsePolicyFile, validatePolicy, createSecurityContract,
         serializeSecurityContract, inspectOpenApi, recommendRequestLimits, runSourceAnalyzer,
         createNestJsSourceAnalyzer];
@@ -833,7 +873,7 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
       compilerOptions: {
         module: 'Node16',
         moduleResolution: 'Node16',
-        noEmit: true,
+        noEmit: false,
         strict: true,
         target: 'ES2022',
         types: ['node'],
@@ -844,6 +884,7 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
       path.join(installDir, 'node_modules', 'typescript', 'bin', 'tsc'),
       '--project', path.join(installDir, 'tsconfig.json'),
     ], { cwd: installDir, stdio: 'inherit' });
+    run(process.execPath, [path.join(installDir, 'consumer.js')], { cwd: installDir, stdio: 'inherit' });
 
     const nestReport = JSON.parse(run(process.execPath, [
       path.join(installedRoot, 'examples', 'nestjs-contract', 'run-analysis.cjs'),
