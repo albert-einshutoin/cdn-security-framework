@@ -182,6 +182,46 @@ the prepared lock pins their artifacts. The inspected Passport
 Its factory passes the supplied type to `passport.authenticate` at runtime,
 but static syntax alone cannot verify that a strategy is registered.
 
+### Static Passport strategy linkage
+
+The dev observer matches the full direct factory call-site list against class
+declarations read in the same TypeScript project. A positive definition is a
+direct `class ... extends PassportStrategy(Strategy, 'jwt')` with an explicit,
+safe literal name, `PassportStrategy` from `@nestjs/passport`, and `Strategy`
+from `passport-jwt`. Named aliases and stable namespace imports are supported.
+It reports one observed candidate, multiple same-name candidates, none observed
+in the read project, or an unmatchable name/input. A same-name class with an
+unverified base remains a candidate; it cannot manufacture a unique match.
+An omitted or dynamic definition name makes an otherwise absent match
+unmatchable. These states describe static Source coverage, not runtime
+registration or uniqueness. Call sites, class declarations, extractor calls,
+provider entries, and route associations retain separate IDs.
+
+An extractor is observed only for one direct constructor `super({
+jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken() })` object whose
+`ExtractJwt` import resolves to `passport-jwt`. The observation says that a
+Bearer-header extractor factory call is written in the constructor argument;
+it does not show constructor execution or accepted authentication. Other
+extractors, callbacks, spread/computed/accessor/duplicate properties, and
+conditional or multiple `super` calls remain unconfirmed. A direct class
+symbol in an authentic `@Module({ providers: [...] })` array is reported as a
+provider **declaration**, without inferring module graph reachability or
+runtime registration. Dynamic providers and custom provider objects are not
+interpreted. The observer does not read `secretOrKey`, configuration values,
+tokens, or `validate` bodies into reports.
+
+Text, JSON, SARIF properties, Summary, and the dev CI record show the same
+bounded safe projection with full/omitted counts and a separate observation
+digest. Static extractor/provider evidence does not change `auth.mode`,
+exposure, enforcement confidence, route/Finding decisions, or add Bearer to
+auth alternatives. The fixed Brocoders snapshot expects two explicit
+definitions, two direct extractor calls and provider entries, six factory call
+sites, and ten operation associations; all 16 scored operations remain auth
+`unknown`. The prepared lock pins `@nestjs/passport` 11.0.5 and
+`passport-jwt` 4.0.1. The relevant upstream implementation is pinned at
+[`PassportStrategy` 11.0.5](https://github.com/nestjs/passport/blob/11.0.5/lib/passport/passport.strategy.ts)
+and [`ExtractJwt` v4.0.1](https://github.com/mikenicholson/passport-jwt/blob/v4.0.1/lib/extract_jwt.js).
+
 The Source version metadata is AST evidence; URI mode and global prefix are
 explicit assumptions. Text/JSON/SARIF/Summary and the dev CI record keep these
 distinct from project and auth-config digests and from the transformed comparison

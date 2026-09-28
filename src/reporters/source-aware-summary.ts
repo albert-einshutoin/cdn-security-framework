@@ -61,6 +61,7 @@ function linesFor(bundle: SourceAwareOutputBundle, top: number): string[] {
       : `| ${name} | ${comparison?.status ?? error?.comparisons[name] ?? 'not evaluated'} | - | - | - | ${comparison && 'code' in comparison ? comparison.code : error?.code ?? '-'} |`);
   }
   const passport = bundle.metadata.passportFactoryObservation;
+  const strategy = bundle.metadata.passportStrategyObservation;
   lines.push('', '## Passport direct factory observation', '');
   if (!passport) lines.push('Source factory observation not available.');
   else {
@@ -76,6 +77,22 @@ function linesFor(bundle: SourceAwareOutputBundle, top: number): string[] {
       lines.push(`- operation ${cell(item.method)} ${cell(item.comparisonPath)}: ${cell(item.callSiteId)}; auth ${item.authMode}`);
     }
     lines.push(`Call sites omitted: ${passport.totalCallSites - Math.min(passport.callSites.length, top)}; associations omitted: ${passport.totalAssociations - Math.min(passport.associations.length, top)}.`);
+  }
+  lines.push('', '## Passport static strategy links', '');
+  if (!strategy) lines.push('Source strategy linkage not available.');
+  else {
+    lines.push(`Definitions: ${strategy.totalDefinitions}; direct provider entries: ${strategy.totalProviders}; call-site matches: ${strategy.totalMatches}; definitions with unverified names: ${strategy.incompleteDefinitionNames}; SHA-256 ${strategy.digest}.`,
+      'Extractor and provider entries describe static syntax. Runtime registration, reachability, authentication kind, and enforcement are unverified.');
+    for (const match of strategy.matches.slice(0, top)) {
+      lines.push(`- ${cell(match.strategy ?? 'unmatchable')}: ${match.status}${match.reason ? ` (${match.reason})` : ''}; candidates ${match.totalCandidates}; call ${cell(match.callSiteId)}`);
+    }
+    for (const definition of strategy.definitions.slice(0, top)) {
+      lines.push(`- ${cell(definition.strategy)}: ${cell(definition.className)} at ${cell(definition.sourceUri)}:${definition.line}; base ${definition.baseStatus}; extractor ${definition.extractor.status}`);
+    }
+    for (const provider of strategy.providers.slice(0, top)) {
+      lines.push(`- provider ${cell(provider.moduleClass)} at ${cell(provider.sourceUri)}:${provider.line} for ${cell(provider.definitionId)}`);
+    }
+    lines.push(`Definitions omitted: ${strategy.totalDefinitions - Math.min(strategy.definitions.length, top)}; providers omitted: ${strategy.totalProviders - Math.min(strategy.providers.length, top)}; matches omitted: ${strategy.totalMatches - Math.min(strategy.matches.length, top)}.`);
   }
   lines.push('', '## Overall findings', '', '| Kind | Count |', '| --- | ---: |',
     `| Unique | ${final?.summary.unique ?? 'not evaluated'} |`,

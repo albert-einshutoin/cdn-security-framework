@@ -25,6 +25,7 @@ import {
   type PassportFactoryOperation,
   type PassportFactoryReason,
 } from '../../contract/passport-factory-observation';
+import { linkPassportStrategies, type PassportStrategyObservation } from '../../contract/passport-strategy-observation';
 import {
   SourceAnalyzerContractError,
   runSourceAnalyzer,
@@ -66,6 +67,7 @@ import {
   type NestJsAuthConfig,
 } from './auth-config';
 import { resolveStaticStrings } from './static-string-resolver';
+import { createPassportStrategyCollector } from './passport-strategy';
 
 export { validateNestJsAuthConfig } from './auth-config';
 
@@ -5420,6 +5422,7 @@ async function analyze(
   onInputPath?: (path: string) => void,
   onUriComparison?: (comparison: UriComparison) => void,
   onPassportObservation?: (observation: PassportFactoryObservation) => void,
+  onStrategyObservation?: (observation: PassportStrategyObservation) => void,
 ) {
   if (context.entrypoints.length !== 1) {
     throw new SourceAnalyzerContractError('SOURCE_ANALYZER_INPUT_INVALID');
@@ -5440,6 +5443,10 @@ async function analyze(
   const projectSources = new Set(loaded.sourceFiles.filter((sourceFile) => (
     !sourceFile.isDeclarationFile && !sourceFile.fileName.replaceAll('\\', '/').includes('/node_modules/')
   )));
+  const strategyCollector = onStrategyObservation ? createPassportStrategyCollector(
+    checker, projectSources, context.workspaceRoot, check,
+    Math.min(10_000, context.limits.maxAstNodes),
+  ) : undefined;
   type LocalFunction = ts.FunctionDeclaration | ts.ArrowFunction | ts.FunctionExpression;
   const localFunctions = new Map<ts.Symbol, { callable: LocalFunction; binding: ts.Identifier }>();
   const localFunctionSymbols = new WeakMap<LocalFunction, ts.Symbol>();
@@ -5799,6 +5806,7 @@ async function analyze(
     while (nodes.length > 0) {
       const node = nodes.pop()!;
       await checkpoint();
+      strategyCollector?.visit(node);
       if (ts.isCallExpression(node)
         && !staticallyUnreachable(node, checker, projectSources, check)
         && !isInsideNonThrowingCatch(node, checker, projectSources, check)
@@ -6245,8 +6253,15 @@ async function analyze(
     const observationDigest = `sha256:${createHash('sha256').update(JSON.stringify({
       observer, input: loaded.snapshotDigest, callSites, associations, operations: operationObservations,
     })).digest('hex')}`;
-    onPassportObservation({ observer, digest: observationDigest,
-      callSites, associations, operations: operationObservations });
+    const factoryObservation: PassportFactoryObservation = { observer, digest: observationDigest,
+      callSites, associations, operations: operationObservations };
+    onPassportObservation(factoryObservation);
+    if (onStrategyObservation && strategyCollector) {
+      const { definitions, providers, incompleteDefinitionNames } = strategyCollector.finish();
+      onStrategyObservation(linkPassportStrategies(
+        loaded.snapshotDigest, factoryObservation, definitions, providers, incompleteDefinitionNames,
+      ));
+    }
   }
   return {
     contract,
@@ -6301,17 +6316,20 @@ export async function runNestJsSourceAnalysisInternal(
   sourceVersioning?: 'uri',
 ): Promise<{ execution: SourceAnalysisExecution; snapshotDigest?: string; analyzer: string;
   configDigest: string; uriComparison?: UriComparison;
-  passportFactoryObservation?: PassportFactoryObservation }> {
+  passportFactoryObservation?: PassportFactoryObservation;
+  passportStrategyObservation?: PassportStrategyObservation }> {
   const plugin = createNestJsSourceAnalyzer(config);
   const authConfig = config === undefined ? EMPTY_NESTJS_AUTH_CONFIG : validateNestJsAuthConfig(config);
   let snapshotDigest: string | undefined;
   let uriComparison: UriComparison | undefined;
   let passportFactoryObservation: PassportFactoryObservation | undefined;
+  let passportStrategyObservation: PassportStrategyObservation | undefined;
   const execution = await runSourceAnalyzer({
     ...plugin,
     analyze: (runContext) => analyze(runContext, authConfig, (digest) => { snapshotDigest = digest; }, cache,
       onInputPath, sourceVersioning === 'uri' ? (comparison) => { uriComparison = comparison; } : undefined,
-      (observation) => { passportFactoryObservation = observation; }),
+      (observation) => { passportFactoryObservation = observation; },
+      (observation) => { passportStrategyObservation = observation; }),
   }, context);
   // Decorator arrays are membership sets and guard mappings are key lookups; input order is not execution identity.
   const canonicalConfig = {
@@ -6326,6 +6344,7 @@ export async function runNestJsSourceAnalysisInternal(
     ...(execution.status === 'success' && snapshotDigest ? { snapshotDigest } : {}),
     ...(execution.status === 'success' && uriComparison ? { uriComparison } : {}),
     ...(execution.status === 'success' && passportFactoryObservation ? { passportFactoryObservation } : {}),
+    ...(execution.status === 'success' && passportStrategyObservation ? { passportStrategyObservation } : {}),
     analyzer: `${plugin.id}@${plugin.version}`,
     configDigest: `sha256:${createHash('sha256').update(JSON.stringify(canonicalConfig)).digest('hex')}`,
   };

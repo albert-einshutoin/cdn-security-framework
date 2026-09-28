@@ -166,6 +166,41 @@ SHA-256は`3023e9b9e5e6ce99ab819946101ceb85643fda86c7018f5de698d3ad2b754116`で�
 Factoryは渡されたtypeをruntimeの`passport.authenticate`へ渡しますが、
 静的構文だけではstrategy登録を確認できません。
 
+### Passport strategyの静的照合
+
+dev observerは、完全なfactory呼出し一覧を、同じTypeScript projectで読んだ
+class宣言へ照合します。正例は明示的な安全な名前を持つ
+`class ... extends PassportStrategy(Strategy, 'jwt')`です。
+`PassportStrategy`は`@nestjs/passport`、`Strategy`は`passport-jwt`由来と
+確認します。named aliasと安定したnamespace importにも対応します。
+同名候補1件、複数、読んだproject内で未観測、名前や入力が不明で照合不能を
+区別します。基底が未確認の同名classも候補として残し、見かけ上の一意性を
+作りません。名前省略・動的nameがあれば、候補なしを完全な不在と扱いません。
+これらはSource内の静的事実で、runtimeの一意な登録先を証明しません。
+呼出し箇所、class宣言、extractor呼出し、provider項目、operation関連は
+別identityです。
+
+extractorはconstructorの一つの直接`super({ jwtFromRequest:
+ExtractJwt.fromAuthHeaderAsBearerToken() })`で、`ExtractJwt`の
+`passport-jwt`由来を確認できる場合だけ観測します。「Bearer header用
+extractor factoryの呼出しが引数に書かれている」という意味で、constructorの
+実行や認証成立を示しません。他のextractor、callback、spread、computed key、
+getter、重複key、条件付き・複数`super`は未確認です。真正な`@Module`の
+直接`providers`配列に解決済みclass symbolがあればprovider「宣言」として
+記録します。module graphの到達性やruntime登録は推測せず、動的providerや
+custom provider objectは対象外です。`secretOrKey`、設定値、token、
+`validate`本文をreportへ持ち込みません。
+
+Text・JSON・SARIF properties・Summary・dev CI記録は、全件数・省略件数と
+別の観測digestを持つ同じ安全な範囲限定表示です。静的extractor/providerを
+根拠に`auth.mode`、exposure、enforcement confidence、route/Finding判定を
+変更せず、auth alternativesへBearerを加えません。固定Brocoders snapshotは
+明示定義2件、直接extractorとprovider項目各2件、factory呼出し6件、
+operation関連10件を期待し、採点対象16操作の認証はすべて`unknown`です。
+prepared lockは`@nestjs/passport` 11.0.5と`passport-jwt` 4.0.1を固定します。
+参照実装は[`PassportStrategy` 11.0.5](https://github.com/nestjs/passport/blob/11.0.5/lib/passport/passport.strategy.ts)と
+[`ExtractJwt` v4.0.1](https://github.com/mikenicholson/passport-jwt/blob/v4.0.1/lib/extract_jwt.js)です。
+
 Sourceから抽出したversion metadataはAST根拠、URI方式とglobal prefixは明示
 前提として、project digest・認証設定digest・変換後contract digestと分けて
 Text/JSON/SARIF/Summaryおよびdev CI記録に示します。変換するのは

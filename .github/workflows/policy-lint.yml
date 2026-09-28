@@ -140,7 +140,8 @@ jobs:
       always() && github.event_name == 'workflow_dispatch' &&
       (github.ref == 'refs/heads/dev/2.1-source-aware' ||
       startsWith(github.ref, 'refs/heads/feat/source-aware-ci/') ||
-      startsWith(github.ref, 'refs/heads/feat/source-passport-factory/'))
+      startsWith(github.ref, 'refs/heads/feat/source-passport-factory/') ||
+      startsWith(github.ref, 'refs/heads/feat/source-passport-strategy/'))
     needs: [package-producer, package-acceptance]
     runs-on: ubuntu-latest
     env:
@@ -229,7 +230,8 @@ jobs:
       (startsWith(github.ref, 'refs/heads/feat/source-aware-pilot/') ||
        startsWith(github.ref, 'refs/heads/feat/source-global-prefix/') ||
        startsWith(github.ref, 'refs/heads/feat/source-brocoders-pilot/') ||
-       startsWith(github.ref, 'refs/heads/feat/source-passport-factory/'))
+       startsWith(github.ref, 'refs/heads/feat/source-passport-factory/') ||
+       startsWith(github.ref, 'refs/heads/feat/source-passport-strategy/'))
     needs: [package-producer, package-acceptance]
     runs-on: ubuntu-latest
     env:
@@ -295,7 +297,8 @@ jobs:
     if: >-
       always() && github.event_name == 'workflow_dispatch' &&
       (startsWith(github.ref, 'refs/heads/feat/source-brocoders-pilot/') ||
-       startsWith(github.ref, 'refs/heads/feat/source-passport-factory/'))
+       startsWith(github.ref, 'refs/heads/feat/source-passport-factory/') ||
+       startsWith(github.ref, 'refs/heads/feat/source-passport-strategy/'))
     needs: [package-producer, package-acceptance]
     runs-on: ubuntu-latest
     timeout-minutes: 15

@@ -1935,9 +1935,22 @@ function isResolvedSymbolFrom(
       createRequire(source.getSourceFile().fileName).resolve(moduleName), moduleName,
     );
   } catch { return false; }
-  return Boolean(resolvedRoot && symbol.declarations?.some((declaration) => {
+  if (!resolvedRoot) return false;
+  if (symbol.declarations?.some((declaration) => {
     const targetRoot = packageRoot(declaration.getSourceFile().fileName, moduleName);
     return targetRoot !== undefined && fs.realpathSync(targetRoot) === fs.realpathSync(resolvedRoot);
+  })) return true;
+  if (moduleName !== 'passport-jwt') return false;
+  // passport-jwt has runtime JS and separate DefinitelyTyped declarations.
+  // Require both packages to resolve from this source file before trusting the type symbol.
+  let typesRoot: string | undefined;
+  try {
+    typesRoot = packageRoot(createRequire(source.getSourceFile().fileName)
+      .resolve('@types/passport-jwt/package.json'), '@types/passport-jwt');
+  } catch { return false; }
+  return Boolean(typesRoot && symbol.declarations?.some((declaration) => {
+    const targetRoot = packageRoot(declaration.getSourceFile().fileName, '@types/passport-jwt');
+    return targetRoot !== undefined && fs.realpathSync(targetRoot) === fs.realpathSync(typesRoot);
   }));
 }
 
