@@ -448,8 +448,14 @@ async function evaluate(candidate, dependencies, workRoot, output) {
       assert.equal(api.exitCode, record.analysis.exitCode);
       assert.equal(api.metadata.passportStrategyObservation?.totalDefinitions, 2);
       assert.equal(api.metadata.passportStrategyObservation?.totalProviders, 2);
-      assert.equal(api.metadata.passportFactoryObservation?.totalCallSites, 6);
-      assert.equal(api.metadata.passportFactoryObservation?.totalAssociations, 10);
+      const apiPassport = api.metadata.passportFactoryObservation;
+      assert.equal(apiPassport?.totalCallSites, routeEvidence.passport.callSites.length);
+      assert.equal(apiPassport?.totalAssociations, routeEvidence.passport.associations.length);
+      assert.equal(apiPassport?.omittedAssociations, 0);
+      const scored = new Set(expected.operations.map(op => `${op.method} ${op.uriApiPrefixPath}`));
+      const scoped = apiPassport.associations.filter(item => scored.has(`${item.method} ${item.comparisonPath}`));
+      assert.equal(scoped.length, passport.operationAssociations);
+      assert.equal(new Set(scoped.map(item => item.callSiteId)).size, passport.callSites);
       assert.equal(JSON.stringify(api).includes(workspace), false, 'PILOT_API_PATH_LEAK');
     }
     runDriver(installed, 'publish', [recordPath, candidate, stage], env);
