@@ -226,6 +226,26 @@ test('keeps all Findings beyond the CLI preview limit', async () => {
   expect(preview.findings.active.length).toBeLessThan(api.findings.length);
 });
 
+test('returns complete Findings at the supported OpenAPI operation limit', async () => {
+  const root = workspace();
+  const paths = Object.fromEntries(Array.from({ length: 2_000 }, (_, i) => [
+    `/route-${i}`, { post: { responses: { '200': { description: 'OK' } } } },
+  ]));
+  fs.writeFileSync(path.join(root, 'openapi.yaml'), JSON.stringify({
+    openapi: '3.0.3', info: { title: 'Synthetic', version: '1.0.0' }, paths,
+  }));
+  const api = await analyzeSourceDiff(options(root));
+  expect(api.kind).toBe('report');
+  if (api.kind !== 'report') return;
+  const command = cli(root);
+  expect(command.status).toBe(0);
+  const preview = JSON.parse(command.stdout);
+  expect(api.summary).toEqual(preview.summary);
+  expect(api.summary.unique).toBeGreaterThan(2_000);
+  expect(api.findings.length + api.suppressedFindings.length).toBe(api.summary.unique);
+  expect(preview.omittedFindings).toBeGreaterThan(0);
+});
+
 test('returns a failed or partial report with independent comparisons for input-stage failures', async () => {
   const root = sourceWorkspace();
   const missingOpenapi = await analyzeSourceDiff({ ...options(root, true), openapiPath: 'missing.yaml' });

@@ -127,10 +127,8 @@ function error(code: string, exitCode: 2 | 3): SourceDiffError {
 function safeResult(value: unknown, workspaceRoot: string): boolean {
   const pending: { value: unknown; key: string }[] = [{ value, key: '' }];
   const seen = new Set<object>();
-  let visits = 0;
   while (pending.length) {
     const { value: current, key } = pending.pop()!;
-    if (++visits > 100_000) return false;
     if (typeof current === 'string') {
       if (workspaceRoot && current.includes(workspaceRoot)) return false;
       let decoded = current;
