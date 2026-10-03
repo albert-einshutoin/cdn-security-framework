@@ -9,6 +9,20 @@ const prepare = vi.mocked(prepareSourceDiff);
 const options = { workspaceRoot: '/synthetic-workspace', openapiPath: 'openapi.yaml',
   policyPath: 'policy.yml', target: 'aws' as const, currentDate: '2026-09-28', failOn: 'never' as const };
 
+test('rejects invalid Source before preparing or reading any input', async () => {
+  prepare.mockClear();
+  let invoked = false;
+  const accessor = Object.defineProperty({}, 'tsconfigPath', { get() { invoked = true; return 'tsconfig.json'; } });
+  const proxy = new Proxy({}, { ownKeys() { invoked = true; return []; } });
+  for (const source of [{}, { tsconfigPath: undefined }, { tsconfigPath: null }, { tsconfigPath: '' }, accessor, proxy]) {
+    expect(await analyzeSourceDiff({ ...options, source } as never)).toMatchObject({
+      kind: 'error', code: 'SOURCE_DIFF_ARGUMENT_INVALID', exitCode: 2,
+    });
+  }
+  expect(prepare).not.toHaveBeenCalled();
+  expect(invoked).toBe(false);
+});
+
 test('preserves fixed input and finalizer diagnostics as errors without raw messages', async () => {
   prepare.mockResolvedValueOnce({ ok: false, code: 'SOURCE_DIFF_EXCEPTIONS_INVALID', exitCode: 2,
     message: 'secret from input' });

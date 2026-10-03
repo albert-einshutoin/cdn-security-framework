@@ -111,6 +111,7 @@ function validatedOptions(value: unknown): SourceDiffOptions {
   }
   if (options.source !== undefined) {
     const source = dataObject(options.source, SOURCE_KEYS, ['tsconfigPath']);
+    if (typeof source.tsconfigPath !== 'string' || source.tsconfigPath === '') throw new Error('invalid options');
     for (const key of SOURCE_KEYS) {
       if (source[key] !== undefined && typeof source[key] !== 'string') throw new Error('invalid options');
     }

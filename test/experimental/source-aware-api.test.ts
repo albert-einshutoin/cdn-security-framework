@@ -137,6 +137,21 @@ test('rejects unknown fields and accessors without evaluating them', async () =>
   });
 });
 
+test('A04 distinguishes omitted Source from invalid explicit Source options', async () => {
+  const root = workspace();
+  const omitted = await analyzeSourceDiff(options(root));
+  expect(omitted).toMatchObject({ kind: 'report', stages: { implemented: { status: 'omitted' } } });
+  expect(await analyzeSourceDiff({ ...options(root), source: undefined })).toEqual(omitted);
+  for (const source of [{}, { tsconfigPath: undefined }, { tsconfigPath: null }, { tsconfigPath: '' }]) {
+    expect(await analyzeSourceDiff({ ...options(root), source } as never)).toMatchObject({
+      kind: 'error', code: 'SOURCE_DIFF_ARGUMENT_INVALID', exitCode: 2,
+    });
+  }
+  const requested = await analyzeSourceDiff(options(root, true));
+  expect(requested.kind).toBe('report');
+  if (requested.kind === 'report') expect(requested.stages.implemented.status).not.toBe('omitted');
+});
+
 test('matches a separate CLI run for Source stages, findings, threshold and exit data', async () => {
   const root = sourceWorkspace();
   const input = { ...options(root, true), failOn: 'warning' as const };

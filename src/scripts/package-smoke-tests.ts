@@ -470,6 +470,15 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer: str
             target: 'aws', currentDate: '2026-09-25', failOn: 'never', source: { tsconfigPath: 'tsconfig.json' } };
           const apiResult = await sourceApi.analyzeSourceDiff(apiOptions);
           assert.equal(apiResult.kind, 'report');
+          for (const source of [{}, { tsconfigPath: undefined }, { tsconfigPath: null }, { tsconfigPath: '' }]) {
+            assert.deepEqual(await sourceApi.analyzeSourceDiff({ ...apiOptions, source }), {
+              kind: 'error', contract: 'experimental-source-aware@1', code: 'SOURCE_DIFF_ARGUMENT_INVALID',
+              message: 'Source-aware input is invalid.', exitCode: 2,
+            });
+          }
+          const omittedApi = await sourceApi.analyzeSourceDiff({ ...apiOptions, source: undefined });
+          assert.equal(omittedApi.kind, 'report');
+          assert.equal(omittedApi.stages.implemented.status, 'omitted');
           assert.deepEqual(apiResult.summary, bundle.finalized.summary);
           assert.deepEqual(apiResult.stages, bundle.finalized.stages);
           assert.deepEqual(apiResult.comparisons, bundle.finalized.comparisons);
