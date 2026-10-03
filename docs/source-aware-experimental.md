@@ -1,5 +1,67 @@
 # Experimental Source-aware CLI (dev branch only)
 
+## Programmatic API in the dev candidate
+
+The dev candidate also exposes the **unpublished Experimental** subpath
+`cdn-security-framework/experimental/source-aware`. It has one runtime export,
+`analyzeSourceDiff(options): Promise<SourceDiffResult>`. Use the same verified
+candidate tarball and Node.js >=20.17.0 as the CLI. The package is CommonJS;
+`require(...)` and Node ESM named `import { analyzeSourceDiff } from ...` both
+resolve this one implementation. This is an additive dev package export, not a
+published 2.1 API or a stable saved report schema.
+
+```js
+// example.mjs
+import { analyzeSourceDiff } from 'cdn-security-framework/experimental/source-aware';
+const result = await analyzeSourceDiff({
+  workspaceRoot: '/absolute/path/to/workspace',
+  openapiPath: 'openapi.yaml', policyPath: 'policy.yml',
+  target: 'aws', currentDate: '2026-09-28', failOn: 'warning',
+  source: { tsconfigPath: 'tsconfig.json', authConfigPath: 'security-analyzer.yml',
+    globalPrefix: '/api', versioning: 'uri' },
+});
+if (result.kind === 'error') throw new Error(result.code);
+console.log(result.analysis.status, result.exitCode, result.findings);
+```
+
+The example caller prints its own result; the API itself does not print, change
+the caller's process, save a report, or post anything. Paths are resolved within
+`workspaceRoot`; optional `environment` and `exceptionsPath` are top-level
+options. The mapping to the CLI is:
+
+| API option | CLI option |
+| --- | --- |
+| `workspaceRoot`, `openapiPath`, `policyPath` | `--workspace-root`, `--openapi`, `--policy` |
+| `target`, `currentDate`, `failOn` | `--target`, `--current-date`, `--fail-on` |
+| `environment`, `exceptionsPath` | `--environment`, `--exceptions` |
+| `source.tsconfigPath`, `source.authConfigPath` | `--source`, `--source-auth-config` |
+| `source.globalPrefix`, `source.versioning` | `--source-global-prefix`, `--source-versioning uri` |
+
+`source` is optional. Without it, the implemented stage is *omitted* and no
+Source scan runs. Explicitly invalid settings, unknown fields, accessors, and
+Proxy inputs return a fixed diagnostic; they do not fall back to defaults.
+`out`, `format`, callbacks, and strategy mappings are not API options.
+
+The result has `contract: 'experimental-source-aware@1'` and a discriminant:
+`kind: 'report'` contains the finalized stages, comparisons, complete active
+and suppressed Findings, governance diagnostics, comparison memberships,
+exception IDs, threshold, analysis state, safe metadata, and an `exitCode` in
+`0|1|2|3`; `kind: 'error'` contains a fixed code, safe message, and exitCode
+`2|3` when no valid result can be built. A report may be partial or failed and
+can carry threshold exit `1` or input/internal exit `2|3`. The exit code is a
+CLI compatible recommendation **as data**, never a process exit. The Finding
+arrays are complete within the existing analysis bounds; Passport and route
+metadata are bounded previews with `total` and `omitted` counts. The metadata
+preview limit does not truncate Findings, and complete Findings do not imply
+complete analysis. Call results are independent objects.
+
+This reads only the explicit local input files under existing limits. It does
+not run Source/config/decorators/Guards, add a shared cache, provide an atomic
+snapshot or hard deadline, save files, deploy, or send data. Static Passport
+observations do not establish runtime strategy registration or authentication
+enforcement. A Node version below the package engine requirement raises the
+existing catchable `ERR_CSF_UNSUPPORTED_NODE` on import.
+
 `cdn-security contract source-diff` is an **unpublished Experimental** entrypoint in
 the `dev/2.1-source-aware` candidate package. It is not part of published 1.4.0,
 the 2.0 release candidate, or a completed standard 2.1 workflow. Use a reviewed

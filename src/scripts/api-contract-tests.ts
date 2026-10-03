@@ -67,6 +67,7 @@ test('package metadata exposes typed root api and bounded exports', () => {
     './contract',
     './contract/security-ir',
     './emitter',
+    './experimental/source-aware',
     './openapi',
     './parser',
     './recommendation',
@@ -94,6 +95,8 @@ test('package metadata exposes typed root api and bounded exports', () => {
   assert.strictEqual(pkg.exports['./recommendation'].require, './recommendation/index.js');
   assert.strictEqual(pkg.exports['./source-analysis'].require, './source-analysis/index.js');
   assert.strictEqual(pkg.exports['./source/nestjs'].require, './source/nestjs/index.js');
+  assert.strictEqual(pkg.exports['./experimental/source-aware'].types, './experimental/source-aware.d.ts');
+  assert.strictEqual(pkg.exports['./experimental/source-aware'].require, './experimental/source-aware.js');
   assert.strictEqual(
     pkg.exports['./schemas/finding-exceptions-v1.schema.json'],
     './schemas/finding-exceptions-v1.schema.json',

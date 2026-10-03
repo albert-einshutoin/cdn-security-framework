@@ -111,6 +111,15 @@
       "exports": ["EMPTY_NESTJS_AUTH_CONFIG", "NESTJS_AUTH_KINDS", "createNestJsSourceAnalyzer", "nestJsSourceAnalyzer", "validateNestJsAuthConfig"],
       "limit": "programmatic/static only; no app execution or enforcement proof"
     },
+    "./experimental/source-aware": {
+      "status": "experimental",
+      "release": "additive",
+      "require": "./experimental/source-aware.js",
+      "default": "./experimental/source-aware.js",
+      "types": "./experimental/source-aware.d.ts",
+      "exports": ["analyzeSourceDiff"],
+      "limit": "dev-only typed Source-aware execution; no stable wire schema or runtime enforcement proof"
+    },
     "./bin/cli": {
       "status": "stable",
       "release": "existing",
@@ -194,6 +203,8 @@
       "contract/source-aware-workspace.js",
       "contract/source-global-prefix.d.ts",
       "contract/source-global-prefix.js",
+      "experimental/source-aware.d.ts",
+      "experimental/source-aware.js",
       "reporters/source-aware-summary.d.ts",
       "reporters/source-aware-summary.js",
       "schemas/nestjs-source-analysis-options.schema.json",
