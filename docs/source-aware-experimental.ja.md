@@ -1,5 +1,62 @@
 # Experimental Source-aware CLI（devブランチ限定）
 
+## dev候補のProgrammatic API
+
+dev候補は未公開Experimental専用subpath
+`cdn-security-framework/experimental/source-aware`も追加します。runtime exportは
+`analyzeSourceDiff(options): Promise<SourceDiffResult>`の1関数です。CLIと同じ
+照合済み候補tarballとNode.js >=20.17.0を使います。packageはCommonJSで、
+`require(...)`とNode ESMの名前付き`import`は同じ実装を参照します。
+dev packageへの追加入口であり、公開済み2.1 APIや永続report schemaではありません。
+
+```js
+// example.mjs
+import { analyzeSourceDiff } from 'cdn-security-framework/experimental/source-aware';
+const result = await analyzeSourceDiff({
+  workspaceRoot: '/absolute/path/to/workspace',
+  openapiPath: 'openapi.yaml', policyPath: 'policy.yml',
+  target: 'aws', currentDate: '2026-09-28', failOn: 'warning',
+  source: { tsconfigPath: 'tsconfig.json', authConfigPath: 'security-analyzer.yml',
+    globalPrefix: '/api', versioning: 'uri' },
+});
+if (result.kind === 'error') throw new Error(result.code);
+console.log(result.analysis.status, result.exitCode, result.findings);
+```
+
+この`console.log`は呼出元の例であり、API自身は出力・process変更・report保存・
+投稿をしません。相対pathは`workspaceRoot`基準です。任意の`environment`と
+`exceptionsPath`はtop-level optionです。CLIとの対応は次のとおりです。
+
+| API option | CLI option |
+| --- | --- |
+| `workspaceRoot`, `openapiPath`, `policyPath` | `--workspace-root`, `--openapi`, `--policy` |
+| `target`, `currentDate`, `failOn` | `--target`, `--current-date`, `--fail-on` |
+| `environment`, `exceptionsPath` | `--environment`, `--exceptions` |
+| `source.tsconfigPath`, `source.authConfigPath` | `--source`, `--source-auth-config` |
+| `source.globalPrefix`, `source.versioning` | `--source-global-prefix`, `--source-versioning uri` |
+
+`source`省略時はimplemented stageが*omitted*となり、Source走査を起動しません。
+明示した不正設定、未知field、accessor、Proxyは固定診断で拒否し、defaultへ
+戻しません。`out`、`format`、callback、strategy mappingは受け付けません。
+
+結果には`contract: 'experimental-source-aware@1'`を付けます。
+`kind: 'report'`は確定したstage・comparison、既存上限内のactive/suppressed
+Finding全件、governance診断、比較membership、適用例外ID、threshold、analysis状態、
+安全なmetadata、`0|1|2|3`の`exitCode`を含みます。`kind: 'error'`は有効な
+結果を構成できない場合の固定code・安全なmessage・exitCode `2|3`です。
+reportでもpartial/failed、threshold到達のexit `1`、入力/内部失敗のexit `2|3`
+になり得ます。exitCodeはCLI互換の**推奨判定データ**で、process終了操作では
+ありません。Finding配列は既存解析上限内の完全な集合ですが、Passportやrouteの
+付随metadataは`total`・`omitted`を持つ有限previewです。metadataの省略は
+Findingを切り詰めず、Finding全件があっても解析自体の完全性は意味しません。
+各呼出しの結果objectは独立します。
+
+既存上限で明示local入力ファイルだけを読みます。Source/config/decorator/Guardの
+実行、共有cache、原子的snapshotや共通hard deadline、ファイル保存、deploy、
+外部送信は行いません。Passportの静的観測はruntime strategy登録や認証強制の
+証明ではありません。対象外Nodeでのimportは既存のcatch可能な
+`ERR_CSF_UNSUPPORTED_NODE`を送出します。
+
 `cdn-security contract source-diff` は `dev/2.1-source-aware` 候補packageの
 **未公開Experimental**入口です。公開済み1.4.0、2.0のRC、完成した標準2.1 workflowには
 含まれません。記録されたCI runの候補tarballを使い、`npm latest`で置き換えません。

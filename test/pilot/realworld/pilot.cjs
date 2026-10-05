@@ -279,6 +279,10 @@ function runDriver(installed, commandName, args, env) {
 }
 async function evaluate(candidate, dependencies, workRoot, output) {
   const { metadata, installed } = candidateIdentity(candidate);
+  const installedRequire = require('node:module').createRequire(path.join(candidate, 'consumer/package.json'));
+  const apiSubpath = 'cdn-security-framework/experimental/source-aware';
+  assert.equal(installedRequire.resolve(apiSubpath), path.join(installed, 'experimental/source-aware.js'));
+  const { analyzeSourceDiff } = installedRequire(apiSubpath);
   assert.equal(fileHash(path.join(dependencies, 'package-lock.json')), preparedLockSha);
   assert.ok(fs.statSync(path.join(dependencies, 'node_modules/@nestjs/common')).isDirectory());
   fs.mkdirSync(workRoot, { recursive: false, mode: 0o700 });
@@ -349,6 +353,21 @@ async function evaluate(candidate, dependencies, workRoot, output) {
     assert.equal(record.analysis.exitCode, 0);
     assert.equal(record.analysis.status, 'partial');
     assert.equal(record.candidate.sha256, metadata.sha256);
+    if (scenario.name === 'baseline') {
+      const api = await analyzeSourceDiff({ workspaceRoot: workspace,
+        openapiPath: `evaluation/${scenario.name}/openapi.json`,
+        policyPath: `evaluation/${scenario.name}/policy.yml`, target: 'aws',
+        currentDate: '2026-09-25', failOn: 'never',
+        source: { tsconfigPath: 'source/tsconfig.json',
+          authConfigPath: `evaluation/${scenario.name}/auth.json` } });
+      assert.equal(api.kind, 'report', 'PILOT_API_NO_REPORT');
+      assert.equal(api.analysis.status, record.analysis.status);
+      assert.deepEqual(api.analysis.codes, record.analysis.codes);
+      assert.equal(api.exitCode, record.analysis.exitCode);
+      assert.equal(api.metadata.passportFactoryObservation?.totalCallSites ?? 0, 0);
+      assert.equal(api.metadata.passportStrategyObservation?.totalDefinitions ?? 0, 0);
+      assert.equal(JSON.stringify(api).includes(workspace), false, 'PILOT_API_PATH_LEAK');
+    }
     runDriver(installed, 'publish', [recordPath, candidate, stage], env);
     runDriver(installed, 'verify-stage', [recordPath, candidate, path.join(stage, 'delivery.json')], env);
     const delivery = JSON.parse(fs.readFileSync(path.join(stage, 'delivery.json')));
