@@ -3,6 +3,7 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import crypto from 'node:crypto';
+import { load } from 'js-yaml';
 import { loadApproval, selectApproval, verifyBinding, verifyReleaseDiff, verifyPublishTarget, verifyH01Evidence } from './release-binding';
 import { verifyTarball } from './single-pack';
 
@@ -102,6 +103,16 @@ for (const [label, paths, pkg, lock] of [
 }
 verifyPublishTarget(finalPackage, finalPackage, {}, 'https://registry.npmjs.org/');
 const workflow = fs.readFileSync('.github/workflows/release-npm.yml', 'utf8');
+const releaseWorkflow = load(workflow) as {
+  permissions: Record<string, string>;
+  jobs: { publish: { permissions?: Record<string, string> } };
+};
+// Job permissions replace workflow permissions; the verifier and artifact download need these reads.
+const publishPermissions = releaseWorkflow.jobs.publish.permissions ?? releaseWorkflow.permissions;
+for (const scope of ['contents', 'actions', 'issues']) {
+  assert.equal(publishPermissions[scope], 'read', `release evidence requires ${scope}: read`);
+}
+assert.equal(publishPermissions['id-token'], 'write', 'npm provenance requires id-token: write');
 for (const command of ['npm view', 'npm publish', 'npm pack', 'npm install --no-save', 'npm audit signatures']) {
   const line = workflow.split('\n').find((entry) => !entry.trim().startsWith('#') && entry.includes(command));
   assert.ok(line?.includes('--registry=https://registry.npmjs.org/'), `release command has no pinned registry: ${command}`);

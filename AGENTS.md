@@ -8,6 +8,7 @@ TypeScript under `src/` is authoritative; do not edit generated JavaScript.
 | Complete validation, independent of impact planner | `npm run test:ci` |
 | PR impact plan / execution | `npm run impact:analyze -- --base <base> --head <head> --output <analysis>` / `npm run impact:run -- --analysis <analysis> --output <report>` |
 | Package artifact gate tests | `node scripts/single-pack-unit-tests.js` after build |
+| Release approval, workflow permissions and artifact binding checks | `node scripts/release-binding-unit-tests.js` after build; does not publish |
 | Single-pack producer / consumer / aggregate | `node scripts/single-pack.js produce <artifact-dir>` / `consume <artifact-dir> <row> <result>` / `aggregate <artifact-dir> <results-dir> <summary>` |
 
 Single-pack commands require the fixed `CSF_SOURCE`, `GITHUB_RUN_ID`, and `GITHUB_RUN_ATTEMPT`. Consumers and aggregate also require the producer's `CSF_TGZ_SHA256`. The aggregate requires successful producer/consumer job states. See the EN/JA Node support sections for evidence and offline preparation. Existing parent approval and safety rules continue to apply.

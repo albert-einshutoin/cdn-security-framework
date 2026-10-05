@@ -69,6 +69,21 @@ If you see an attestation mismatch, a missing attestation on a release tag, or a
 
 ## For Maintainers
 
+### Prepare the 2.0 candidate before publication
+
+The release gates are [#890 (human onboarding)](https://github.com/albert-einshutoin/cdn-security-framework/issues/890), [#1024 (technical audit)](https://github.com/albert-einshutoin/cdn-security-framework/issues/1024), [#542 (status review)](https://github.com/albert-einshutoin/cdn-security-framework/issues/542), [#895 (GO decision)](https://github.com/albert-einshutoin/cdn-security-framework/issues/895), and [#571 (versioned release)](https://github.com/albert-einshutoin/cdn-security-framework/issues/571).
+
+1. Finish dependency, behavior, workflow and documentation repairs before fixing the RC identity. Record the source/tree SHA, successful main push run/attempt, candidate tgz SHA-256 and consumer lock SHA-256. Verify the downloaded bytes; the Actions ZIP digest is a different value.
+2. Hand that candidate and the matching [EN](https://github.com/albert-einshutoin/cdn-security-framework/blob/main/test/onboarding/novice-evaluation.md)/[JA](https://github.com/albert-einshutoin/cdn-security-framework/blob/main/test/onboarding/novice-evaluation.ja.md) sheets from the repository to real evaluators. Keep timing and Finding comprehension unassessed until the human sessions occur. A successful automated journey is separate evidence.
+3. Configure the `npm-release` environment with required reviewers and `prevent_self_review: true`. The person starting the release cannot approve their own job. Confirm an eligible reviewer before publication. The workflow needs `contents: read`, `actions: read` and `issues: read` to inspect approval/environment/run records and download the approved artifact; `id-token: write` supplies provenance. Local administrator access does not prove the workflow token has those permissions.
+4. After the required assessments and RC GO, prepare #571 with only the package/root-lock version and EN/JA Changelog changes. Dependency or behavior changes require a new RC and impact assessment. Bind the final successful main push run and tarball to the reviewed RC; a feature-branch or PR run cannot replace these main records.
+5. The owner records the actual H01 assessment on #890 (`CSF_H01_ASSESSED_V1`) and the identity-bound decision on #895 (`CSF_RELEASE_APPROVAL_V1`). The verifier checks RC and final identities, final-diff assessment, required jobs, the protected environment and the exact four-file release diff. Preparation, an empty form, or a draft decision is not GO.
+6. Keep the pre-migration v1 Policy and the [documented isolated 1.4.0 rollback](./quickstart.md) available. Before publication, stop without creating a tag if any gate is incomplete. Publication and registry verification are separate from this preparation.
+
+Check the nonpublishing gate locally with `npm run build:ts && node scripts/release-binding-unit-tests.js`. Its synthetic acceptance and rejection cases do not prove human approval or live environment configuration. Do not start `release-npm.yml` merely to test the gate: it contains the actual publish step.
+
+### Authorized publication
+
 Release publishing happens in `.github/workflows/release-npm.yml`:
 
 1. `npm publish --provenance --access public` — signs the tarball with the workflow's OIDC identity
