@@ -104,6 +104,7 @@ const cases: RuntimeCase[] = [
   ['GET //admin no token (slash collapse)', buildEvent('GET', '//admin', { 'user-agent': 'Mozilla' }), 401],
   ['GET /Admin no token (case)', buildEvent('GET', '/Admin', { 'user-agent': 'Mozilla' }), 401],
   ['GET /%61dmin no token (percent decode)', buildEvent('GET', '/%61dmin', { 'user-agent': 'Mozilla' }), 401],
+  ['GET /%2561dmin no token (double-encoded a)', buildEvent('GET', '/%2561dmin', { 'user-agent': 'Mozilla' }), 401],
   ['GET /admin;x=1 no token (matrix param)', buildEvent('GET', '/admin;x=1', { 'user-agent': 'Mozilla' }), 401],
   ['GET /admin%2fusers (ambiguous encoding)', buildEvent('GET', '/admin%2fusers', { 'user-agent': 'Mozilla' }), 400],
   ['GET /./admin no token (dot segment)', buildEvent('GET', '/./admin', { 'user-agent': 'Mozilla' }), 401],

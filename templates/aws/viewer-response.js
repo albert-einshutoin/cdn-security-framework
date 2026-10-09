@@ -60,13 +60,15 @@ function handler(event) {
   // Reporting-Endpoints (RFC: replaces Report-To). Verbatim string from policy.
   if (RESPONSE_CFG.reporting_endpoints) set(h, "Reporting-Endpoints", RESPONSE_CFG.reporting_endpoints);
 
-  // Mirror request-side matching: case-insensitive prefix compare so response
-  // cache protections cannot be skipped via /Admin vs /admin notation drift.
+  // Mirror request-side matching so response cache protections cannot drift
+  // from auth-gate decisions (honors normalize.path.case_insensitive).
   function pathMatchesPrefix(uri, prefix) {
     var left = uri || '/';
     var right = prefix || '';
-    left = left.toLowerCase();
-    right = right.toLowerCase();
+    if (RESPONSE_CFG.caseInsensitive !== false) {
+      left = left.toLowerCase();
+      right = right.toLowerCase();
+    }
     return left === right || left.indexOf(right + '/') === 0;
   }
 

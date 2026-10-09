@@ -265,6 +265,7 @@ routes:
   assert.strictEqual(await statusFor('//admin'), 401);
   assert.strictEqual(await statusFor('/Admin'), 401);
   assert.strictEqual(await statusFor('/%61dmin'), 401);
+  assert.strictEqual(await statusFor('/%2561dmin'), 401);
   assert.strictEqual(await statusFor('/admin;x=1'), 401);
   assert.strictEqual(await statusFor('/admin%2fusers'), 400);
   assert.strictEqual(await statusFor('/./admin'), 401);

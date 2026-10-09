@@ -409,7 +409,20 @@
   function canonicalizePath(uri) {
     var opts = CFG.normalizePath || {};
     var p = String(uri || '/').replace(/;[^/]*/g, '');
-    try { p = decodeURIComponent(p); } catch (_e) { return null; }
+    // Decode up to 3 times so double-encoded unreserved bytes (%2561 → %61 → a)
+    // cannot slip past auth matching while still looking different from the prefix.
+    var round;
+    for (round = 0; round < 3; round++) {
+      if (!/%[0-9A-Fa-f]{2}/.test(p)) break;
+      try {
+        var next = decodeURIComponent(p);
+        if (next === p) break;
+        p = next;
+      } catch (_e) {
+        return null;
+      }
+    }
+    if (/%[0-9A-Fa-f]{2}/.test(p)) return null;
     if (p.charAt(0) !== '/') p = '/' + p;
     if (opts.collapseSlashes !== false) p = p.replace(/\/+/g, '/');
     if (opts.removeDotSegments !== false) {

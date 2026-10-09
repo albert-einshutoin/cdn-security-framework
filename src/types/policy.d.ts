@@ -548,6 +548,10 @@ export interface CDNSecurityFrameworkPolicy {
        */
       rate_limit?: number;
       /**
+       * Cloudflare rate-limit mitigation_timeout in seconds. Defaults to 10 (Free-plan maximum). Pro+ plans may raise this (for example 600).
+       */
+      rate_limit_mitigation_timeout?: number;
+      /**
        * Fine-grained rate-limit rules. Each entry renders as one `aws_wafv2_rule_group` rule with its own `rate_based_statement` and optional `scope_down_statement` so you can scope by URI, auth state, or header keys without hand-editing Terraform. `limit` is per 5-minute window (AWS WAFv2 accepts 100..2,000,000,000). `aggregate_key_type` defaults to `IP`; `FORWARDED_IP` follows the `X-Forwarded-For` chain and `CUSTOM_KEYS` lets you pass a raw `custom_keys` block. `scope_down_statement` is forwarded verbatim as a raw JSON object — schema-free because AWS WAFv2 ships dozens of statement kinds; lint only checks the shell.
        */
       rate_limit_rules?: {

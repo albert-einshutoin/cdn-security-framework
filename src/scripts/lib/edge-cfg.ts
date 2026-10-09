@@ -228,6 +228,7 @@ export function buildResponseCfgBase(
   const { adminPathPrefixes, adminCacheControl } = findAdminCacheRoute(policy.routes || []);
   const authProtectedPrefixes = collectAuthProtectedPrefixes(authGates);
   const forceVaryAuth = resHeaders.force_vary_auth !== false;
+  const requestNormalizePath = ((((policy as any).request || {}).normalize || {}).path || {}) as Record<string, unknown>;
 
   return {
     headers: {
@@ -249,6 +250,8 @@ export function buildResponseCfgBase(
     adminCacheControl,
     authProtectedPrefixes,
     forceVaryAuth,
+    // Keep response auth-path matching aligned with request.normalize.path.case_insensitive.
+    caseInsensitive: requestNormalizePath.case_insensitive !== false,
     clearSiteDataPaths: normalizeStringList(resHeaders.clear_site_data_paths, 'preserve', { trim: false }),
     clearSiteDataTypes: Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
       ? resHeaders.clear_site_data_types

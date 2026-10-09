@@ -451,6 +451,7 @@ function build(policy: any, options: any = {}) {
     adminCacheControl: responseBase.adminCacheControl,
     authProtectedPrefixes: responseBase.authProtectedPrefixes,
     forceVaryAuth: responseBase.forceVaryAuth,
+    caseInsensitive: responseBase.caseInsensitive,
     clearSiteDataPaths: responseBase.clearSiteDataPaths,
     clearSiteDataTypes: responseBase.clearSiteDataTypes,
     cors: responseBase.cors,
