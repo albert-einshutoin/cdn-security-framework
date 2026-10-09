@@ -45,6 +45,14 @@ dist/
 /examples/*/policy/
 !/examples/nestjs-contract/policy/
 !/examples/nestjs-contract/policy/security.yml
+!/examples/aws-cloudfront/policy/
+!/examples/aws-cloudfront/policy/security.yml
+!/examples/aws-cloudfront/policy/profiles/
+!/examples/aws-cloudfront/policy/profiles/balanced.yml
+!/examples/cloudflare/policy/
+!/examples/cloudflare/policy/security.yml
+!/examples/cloudflare/policy/profiles/
+!/examples/cloudflare/policy/profiles/balanced.yml
 /examples/*/node_modules/
 *.log
 .wrangler/
