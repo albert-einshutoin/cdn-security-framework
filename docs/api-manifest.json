@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "packageVersion": "1.4.0",
+  "packageVersion": "2.0.0-rc.0",
   "packageVersionSource": "package.json",
   "entrypoints": {
     ".": {
@@ -152,10 +152,14 @@
       "examples/aws-cloudfront/README.md",
       "examples/aws-cloudfront/package-lock.json",
       "examples/aws-cloudfront/package.json",
+      "examples/aws-cloudfront/policy/profiles/balanced.yml",
+      "examples/aws-cloudfront/policy/security.yml",
       "examples/cloudflare/README.ja.md",
       "examples/cloudflare/README.md",
       "examples/cloudflare/package-lock.json",
       "examples/cloudflare/package.json",
+      "examples/cloudflare/policy/profiles/balanced.yml",
+      "examples/cloudflare/policy/security.yml",
       "examples/github-actions/contract-diff.yml",
       "examples/github-actions/fixtures/openapi.yaml",
       "examples/github-actions/fixtures/policy.yml",
@@ -272,6 +276,7 @@
       "scripts/lib/policy-io.js",
       "scripts/lib/template-inject.js",
       "scripts/lib/value-normalize.js",
+      "scripts/lib/waf-hygiene.js",
       "scripts/lib/waf-rule-builder.js",
       "scripts/policy-lint.js",
       "templates/aws/origin-request.js",
@@ -348,6 +353,7 @@
       "scripts/lib/policy-io.d.ts",
       "scripts/lib/template-inject.d.ts",
       "scripts/lib/value-normalize.d.ts",
+      "scripts/lib/waf-hygiene.d.ts",
       "scripts/lib/waf-rule-builder.d.ts",
       "scripts/policy-lint.d.ts",
       "types/policy.d.ts",
