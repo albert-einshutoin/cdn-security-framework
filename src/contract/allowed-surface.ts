@@ -95,6 +95,8 @@ export interface AllowedDefaultsV1 {
   pathNormalization: {
     collapseSlashes: boolean;
     removeDotSegments: boolean;
+    caseInsensitive?: boolean;
+    rejectAmbiguousEncoding?: boolean;
     routeMatchPhase: 'normalized-path';
   };
   response: AllowedResponseDefaultsV1;

@@ -11,7 +11,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Breaking, unpublished candidate:** Policy schema 2 is canonical; v1 is accepted only by the explicit migration adapter. Migration defaults to preview, preserves configuration, requires manual decisions for difficulty 5/6 and unsupported AWS auth/nonce, and saves only with an original-byte backup. Package version remains 1.4.0 pending release GO. [Migration and rollback](docs/schema-migration.md).
+- **Breaking, unpublished candidate:** Policy schema 2 is canonical; v1 is accepted only by the explicit migration adapter. Migration defaults to preview, preserves configuration, requires manual decisions for difficulty 5/6 and unsupported AWS auth/nonce, and saves only with an original-byte backup. Package version is now `2.0.0-rc.0`. [Migration and rollback](docs/schema-migration.md).
+- Path normalization defaults are now secure-by-default (`collapse_slashes`, `remove_dot_segments`, case-insensitive auth matching, and ambiguous-encoding rejection). Explicit `false` still disables each option.
+- Cloudflare WAF approximation/unsupported mappings fail closed by default; pass `--allow-waf-approximation` for warn-only local exploration.
 
 ### Security
 
@@ -19,10 +21,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Bake Lambda@Edge origin-auth credentials at build time because Lambda@Edge does not support custom environment variables.
 - **Breaking:** Reject AWS `jwt` and `signed_url` builds because CloudFront cache hits skip their origin-request verifier. Readiness and capability/Allowed Surface reports now reflect this restriction. Cloudflare auth and AWS static/basic auth remain supported; see [migration guidance](docs/auth.md#aws-authentication-support-and-migration).
 - Reject unsupported AWS CSP nonces; Cloudflare now passes a cryptographic nonce to the origin before rendering and bounds response-DLP body reads.
+- Close auth-gate path-notation bypasses (`//admin`, `/Admin`, `/%61dmin`, matrix params, `/./admin`, encoded traversal) on AWS and Cloudflare; reject encoded slash/backslash (`%2f`/`%5c`) and dangerous double-encoding before auth matching.
+- Cloudflare rate-limit Terraform now includes required `cf.colo.id` and defaults `mitigation_timeout` to 10s (Free-plan safe).
+- Cloudflare JWT unknown-`kid` handling no longer deletes the JWKS cache before refresh; unknown kids are negatively cached to stop fetch amplification.
 
 ### Fixed
 
 - Ship `esbuild` to npm consumers, align Commander with Node 20 support, preserve template replacement tokens, generate `wrangler.toml`, and pin generated deployment tooling.
+- Atomic CloudFront Function writes: size-limit failures no longer leave unminified secret-bearing files in `dist/`.
+- Guided Cloudflare init no longer emits AWS-only `scope: REGIONAL` / hygiene lint noise; AWS BotControl hygiene warnings are scoped to AWS WAF only.
+- Legacy `(?i)\.{2}/` path patterns no longer expand to a bare `..` substring (false positive on names like `release-1..2.txt`).
+- `npm audit` high finding via `source-map-js` (devDependency chain) cleared for `test:ci`.
 
 ## [1.4.0] - 2026-06-07
 

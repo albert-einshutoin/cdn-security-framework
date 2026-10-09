@@ -106,8 +106,22 @@ export interface CDNSecurityFrameworkPolicy {
     normalize?: {
       drop_query_keys?: string[];
       path?: {
+        /**
+         * Collapse repeated slashes (// → /). Defaults to true when omitted.
+         */
         collapse_slashes?: boolean;
+        /**
+         * Resolve . and .. path segments (RFC 3986). Defaults to true when omitted.
+         */
         remove_dot_segments?: boolean;
+        /**
+         * Compare auth-gate and response auth prefixes case-insensitively. Defaults to true when omitted.
+         */
+        case_insensitive?: boolean;
+        /**
+         * Reject paths with encoded slash/backslash or double-encoded slash/backslash/dot (%2f, %5c, %252f, %255c, %252e). Defaults to true when omitted.
+         */
+        reject_ambiguous_encoding?: boolean;
       };
     };
     /**

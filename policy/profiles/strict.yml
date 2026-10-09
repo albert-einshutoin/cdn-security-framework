@@ -32,7 +32,7 @@ request:
     path_patterns:
       contains:
         - "/../"
-        - ".."
+        - "../"
         - "%2e%2e"
         - "%2E%2E"
       regex:

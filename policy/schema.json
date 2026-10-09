@@ -158,8 +158,22 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "collapse_slashes": { "type": "boolean" },
-                "remove_dot_segments": { "type": "boolean" }
+                "collapse_slashes": {
+                  "type": "boolean",
+                  "description": "Collapse repeated slashes (// → /). Defaults to true when omitted."
+                },
+                "remove_dot_segments": {
+                  "type": "boolean",
+                  "description": "Resolve . and .. path segments (RFC 3986). Defaults to true when omitted."
+                },
+                "case_insensitive": {
+                  "type": "boolean",
+                  "description": "Compare auth-gate and response auth prefixes case-insensitively. Defaults to true when omitted."
+                },
+                "reject_ambiguous_encoding": {
+                  "type": "boolean",
+                  "description": "Reject paths with encoded slash/backslash or double-encoded slash/backslash/dot (%2f, %5c, %252f, %255c, %252e). Defaults to true when omitted."
+                }
               }
             }
           }

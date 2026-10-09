@@ -14,6 +14,7 @@ const fs = require('fs');
 const path = require('path');
 const Ajv = require('ajv');
 const { validateAuthGates, parsePathPatterns } = require('./lib/compile-core');
+const { collectWafHygieneWarnings } = require('./lib/waf-hygiene');
 const {
   loadPolicyWithWarnings,
   reportPolicyWarnings,
@@ -122,27 +123,8 @@ function main(): void {
     errors.push('  - firewall.waf.fingerprint_action must be "block" or "count"');
   }
 
-  // Non-fatal warnings for production-grade WAF hygiene.
-  const warnings: string[] = [];
-  const mode = (policy && policy.defaults && policy.defaults.mode) || null;
-  const isEnforce = mode === 'enforce';
-  const hasWaf = policy && policy.firewall && policy.firewall.waf;
-  if (isEnforce && hasWaf) {
-    const managed = Array.isArray(waf.managed_rules) ? waf.managed_rules : [];
-    const hasCoreSignal = managed.some((r: string) =>
-      r === 'AWSManagedRulesBotControlRuleSet' ||
-      r === 'AWSManagedRulesATPRuleSet' ||
-      r === 'AWSManagedRulesIPReputationList' ||
-      r === 'AWSManagedRulesAnonymousIpList'
-    );
-    if (!hasCoreSignal) {
-      warnings.push('firewall.waf.managed_rules does not include any of BotControl / ATP / IPReputation / AnonymousIp. Consider adding at least IPReputation + AnonymousIp for production enforce mode.');
-    }
-    const loggingEnabled = waf.logging && waf.logging.enabled === true;
-    if (waf.scope === 'CLOUDFRONT' && !loggingEnabled) {
-      warnings.push('firewall.waf.logging is not enabled while scope=CLOUDFRONT. PCI-DSS / SOC2 require WAF log retention — set logging.enabled: true and supply destination_arn_env.');
-    }
-  }
+  // Non-fatal warnings for production-grade WAF hygiene (AWS scopes only).
+  const warnings: string[] = collectWafHygieneWarnings(policy);
 
   // origin.auth.custom_header env-var presence check (best-effort; env may be CI-only)
   const originAuth = policy && policy.origin && policy.origin.auth;

@@ -4,15 +4,15 @@
 
 This document is **generated** from `scripts/lib/cloudflare-waf-parity.js`. Do not edit by hand — run `node scripts/generate-parity-doc.js --write` after changing the metadata. The drift test in `scripts/check-drift.js` fails CI if this file falls out of sync.
 
-The dual-target story ("one YAML, both CloudFront and Cloudflare") depends on users knowing which parts are 1:1 equivalents, which are approximations, and which simply do not exist on Cloudflare. Silent degradation would undermine the whole value proposition — so the compiler emits stderr warnings for every non-equivalent entry, and `--fail-on-waf-approximation` promotes those to a non-zero exit for production CI.
+The dual-target story ("one YAML, both CloudFront and Cloudflare") depends on users knowing which parts are 1:1 equivalents, which are approximations, and which simply do not exist on Cloudflare. Silent degradation would undermine the whole value proposition — so the compiler emits stderr warnings for every non-equivalent entry and **fails closed by default**. Pass `--allow-waf-approximation` for warn-only local exploration. `--fail-on-waf-approximation` remains as an explicit alias of the default.
 
 ## Legend
 
 | Status | Meaning |
 | --- | --- |
 | `EQUIVALENT` | Cloudflare has a direct 1:1 resource. No warning. |
-| `APPROXIMATE` | Close but not identical. Compiler warns; `--fail-on-waf-approximation` exits non-zero. |
-| `UNSUPPORTED` | No reasonable Cloudflare mapping today. Rule emitted with `enabled: false`. Compiler warns; `--fail-on-waf-approximation` exits non-zero. |
+| `APPROXIMATE` | Close but not identical. Compiler warns and exits non-zero by default; `--allow-waf-approximation` keeps warn-only. |
+| `UNSUPPORTED` | No reasonable Cloudflare mapping today. Rule emitted with `enabled: false`. Compiler warns and exits non-zero by default; `--allow-waf-approximation` keeps warn-only. |
 
 ## AWS managed rule sets
 
@@ -122,10 +122,12 @@ AWS `rate_limit_rules[].scope_down_statement` is a structured AST. Cloudflare ra
 ## Production CI gate
 
 ```bash
-npx cdn-security build --target cloudflare --fail-on-waf-approximation
+npx cdn-security build --target cloudflare
+# warn-only local exploration:
+npx cdn-security build --target cloudflare --allow-waf-approximation
 ```
 
-Exits non-zero when any `APPROXIMATE` or `UNSUPPORTED` entry is touched by the compiled policy. Use this gate in `main`-branch release pipelines; keep the default (warn-only) for local feature-branch builds.
+Exits non-zero by default when any `APPROXIMATE` or `UNSUPPORTED` entry is touched by the compiled policy. Pass `--allow-waf-approximation` only when you intentionally accept the parity gaps.
 
 ## Updating this document
 

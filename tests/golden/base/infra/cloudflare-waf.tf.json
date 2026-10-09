@@ -48,11 +48,12 @@
             },
             "ratelimit": {
               "characteristics": [
+                "cf.colo.id",
                 "ip.src"
               ],
               "period": 300,
               "requests_per_period": 2000,
-              "mitigation_timeout": 600
+              "mitigation_timeout": 10
             }
           }
         ]

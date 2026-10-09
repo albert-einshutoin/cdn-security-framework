@@ -282,7 +282,12 @@ function runBuild(inputPolicyPath: string, outputRoot: string, env: NodeJS.Proce
   runNode([path.join(repoRoot, 'scripts', 'compile.js'), '--policy', inputPolicyPath, '--out-dir', outputRoot], env);
   runNode([path.join(repoRoot, 'scripts', 'compile-cloudflare.js'), '--policy', inputPolicyPath, '--out-dir', outputRoot], env);
   runNode([path.join(repoRoot, 'scripts', 'compile-infra.js'), '--policy', inputPolicyPath, '--out-dir', outputRoot], env);
-  runNode([path.join(repoRoot, 'scripts', 'compile-cloudflare-waf.js'), '--policy', inputPolicyPath, '--out-dir', outputRoot], env);
+  runNode([
+    path.join(repoRoot, 'scripts', 'compile-cloudflare-waf.js'),
+    '--policy', inputPolicyPath,
+    '--out-dir', outputRoot,
+    '--allow-waf-approximation',
+  ], env);
   return digestTree(outputRoot);
 }
 

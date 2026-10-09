@@ -60,11 +60,21 @@ function handler(event) {
   // Reporting-Endpoints (RFC: replaces Report-To). Verbatim string from policy.
   if (RESPONSE_CFG.reporting_endpoints) set(h, "Reporting-Endpoints", RESPONSE_CFG.reporting_endpoints);
 
+  // Mirror request-side matching: case-insensitive prefix compare so response
+  // cache protections cannot be skipped via /Admin vs /admin notation drift.
+  function pathMatchesPrefix(uri, prefix) {
+    var left = uri || '/';
+    var right = prefix || '';
+    left = left.toLowerCase();
+    right = right.toLowerCase();
+    return left === right || left.indexOf(right + '/') === 0;
+  }
+
   const uri = req.uri || "/";
-  const isAdminPath = RESPONSE_CFG.adminPathPrefixes.some(function (p) { return uri === p || uri.startsWith(p + "/"); });
+  const isAdminPath = RESPONSE_CFG.adminPathPrefixes.some(function (p) { return pathMatchesPrefix(uri, p); });
   // Union of auth-gate prefixes — broader than admin-only; catches jwt/basic/signed_url too.
   const isAuthPath = (RESPONSE_CFG.authProtectedPrefixes || []).some(function (p) {
-    return uri === p || uri.startsWith(p + "/");
+    return pathMatchesPrefix(uri, p);
   });
 
   // CSP: substitute per-response nonce into any `'nonce-PLACEHOLDER'` in policy strings.

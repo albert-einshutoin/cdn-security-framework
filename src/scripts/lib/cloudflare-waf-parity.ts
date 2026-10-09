@@ -11,10 +11,10 @@
  *   equivalent  — CF has a 1:1 resource. Compiler emits normally, no warning.
  *   approximate — CF has something close but not identical. Compiler emits
  *                 a stderr warning naming the rule, the CF target, and the
- *                 caveat. `--fail-on-waf-approximation` makes these fatal.
+ *                 caveat. Fatal by default; `--allow-waf-approximation` keeps warn-only.
  *   unsupported — CF has no reasonable mapping today. Compiler emits the
- *                 rule as `enabled: false` + stderr warning. Also gated
- *                 by `--fail-on-waf-approximation`.
+ *                 rule as `enabled: false` + stderr warning. Fatal by default;
+ *                 `--allow-waf-approximation` keeps warn-only.
  *
  * Every entry has a `lastVerified` date. The drift test lives in
  * scripts/check-drift.js — when entries change, the generated doc is

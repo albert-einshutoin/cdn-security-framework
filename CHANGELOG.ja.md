@@ -11,7 +11,9 @@
 
 ### Changed
 
-- **破壊的変更・未公開候補:** Policy schema2をcanonicalとし、v1は明示migration adapterだけで受理します。既定previewで設定を保持し、difficulty5/6・AWS未対応auth/nonceは手動判断を要求。保存時は原本bytesのbackupを必須にします。release GOまでpackage version1.4.0は維持。[移行・rollback](docs/schema-migration.ja.md)。
+- **破壊的変更・未公開候補:** Policy schema2をcanonicalとし、v1は明示migration adapterだけで受理します。既定previewで設定を保持し、difficulty5/6・AWS未対応auth/nonceは手動判断を要求。保存時は原本bytesのbackupを必須にします。package version は `2.0.0-rc.0`。[移行・rollback](docs/schema-migration.ja.md)。
+- パス正規化の既定を secure-by-default に変更（slash 圧縮・dot 解決・認証の大文字小文字無視・曖昧エンコード拒否）。明示的な `false` で無効化可能。
+- Cloudflare WAF の近似/未対応マッピングは既定で fail-closed。調査用途は `--allow-waf-approximation`。
 
 ### Security
 
@@ -19,10 +21,17 @@
 - Lambda@Edge がカスタム環境変数を使えないため、origin auth の credential を build 時に埋め込むよう修正。
 - **破壊的変更:** CloudFrontのcache hitではorigin-request認証が省略されるため、AWSの `jwt` / `signed_url` buildを拒否。readiness・capability・Allowed Surfaceにも制限を反映。Cloudflare認証とAWSのstatic/basic認証は引き続き対応。[移行手順](docs/auth.ja.md#awsの認証対応範囲と移行)を参照。
 - AWS の未対応 CSP nonce を拒否し、Cloudflare は暗号学的 nonce を origin 描画前に渡すとともに response DLP の本文読取量を制限。
+- 認証ゲートのパス表記ゆれ迂回（`//admin`、`/Admin`、`/%61dmin`、matrix、`/./admin` 等）を AWS/Cloudflare 双方で封鎖。`%2f`/`%5c` と危険な二重エンコードは認証前に 400。
+- Cloudflare rate-limit Terraform に必須の `cf.colo.id` を付与し、`mitigation_timeout` 既定を Free 向け 10 秒に変更。
+- Cloudflare JWT の未知 `kid` 処理で JWKS キャッシュを先消ししないよう変更し、kid-miss ネガティブキャッシュで再取得増幅を抑制。
 
 ### Fixed
 
 - npm package に `esbuild` を同梱し、Commander を Node 20 対応へ揃え、template replacement token を保持し、`wrangler.toml` を生成して deployment tool を固定。
+- CloudFront Function の atomic write: サイズ超過失敗時に未最小化の秘密入りファイルが `dist/` に残らないよう修正。
+- Cloudflare guided init が AWS 専用の `scope: REGIONAL` や hygiene lint を出さないよう修正。
+- レガシー `(?i)\.{2}/` が裸の `..` に展開され `release-1..2.txt` を誤検知する問題を修正。
+- `npm audit` の high（`source-map-js`）を解消し `test:ci` 先頭が通るように修正。
 
 ## [1.3.0] - 2026-05-01
 

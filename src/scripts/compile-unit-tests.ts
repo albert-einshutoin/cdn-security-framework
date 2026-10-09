@@ -289,7 +289,9 @@ test('parsePathPatterns returns defaults when unset or empty', () => {
 test('parsePathPatterns expands known legacy regex entries as contains (lowercased)', () => {
   const { contains, regexSources } = parsePathPatterns(['(?i)\\.{2}/', '(?i)%2e%2e']);
   assert.ok(contains.includes('/../'));
-  assert.ok(contains.includes('..'));
+  assert.ok(contains.includes('../'));
+  assert.ok(!contains.includes('..') || contains.includes('../'), 'bare ".." must not be the only traversal marker');
+  assert.ok(!contains.some((c: string) => c === '..'), 'bare ".." causes false positives like release-1..2.txt');
   assert.ok(contains.includes('%2e%2e'));
   // Runtime lowercases the URI before `includes()`, so we only need the lower form.
   assert.ok(contains.every((c: string) => c === c.toLowerCase()));

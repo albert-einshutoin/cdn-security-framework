@@ -518,6 +518,8 @@ function guidedRateLimit(waf: string): number {
 }
 
 function guidedManagedRules(waf: string, platform: string): string[] {
+  // Cloudflare guided init sticks to equivalent mappings so default
+  // fail-closed WAF parity does not reject a fresh scaffold.
   if (platform === 'cloudflare') {
     return ['AWSManagedRulesCommonRuleSet'];
   }
@@ -564,7 +566,6 @@ function renderGuidedPolicy(opts: {
 }): string {
   const allowMethods = guidedAllowMethods(opts.appShape);
   const riskLevel = opts.waf === 'strict' ? 'strict' : opts.waf === 'basic' ? 'balanced' : 'balanced';
-  const wafScope = opts.platform === 'aws' ? 'CLOUDFRONT' : 'REGIONAL';
   const csp = opts.appShape === 'rest-api'
     ? "default-src 'none'; frame-ancestors 'none';"
     : "default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'self';";
@@ -702,9 +703,12 @@ function renderGuidedPolicy(opts: {
     'firewall:',
     '  waf:',
     `    rate_limit: ${guidedRateLimit(opts.waf)}`,
-    `    scope: ${wafScope}`,
-    '    managed_rules:'
   );
+  // scope / logging are AWS WAFv2 concepts — omit them for Cloudflare scaffolds.
+  if (opts.platform === 'aws') {
+    lines.push('    scope: CLOUDFRONT');
+  }
+  lines.push('    managed_rules:');
   guidedManagedRules(opts.waf, opts.platform).forEach((rule) => lines.push(`      - ${yamlString(rule)}`));
   if (opts.platform === 'aws') {
     lines.push(
@@ -3164,9 +3168,10 @@ program
   .option('--output-mode <mode>', 'AWS infra output mode: full | rule-group', 'full')
   .option('--rule-group-only', 'AWS only: generate WAF rule groups without aws_wafv2_web_acl output')
   .option('--fail-on-permissive', 'Exit non-zero when policy.metadata.risk_level is "permissive" (gate for production CI)')
-  .option('--fail-on-waf-approximation', 'Cloudflare only: exit non-zero when the policy relies on approximate or unsupported Cloudflare WAF mappings (see docs/cloudflare-waf-parity.md)')
+  .option('--fail-on-waf-approximation', 'Cloudflare only: exit non-zero on approximate/unsupported WAF mappings (default behavior; kept for compatibility)')
+  .option('--allow-waf-approximation', 'Cloudflare only: warn-only when the policy relies on approximate or unsupported Cloudflare WAF mappings (see docs/cloudflare-waf-parity.md)')
   .option('--allow-placeholder-token', 'Allow non-production placeholder credentials for static_token/basic_auth gates when referenced env vars are unset')
-  .action((opts: BuildOptions) => {
+  .action((opts: BuildOptions & { allowWafApproximation?: boolean }) => {
     const { compile } = require(path.join(pkgRoot, 'lib'));
     const cwd = process.cwd();
     let policyPath = opts.policy;
@@ -3181,7 +3186,8 @@ program
       outputMode: opts.outputMode,
       ruleGroupOnly: !!opts.ruleGroupOnly,
       failOnPermissive: !!opts.failOnPermissive,
-      failOnWafApproximation: !!opts.failOnWafApproximation,
+      // Default is fail-closed; --allow-waf-approximation opts out.
+      failOnWafApproximation: !opts.allowWafApproximation,
       allowPlaceholderToken: !!opts.allowPlaceholderToken,
       cwd,
       pkgRoot,
@@ -3622,8 +3628,9 @@ program
   .option('--output-mode <mode>', 'AWS infra output mode: full | rule-group', 'full')
   .option('--rule-group-only', 'AWS only: generate WAF rule groups without aws_wafv2_web_acl output')
   .option('--format <format>', 'Output format: terraform | cloudformation | cdk (terraform is the only format currently generated; others return exit 2)', 'terraform')
-  .option('--fail-on-waf-approximation', 'Cloudflare only: exit non-zero when the policy relies on approximate or unsupported Cloudflare WAF mappings (see docs/cloudflare-waf-parity.md)')
-  .action((opts: EmitWafOptions) => {
+  .option('--fail-on-waf-approximation', 'Cloudflare only: exit non-zero on approximate/unsupported WAF mappings (default behavior; kept for compatibility)')
+  .option('--allow-waf-approximation', 'Cloudflare only: warn-only when the policy relies on approximate or unsupported Cloudflare WAF mappings (see docs/cloudflare-waf-parity.md)')
+  .action((opts: EmitWafOptions & { allowWafApproximation?: boolean }) => {
     const { emitWaf } = require(path.join(pkgRoot, 'lib'));
     const cwd = process.cwd();
     let policyPath = opts.policy;
@@ -3638,7 +3645,7 @@ program
       format: opts.format,
       outputMode: opts.outputMode,
       ruleGroupOnly: !!opts.ruleGroupOnly,
-      failOnWafApproximation: !!opts.failOnWafApproximation,
+      failOnWafApproximation: !opts.allowWafApproximation,
       cwd,
       pkgRoot,
     });

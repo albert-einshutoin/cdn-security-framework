@@ -15,9 +15,9 @@ const CFG = {
   maxHeaderCount: 64,
   dropQueryKeys: new Set(["utm_source","utm_medium","utm_campaign","utm_term","utm_content","gclid","fbclid"]),
   uaDenyContains: ["sqlmap","nikto","acunetix","masscan","python-requests","zgrab","nmap","curl","wget","scanner"],
-  blockPathContains: ["/../","..","%2e%2e","%2e%2e"],
+  blockPathContains: ["/../","../","%2e%2e","%2e%2e"],
   blockPathRegexes: [/%2f\.\.\//i, /\.\.%2f/i, /\\\.\.\\/i],
-  normalizePath: {"collapseSlashes":false,"removeDotSegments":false},
+  normalizePath: {"collapseSlashes":true,"removeDotSegments":true,"caseInsensitive":true,"rejectAmbiguousEncoding":true},
   requiredHeaders: ["user-agent"],
   allowedHosts: [],
   trustForwardedFor: false,
@@ -68,6 +68,9 @@ const jwksCache = new Map<string, JwksCacheEntry>();
 
 type JwksNegativeEntry = { failedAt: number; reason: string };
 const jwksNegativeCache = new Map<string, JwksNegativeEntry>();
+/** Unknown-kid negative cache — stops random-kid JWKS fetch amplification. */
+const jwksKidMissCache = new Map<string, number>();
+const JWKS_KID_MISS_TTL_MS = 60_000;
 const JWKS_MAX_BODY_BYTES = 256 * 1024;
 const JWKS_MAX_KEYS = 100;
 
@@ -180,21 +183,47 @@ type GraphqlScanResult = {
   fields: number;
 };
 
-function normalizePath(pathname: string): string {
-  let p = pathname;
-  if (CFG.normalizePath.collapseSlashes) {
-    p = p.replace(/\/+/g, '/');
-  }
-  if (CFG.normalizePath.removeDotSegments) {
-    const segments = p.split('/');
+function hasAmbiguousPathEncoding(uri: string): boolean {
+  const s = String(uri || '').toLowerCase();
+  return s.includes('%2f') || s.includes('%5c') ||
+    s.includes('%252f') || s.includes('%255c') || s.includes('%252e');
+}
+
+/** Canonicalize for auth/response matching and request rewrite. null = malformed. */
+function canonicalizePath(pathname: string): string | null {
+  const opts = (CFG.normalizePath || {}) as any;
+  let p = String(pathname || '/').replace(/;[^/]*/g, '');
+  try { p = decodeURIComponent(p); } catch (_e) { return null; }
+  if (!p.startsWith('/')) p = '/' + p;
+  if (opts.collapseSlashes !== false) p = p.replace(/\/+/g, '/');
+  if (opts.removeDotSegments !== false) {
     const out: string[] = [];
-    for (const seg of segments) {
+    for (const seg of p.split('/')) {
       if (seg === '..') out.pop();
       else if (seg !== '.') out.push(seg);
     }
     p = out.join('/') || '/';
   }
   return p;
+}
+
+function normalizeForMatch(value: string): string {
+  const raw = value || '/';
+  return (CFG.normalizePath as any)?.caseInsensitive !== false ? raw.toLowerCase() : raw;
+}
+
+function pathMatchesExact(uri: string, prefix: string): boolean {
+  return normalizeForMatch(uri) === normalizeForMatch(prefix);
+}
+
+function pathMatchesPrefix(uri: string, prefix: string): boolean {
+  const left = normalizeForMatch(uri);
+  const right = normalizeForMatch(prefix);
+  return left === right || left.startsWith(right + '/');
+}
+
+function normalizePath(pathname: string): string | null {
+  return canonicalizePath(pathname);
 }
 
 function rawPathnameFromRequestUrl(rawUrl: string): string {
@@ -622,16 +651,21 @@ function validateJwksKeys(body: any): Array<Record<string, any>> {
   return keys;
 }
 
-async function fetchJwks(jwksUrl: string, ttlSec: number): Promise<Array<Record<string, any>>> {
+async function fetchJwks(
+  jwksUrl: string,
+  ttlSec: number,
+  options?: { forceRefresh?: boolean },
+): Promise<Array<Record<string, any>>> {
   const unsafe = isUnsafeJwksUrl(jwksUrl);
   if (unsafe) {
     throw new Error('JWKS URL rejected: ' + unsafe);
   }
   const now = Date.now();
   const cached = jwksCache.get(jwksUrl);
+  const forceRefresh = options?.forceRefresh === true;
 
-  // Fresh window — serve cache
-  if (cached && (now - cached.fetchedAt) < ttlSec * 1000) {
+  // Fresh window — serve cache (skipped on explicit rotation refresh)
+  if (!forceRefresh && cached && (now - cached.fetchedAt) < ttlSec * 1000) {
     return cached.keys;
   }
 
@@ -736,17 +770,27 @@ async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ va
   if (gate.algorithm === 'RS256') {
     if (!gate.jwks_url) return { valid: false, error: 'JWKS URL missing' };
     try {
-      let keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
+      const kidKey = gate.jwks_url + '\0' + String(header.kid || '');
+      const kidMissAt = jwksKidMissCache.get(kidKey);
+      if (kidMissAt && (Date.now() - kidMissAt) < JWKS_KID_MISS_TTL_MS) {
+        return { valid: false, error: 'JWK key not found' };
+      }
+
+      const ttl = gate.cache_ttl_sec || 3600;
+      let keys = await fetchJwks(gate.jwks_url, ttl);
       let jwk = keys.find((k) => isMatchingRs256Jwk(k, header.kid));
-      // Key rotation: if `kid` is not in our cache, invalidate and refetch once
-      // — the IdP may have rotated keys since our last fetch. This prevents a
-      // "stuck isolate" 401 storm after rotation.
+      // Key rotation: unknown kid → refresh once WITHOUT deleting the cache
+      // first, so a failed IdP fetch still has stale-if-error insurance. Random
+      // kids are then negatively cached to stop fetch amplification.
       if (!jwk) {
-        jwksCache.delete(gate.jwks_url);
-        keys = await fetchJwks(gate.jwks_url, gate.cache_ttl_sec || 3600);
+        keys = await fetchJwks(gate.jwks_url, ttl, { forceRefresh: true });
         jwk = keys.find((k) => isMatchingRs256Jwk(k, header.kid));
       }
-      if (!jwk) return { valid: false, error: 'JWK key not found' };
+      if (!jwk) {
+        jwksKidMissCache.set(kidKey, Date.now());
+        return { valid: false, error: 'JWK key not found' };
+      }
+      jwksKidMissCache.delete(kidKey);
 
       const verifyKey = await crypto.subtle.importKey(
         'jwk',
@@ -1352,10 +1396,23 @@ export default {
     const anomalyBlock = blockIfRequestAnomaly(request, rawPathname, qs, ctx);
     if (anomalyBlock) return anomalyBlock;
 
+    if ((CFG.normalizePath || {} as any).rejectAmbiguousEncoding !== false) {
+      if (hasAmbiguousPathEncoding(rawPathname) || hasAmbiguousPathEncoding(url.pathname)) {
+        const r = shouldBlock(400, 'Bad Request', ctx);
+        if (r) return r;
+      }
+    }
+
     const rawPathBlock = blockIfPathPattern(rawPathname, ctx);
     if (rawPathBlock) return rawPathBlock;
 
-    url.pathname = normalizePath(url.pathname);
+    const canonical = normalizePath(rawPathname);
+    if (canonical === null) {
+      const r = shouldBlock(400, 'Bad Request', ctx);
+      if (r) return r;
+    } else {
+      url.pathname = canonical;
+    }
 
     const normalizedPathBlock = blockIfPathPattern(url.pathname, ctx);
     if (normalizedPathBlock) return normalizedPathBlock;
@@ -1397,8 +1454,8 @@ export default {
       // for /assets/ from being replayed against /assets/other-file.
       const useExact = gate.type === 'signed_url' && gate.exact_path === true;
       const isProtected = useExact
-        ? gate.protectedPrefixes.some((p: string) => url.pathname === p)
-        : gate.protectedPrefixes.some((p: string) => url.pathname === p || url.pathname.startsWith(p + '/'));
+        ? gate.protectedPrefixes.some((p: string) => pathMatchesExact(url.pathname, p))
+        : gate.protectedPrefixes.some((p: string) => pathMatchesPrefix(url.pathname, p));
       if (!isProtected) continue;
 
       if (gate.type === 'static_token') {
@@ -1599,8 +1656,8 @@ export default {
     if (RESPONSE_CFG.corp) out.headers.set('Cross-Origin-Resource-Policy', RESPONSE_CFG.corp);
     if (RESPONSE_CFG.reporting_endpoints) out.headers.set('Reporting-Endpoints', RESPONSE_CFG.reporting_endpoints);
 
-    const isAdminPath = RESPONSE_CFG.adminPathPrefixes.some((p: string) => url.pathname === p || url.pathname.startsWith(p + '/'));
-    const isAuthPath = (RESPONSE_CFG.authProtectedPrefixes || []).some((p: string) => url.pathname === p || url.pathname.startsWith(p + '/'));
+    const isAdminPath = RESPONSE_CFG.adminPathPrefixes.some((p: string) => pathMatchesPrefix(url.pathname, p));
+    const isAuthPath = (RESPONSE_CFG.authProtectedPrefixes || []).some((p: string) => pathMatchesPrefix(url.pathname, p));
 
     // Per-response CSP nonce (issue #11). crypto.getRandomValues is a CS-PRNG on Workers.
     if (cspNonce) out.headers.set('X-CSP-Nonce', cspNonce);

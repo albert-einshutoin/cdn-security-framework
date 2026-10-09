@@ -4,15 +4,15 @@
 
 このドキュメントは `scripts/lib/cloudflare-waf-parity.js` から **自動生成** されます。手で編集せず、メタデータ更新後に `node scripts/generate-parity-doc.js --write --lang=ja` を実行してください。`scripts/check-drift.js` がズレを検知すると CI が落ちます。
 
-「1 つの YAML で CloudFront と Cloudflare 両方」という前提は、**どこが 1:1 等価で、どこが近似で、どこが未対応か** を利用者が把握していてはじめて成立します。黙って劣化させるのはアーキテクチャ上の罪なので、コンパイラは equivalent 以外の全てで stderr 警告を出し、`--fail-on-waf-approximation` を付けると本番 CI で非ゼロ終了します。
+「1 つの YAML で CloudFront と Cloudflare 両方」という前提は、**どこが 1:1 等価で、どこが近似で、どこが未対応か** を利用者が把握していてはじめて成立します。黙って劣化させるのはアーキテクチャ上の罪なので、コンパイラは equivalent 以外の全てで stderr 警告を出し、**既定で非ゼロ終了**します。調査用途では `--allow-waf-approximation` で警告のみにできます。`--fail-on-waf-approximation` は既定動作の明示エイリアスとして残しています。
 
 ## 凡例
 
 | ステータス | 意味 |
 | --- | --- |
 | `EQUIVALENT` | Cloudflare に 1:1 のリソースあり。警告なし。 |
-| `APPROXIMATE` | 近いが同一ではない。警告あり。`--fail-on-waf-approximation` で非ゼロ終了。 |
-| `UNSUPPORTED` | 現状 Cloudflare に対応物なし。ルールは `enabled: false` で出力。警告あり、`--fail-on-waf-approximation` で非ゼロ終了。 |
+| `APPROXIMATE` | 近いが同一ではない。警告あり。既定で非ゼロ終了。`--allow-waf-approximation` で警告のみ。 |
+| `UNSUPPORTED` | 現状 Cloudflare に対応物なし。ルールは `enabled: false` で出力。警告あり、既定で非ゼロ終了。`--allow-waf-approximation` で警告のみ。 |
 
 ## AWS マネージドルール
 
@@ -122,10 +122,12 @@ AWS の `rate_limit_rules[].scope_down_statement` は構造化 AST ですが、C
 ## 本番 CI ゲート
 
 ```bash
-npx cdn-security build --target cloudflare --fail-on-waf-approximation
+npx cdn-security build --target cloudflare
+# 調査用途（警告のみ）:
+npx cdn-security build --target cloudflare --allow-waf-approximation
 ```
 
-コンパイル対象のポリシーが `APPROXIMATE` か `UNSUPPORTED` に触れていると非ゼロで終了します。`main` ブランチのリリースパイプラインではこのゲートを有効化し、ローカルの feature ブランチビルドではデフォルト（警告のみ）のままで運用するのが推奨です。
+コンパイル対象のポリシーが `APPROXIMATE` か `UNSUPPORTED` に触れていると、既定で非ゼロ終了します。パリティギャップを意図的に受け入れるときだけ `--allow-waf-approximation` を付けてください。
 
 ## 更新手順
 

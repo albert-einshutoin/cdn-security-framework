@@ -100,7 +100,14 @@ function runBuild(policyPath: string, outDir: string, awsUnsupported = false) {
     cwd: repoRoot,
     stdio: 'inherit',
   });
-  execFileSync(process.execPath, [path.join(repoRoot, 'scripts', 'compile-cloudflare-waf.js'), '--policy', policyPath, '--out-dir', outDir], {
+  // Golden fixtures intentionally include approximate AWS→CF mappings; allow
+  // them here so drift compares artifacts rather than failing the compile gate.
+  execFileSync(process.execPath, [
+    path.join(repoRoot, 'scripts', 'compile-cloudflare-waf.js'),
+    '--policy', policyPath,
+    '--out-dir', outDir,
+    '--allow-waf-approximation',
+  ], {
     cwd: repoRoot,
     stdio: 'inherit',
   });
@@ -114,7 +121,7 @@ function readOrNull(filePath: string): string | null {
   }
 }
 
-function compareScenario(scenario: DriftScenario) {
+function compareScenario(scenario: DriftScenario, updateGolden: boolean) {
   const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), `cdn-security-drift-${scenario.name}-`));
   let failed = false;
 
@@ -124,11 +131,18 @@ function compareScenario(scenario: DriftScenario) {
     for (const rel of expectedFiles) {
       if (scenario.awsUnsupported && rel.startsWith('edge/') && !rel.startsWith('edge/cloudflare/')) continue;
       const generated = readOrNull(path.join(tmpDir, rel));
-      const golden = readOrNull(path.join(scenario.goldenDir, rel));
+      const goldenPath = path.join(scenario.goldenDir, rel);
+      const golden = readOrNull(goldenPath);
 
       if (generated === null) {
         console.error(`[${scenario.name}] Missing generated file:`, rel);
         failed = true;
+        continue;
+      }
+      if (updateGolden) {
+        fs.mkdirSync(path.dirname(goldenPath), { recursive: true });
+        fs.writeFileSync(goldenPath, generated, 'utf8');
+        console.log(`[${scenario.name}] Updated golden:`, rel);
         continue;
       }
       if (golden === null) {
@@ -175,21 +189,24 @@ function checkParityDocsFresh() {
 }
 
 function main() {
+  const updateGolden = process.argv.includes('--update');
   let allPassed = true;
 
   for (const scenario of scenarios) {
-    const ok = compareScenario(scenario);
+    const ok = compareScenario(scenario, updateGolden);
     if (!ok) allPassed = false;
   }
 
-  if (!checkParityDocsFresh()) allPassed = false;
+  if (!updateGolden && !checkParityDocsFresh()) allPassed = false;
 
   if (!allPassed) {
-    console.error('Drift check failed. Regenerate golden fixtures if change is intentional.');
+    console.error('Drift check failed. Regenerate golden fixtures if change is intentional (node scripts/check-drift.js --update).');
     process.exit(1);
   }
 
-  console.log('Drift check passed for base + all profiles + parity docs.');
+  console.log(updateGolden
+    ? 'Golden fixtures updated for base + all profiles.'
+    : 'Drift check passed for base + all profiles + parity docs.');
 }
 
 main();
