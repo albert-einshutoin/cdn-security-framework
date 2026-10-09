@@ -34,7 +34,9 @@ const parity = require('./lib/cloudflare-waf-parity');
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
 const { policyPath, outDir } = parseArgs(argv, repoRoot);
-const failOnApproximation = hasFlag(argv, '--fail-on-waf-approximation');
+// Secure default: approximate/unsupported WAF mappings fail the build.
+// Opt out with --allow-waf-approximation for explorative local compiles.
+const failOnApproximation = !hasFlag(argv, '--allow-waf-approximation');
 
 // Parity warnings collected during emission — surfaced once at the end so
 // the order is stable (managed rules first, then scope-down notes).
@@ -215,6 +217,19 @@ if (customRules.length > 0) {
 }
 
 // 3. Rate-limit ruleset — rate_limit (legacy global) + rate_limit_rules[]
+// Cloudflare API requires `cf.colo.id` in characteristics for rate limiting.
+// mitigation_timeout defaults to 10s (Free-plan maximum); Pro+ can override
+// via firewall.waf.rate_limit_mitigation_timeout.
+function ensureColoCharacteristic(chars: string[]): string[] {
+  const list = Array.isArray(chars) ? chars.slice() : [];
+  if (!list.includes('cf.colo.id')) list.unshift('cf.colo.id');
+  return list;
+}
+const rateMitigationTimeout = numberOr(
+  (waf as any).rate_limit_mitigation_timeout,
+  10,
+);
+
 const rateRules: any[] = [];
 if (waf.rate_limit) {
   rateRules.push({
@@ -224,10 +239,10 @@ if (waf.rate_limit) {
     action: 'block',
     action_parameters: makeBlockAction().action_parameters,
     ratelimit: {
-      characteristics: ['ip.src'],
+      characteristics: ensureColoCharacteristic(['ip.src']),
       period: 300,
       requests_per_period: numberOr(waf.rate_limit, 2000),
-      mitigation_timeout: 600,
+      mitigation_timeout: rateMitigationTimeout,
     },
   });
 }
@@ -275,10 +290,12 @@ if (Array.isArray(waf.rate_limit_rules)) {
       action,
       action_parameters: action === 'block' ? makeBlockAction().action_parameters : {},
       ratelimit: {
-        characteristics: characteristicsMap[rule.aggregate_key_type || 'IP'] || ['ip.src'],
+        characteristics: ensureColoCharacteristic(
+          characteristicsMap[rule.aggregate_key_type || 'IP'] || ['ip.src'],
+        ),
         period: 300,
         requests_per_period: Number(rule.limit),
-        mitigation_timeout: 600,
+        mitigation_timeout: rateMitigationTimeout,
       },
     });
   }
@@ -386,6 +403,6 @@ for (const msg of parityWarnings) {
 }
 
 if (failOnApproximation && sawApproximationOrUnsupported) {
-  console.error('[cloudflare-waf-parity] --fail-on-waf-approximation set; exiting non-zero because the policy relies on approximate or unsupported Cloudflare mappings.');
+  console.error('[cloudflare-waf-parity] approximate or unsupported Cloudflare WAF mappings detected (default fail-closed). Pass --allow-waf-approximation to warn-only.');
   process.exit(1);
 }

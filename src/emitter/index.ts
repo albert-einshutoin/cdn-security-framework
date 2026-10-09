@@ -197,7 +197,7 @@ export function compileArtifacts(opts: CompileArtifactsOptions = {}): CompileArt
         cfWafPath,
         '--policy', policyPath,
         '--out-dir', outDir,
-        ...(opts.failOnWafApproximation ? ['--fail-on-waf-approximation'] : []),
+        ...(opts.failOnWafApproximation === false ? ['--allow-waf-approximation'] : []),
       ],
       { cwd, encoding: 'utf8', env },
     );

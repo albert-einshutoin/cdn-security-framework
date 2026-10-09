@@ -24,7 +24,8 @@ import {
 const DEFAULT_CONTAINS = ['/../', '%2e%2e', '%2f..', '..%2f', '%5c'];
 
 const LEGACY_KNOWN_MAP = {
-  '(?i)\\.{2}/': { contains: ['/../', '..'] },
+  // Prefer slash-anchored forms so legitimate names like release-1..2.txt are not blocked.
+  '(?i)\\.{2}/': { contains: ['/../', '../'] },
   '(?i)%2e%2e': { contains: ['%2e%2e'] },
 } as Record<string, { contains?: string[]; regex?: string[] }>;
 
@@ -227,6 +228,7 @@ export function buildResponseCfgBase(
   const { adminPathPrefixes, adminCacheControl } = findAdminCacheRoute(policy.routes || []);
   const authProtectedPrefixes = collectAuthProtectedPrefixes(authGates);
   const forceVaryAuth = resHeaders.force_vary_auth !== false;
+  const requestNormalizePath = ((((policy as any).request || {}).normalize || {}).path || {}) as Record<string, unknown>;
 
   return {
     headers: {
@@ -248,6 +250,8 @@ export function buildResponseCfgBase(
     adminCacheControl,
     authProtectedPrefixes,
     forceVaryAuth,
+    // Keep response auth-path matching aligned with request.normalize.path.case_insensitive.
+    caseInsensitive: requestNormalizePath.case_insensitive !== false,
     clearSiteDataPaths: normalizeStringList(resHeaders.clear_site_data_paths, 'preserve', { trim: false }),
     clearSiteDataTypes: Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
       ? resHeaders.clear_site_data_types
@@ -360,8 +364,11 @@ export function buildRequestCfgBase(policy: {
     blockPathContains: blockPath,
     blockPathRegexSources,
     normalizePath: {
-      collapseSlashes: !!pathNormalize.collapse_slashes,
-      removeDotSegments: !!pathNormalize.remove_dot_segments,
+      // Secure defaults: omit → enabled. Explicit `false` still disables.
+      collapseSlashes: pathNormalize.collapse_slashes !== false,
+      removeDotSegments: pathNormalize.remove_dot_segments !== false,
+      caseInsensitive: pathNormalize.case_insensitive !== false,
+      rejectAmbiguousEncoding: pathNormalize.reject_ambiguous_encoding !== false,
     },
     requiredHeaders,
     allowedHosts,

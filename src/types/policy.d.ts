@@ -106,8 +106,22 @@ export interface CDNSecurityFrameworkPolicy {
     normalize?: {
       drop_query_keys?: string[];
       path?: {
+        /**
+         * Collapse repeated slashes (// → /). Defaults to true when omitted.
+         */
         collapse_slashes?: boolean;
+        /**
+         * Resolve . and .. path segments (RFC 3986). Defaults to true when omitted.
+         */
         remove_dot_segments?: boolean;
+        /**
+         * Compare auth-gate and response auth prefixes case-insensitively. Defaults to true when omitted.
+         */
+        case_insensitive?: boolean;
+        /**
+         * Reject paths with encoded slash/backslash or double-encoded slash/backslash/dot (%2f, %5c, %252f, %255c, %252e). Defaults to true when omitted.
+         */
+        reject_ambiguous_encoding?: boolean;
       };
     };
     /**
@@ -533,6 +547,10 @@ export interface CDNSecurityFrameworkPolicy {
        * Per-IP request ceiling over the 5-minute WAF rate-based window. AWS WAFv2 accepts 100..2,000,000,000. Legacy single global rule; prefer `rate_limit_rules` for per-route / per-key controls.
        */
       rate_limit?: number;
+      /**
+       * Cloudflare rate-limit mitigation_timeout in seconds. Defaults to 10 (Free-plan maximum). Pro+ plans may raise this (for example 600).
+       */
+      rate_limit_mitigation_timeout?: number;
       /**
        * Fine-grained rate-limit rules. Each entry renders as one `aws_wafv2_rule_group` rule with its own `rate_based_statement` and optional `scope_down_statement` so you can scope by URI, auth state, or header keys without hand-editing Terraform. `limit` is per 5-minute window (AWS WAFv2 accepts 100..2,000,000,000). `aggregate_key_type` defaults to `IP`; `FORWARDED_IP` follows the `X-Forwarded-For` chain and `CUSTOM_KEYS` lets you pass a raw `custom_keys` block. `scope_down_statement` is forwarded verbatim as a raw JSON object — schema-free because AWS WAFv2 ships dozens of statement kinds; lint only checks the shell.
        */

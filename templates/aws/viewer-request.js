@@ -398,23 +398,64 @@
     return null;
   }
 
-  function normalizePath(req) {
-    let p = req.uri || '/';
-    if (CFG.normalizePath.collapseSlashes) {
-      p = p.replace(/\/+/g, '/');
+  // Path hardening for auth: reject ambiguous encodings, then canonicalize
+  // (matrix strip → percent-decode → slash/dot cleanup) before prefix match.
+  function hasAmbiguousPathEncoding(uri) {
+    var s = String(uri || '').toLowerCase();
+    return s.indexOf('%2f') !== -1 || s.indexOf('%5c') !== -1 ||
+      s.indexOf('%252f') !== -1 || s.indexOf('%255c') !== -1 || s.indexOf('%252e') !== -1;
+  }
+
+  function canonicalizePath(uri) {
+    var opts = CFG.normalizePath || {};
+    var p = String(uri || '/').replace(/;[^/]*/g, '');
+    // Decode up to 3 times so double-encoded unreserved bytes (%2561 → %61 → a)
+    // cannot slip past auth matching while still looking different from the prefix.
+    var round;
+    for (round = 0; round < 3; round++) {
+      if (!/%[0-9A-Fa-f]{2}/.test(p)) break;
+      try {
+        var next = decodeURIComponent(p);
+        if (next === p) break;
+        p = next;
+      } catch (_e) {
+        return null;
+      }
     }
-    if (CFG.normalizePath.removeDotSegments) {
-      // RFC 3986 dot-segment removal
-      const segments = p.split('/');
-      const out = [];
-      for (const seg of segments) {
-        if (seg === '..') { out.pop(); }
-        else if (seg !== '.') { out.push(seg); }
+    if (/%[0-9A-Fa-f]{2}/.test(p)) return null;
+    if (p.charAt(0) !== '/') p = '/' + p;
+    if (opts.collapseSlashes !== false) p = p.replace(/\/+/g, '/');
+    if (opts.removeDotSegments !== false) {
+      var segs = p.split('/'), out = [], i, seg;
+      for (i = 0; i < segs.length; i++) {
+        seg = segs[i];
+        if (seg === '..') out.pop();
+        else if (seg !== '.') out.push(seg);
       }
       p = out.join('/') || '/';
     }
-    req.uri = p;
+    return p;
+  }
+
+  function pathMatchesPrefix(uri, prefix) {
+    var left = uri || '/', right = prefix || '';
+    if ((CFG.normalizePath || {}).caseInsensitive !== false) {
+      left = left.toLowerCase();
+      right = right.toLowerCase();
+    }
+    return left === right || left.indexOf(right + '/') === 0;
+  }
+
+  function normalizePath(req) {
+    var c = canonicalizePath(req.uri || '/');
+    if (c === null) return resp(400, 'Bad Request');
+    req.uri = c;
     return null;
+  }
+
+  function blockIfAmbiguousPathEncoding(req) {
+    if ((CFG.normalizePath || {}).rejectAmbiguousEncoding === false) return null;
+    return hasAmbiguousPathEncoding(req.uri || '/') ? resp(400, 'Bad Request') : null;
   }
 
   function blockIfTraversal(req) {
@@ -549,7 +590,7 @@
 
     for (const gate of CFG.authGates) {
       const isProtected = gate.protectedPrefixes.some(
-        (p) => uri === p || uri.startsWith(p + "/")
+        (p) => pathMatchesPrefix(uri, p)
       );
       if (!isProtected) continue;
 
@@ -627,14 +668,20 @@
     const anomaly = shouldBlock(blockIfRequestAnomaly(req), req);
     if (anomaly) return anomaly;
 
-    // 5) Raw path traversal (coarse). Run before dot-segment normalization so
+    // 5) Reject ambiguous encodings (%2f/%5c/double-encoded) before any
+    // rewrite so auth and origin cannot disagree about the path.
+    const ambiguous = shouldBlock(blockIfAmbiguousPathEncoding(req), req);
+    if (ambiguous) return ambiguous;
+
+    // 5b) Raw path traversal (coarse). Run before dot-segment normalization so
     // suspicious input like /public/../private cannot be rewritten to /private
     // before the block patterns see it.
     const rawTraversal = shouldBlock(blockIfTraversal(req), req);
     if (rawTraversal) return rawTraversal;
 
-    // 6) Path normalization
-    normalizePath(req);
+    // 6) Path normalization (matrix strip, percent-decode, slash/dot cleanup)
+    const normErr = shouldBlock(normalizePath(req), req);
+    if (normErr) return normErr;
 
     // 6b) Path traversal after normalization. Preserves existing behavior for
     // block rules that intentionally match canonicalized paths.

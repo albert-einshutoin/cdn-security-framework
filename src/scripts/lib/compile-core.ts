@@ -435,11 +435,6 @@ function build(policy: any, options: any = {}) {
   );
   assertInjectedConstDeclarations(code, ['CFG']);
 
-  const distDir = path.join(outDir, 'edge');
-  fs.mkdirSync(distDir, { recursive: true });
-  const outPath = path.join(distDir, 'viewer-request.js');
-  fs.writeFileSync(outPath, code, 'utf8');
-
   const responseBase = buildResponseCfgBase(policy, authGates);
   const responseCfgCode = renderConstObject('RESPONSE_CFG', {
     headers: responseBase.headers,
@@ -456,6 +451,7 @@ function build(policy: any, options: any = {}) {
     adminCacheControl: responseBase.adminCacheControl,
     authProtectedPrefixes: responseBase.authProtectedPrefixes,
     forceVaryAuth: responseBase.forceVaryAuth,
+    caseInsensitive: responseBase.caseInsensitive,
     clearSiteDataPaths: responseBase.clearSiteDataPaths,
     clearSiteDataTypes: responseBase.clearSiteDataTypes,
     cors: responseBase.cors,
@@ -466,8 +462,6 @@ function build(policy: any, options: any = {}) {
   let codeResponse = fs.readFileSync(templateResponsePath, 'utf8');
   codeResponse = injectTemplateCode(codeResponse, '// {{INJECT_RESPONSE_CONFIG}}', responseCfgCode);
   assertInjectedConstDeclarations(codeResponse, ['RESPONSE_CFG']);
-  const outPathResponse = path.join(distDir, 'viewer-response.js');
-  fs.writeFileSync(outPathResponse, codeResponse, 'utf8');
 
   const rawOriginAuth = (policy.origin || {}).auth || null;
   const originAuth = rawOriginAuth
@@ -489,10 +483,35 @@ function build(policy: any, options: any = {}) {
   let codeOrigin = fs.readFileSync(templateOriginPath, 'utf8');
   codeOrigin = injectTemplateCode(codeOrigin, '// {{INJECT_CONFIG}}', originCfgCode);
   assertInjectedConstDeclarations(codeOrigin, ['CFG']);
+
+  // Production builds (optimize: true) size-check BEFORE the final write so a
+  // 10 KiB failure cannot leave unminified secret-bearing artifacts in dist/.
+  // Unit tests that inspect CFG source pass optimize: false (the default).
+  const shouldOptimize = options.optimize === true;
+  const finalRequest = shouldOptimize
+    ? optimizeCloudFrontFunction(code, 'viewer-request.js')
+    : code;
+  const finalResponse = shouldOptimize
+    ? optimizeCloudFrontFunction(codeResponse, 'viewer-response.js')
+    : codeResponse;
+
+  const distDir = path.join(outDir, 'edge');
+  fs.mkdirSync(distDir, { recursive: true });
+  const outPath = path.join(distDir, 'viewer-request.js');
+  const outPathResponse = path.join(distDir, 'viewer-response.js');
   const outPathOrigin = path.join(distDir, 'origin-request.js');
-  fs.writeFileSync(outPathOrigin, codeOrigin, 'utf8');
+  atomicWriteFile(outPath, finalRequest);
+  atomicWriteFile(outPathResponse, finalResponse);
+  atomicWriteFile(outPathOrigin, codeOrigin);
 
   return [outPath, outPathResponse, outPathOrigin];
+}
+
+function atomicWriteFile(filePath: string, contents: string) {
+  const dir = path.dirname(filePath);
+  const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
+  fs.writeFileSync(tmp, contents, 'utf8');
+  fs.renameSync(tmp, filePath);
 }
 
 function main(argv: string[] = process.argv.slice(2)) {
@@ -536,11 +555,14 @@ function main(argv: string[] = process.argv.slice(2)) {
   }
 
   try {
-    const outputs = build(policy, { outDir, rootDir: repoRoot, allowPlaceholderToken });
-    for (const outPath of outputs.slice(0, 2)) {
-      const source = fs.readFileSync(outPath, 'utf8');
-      fs.writeFileSync(outPath, optimizeCloudFrontFunction(source, path.basename(outPath)), 'utf8');
-    }
+    // optimize:true size-checks before the final rename so failures leave no
+    // unminified secret-bearing artifacts in the output directory.
+    const outputs = build(policy, {
+      outDir,
+      rootDir: repoRoot,
+      allowPlaceholderToken,
+      optimize: true,
+    });
     outputs.forEach((outPath) => console.log('Build complete:', outPath));
     // Advertise placeholder usage loudly so humans notice in CI output.
     if (allowPlaceholderToken) {

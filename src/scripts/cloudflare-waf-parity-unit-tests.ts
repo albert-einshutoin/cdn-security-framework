@@ -177,33 +177,34 @@ test('compiler: equivalent-only policy emits no parity warning', () => {
   }
 });
 
-test('compiler: approximate rule emits APPROXIMATE stderr warning, exit 0 by default', () => {
+test('compiler: approximate rule fails closed by default', () => {
   const ctx = tmpProject(POLICY_APPROXIMATE);
   try {
     const r = runCompiler(ctx.policyPath, ctx.dir);
-    assert.strictEqual(r.status, 0);
+    assert.strictEqual(r.status, 1);
     assert.ok(/APPROXIMATE/.test(r.stderr));
     assert.ok(/AWSManagedRulesSQLiRuleSet/.test(r.stderr));
+    assert.ok(/allow-waf-approximation/.test(r.stderr));
   } finally {
     ctx.cleanup();
   }
 });
 
-test('compiler: --fail-on-waf-approximation exits non-zero on approximate', () => {
+test('compiler: --allow-waf-approximation warns and exits 0 on approximate', () => {
   const ctx = tmpProject(POLICY_APPROXIMATE);
   try {
-    const r = runCompiler(ctx.policyPath, ctx.dir, ['--fail-on-waf-approximation']);
-    assert.strictEqual(r.status, 1);
-    assert.ok(/--fail-on-waf-approximation/.test(r.stderr));
+    const r = runCompiler(ctx.policyPath, ctx.dir, ['--allow-waf-approximation']);
+    assert.strictEqual(r.status, 0);
+    assert.ok(/APPROXIMATE/.test(r.stderr));
   } finally {
     ctx.cleanup();
   }
 });
 
-test('compiler: --fail-on-waf-approximation exits non-zero on unsupported', () => {
+test('compiler: unsupported mappings fail closed by default', () => {
   const ctx = tmpProject(POLICY_UNSUPPORTED);
   try {
-    const r = runCompiler(ctx.policyPath, ctx.dir, ['--fail-on-waf-approximation']);
+    const r = runCompiler(ctx.policyPath, ctx.dir);
     assert.strictEqual(r.status, 1);
     assert.ok(/UNSUPPORTED/.test(r.stderr));
   } finally {
@@ -215,7 +216,7 @@ test('compiler: unknown AWS managed rule treated as unsupported (disabled, warne
   const policy = POLICY_UNSUPPORTED.replace('AWSManagedRulesATPRuleSet', 'AWSManagedRulesTotallyFake');
   const ctx = tmpProject(policy);
   try {
-    const r = runCompiler(ctx.policyPath, ctx.dir);
+    const r = runCompiler(ctx.policyPath, ctx.dir, ['--allow-waf-approximation']);
     assert.strictEqual(r.status, 0);
     assert.ok(/UNSUPPORTED: AWSManagedRulesTotallyFake/.test(r.stderr));
     const tf = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra', 'cloudflare-waf.tf.json'), 'utf8'));
@@ -231,7 +232,7 @@ test('compiler: unknown AWS managed rule treated as unsupported (disabled, warne
 test('compiler: untranslated scope_down emits parity warning and degrades expression', () => {
   const ctx = tmpProject(POLICY_SCOPE_DOWN_UNTRANSLATED);
   try {
-    const r = runCompiler(ctx.policyPath, ctx.dir);
+    const r = runCompiler(ctx.policyPath, ctx.dir, ['--allow-waf-approximation']);
     assert.strictEqual(r.status, 0);
     assert.ok(/scope_down_statement/i.test(r.stderr));
     assert.ok(/match-all/.test(r.stderr));
@@ -332,7 +333,9 @@ firewall:
     const scopedRate = rateRules.find((rule: any) => rule.description === 'login-starts-with');
     assert.strictEqual(scopedRate.action, 'log');
     assert.strictEqual(scopedRate.expression, 'starts_with(http.request.uri.path, "/login")');
-    assert.deepStrictEqual(scopedRate.ratelimit.characteristics, ['ip.src', 'http.request.headers["x-api-key"]']);
+    assert.deepStrictEqual(scopedRate.ratelimit.characteristics, ['cf.colo.id', 'ip.src', 'http.request.headers["x-api-key"]']);
+    assert.strictEqual(scopedRate.ratelimit.mitigation_timeout, 10);
+    assert.strictEqual(globalRate.ratelimit.mitigation_timeout, 10);
 
     assert.ok(tf.variable.cloudflare_log_dest);
     const logpush = tf.resource.cloudflare_logpush_job['cf-custom-test_waf_logs'];
@@ -357,7 +360,7 @@ firewall:
 `;
   const ctx = tmpProject(policy);
   try {
-    const r = runCompiler(ctx.policyPath, ctx.dir);
+    const r = runCompiler(ctx.policyPath, ctx.dir, ['--allow-waf-approximation']);
     assert.strictEqual(r.status, 0, r.stderr);
     assert.ok(/APPROXIMATE: AWSManagedRulesBotControlRuleSet/.test(r.stderr));
     const tf = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra', 'cloudflare-waf.tf.json'), 'utf8'));
@@ -376,7 +379,7 @@ test('generator: EN render includes every managed rule entry', () => {
   for (const e of parityLib.MANAGED_RULES) {
     assert.ok(out.includes(`\`${e.aws}\``), `missing ${e.aws} in EN doc`);
   }
-  assert.ok(/--fail-on-waf-approximation/.test(out));
+  assert.ok(/--allow-waf-approximation/.test(out));
 });
 
 test('generator: JA render includes every managed rule entry', () => {
@@ -384,7 +387,7 @@ test('generator: JA render includes every managed rule entry', () => {
   for (const e of parityLib.MANAGED_RULES) {
     assert.ok(out.includes(`\`${e.aws}\``), `missing ${e.aws} in JA doc`);
   }
-  assert.ok(/--fail-on-waf-approximation/.test(out));
+  assert.ok(/--allow-waf-approximation/.test(out));
 });
 
 test('generator: render is deterministic (stable across calls)', () => {

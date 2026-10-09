@@ -100,6 +100,17 @@ const cases: RuntimeCase[] = [
   ['GET /docs with token', buildEvent('GET', '/docs', { 'user-agent': 'Mozilla', 'x-edge-token': DEFAULT_TOKEN }), 'allow'],
   ['GET /swagger with token', buildEvent('GET', '/swagger', { 'user-agent': 'Mozilla', 'x-edge-token': DEFAULT_TOKEN }), 'allow'],
 
+  // Auth gate path-notation bypasses must not reach the origin unauthenticated.
+  ['GET //admin no token (slash collapse)', buildEvent('GET', '//admin', { 'user-agent': 'Mozilla' }), 401],
+  ['GET /Admin no token (case)', buildEvent('GET', '/Admin', { 'user-agent': 'Mozilla' }), 401],
+  ['GET /%61dmin no token (percent decode)', buildEvent('GET', '/%61dmin', { 'user-agent': 'Mozilla' }), 401],
+  ['GET /%2561dmin no token (double-encoded a)', buildEvent('GET', '/%2561dmin', { 'user-agent': 'Mozilla' }), 401],
+  ['GET /admin;x=1 no token (matrix param)', buildEvent('GET', '/admin;x=1', { 'user-agent': 'Mozilla' }), 401],
+  ['GET /admin%2fusers (ambiguous encoding)', buildEvent('GET', '/admin%2fusers', { 'user-agent': 'Mozilla' }), 400],
+  ['GET /./admin no token (dot segment)', buildEvent('GET', '/./admin', { 'user-agent': 'Mozilla' }), 401],
+  ['GET /static/.%2e/admin no token', buildEvent('GET', '/static/.%2e/admin', { 'user-agent': 'Mozilla' }), 401],
+  ['GET /release-1..2.txt (no false traversal)', buildEvent('GET', '/release-1..2.txt', { 'user-agent': 'Mozilla' }), 'allow'],
+
   // Query limits
   ['GET / with too many query params', buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, Array(31).fill('a=b').join('&')), 400],
   ['GET / with long query string', buildEvent('GET', '/', { 'user-agent': 'Mozilla' }, 'x=' + 'a'.repeat(1100)), 414],

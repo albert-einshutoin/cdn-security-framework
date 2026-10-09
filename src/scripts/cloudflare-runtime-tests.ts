@@ -219,6 +219,141 @@ test('cloudflare template contains auth enforcement logic', () => {
   assert.ok(template.includes('function shouldBlockAuth'), 'auth fail-closed helper missing');
 });
 
+test('cloudflare auth gates resist path-notation bypasses', async () => {
+  const generated = compileCloudflare(`
+version: 2
+project: cf-auth-path-test
+request:
+  allow_methods: ["GET"]
+  block:
+    header_missing: []
+    path_patterns:
+      contains:
+        - "/../"
+        - "../"
+  normalize:
+    path:
+      collapse_slashes: true
+      remove_dot_segments: true
+      case_insensitive: true
+      reject_ambiguous_encoding: true
+response_headers:
+  hsts: "max-age=31536000"
+routes:
+  - name: admin
+    match:
+      path_prefixes: ["/admin"]
+    auth_gate:
+      type: static_token
+      header: x-edge-token
+      token_env: EDGE_ADMIN_TOKEN
+`);
+
+  async function statusFor(pathname: string): Promise<number> {
+    const req = new Request('https://edge.example.com' + pathname, {
+      method: 'GET',
+      headers: { 'user-agent': 'runtime-test' },
+    });
+    const { res, fetchCalls } = await runGeneratedWorkerRequest(generated, req, {
+      env: { EDGE_ADMIN_TOKEN: 'test-token' },
+    });
+    assert.strictEqual(fetchCalls.length, 0, pathname + ' must not reach origin without auth');
+    return res.status;
+  }
+
+  assert.strictEqual(await statusFor('/admin'), 401);
+  assert.strictEqual(await statusFor('//admin'), 401);
+  assert.strictEqual(await statusFor('/Admin'), 401);
+  assert.strictEqual(await statusFor('/%61dmin'), 401);
+  assert.strictEqual(await statusFor('/%2561dmin'), 401);
+  assert.strictEqual(await statusFor('/admin;x=1'), 401);
+  assert.strictEqual(await statusFor('/admin%2fusers'), 400);
+  assert.strictEqual(await statusFor('/./admin'), 401);
+  assert.strictEqual(await statusFor('/static/.%2e/admin'), 401);
+});
+
+test('cloudflare unknown JWT kid does not amplify JWKS fetches', async () => {
+  const generated = compileCloudflare(`
+version: 2
+project: cf-jwks-kid-amp
+request:
+  allow_methods: ["GET"]
+  block:
+    header_missing: []
+response_headers:
+  hsts: "max-age=31536000"
+firewall:
+  jwks:
+    allowed_hosts: ["example.com"]
+routes:
+  - name: api-jwt
+    match:
+      path_prefixes: ["/api"]
+    auth_gate:
+      type: jwt
+      algorithm: RS256
+      jwks_url: https://example.com/jwks.json
+      issuer: test
+      audience: test
+`);
+  const { publicKey } = nodeCrypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const publicJwk = publicKey.export({ format: 'jwk' });
+  const nowSec = Math.floor(Date.now() / 1000);
+
+  function fakeJwt(kid: string): string {
+    const header = Buffer.from(JSON.stringify({ alg: 'RS256', kid })).toString('base64url');
+    const payload = Buffer.from(JSON.stringify({
+      iss: 'test',
+      aud: 'test',
+      exp: nowSec + 3600,
+      sub: 'attacker',
+    })).toString('base64url');
+    return `${header}.${payload}.fakesig`;
+  }
+
+  const tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-kid-amp-'));
+  const modPath = path.join(tempDir, 'worker.cjs');
+  const compiled = esbuild.transformSync(generated, { loader: 'ts', format: 'cjs', target: 'es2022' }).code;
+  fs.writeFileSync(modPath, compiled, 'utf8');
+  const previousFetch = globalThis.fetch;
+  let jwksHits = 0;
+  (globalThis as any).fetch = async (input: any) => {
+    if (String(input).includes('jwks')) jwksHits += 1;
+    return new Response(JSON.stringify({ keys: [{ ...publicJwk, kid: 'real-key' }] }), {
+      status: 200,
+      headers: { 'content-type': 'application/json' },
+    });
+  };
+  try {
+    delete require.cache[modPath];
+    const worker = require(modPath).default;
+    for (let i = 0; i < 5; i++) {
+      const res = await worker.fetch(new Request('https://edge.example.com/api/data', {
+        method: 'GET',
+        headers: {
+          'user-agent': 'runtime-test',
+          authorization: 'Bearer ' + fakeJwt('random-kid-' + i),
+        },
+      }), {});
+      assert.strictEqual(res.status, 401);
+    }
+    // First sight of each kid may refresh once; must stay bounded.
+    assert.ok(jwksHits <= 10, 'unknown kids must not unboundedly refetch JWKS, got ' + jwksHits);
+    const beforeReuse = jwksHits;
+    await worker.fetch(new Request('https://edge.example.com/api/data', {
+      method: 'GET',
+      headers: {
+        'user-agent': 'runtime-test',
+        authorization: 'Bearer ' + fakeJwt('random-kid-0'),
+      },
+    }), {});
+    assert.strictEqual(jwksHits, beforeReuse, 'repeating an unknown kid must hit kid-miss cache');
+  } finally {
+    (globalThis as any).fetch = previousFetch;
+    fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
 test('cloudflare blocks raw traversal before dot-segment normalization', async () => {
   const generated = compileCloudflare(`
 version: 2

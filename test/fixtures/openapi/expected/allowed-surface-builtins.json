@@ -52,8 +52,10 @@
       ],
       "mode": "enforce",
       "pathNormalization": {
-        "collapseSlashes": false,
-        "removeDotSegments": false,
+        "caseInsensitive": true,
+        "collapseSlashes": true,
+        "rejectAmbiguousEncoding": true,
+        "removeDotSegments": true,
         "routeMatchPhase": "normalized-path"
       },
       "requestDecision": "block",
@@ -352,8 +354,10 @@
       ],
       "mode": "enforce",
       "pathNormalization": {
-        "collapseSlashes": false,
-        "removeDotSegments": false,
+        "caseInsensitive": true,
+        "collapseSlashes": true,
+        "rejectAmbiguousEncoding": true,
+        "removeDotSegments": true,
         "routeMatchPhase": "normalized-path"
       },
       "requestDecision": "block",
@@ -576,8 +580,10 @@
       ],
       "mode": "enforce",
       "pathNormalization": {
-        "collapseSlashes": false,
-        "removeDotSegments": false,
+        "caseInsensitive": true,
+        "collapseSlashes": true,
+        "rejectAmbiguousEncoding": true,
+        "removeDotSegments": true,
         "routeMatchPhase": "normalized-path"
       },
       "requestDecision": "block",
@@ -878,8 +884,10 @@
       ],
       "mode": "enforce",
       "pathNormalization": {
-        "collapseSlashes": false,
-        "removeDotSegments": false,
+        "caseInsensitive": true,
+        "collapseSlashes": true,
+        "rejectAmbiguousEncoding": true,
+        "removeDotSegments": true,
         "routeMatchPhase": "normalized-path"
       },
       "requestDecision": "block",
@@ -1092,8 +1100,10 @@
       ],
       "mode": "enforce",
       "pathNormalization": {
-        "collapseSlashes": false,
-        "removeDotSegments": false,
+        "caseInsensitive": true,
+        "collapseSlashes": true,
+        "rejectAmbiguousEncoding": true,
+        "removeDotSegments": true,
         "routeMatchPhase": "normalized-path"
       },
       "requestDecision": "block",
@@ -1394,8 +1404,10 @@
       ],
       "mode": "enforce",
       "pathNormalization": {
-        "collapseSlashes": false,
-        "removeDotSegments": false,
+        "caseInsensitive": true,
+        "collapseSlashes": true,
+        "rejectAmbiguousEncoding": true,
+        "removeDotSegments": true,
         "routeMatchPhase": "normalized-path"
       },
       "requestDecision": "block",
@@ -1704,8 +1716,10 @@
       ],
       "mode": "enforce",
       "pathNormalization": {
-        "collapseSlashes": false,
-        "removeDotSegments": false,
+        "caseInsensitive": true,
+        "collapseSlashes": true,
+        "rejectAmbiguousEncoding": true,
+        "removeDotSegments": true,
         "routeMatchPhase": "normalized-path"
       },
       "requestDecision": "block",
@@ -2014,8 +2028,10 @@
       ],
       "mode": "enforce",
       "pathNormalization": {
-        "collapseSlashes": false,
-        "removeDotSegments": false,
+        "caseInsensitive": true,
+        "collapseSlashes": true,
+        "rejectAmbiguousEncoding": true,
+        "removeDotSegments": true,
         "routeMatchPhase": "normalized-path"
       },
       "requestDecision": "block",
@@ -2148,13 +2164,13 @@
         }
       }
     ],
-    "policyDigest": "sha256:e9702aff1183f8e6c6b6a919c2ab6008f5bfc1fed2c953d6f6d754134cbc26a1",
+    "policyDigest": "sha256:871e1aeede1186dabe3949288cd8b2f9e8fa2d7cf095a0fbd1c71abe46d9c942",
     "provenance": [
       {
         "analyzer": "allowed-surface@1",
         "capability": "policy-projection-v1",
         "complete": true,
-        "digest": "sha256:e9702aff1183f8e6c6b6a919c2ab6008f5bfc1fed2c953d6f6d754134cbc26a1",
+        "digest": "sha256:871e1aeede1186dabe3949288cd8b2f9e8fa2d7cf095a0fbd1c71abe46d9c942",
         "source": "policy",
         "uri": "policy/profiles/strict.yml"
       }

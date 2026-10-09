@@ -16,6 +16,7 @@ const {
   validateAuthGates,
   parsePathPatterns,
 } = require('../scripts/lib/compile-core');
+const { collectWafHygieneWarnings } = require('../scripts/lib/waf-hygiene');
 
 const DEFAULT_PKG_ROOT = path.join(__dirname, '..');
 export type PolicyDraft = Partial<CDNSecurityFrameworkPolicy>;
@@ -130,30 +131,7 @@ export function validatePolicy(opts: ValidatePolicyOptions): ValidatePolicyResul
     );
   }
 
-  const mode = (policy && policy.defaults && policy.defaults.mode) || null;
-  const isEnforce = mode === 'enforce';
-  const hasWaf = policy && policy.firewall && policy.firewall.waf;
-  if (isEnforce && hasWaf) {
-    const managed = Array.isArray(waf.managed_rules) ? waf.managed_rules : [];
-    const hasCoreSignal = managed.some(
-      (r: string) =>
-        r === 'AWSManagedRulesBotControlRuleSet' ||
-        r === 'AWSManagedRulesATPRuleSet' ||
-        r === 'AWSManagedRulesIPReputationList' ||
-        r === 'AWSManagedRulesAnonymousIpList',
-    );
-    if (!hasCoreSignal) {
-      warnings.push(
-        'firewall.waf.managed_rules does not include any of BotControl / ATP / IPReputation / AnonymousIp. Consider adding at least IPReputation + AnonymousIp for production enforce mode.',
-      );
-    }
-    const loggingEnabled = waf.logging && waf.logging.enabled === true;
-    if (waf.scope === 'CLOUDFRONT' && !loggingEnabled) {
-      warnings.push(
-        'firewall.waf.logging is not enabled while scope=CLOUDFRONT. PCI-DSS / SOC2 require WAF log retention — set logging.enabled: true and supply destination_arn_env.',
-      );
-    }
-  }
+  warnings.push(...collectWafHygieneWarnings(policy));
 
   const originAuth = policy && policy.origin && policy.origin.auth;
   const originAuthType = getStringProp(originAuth, 'type');

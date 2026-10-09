@@ -83,7 +83,12 @@ function main() {
   }
   const scriptsJson = readJson('package.json');
   const packageScripts = scriptsJson.scripts || {};
-  const ciScript = String(packageScripts['test:ci'] || '');
+  // test:ci may delegate the long gate list to test:ci:rest after an initial
+  // build:ts; accept either script as the source of the required steps.
+  const ciScript = [
+    String(packageScripts['test:ci'] || ''),
+    String(packageScripts['test:ci:rest'] || ''),
+  ].join('\n');
   if (!ciScript.includes('npm run test:drift')) {
     fail('package.json test:ci must run npm run test:drift');
   }
