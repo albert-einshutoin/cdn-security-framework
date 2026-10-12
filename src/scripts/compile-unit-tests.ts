@@ -60,6 +60,19 @@ const {
 const { isPolicyValidationError } = require('./lib/errors') as typeof import('./lib/errors');
 type PolicyValidationError = InstanceType<typeof import('./lib/errors').PolicyValidationError>;
 
+test('B1 request/response retain identical explicit path normalization settings', () => {
+  const policy = { request: { normalize: { path: {
+    collapse_slashes: false, remove_dot_segments: false,
+    case_insensitive: false, reject_ambiguous_encoding: false,
+  } } }, response_headers: {} };
+  const expected = { collapseSlashes: false, removeDotSegments: false, caseInsensitive: false, rejectAmbiguousEncoding: false };
+  assert.deepStrictEqual(buildRequestCfgBase(policy).normalizePath, expected);
+  assert.deepStrictEqual(buildResponseCfgBase(policy, []).normalizePath, expected);
+  const defaults = { collapseSlashes: true, removeDotSegments: true, caseInsensitive: true, rejectAmbiguousEncoding: true };
+  assert.deepStrictEqual(buildRequestCfgBase({ request: {}, response_headers: {} }).normalizePath, defaults);
+  assert.deepStrictEqual(buildResponseCfgBase({ response_headers: {} }, []).normalizePath, defaults);
+});
+
 function test(name: string, fn: () => void) {
   try {
     fn();

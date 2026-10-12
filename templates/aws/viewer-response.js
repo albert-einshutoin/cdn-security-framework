@@ -72,7 +72,40 @@ function handler(event) {
     return left === right || left.indexOf(right + '/') === 0;
   }
 
-  const uri = req.uri || "/";
+  // A response event can expose the original viewer notation. Apply the same
+  // bounded path interpretation rather than assuming request-stage rewriting.
+  function canonicalizeResponsePath(uri) {
+    var opts = RESPONSE_CFG.normalizePath || {};
+    var raw = String(uri || '/');
+    var lower = raw.toLowerCase();
+    if (opts.rejectAmbiguousEncoding !== false &&
+        (lower.indexOf('%2f') !== -1 || lower.indexOf('%5c') !== -1 ||
+         lower.indexOf('%252f') !== -1 || lower.indexOf('%255c') !== -1 || lower.indexOf('%252e') !== -1)) return null;
+    var p = raw.replace(/;[^/]*/g, '');
+    for (var round = 0; round < 3; round++) {
+      if (!/%[0-9A-Fa-f]{2}/.test(p)) break;
+      try {
+        var next = decodeURIComponent(p);
+        if (next === p) break;
+        p = next;
+      } catch (_e) { return null; }
+    }
+    if (/%[0-9A-Fa-f]{2}/.test(p)) return null;
+    p = p.replace(/;[^/]*/g, '');
+    if (p.charAt(0) !== '/') p = '/' + p;
+    if (opts.collapseSlashes !== false) p = p.replace(/\/+/g, '/');
+    if (opts.removeDotSegments !== false) {
+      var out = [], segments = p.split('/');
+      for (var i = 0; i < segments.length; i++) {
+        if (segments[i] === '..') out.pop();
+        else if (segments[i] !== '.') out.push(segments[i]);
+      }
+      p = out.join('/') || '/';
+    }
+    return p;
+  }
+  const uri = canonicalizeResponsePath(req.uri || '/');
+  if (uri === null) throw new Error('Invalid response request path');
   const isAdminPath = RESPONSE_CFG.adminPathPrefixes.some(function (p) { return pathMatchesPrefix(uri, p); });
   // Union of auth-gate prefixes — broader than admin-only; catches jwt/basic/signed_url too.
   const isAuthPath = (RESPONSE_CFG.authProtectedPrefixes || []).some(function (p) {

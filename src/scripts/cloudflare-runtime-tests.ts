@@ -316,10 +316,15 @@ routes:
   const compiled = esbuild.transformSync(generated, { loader: 'ts', format: 'cjs', target: 'es2022' }).code;
   fs.writeFileSync(modPath, compiled, 'utf8');
   const previousFetch = globalThis.fetch;
+  const previousNow = Date.now;
+  let clock = previousNow();
+  Date.now = () => clock;
   let jwksHits = 0;
+  const rotated = nodeCrypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const keys = [{ ...publicJwk, kid: 'real-key' }];
   (globalThis as any).fetch = async (input: any) => {
     if (String(input).includes('jwks')) jwksHits += 1;
-    return new Response(JSON.stringify({ keys: [{ ...publicJwk, kid: 'real-key' }] }), {
+    return new Response(JSON.stringify({ keys }), {
       status: 200,
       headers: { 'content-type': 'application/json' },
     });
@@ -327,7 +332,7 @@ routes:
   try {
     delete require.cache[modPath];
     const worker = require(modPath).default;
-    for (let i = 0; i < 5; i++) {
+    for (let i = 0; i < 128; i++) {
       const res = await worker.fetch(new Request('https://edge.example.com/api/data', {
         method: 'GET',
         headers: {
@@ -337,8 +342,7 @@ routes:
       }), {});
       assert.strictEqual(res.status, 401);
     }
-    // First sight of each kid may refresh once; must stay bounded.
-    assert.ok(jwksHits <= 10, 'unknown kids must not unboundedly refetch JWKS, got ' + jwksHits);
+    assert.strictEqual(jwksHits, 2, '128 distinct kids share the initial fixed-window budget');
     const beforeReuse = jwksHits;
     await worker.fetch(new Request('https://edge.example.com/api/data', {
       method: 'GET',
@@ -347,10 +351,81 @@ routes:
         authorization: 'Bearer ' + fakeJwt('random-kid-0'),
       },
     }), {});
-    assert.strictEqual(jwksHits, beforeReuse, 'repeating an unknown kid must hit kid-miss cache');
+    assert.strictEqual(jwksHits, beforeReuse, 'repeating an unknown kid shares the endpoint budget');
+    const signed = createSignedRs256Jwt({ iss: 'test', aud: 'test', exp: nowSec + 3600 }, rotated.privateKey, 'rotated-key');
+    const rotatedRequest = () => new Request('https://edge.example.com/api/data', { headers: { 'user-agent': 'runtime-test', authorization: 'Bearer ' + signed } });
+    assert.strictEqual((await worker.fetch(rotatedRequest(), {})).status, 401);
+    keys.push({ ...rotated.publicKey.export({ format: 'jwk' }), kid: 'rotated-key' });
+    clock += 4999;
+    assert.strictEqual((await worker.fetch(rotatedRequest(), {})).status, 401, 'boundary minus 1 ms stays closed');
+    assert.strictEqual(jwksHits, 2);
+    clock += 1;
+    assert.strictEqual((await worker.fetch(rotatedRequest(), {})).status, 200, 'exact boundary permits a legitimate rotation');
+    assert.strictEqual(jwksHits, 3);
+    assert.strictEqual((await worker.fetch(rotatedRequest(), {})).status, 200);
+    assert.strictEqual(jwksHits, 3, 'fresh known key does not refetch');
   } finally {
     (globalThis as any).fetch = previousFetch;
+    Date.now = previousNow;
     fs.rmSync(tempDir, { recursive: true, force: true });
+  }
+});
+
+test('cloudflare shared JWKS failure honors each gate stale TTL', async () => {
+  const generated = compileCloudflare(`
+version: 2
+project: cf-jwks-shared-ttl
+request: { allow_methods: [GET] }
+firewall:
+  jwks: { allowed_hosts: [example.com], stale_if_error_sec: 2, negative_cache_sec: 1 }
+routes:
+  - name: long
+    match: { path_prefixes: [/long] }
+    auth_gate: { type: jwt, algorithm: RS256, jwks_url: 'https://example.com/jwks', issuer: test, audience: test, cache_ttl_sec: 3 }
+  - name: short
+    match: { path_prefixes: [/short] }
+    auth_gate: { type: jwt, algorithm: RS256, jwks_url: 'https://example.com/jwks', issuer: test, audience: test, cache_ttl_sec: 1 }
+`);
+  const key = nodeCrypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const signed = createSignedRs256Jwt({ iss: 'test', aud: 'test', exp: Math.floor(Date.now() / 1000) + 3600 }, key.privateKey);
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-jwks-ttl-'));
+  const modPath = path.join(tmp, 'worker.cjs');
+  fs.writeFileSync(modPath, esbuild.transformSync(generated, { loader: 'ts', format: 'cjs', target: 'es2022' }).code);
+  const oldFetch = globalThis.fetch;
+  const oldNow = Date.now;
+  let clock = oldNow();
+  let hits = 0;
+  let release: (() => void) | undefined;
+  const failing = new Promise<void>(resolve => { release = resolve; });
+  const reached = new Promise<void>(resolve => {
+    (globalThis as any).fetch = async (input: any) => {
+      if (!String(input).includes('/jwks')) return new Response('synthetic-app');
+      hits++;
+      if (hits === 1) return new Response(JSON.stringify({ keys: [{ ...key.publicKey.export({ format: 'jwk' }), kid: 'test-key' }] }));
+      resolve(); await failing;
+      return new Response('synthetic-outage', { status: 503 });
+    };
+  });
+  Date.now = () => clock;
+  try {
+    const worker = require(modPath).default;
+    const send = (route: string) => worker.fetch(new Request('https://edge.example.com/' + route, { headers: { 'user-agent': 'runtime-test', authorization: 'Bearer ' + signed } }), {});
+    assert.strictEqual((await send('long')).status, 200);
+    clock += 4000;
+    const long = send('long');
+    await reached;
+    const short = send('short');
+    // Let the second caller reach the pending fetch without altering Worker source.
+    await new Promise(resolve => setImmediate(resolve));
+    release!();
+    const responses = await Promise.all([long, short]);
+    assert.strictEqual(responses[0].status, 200, 'long gate is within 3+2 seconds');
+    assert.strictEqual(responses[1].status, 401, 'short gate is outside 1+2 seconds');
+    assert.strictEqual(hits, 2, 'one seed plus one shared failed fetch');
+  } finally {
+    release!();
+    (globalThis as any).fetch = oldFetch; Date.now = oldNow;
+    fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
 
