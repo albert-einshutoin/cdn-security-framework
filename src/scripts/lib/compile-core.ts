@@ -452,6 +452,7 @@ function build(policy: any, options: any = {}) {
     authProtectedPrefixes: responseBase.authProtectedPrefixes,
     forceVaryAuth: responseBase.forceVaryAuth,
     caseInsensitive: responseBase.caseInsensitive,
+    normalizePath: responseBase.normalizePath,
     clearSiteDataPaths: responseBase.clearSiteDataPaths,
     clearSiteDataTypes: responseBase.clearSiteDataTypes,
     cors: responseBase.cors,

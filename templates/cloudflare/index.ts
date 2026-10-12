@@ -158,6 +158,8 @@ function canonicalizePath(pathname: string): string | null {
     }
   }
   if (/%[0-9A-Fa-f]{2}/.test(p)) return null;
+  // Decoding can reveal matrix parameters; auth and origin need the same path.
+  p = p.replace(/;[^/]*/g, '');
   if (!p.startsWith('/')) p = '/' + p;
   if (opts.collapseSlashes !== false) p = p.replace(/\/+/g, '/');
   if (opts.removeDotSegments !== false) {

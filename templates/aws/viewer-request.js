@@ -399,7 +399,7 @@
   }
 
   // Path hardening for auth: reject ambiguous encodings, then canonicalize
-  // (matrix strip → percent-decode → slash/dot cleanup) before prefix match.
+  // (raw matrix strip → percent-decode → decoded matrix strip → slash/dot cleanup).
   function hasAmbiguousPathEncoding(uri) {
     var s = String(uri || '').toLowerCase();
     return s.indexOf('%2f') !== -1 || s.indexOf('%5c') !== -1 ||
@@ -423,6 +423,8 @@
       }
     }
     if (/%[0-9A-Fa-f]{2}/.test(p)) return null;
+    // Decoding can reveal matrix parameters; auth and origin need the same path.
+    p = p.replace(/;[^/]*/g, '');
     if (p.charAt(0) !== '/') p = '/' + p;
     if (opts.collapseSlashes !== false) p = p.replace(/\/+/g, '/');
     if (opts.removeDotSegments !== false) {

@@ -22,7 +22,10 @@ type RuntimeCase = [string, any, ExpectedStatus];
 // Section 1: viewer-request.js tests (CloudFront Functions)
 // =========================================================================
 
-const viewerRequestPath = path.join(__dirname, '..', 'dist', 'edge', 'viewer-request.js');
+const distArg = process.argv.indexOf('--dist-dir');
+if (distArg >= 0 && !process.argv[distArg + 1]) throw new Error('--dist-dir requires a path');
+const runtimeDist = distArg >= 0 ? path.resolve(process.argv[distArg + 1]) : path.join(__dirname, '..', 'dist');
+const viewerRequestPath = path.join(runtimeDist, 'edge', 'viewer-request.js');
 let code;
 try {
   code = fs.readFileSync(viewerRequestPath, 'utf8');
@@ -151,6 +154,59 @@ for (const [name, event, expected] of cases) {
 }
 
 console.log('--- viewer-request: ' + (cases.length - viewerFailed) + '/' + cases.length + ' passed ---');
+
+// B1: the returned request is the local forwarding boundary. Feed that same
+// canonical request to the generated response stage to check cache protection.
+const b1Receipts: any[] = [];
+const b1Response = Function(fs.readFileSync(path.join(runtimeDist, 'edge/viewer-response.js'), 'utf8') + '\nreturn handler;')();
+for (const [name, uri, destination] of [
+  ['raw-root', '/admin;x=1', '/admin'],
+  ['encoded-root', '/admin%3bx=1', '/admin'],
+  ['double-root', '/admin%253bx=1', '/admin'],
+  ['raw-child', '/admin;x=1/child;y=2', '/admin/child'],
+  ['encoded-child', '/admin%3bx=1/child%3by=2', '/admin/child'],
+  ['double-child', '/admin%253bx=1/child%253by=2', '/admin/child'],
+  ['triple-root', '/admin%25253bx=1', '/admin'],
+]) for (const auth of ['missing', 'wrong', 'valid']) {
+  const headers: HeaderMap = { 'user-agent': 'b1-synthetic' };
+  if (auth !== 'missing') headers['x-edge-token'] = auth === 'valid' ? DEFAULT_TOKEN : 'wrong-synthetic';
+  const event = buildEvent('GET', uri, headers);
+  const result = handler(event);
+  const allowed = result && !result.statusCode && typeof result.uri === 'string';
+  const response = allowed ? b1Response({ request: result, response: { statusCode: 200, headers: {} } }) : null;
+  const cacheControl = response?.headers?.['cache-control']?.value;
+  const vary = response?.headers?.vary?.value;
+  // Response events expose viewer request data too: original notation must
+  // receive the same protection even when it is not pre-normalized by this harness.
+  const originalResponse = allowed ? b1Response({ request: buildEvent('GET', uri, headers).request, response: { statusCode: 200, headers: {} } }) : null;
+  const originalCacheControl = originalResponse?.headers?.['cache-control']?.value;
+  const ok = auth === 'valid'
+    ? allowed && result.uri === destination && String(cacheControl).split(/,\s*/).includes('no-store') && /authorization/i.test(String(vary)) && String(originalCacheControl).split(/,\s*/).includes('no-store')
+    : !allowed && String(result?.statusCode) === '401';
+  b1Receipts.push({ id: 'matrix-' + name + '-' + auth, requestTarget: uri, expectedDestination: destination, status: allowed ? 200 : Number(result?.statusCode), forwardedCount: allowed ? 1 : 0, forwardedPath: allowed ? result.uri : null, cacheControl, originalCacheControl, vary, ok });
+  if (!ok) { viewerFailed++; console.error('FAIL: B1', name, auth); }
+}
+for (const [name, uri, status, destination] of [
+  ['prefix-boundary', '/administrator', 200, '/administrator'],
+  ['matrix-prefix-boundary', '/administrator%3bx=1', 200, '/administrator'],
+  ['matrix-invalid-encoding', '/admin%3bx=%ZZ', 400, null],
+  ['matrix-decode-overflow', '/admin%2525253bx=1', 400, null],
+  ['matrix-ambiguous-encoding', '/admin%3bx=1%2fchild', 400, null],
+] as const) {
+  const result = handler(buildEvent('GET', uri, { 'user-agent': 'b1-synthetic' }));
+  const allowed = result && !result.statusCode && typeof result.uri === 'string';
+  const response = allowed ? b1Response({ request: result, response: { statusCode: 200, headers: {} } }) : null;
+  const actual = allowed ? 200 : Number(result?.statusCode);
+  const ok = actual === status && (destination === null ? !allowed : allowed && result.uri === destination && !response.headers['cache-control']);
+  b1Receipts.push({ id: name, requestTarget: uri, status: actual, forwardedCount: allowed ? 1 : 0, forwardedPath: allowed ? result.uri : null, cacheControl: response?.headers?.['cache-control']?.value, ok });
+  if (!ok) { viewerFailed++; console.error('FAIL: B1', name); }
+}
+const b1ReportIndex = process.argv.indexOf('--b1-report');
+if (b1ReportIndex >= 0) {
+  const reportPath = process.argv[b1ReportIndex + 1];
+  if (!reportPath) throw new Error('--b1-report requires a path');
+  fs.writeFileSync(reportPath, JSON.stringify({ status: b1Receipts.every(r => r.ok) ? 'pass' : 'fail', target: 'aws-local-generated', generatedRequestSha256: crypto.createHash('sha256').update(code).digest('hex'), generatedResponseSha256: crypto.createHash('sha256').update(fs.readFileSync(path.join(runtimeDist, 'edge/viewer-response.js'))).digest('hex'), cases: b1Receipts }, null, 2));
+}
 
 // Query normalization must preserve the CloudFront Functions object shape when
 // the runtime supplies querystring as an object.
@@ -990,7 +1046,7 @@ async function runOriginAllowSamplingTests() {
 // Run all tests
 async function main() {
   let totalFailed = viewerFailed;
-  let totalTests = cases.length + viewerMonitorResult.total + viewerResponseCorsResult.total;
+  let totalTests = cases.length + b1Receipts.length + viewerMonitorResult.total + viewerResponseCorsResult.total;
 
   const enforceResult: any = await runOriginRequestTests();
   totalFailed += enforceResult.failed;

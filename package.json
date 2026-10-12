@@ -100,6 +100,7 @@
     "test:security-baseline": "npm run build:ts && node scripts/security-baseline-check.js",
     "test:fuzz": "npm run build:ts && node scripts/regex-fuzz-tests.js",
     "test:cloudflare-integration": "npm run build:ts && node scripts/cloudflare-integration-tests.js",
+    "test:cloudflare-http-e2e": "npm run build:ts && node scripts/cloudflare-http-e2e-tests.js",
     "test:edge-container": "npm run build:ts && node scripts/edge-container-attack-tests.js",
     "test:package": "npm run build:ts && node scripts/package-smoke-tests.js",
     "test:dist-exists": "node -e \"const fs=require('fs'); for (const f of ['dist/edge/viewer-request.js','dist/edge/viewer-response.js','dist/edge/origin-request.js','dist/edge/cloudflare/index.ts']) fs.accessSync(f);\"",
@@ -198,6 +199,7 @@
     "@types/js-yaml": "^4.0.9",
     "c8": "^11.0.0",
     "json-schema-to-typescript": "^15.0.4",
-    "vitest": "^4.1.7"
+    "vitest": "^4.1.7",
+    "workerd": "1.20261012.1"
   }
 }

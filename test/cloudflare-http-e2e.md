@@ -1,0 +1,138 @@
+# Cloudflare HTTP E2E (local workerd)
+
+This development-only check sends real HTTP through **Node client → workerd →
+separate loopback Node HTTP origin → client**. It adds no cloud charges, requires
+no Cloudflare account, credentials, deployment, remote bindings or paid services.
+The origin is a separate listener in the harness process; the Worker runs in its
+own native workerd process. Neither the Worker handler nor its fetch is mocked.
+
+## Run
+
+Use a supported native workerd platform and the repository's Node >=20.17
+development environment. The observed platform is macOS arm64 / Node 24.2.0.
+Install dependencies once, then run:
+
+```sh
+npm ci --ignore-scripts
+npm run test:cloudflare-http-e2e
+# Optional explicit report location:
+node scripts/cloudflare-http-e2e-tests.js --report reports/cloudflare-http-e2e.json
+```
+
+The first command requires npm registry access. After dependency preparation the
+test's communication uses only `127.0.0.1`. The pinned dev dependency is
+`workerd@1.20261012.1`; a missing/unsupported native runtime is an error, without
+a Node handler fallback. No Miniflare cf-metadata download or Wrangler telemetry
+is involved. workerd's implicit internet service is replaced with deny-all;
+global outbound fetch is a native `ExternalServer` service fixed to the local
+origin address. This changes transport routing, without changing Worker code or
+fabricating a fetch response. See the upstream [configuration contract](https://github.com/cloudflare/workerd/blob/main/src/workerd/server/workerd.capnp).
+
+The harness uses the installed repository CLI `init --platform cloudflare` to
+obtain the current generated `wrangler.toml` compatibility date and flags, then
+`build --target cloudflare` with a disposable schema-2 policy. It transpiles the
+generated TypeScript to an ES module with the existing esbuild dependency. It
+does not replace source text, patch CFG, modify the generated Worker or provide a
+test Worker. Generated TS and module SHA-256, policy/compiler/harness/lock/native
+runtime identity, date/flags and network configuration are in the JSON report.
+
+## Acceptance and evidence
+
+`reports/cloudflare-http-e2e.json` includes sent request-targets, methods,
+responses, each origin's URL/method/headers/body receipt, Worker rejection events,
+native runtime output, and cleanup proof. These are synthetic fixtures only.
+
+| Requirement | Check |
+| --- | --- |
+| Allowed HTTP round trip | GET query normalization and POST JSON arrive once; body returned by the actual origin equals its receipt |
+| Missing/incorrect auth | `/admin` without token or with incorrect synthetic token returns 401 and has zero origin arrivals |
+| Correct auth | Correct token arrives once, origin response returns, protected response includes no-store |
+| Representative controls | Encoded admin/raw matrix/double-slash aliases, encoded slash, dot segments, method, URI length, required header, UA deny list; spoofed XFF/edge marker removed; security response headers verified |
+| Origin failures | Origin's 503/body remains 503/body; closed origin listener yields native 5xx or the explicit ECONNRESET transport error, never a successful response or a timeout accepted as success |
+| HTTP parser boundary | Raw NUL header returns HTTP 400 with zero origin arrivals and no Worker event for that request ID |
+| Cleanup | Child exit, both listening ports closed, origin closed and owned temporary directory removed |
+
+`http.request({ path: ... })` sends the literal target without URL-client
+normalization. workerd's Request URL can still remove dot segments before Worker
+execution: sending `/public/../admin` is recorded separately from the Worker
+event's `/admin`; the canonical protected destination must return 401. This is
+not evidence of the Worker's raw traversal guard seeing the original bytes.
+Policy rejection requires the corresponding Worker block event as well as status
+and zero origin count; a parser 400 is kept as a separate layer. In particular,
+the trial of a space-containing request line was not classified as parser proof:
+the runtime admitted `/bad` and the Worker rejected a missing header.
+
+Startup is bounded (10 seconds for workerd, 60-second overall abort), each HTTP
+operation by 5 seconds, and shutdown by TERM/3 seconds then KILL/3 seconds. A
+brief port-reservation handoff can collide with another local process; it fails
+the run rather than silently selecting another environment. `finally` disposes
+owned resources on assertions or communication errors. A cleanup failure makes
+the report and command fail.
+
+To exercise cleanup after startup, the following command **must exit 1** with the
+injected error; this is not a passing product test:
+
+```sh
+node scripts/cloudflare-http-e2e-tests.js --fail-after-start \
+  --report reports/cloudflare-http-e2e-failure.json
+```
+
+Add `--fail-cleanup` to that command to inject an error after runtime shutdown;
+the other resources must still be disposed and the command must still fail.
+This exercises cleanup continuation without deliberately leaving a child alive.
+
+Verify all report `cleanup` fields are true and the recorded child PID and
+temporary directory no longer exist. Keep normal and injected-failure reports
+separate. No hosted CI is started by this command.
+
+## Observed result and limits
+
+2026-10-12: native workerd `1.20261012.1` (`workerd 2026-10-12`), macOS arm64,
+Node 24.2.0, compatibility date `2026-07-20`, flags `[]`. Normal run: 17 cases
+pass. Injected startup failure: expected exit 1, all cleanup fields true; child
+PID absent and temporary directory absent. The origin-unreachable check observed
+ECONNRESET, rather than inventing a 500 response. Review and complete validation
+results are recorded below after they finish.
+
+This proves the listed local fixtures on that native runtime. It does not prove
+Cloudflare POP routing, managed WAF rules, distributed cache, production limits,
+geo/cf metadata, live JWT/JWKS, or AWS Lambda@Edge. Existing Node handler/unit
+tests remain separate. This phase does not fix or waive the previously recorded
+encoded-matrix/JWKS security findings in the #1024 audit, or claim exhaustive path
+coverage, H01, RC GO, package publication or provider readiness.
+
+## Validation / review record
+
+Targeted build/types, generated-boundary and dependency audit (0 vulnerabilities)
+passed. The first specialist review requested independent cleanup attempts and
+structured/drained parser-event proof. Both were repaired; the subsequent
+targeted normal run passes, and injected startup + cleanup errors report failure
+while all resource-cleanup proofs are true. Final scoped specialist review: **ALLOW** (gpt-5.6-sol / medium).
+
+Complete validation: `npm run test:ci` **exit 0** in an isolated disposable Git
+checkout with the four scoped file snapshots copied before this result-record
+section was updated, over source
+`c5a0caa1e552e8a2b8c700a197da96672f574258`; the pre-existing uncommitted audit
+report was preserved in the user checkout and excluded from this validation
+input. The first run had one unrelated NestJS test timeout (606 pass / 1 fail);
+that same test passed alone in 1.6 seconds, and one bounded complete retry
+passed all 33 files / 607 tests plus the remaining full gate. Coverage: 81.23% lines, 80.63% branches, 82.89% functions.
+Dependency audit: zero vulnerabilities. No test timeout, product source or CI
+configuration was changed to obtain this result.
+
+Companion Stop Review Gate: see the raw verdict in
+`reports/cloudflare-http-e2e-stop-gate.json`. The first Gate detected that this
+result-record section was appended after full validation; the record below now
+separates tested bytes from post-validation annotations. The subsequent Gate
+reviews that distinction and the unchanged executable inputs. No commit/push/PR/deploy
+is part of this phase.
+
+Provenance: the three executable inputs (`package.json`, `package-lock.json`,
+`src/scripts/cloudflare-http-e2e-tests.ts`) are byte-identical to the reviewed and
+full-tested snapshots. This repo-only Markdown is not compiled, imported or
+packaged by those checks. Its instructions and acceptance sections are unchanged;
+only this validation/review record was appended after the run. The original
+validation context is preserved, rather than rewriting its digest to fit this
+annotation. Binding and the section-only delta are in
+`reports/cloudflare-http-e2e-validation-binding.json`. The final Gate verdict is
+written separately, so recording its result does not mutate a reviewed file.

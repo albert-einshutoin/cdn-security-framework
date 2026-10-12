@@ -217,6 +217,15 @@ export function buildAuthGateBase(route: { name?: string; match?: { path_prefixe
   };
 }
 
+function buildPathNormalizationCfg(pathNormalize: Record<string, unknown>) {
+  return {
+    collapseSlashes: pathNormalize.collapse_slashes !== false,
+    removeDotSegments: pathNormalize.remove_dot_segments !== false,
+    caseInsensitive: pathNormalize.case_insensitive !== false,
+    rejectAmbiguousEncoding: pathNormalize.reject_ambiguous_encoding !== false,
+  };
+}
+
 export function buildResponseCfgBase(
   policy: {
     response_headers?: Record<string, unknown>;
@@ -229,6 +238,7 @@ export function buildResponseCfgBase(
   const authProtectedPrefixes = collectAuthProtectedPrefixes(authGates);
   const forceVaryAuth = resHeaders.force_vary_auth !== false;
   const requestNormalizePath = ((((policy as any).request || {}).normalize || {}).path || {}) as Record<string, unknown>;
+  const normalizePath = buildPathNormalizationCfg(requestNormalizePath);
 
   return {
     headers: {
@@ -251,7 +261,8 @@ export function buildResponseCfgBase(
     authProtectedPrefixes,
     forceVaryAuth,
     // Keep response auth-path matching aligned with request.normalize.path.case_insensitive.
-    caseInsensitive: requestNormalizePath.case_insensitive !== false,
+    caseInsensitive: normalizePath.caseInsensitive,
+    normalizePath,
     clearSiteDataPaths: normalizeStringList(resHeaders.clear_site_data_paths, 'preserve', { trim: false }),
     clearSiteDataTypes: Array.isArray(resHeaders.clear_site_data_types) && resHeaders.clear_site_data_types.length > 0
       ? resHeaders.clear_site_data_types
@@ -363,13 +374,7 @@ export function buildRequestCfgBase(policy: {
     uaDenyContains: block.ua_contains || DEFAULT_UA_DENY_CONTAINS,
     blockPathContains: blockPath,
     blockPathRegexSources,
-    normalizePath: {
-      // Secure defaults: omit → enabled. Explicit `false` still disables.
-      collapseSlashes: pathNormalize.collapse_slashes !== false,
-      removeDotSegments: pathNormalize.remove_dot_segments !== false,
-      caseInsensitive: pathNormalize.case_insensitive !== false,
-      rejectAmbiguousEncoding: pathNormalize.reject_ambiguous_encoding !== false,
-    },
+    normalizePath: buildPathNormalizationCfg(pathNormalize),
     requiredHeaders,
     allowedHosts,
     trustForwardedFor,
