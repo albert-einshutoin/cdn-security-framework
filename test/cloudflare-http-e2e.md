@@ -62,7 +62,7 @@ and zero origin count; a parser 400 is kept as a separate layer. In particular,
 the trial of a space-containing request line was not classified as parser proof:
 the runtime admitted `/bad` and the Worker rejected a missing header.
 
-Startup is bounded (10 seconds for workerd, 60-second overall abort), each HTTP
+Startup is bounded (10 seconds for workerd, 120-second overall abort), each HTTP
 operation by 5 seconds, and shutdown by TERM/3 seconds then KILL/3 seconds. A
 brief port-reservation handoff can collide with another local process; it fails
 the run rather than silently selecting another environment. `finally` disposes
@@ -86,6 +86,32 @@ temporary directory no longer exist. Keep normal and injected-failure reports
 separate. No hosted CI is started by this command.
 
 ## Observed result and limits
+
+The maintained suite also exercises B1 path variants and RS256/JWKS using real
+synthetic RSA signatures. A single workerd process fetches trusted HTTPS
+identification URLs through its fixed loopback outbound; this transport proves
+neither public DNS nor TLS. The same listener records JWKS and application
+requests separately. JWTs and private keys are never written to its reports.
+
+JWKS admission is per configured endpoint and Worker isolate: at most two fetch
+attempts (including initial load and failures) per fixed five-second window,
+with shared in-flight work and a two-second fetch/body deadline. A denied miss
+does not move the boundary. Healthy rotation can require up to five seconds
+plus the fetch deadline, assuming requests continue and scheduling is timely.
+Actual failures also honor configured negative-cache TTL; recovery can wait
+until both that TTL and the fixed window permit a fetch. Throttling alone never
+permits expired keys; stale keys require an actual failed fetch and remain
+bounded by gate TTL plus configured stale-if-error. A TTL shorter than the
+refresh window can temporarily fail closed after both attempts are spent.
+
+The suite checks 32 and 128 consecutive unknown kids in one window, cold/fresh/
+expired parallel misses, repeated kids, correct signatures, incorrect signatures
+and claims, live key rotation, separate endpoints, 5xx, malformed JSON, refused
+connections, hanging fetch, redirect rejection, and recovery. Deterministic
+generated-runtime tests cover the exact five-second boundary independently.
+The limit applies separately to every isolate; it is not a global IdP limit.
+State is bounded by configured endpoints, not incoming kids; this is not a
+memory-exhaustion benchmark. Historical observations below remain dated.
 
 2026-10-12: native workerd `1.20261012.1` (`workerd 2026-10-12`), macOS arm64,
 Node 24.2.0, compatibility date `2026-07-20`, flags `[]`. Normal run: 17 cases

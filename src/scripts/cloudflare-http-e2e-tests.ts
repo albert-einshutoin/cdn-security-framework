@@ -14,7 +14,7 @@ const argv = process.argv.slice(2);
 const reportIndex = argv.indexOf('--report');
 for (let i = 0; i < argv.length; i++) {
   if (argv[i] === '--report') { assert.ok(argv[++i] && !argv[i].startsWith('--'), '--report requires a path'); }
-  else assert.ok(['--fail-after-start', '--fail-cleanup'].includes(argv[i]), 'Unknown argument');
+  else assert.ok(['--fail-after-start', '--fail-cleanup', '--jwks-before'].includes(argv[i]), 'Unknown argument');
 }
 const reportPath = path.resolve(reportIndex < 0 ? 'reports/cloudflare-http-e2e.json' : argv[reportIndex + 1]);
 const workerdPath: string = require('workerd').default;
@@ -38,6 +38,15 @@ routes:
     match: { path_prefixes: [/admin] }
     auth_gate: { type: static_token, header: x-edge-token, token_env: EDGE_ADMIN_TOKEN }
     response: { cache_control: no-store }
+${['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'].map(endpoint => `  - name: jwt-${endpoint}
+    match: { path_prefixes: [/jwt-${endpoint}] }
+    auth_gate: { type: jwt, algorithm: RS256, jwks_url: 'https://jwks.example.com/jwks/${endpoint}', issuer: synthetic, audience: synthetic, cache_ttl_sec: ${['c', 'd'].includes(endpoint) ? 1 : endpoint === 'h' ? 3 : 3600} }
+    response: { cache_control: no-store }`).join('\n')}
+  - name: jwt-short
+    match: { path_prefixes: [/jwt-short] }
+    auth_gate: { type: jwt, algorithm: RS256, jwks_url: 'https://jwks.example.com/jwks/h', issuer: synthetic, audience: synthetic, cache_ttl_sec: 1 }
+firewall:
+  jwks: { allowed_hosts: [jwks.example.com], negative_cache_sec: 1, stale_if_error_sec: 2 }
 response_headers:
   hsts: max-age=100
   x_content_type_options: nosniff
@@ -99,9 +108,22 @@ async function main() {
   const controller = new AbortController();
   const abort = () => controller.abort(new Error('HTTP E2E interrupted'));
   process.once('SIGINT', abort); process.once('SIGTERM', abort);
-  const watchdog = setTimeout(abort, 60000);
+  const watchdog = setTimeout(abort, 120000);
   const receipts: Receipt[] = [];
   const cases: Array<Record<string, unknown>> = [];
+  const jwksReceipts: Array<{ endpoint: string; at: number; mode: string; kids: string[] }> = [];
+  const jwksCases: Array<Record<string, unknown>> = [];
+  // Private keys and complete tokens remain in memory and never enter reports.
+  const keyA = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const keyB = crypto.generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const publicA = { ...keyA.publicKey.export({ format: 'jwk' }), kid: 'key-a', alg: 'RS256' };
+  const publicB = { ...keyB.publicKey.export({ format: 'jwk' }), kid: 'key-b', alg: 'RS256' };
+  const endpoints = new Map(['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'].map(name => [name, { mode: 'ok', keys: [publicA], delay: 20 }]));
+  function jwt(kid: string, signingKey = keyA.privateKey, claims: Record<string, unknown> = {}) {
+    const encode = (value: unknown) => Buffer.from(JSON.stringify(value)).toString('base64url');
+    const data = encode({ alg: 'RS256', kid }) + '.' + encode({ iss: 'synthetic', aud: 'synthetic', exp: Math.floor(Date.now() / 1000) + 3600, ...claims });
+    return data + '.' + crypto.sign('sha256', Buffer.from(data), signingKey).toString('base64url');
+  }
   let runtime: ChildProcess | undefined;
   let closed: Promise<unknown> | undefined;
   let runtimeLog = '';
@@ -114,9 +136,27 @@ async function main() {
   let identity: Record<string, unknown> = {};
   const origin = http.createServer(async (req, res) => {
     try {
+    if (req.url?.startsWith('/jwks/')) {
+      const name = req.url.slice('/jwks/'.length);
+      const endpoint = endpoints.get(name);
+      assert.ok(endpoint, 'Unexpected JWKS endpoint');
+      jwksReceipts.push({ endpoint: name, at: Date.now(), mode: endpoint.mode, kids: endpoint.keys.map(key => key.kid) });
+      if (endpoint.mode === 'hang') return;
+      if (endpoint.mode === 'body-hang') {
+        res.writeHead(200, { 'content-type': 'application/json' });
+        res.flushHeaders(); res.write('{"keys":'); return;
+      }
+      await new Promise(resolve => setTimeout(resolve, endpoint.delay));
+      if (endpoint.mode === 'redirect') {
+        res.writeHead(302, { location: 'http://169.254.169.254/metadata' }); res.end(); return;
+      }
+      res.writeHead(endpoint.mode === '5xx' ? 503 : 200, { 'content-type': 'application/json' });
+      res.end(endpoint.mode === 'bad-json' ? '{' : JSON.stringify({ keys: endpoint.keys }));
+      return;
+    }
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
-    const receipt = { url: req.url!, method: req.method!, headers: req.headers, body: Buffer.concat(chunks).toString() };
+    const receipt = { url: req.url!, method: req.method!, headers: { ...req.headers, ...(req.headers.authorization ? { authorization: '[redacted synthetic JWT]' } : {}) }, body: Buffer.concat(chunks).toString() };
     receipts.push(receipt);
     if (req.url === '/origin-error') { res.writeHead(503, { 'content-type': 'text/plain' }); res.end('synthetic-origin-failure'); }
     else { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(receipt)); }
@@ -189,6 +229,106 @@ const config :Workerd.Config = (
       await new Promise(resolve => setTimeout(resolve, 25));
     }
     if (argv.includes('--fail-after-start')) throw new Error('Injected cleanup check after workerd startup');
+
+    const wait = async (milliseconds: number) => {
+      await new Promise(resolve => setTimeout(resolve, milliseconds));
+      controller.signal.throwIfAborted();
+    };
+    async function jwtGroup(id: string, endpoint: string, tokens: string[], expectedStatus: number, parallel = false, maxFetches = 0) {
+      const startedAt = Date.now();
+      const beforeJwks = jwksReceipts.length;
+      const beforeApp = receipts.length;
+      const send = (signed: string, i: number) => request(workerPort, { id: id + '-' + i, target: '/jwt-' + endpoint, headers: { authorization: 'Bearer ' + signed }, status: expectedStatus }, controller.signal);
+      const responses: HttpResult[] = [];
+      if (parallel) responses.push(...await Promise.all(tokens.map(send)));
+      else for (let i = 0; i < tokens.length; i++) responses.push(await send(tokens[i], i));
+      const observed = { id, endpoint, startedAt, endedAt: Date.now(), requests: tokens.length, parallel, responses: responses.map(r => r.status), jwksArrivals: jwksReceipts.slice(beforeJwks), appArrivals: receipts.slice(beforeApp).filter(r => String(r.headers['x-e2e-id']).startsWith(id + '-')).length, maxFetches };
+      jwksCases.push(observed);
+      assert.ok(responses.every(r => r.status === expectedStatus), id + ': JWT status');
+      assert.equal(observed.appArrivals, expectedStatus === 200 ? tokens.length : 0, id + ': app arrivals');
+      assert.ok(observed.jwksArrivals.length <= maxFetches, id + ': JWKS amplification (' + observed.jwksArrivals.length + ')');
+      if (expectedStatus === 200) assert.ok(responses.every(r => String(r.headers['cache-control']).includes('no-store')), id + ': protected response');
+      return observed;
+    }
+    const first = await jwtGroup('unknown-32', 'a', Array.from({ length: 32 }, (_, i) => jwt('unknown-' + i)), 401, false, 2);
+    assert.ok(first.endedAt - first.startedAt < 5000, 'Burst must remain in one fixed window');
+    if (argv.includes('--jwks-before')) throw new Error('Before reproduction unexpectedly passed');
+    const larger = await jwtGroup('unknown-128', 'a', Array.from({ length: 128 }, (_, i) => jwt('larger-' + i)), 401);
+    assert.ok(larger.endedAt - first.startedAt < 5000, 'Both bursts must share one window');
+    await jwtGroup('known-fresh', 'a', [jwt('key-a')], 200);
+    await jwtGroup('wrong-signature', 'a', [jwt('key-a', keyB.privateKey)], 401);
+    await jwtGroup('wrong-claims', 'a', [jwt('key-a', keyA.privateKey, { iss: 'wrong' }), jwt('key-a', keyA.privateKey, { aud: 'wrong' })], 401);
+    await jwtGroup('cold-parallel', 'b', Array.from({ length: 32 }, (_, i) => jwt('cold-' + i)), 401, true, 2);
+    await jwtGroup('fresh-parallel-repeat', 'b', Array.from({ length: 32 }, () => jwt('cold-0')), 401, true);
+    // The same kid used on A must not couple B's keys or failure state.
+    await jwtGroup('endpoint-b-known', 'b', [jwt('key-a')], 200);
+    await jwtGroup('expiry-seed', 'c', [jwt('key-a')], 200, false, 1);
+    await wait(1100);
+    await jwtGroup('expired-parallel', 'c', Array.from({ length: 32 }, (_, i) => jwt('expired-' + i)), 401, true, 1);
+    await jwtGroup('expired-known', 'c', [jwt('key-a')], 200);
+    await jwtGroup('rotation-before', 'a', [jwt('key-b', keyB.privateKey)], 401);
+    endpoints.get('a')!.keys.push(publicB);
+    jwksCases.push({ id: 'rotation-key-update', at: Date.now(), endpoint: 'a', kids: ['key-a', 'key-b'] });
+    // Continue misses until a fixed original boundary, without rewriting the Worker clock.
+    while (Date.now() < first.startedAt + 4800) {
+      await jwtGroup('rotation-attack-' + jwksCases.length, 'a', [jwt('continued-' + jwksCases.length)], 401);
+      await wait(250);
+    }
+    await wait(Math.max(0, first.startedAt + 5100 - Date.now()));
+    await jwtGroup('rotation-parallel', 'a', Array.from({ length: 16 }, () => jwt('key-b', keyB.privateKey)), 200, true, 1);
+    await jwtGroup('rotation-fresh', 'a', [jwt('key-b', keyB.privateKey)], 200);
+    await jwtGroup('endpoint-key-isolation', 'b', [jwt('key-b', keyB.privateKey)], 401, false, 1);
+
+    const faultSeed = await jwtGroup('fault-seed', 'd', [jwt('key-a')], 200, false, 1);
+    endpoints.get('d')!.mode = '5xx';
+    await wait(1100);
+    await jwtGroup('5xx-stale-parallel', 'd', Array.from({ length: 16 }, () => jwt('key-a')), 200, true, 1);
+    await jwtGroup('5xx-unknown-negative', 'd', [jwt('unknown-fault')], 401);
+    await jwtGroup('endpoint-b-during-d-fault', 'b', [jwt('key-a')], 200);
+    await wait(2100);
+    await jwtGroup('stale-expired-throttled', 'd', [jwt('key-a')], 401);
+    await wait(Math.max(0, faultSeed.startedAt + 5100 - Date.now()));
+    endpoints.get('d')!.mode = 'bad-json';
+    await jwtGroup('bad-json-parallel', 'd', Array.from({ length: 16 }, () => jwt('key-a')), 401, true, 1);
+    await jwtGroup('bad-json-negative', 'd', [jwt('key-a')], 401);
+    endpoints.get('d')!.mode = 'ok';
+    await wait(1100);
+    await jwtGroup('failure-recovery', 'd', [jwt('key-a')], 200, false, 1);
+    endpoints.get('f')!.mode = 'hang';
+    const fetchDeadline = await jwtGroup('fetch-deadline', 'f', [jwt('key-a')], 401, false, 1);
+    assert.ok(fetchDeadline.endedAt - fetchDeadline.startedAt >= 1800 && fetchDeadline.endedAt - fetchDeadline.startedAt < 4000, 'Fetch deadline timing');
+    endpoints.get('f')!.mode = 'ok';
+    await wait(1100);
+    await jwtGroup('deadline-recovery', 'f', [jwt('key-a')], 200, false, 1);
+    endpoints.get('g')!.mode = 'redirect';
+    await jwtGroup('redirect-rejected', 'g', [jwt('key-a')], 401, false, 1);
+    await jwtGroup('redirect-negative', 'g', [jwt('key-a')], 401);
+    endpoints.get('i')!.mode = 'body-hang';
+    const bodyDeadline = await jwtGroup('body-deadline', 'i', [jwt('key-a')], 401, false, 1);
+    assert.ok(bodyDeadline.endedAt - bodyDeadline.startedAt >= 1800 && bodyDeadline.endedAt - bodyDeadline.startedAt < 4000, 'Body deadline timing');
+    endpoints.get('i')!.mode = 'ok';
+    await wait(1100);
+    await jwtGroup('body-deadline-recovery', 'i', [jwt('key-a')], 200, false, 1);
+    await jwtGroup('shared-ttl-seed', 'h', [jwt('key-a')], 200, false, 1);
+    endpoints.get('h')!.mode = '5xx';
+    endpoints.get('h')!.delay = 200;
+    await wait(4100);
+    const long = jwtGroup('shared-ttl-long', 'h', [jwt('key-a')], 200, false, 1);
+    // Receipt proves the long caller's network fetch is pending before short joins.
+    const pendingDeadline = Date.now() + timeoutMs;
+    while (!jwksReceipts.some(r => r.endpoint === 'h' && r.mode === '5xx')) {
+      assert.ok(Date.now() < pendingDeadline, 'Shared TTL fetch did not start'); await wait(5);
+    }
+    const short = jwtGroup('shared-ttl-short', 'short', [jwt('key-a')], 401);
+    await Promise.all([long, short]);
+    origin.closeAllConnections();
+    await new Promise<void>((resolve, reject) => origin.close(error => error ? reject(error) : resolve()));
+    await jwtGroup('connection-refused', 'e', [jwt('key-a')], 401);
+    origin.listen(originPort, '127.0.0.1');
+    await once(origin, 'listening', { signal: controller.signal });
+    await jwtGroup('connection-negative', 'e', [jwt('key-a')], 401);
+    await wait(1100);
+    await jwtGroup('connection-recovery', 'e', [jwt('key-a')], 200, false, 1);
 
     const tests: Case[] = [
       { id: 'public', target: '/public?keep=1&utm_source=discard', status: 200, forwarded: '/public?keep=1' },
@@ -367,7 +507,7 @@ const config :Workerd.Config = (
     });
     if (cleanupErrors.length) failure = new AggregateError([failure, ...cleanupErrors].filter(Boolean), 'HTTP E2E or cleanup failed');
     fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-    fs.writeFileSync(reportPath, JSON.stringify({ status: failure ? 'fail' : 'pass', identity, cases, receipts, cleanup, workerPid: runtime?.pid, tempDirectory: tmp, runtimeLog, error: failure ? String(failure) : null }, null, 2));
+    fs.writeFileSync(reportPath, JSON.stringify({ status: failure ? 'fail' : 'pass', identity, jwksCases, jwksReceipts, cases, receipts, cleanup, workerPid: runtime?.pid, tempDirectory: tmp, runtimeLog, error: failure ? String(failure) : null }, null, 2));
   }
   if (failure) throw failure;
   console.log('Cloudflare HTTP E2E passed; report:', reportPath);

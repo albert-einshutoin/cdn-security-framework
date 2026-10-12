@@ -20,9 +20,12 @@ const jwksCache = new Map<string, JwksCacheEntry>();
 
 type JwksNegativeEntry = { failedAt: number; reason: string };
 const jwksNegativeCache = new Map<string, JwksNegativeEntry>();
-/** Unknown-kid negative cache — stops random-kid JWKS fetch amplification. */
-const jwksKidMissCache = new Map<string, number>();
-const JWKS_KID_MISS_TTL_MS = 60_000;
+// Only configured endpoints create state; attacker-controlled kids never do.
+type JwksRefreshState = { windowStartedAt: number; attempts: number; inFlight?: Promise<Array<Record<string, any>>> };
+const jwksRefreshState = new Map<string, JwksRefreshState>();
+const JWKS_REFRESH_WINDOW_MS = 5000;
+const JWKS_REFRESH_MAX_ATTEMPTS = 2;
+const JWKS_FETCH_TIMEOUT_MS = 2000;
 const JWKS_MAX_BODY_BYTES = 256 * 1024;
 const JWKS_MAX_KEYS = 100;
 
@@ -651,26 +654,59 @@ async function fetchJwks(
     throw new Error('JWKS fetch skipped (negative cache): ' + neg.reason);
   }
 
+  let state = jwksRefreshState.get(jwksUrl);
+  if (!state) {
+    state = { windowStartedAt: now, attempts: 0 };
+    jwksRefreshState.set(jwksUrl, state);
+  }
+  if (!state.inFlight) {
+    // A blocked request must not slide the boundary and starve rotation.
+    if (now - state.windowStartedAt >= JWKS_REFRESH_WINDOW_MS) {
+      state.windowStartedAt = now;
+      state.attempts = 0;
+    }
+    if (state.attempts >= JWKS_REFRESH_MAX_ATTEMPTS) {
+      if (cached && now - cached.fetchedAt < ttlSec * 1000) return cached.keys;
+      // Throttling alone does not authorize use of expired keys.
+      throw new Error('JWKS refresh window exhausted');
+    }
+    state.attempts++;
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), JWKS_FETCH_TIMEOUT_MS);
+    state.inFlight = (async () => {
+      try {
+        // This compatibility date's workerd rejects `error`. Never follow a 3xx,
+        // attacker who briefly controls the JWKS host cannot redirect us to a
+        // cloud-metadata endpoint or a different tenant's IdP.
+        const res = await fetch(jwksUrl, { method: 'GET', redirect: 'manual', signal: controller.signal });
+        if (!res.ok) throw new Error('Failed to fetch JWKS: ' + res.status);
+        const bodyText = await readLimitedResponseText(res, JWKS_MAX_BODY_BYTES);
+        const keys = validateJwksKeys(JSON.parse(bodyText));
+        jwksCache.set(jwksUrl, { fetchedAt: Date.now(), keys });
+        jwksNegativeCache.delete(jwksUrl);
+        return keys;
+      } catch (err: any) {
+        jwksNegativeCache.set(jwksUrl, { failedAt: Date.now(), reason: err?.message || 'unknown' });
+        throw err;
+      } finally {
+        clearTimeout(timer);
+      }
+    })();
+  }
+  const inFlight = state.inFlight;
   try {
-    // `redirect: 'error'` forces Workers' fetch to refuse any 3xx, so an
-    // attacker who briefly controls the JWKS host cannot redirect us to a
-    // cloud-metadata endpoint or a different tenant's IdP.
-    const res = await fetch(jwksUrl, { method: 'GET', redirect: 'error' });
-    if (!res.ok) throw new Error('Failed to fetch JWKS: ' + res.status);
-    const bodyText = await readLimitedResponseText(res, JWKS_MAX_BODY_BYTES);
-    const keys = validateJwksKeys(JSON.parse(bodyText));
-    jwksCache.set(jwksUrl, { fetchedAt: now, keys });
-    jwksNegativeCache.delete(jwksUrl);
-    return keys;
+    return await inFlight;
   } catch (err: any) {
-    jwksNegativeCache.set(jwksUrl, { failedAt: now, reason: err?.message || 'unknown' });
-    // Stale-if-error: keep serving the last known-good keys during the
-    // stale-if-error window so an IdP outage doesn't cause 100% 401.
-    if (cached && (now - cached.fetchedAt) < staleWindowMs) {
+    // Network work is shared, but different gates can impose different TTLs.
+    // Judge stale eligibility separately for every caller after a real failure.
+    if (cached && Date.now() - cached.fetchedAt < staleWindowMs) {
       console.log('[jwks] refresh failed, serving stale keys:', err?.message);
       return cached.keys;
     }
     throw err;
+  } finally {
+    // Neither fulfilled nor rejected work is retained across refreshes.
+    if (state.inFlight === inFlight) state.inFlight = undefined;
   }
 }
 
@@ -736,27 +772,19 @@ async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ va
   if (gate.algorithm === 'RS256') {
     if (!gate.jwks_url) return { valid: false, error: 'JWKS URL missing' };
     try {
-      const kidKey = gate.jwks_url + '\0' + String(header.kid || '');
-      const kidMissAt = jwksKidMissCache.get(kidKey);
-      if (kidMissAt && (Date.now() - kidMissAt) < JWKS_KID_MISS_TTL_MS) {
-        return { valid: false, error: 'JWK key not found' };
-      }
-
       const ttl = gate.cache_ttl_sec || 3600;
       let keys = await fetchJwks(gate.jwks_url, ttl);
       let jwk = keys.find((k) => isMatchingRs256Jwk(k, header.kid));
       // Key rotation: unknown kid → refresh once WITHOUT deleting the cache
-      // first, so a failed IdP fetch still has stale-if-error insurance. Random
-      // kids are then negatively cached to stop fetch amplification.
+      // first, so a failed IdP fetch still has stale-if-error insurance. All
+      // kids share the endpoint's fixed refresh budget and in-flight work.
       if (!jwk) {
         keys = await fetchJwks(gate.jwks_url, ttl, { forceRefresh: true });
         jwk = keys.find((k) => isMatchingRs256Jwk(k, header.kid));
       }
       if (!jwk) {
-        jwksKidMissCache.set(kidKey, Date.now());
         return { valid: false, error: 'JWK key not found' };
       }
-      jwksKidMissCache.delete(kidKey);
 
       const verifyKey = await crypto.subtle.importKey(
         'jwk',

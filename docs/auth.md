@@ -90,18 +90,26 @@ remains the authority for accepted token algorithms.
 | Fresh expired + IdP fails + outside stale-if-error | Yes (once) | Reject JWT verification |
 | Within negative-cache window + stale available | No | Serve stale cached keys; skip fetch |
 | Within negative-cache window + no cache | No | Reject JWT verification |
-| `kid` not in cache | Yes (once) | Invalidate + refetch — handles IdP key rotation |
+| `kid` not in cache | If endpoint budget permits | Refresh without deleting cached keys; otherwise reject unknown key |
 
 ### Operational Implications
 
 - **IdP outage** doesn't cause 100% 401 as long as some tokens were
   verified within `stale_if_error_sec` before the outage and the
   isolate / container kept the cache.
-- **Key rotation** completes transparently on the first request with the
-  new `kid` — cache invalidates, refetches, finds the new key.
-- **Broken IdP** (persistent 5xx or DNS failure) is rate-limited to one
-  attempt per `negative_cache_sec`. Edge functions stop hammering the
-  IdP after the first failure.
+- **Refresh budget:** each configured JWKS URL has at most two fetch attempts
+  (initial load and failures included) per fixed five-second window in each
+  Worker isolate. Concurrent cold, expired, and forced fetches share in-flight
+  work. Unknown kids create no state; denied requests do not slide the window.
+- **Key rotation:** a healthy endpoint can take up to five seconds plus a
+  two-second fetch/body deadline to recognize a new key, with continuing requests
+  and timely scheduling. Redirects use `manual`; every non-2xx is rejected.
+- **Broken IdP:** configured `negative_cache_sec` also delays further attempts.
+  Once healthy, fetching resumes when both that TTL and the fixed budget allow
+  it. Stale keys require an actual fetch failure and are valid only within
+  `cache_ttl_sec + stale_if_error_sec` since the last successful fetch. Exhausting
+  the refresh budget alone never authorizes expired keys. A gate TTL shorter
+  than five seconds can temporarily fail closed when both attempts are spent.
 
 ### Limits on Coverage
 

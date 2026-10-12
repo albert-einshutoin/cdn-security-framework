@@ -146,6 +146,7 @@
     "parser/",
     "validator/",
     "docs/",
+    "!docs/reviews/",
     "!docs/benchmarks/compiler-baseline.json",
     "!docs/benchmarks/compiler-baseline-with-install.json",
     "scripts/README.md",
