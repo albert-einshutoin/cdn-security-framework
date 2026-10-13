@@ -2,20 +2,118 @@
 
 ## 1. Install the unpublished schema2 candidate in an empty consumer
 
-Published1.4.0 uses schema1. This guide targets the unpublished main schema2 candidate; see the [roadmap](ROADMAP.md). Obtain a tarball prepared by the candidate maintainer with `npm run build:ts` then `npm pack --ignore-scripts`, and verify its commit SHA and SHA-256. Bundled documentation changes also change the digest. The following consumer steps require no repository npm scripts, development checkout dependencies, global install or NODE_PATH.
+Published `cdn-security-framework@1.4.0` uses Policy schema **version 1**. The current unpublished main candidate is **2.0.0-rc.0** and requires Policy schema **version 2**. These are separate version contracts; npm latest is the published baseline, not this candidate. See the [roadmap](ROADMAP.md). Node 20.17.0, 22 or 24, npm, GitHub CLI (`gh`) with artifact read access, and POSIX `unzip` are prerequisites.
+
+### Maintainer handoff and independent verification
+
+Use a successful **main push** `Policy Lint & Build Check` run and its exact attempt. A PR run is pre-merge evidence and is not automatically the post-merge candidate. The maintainer supplies a trusted handoff JSON through a reviewed channel outside the downloaded archive, using this format (replace every placeholder):
+
+```json
+{
+  "source": "<40 lowercase hex characters>",
+  "harness": "<40 lowercase hex characters>",
+  "tree": "<40 lowercase hex characters>",
+  "run": "<main push run ID>",
+  "attempt": "<attempt number>",
+  "artifactId": "<Actions artifact ID>",
+  "artifactZipSha256": "<64 lowercase hex characters>",
+  "tgzSha256": "<64 lowercase hex characters>",
+  "consumerLockSha256": "<64 lowercase hex characters>"
+}
+```
+
+| Field | Meaning and independent comparison |
+| --- | --- |
+| `source` | Producer package checkout commit; compare with GitHub run `head_sha` and commit API `sha` |
+| `harness` | Checkout supplying the copied single-pack/smoke/journey verification code; the current producer explicitly copies it from `source` and validates equality. Verify it against the independently supplied record and run; do not infer equality for other producers |
+| `tree` | Producer checkout Git tree; compare with the commit API `tree.sha` |
+| `run`, `attempt` | Exact main push run and attempt; compare with the run-attempt API, completed/success and workflow path |
+| `artifactId`, `artifactZipSha256` | Exact named Actions artifact and **ZIP bytes**, compared with GitHub artifact API `digest` |
+| `tgzSha256` | **candidate.tgz bytes**, compared with the trusted handoff and downloaded metadata |
+| `consumerLockSha256` | **consumer/package-lock.json bytes**, compared with the trusted handoff and metadata |
+
+Do not manufacture the trusted record by copying values from an unverified archive. The maintainer cross-checks run/commit/artifact records and producer/consumer acceptance before handoff. Keep the trusted record and final candidate hashes outside the package (for example, a maintainer evidence directory); never embed the final tgz hash in bundled docs and repack to chase that hash. Every bundled documentation change requires a new candidate artifact.
+
+The following commands start in a new directory, use no development checkout/global installation/NODE_PATH, and fail on a missing field, wrong source/harness/tree/run/attempt, unsuccessful/wrong workflow, unsafe archive, or ZIP/tgz/lock/integrity mismatch. They do not install until verification succeeds. Trust and exclusive management of the local directory and the external handoff are prerequisites; concurrent local edits are not supported.
 
 ```bash
-# Set this to the verified tarball supplied with the candidate SHA and SHA-256.
-export CANDIDATE_TARBALL=/path/to/verified-candidate.tgz
-shasum -a 256 "$CANDIDATE_TARBALL"
+set -eu
+export CANDIDATE_HANDOFF=/absolute/path/to/trusted-candidate-handoff.json
 mkdir consumer
 cd consumer
-npm init -y
-npm install --save-dev "$CANDIDATE_TARBALL"
+node - <<'JS'
+const fs = require('node:fs');
+const cp = require('node:child_process');
+const crypto = require('node:crypto');
+const assert = require('node:assert/strict');
+const repo = 'albert-einshutoin/cdn-security-framework';
+const read = file => {
+  assert.ok(fs.statSync(file).size <= 2 * 1024 * 1024, 'JSON too large');
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+};
+const hash = (bytes, algorithm = 'sha256', encoding = 'hex') => crypto.createHash(algorithm).update(bytes).digest(encoding);
+const command = (name, args) => cp.execFileSync(name, args, { timeout: 30000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } });
+const api = endpoint => JSON.parse(command('gh', ['api', '--hostname', 'github.com', `repos/${repo}/${endpoint}`]).toString());
+assert.ok(process.env.CANDIDATE_HANDOFF, 'Trusted handoff is required');
+const h = read(process.env.CANDIDATE_HANDOFF);
+for (const key of ['source', 'harness', 'tree']) assert.match(h[key], /^[a-f0-9]{40}$/, key);
+for (const key of ['run', 'attempt', 'artifactId']) assert.match(h[key], /^[1-9][0-9]*$/, key);
+for (const key of ['artifactZipSha256', 'tgzSha256', 'consumerLockSha256']) assert.match(h[key], /^[a-f0-9]{64}$/, key);
+const run = api(`actions/runs/${h.run}/attempts/${h.attempt}`);
+assert.equal(String(run.id), h.run); assert.equal(String(run.run_attempt), h.attempt);
+assert.equal(run.repository.full_name, repo);
+assert.equal(run.event, 'push'); assert.equal(run.head_branch, 'main');
+assert.equal(run.status, 'completed'); assert.equal(run.conclusion, 'success');
+assert.equal(run.head_sha, h.source);
+const workflow = api(`actions/workflows/${run.workflow_id}`);
+assert.equal(workflow.path, '.github/workflows/policy-lint.yml');
+const commit = api(`git/commits/${h.source}`);
+assert.equal(commit.sha, h.source); assert.equal(commit.tree.sha, h.tree);
+// Current producer copies the harness from its source checkout; verify, do not infer.
+assert.equal(h.harness, run.head_sha);
+const artifact = api(`actions/artifacts/${h.artifactId}`);
+assert.equal(String(artifact.workflow_run.id), h.run);
+assert.equal(artifact.workflow_run.head_sha, h.source);
+assert.equal(artifact.name, `package-candidate-${h.run}-${h.attempt}`);
+assert.equal(artifact.expired, false);
+assert.equal(artifact.digest, 'sha256:' + h.artifactZipSha256);
+const zip = command('gh', ['api', '--hostname', 'github.com', `repos/${repo}/actions/artifacts/${h.artifactId}/zip`]);
+assert.equal(hash(zip), h.artifactZipSha256, 'Actions ZIP mismatch');
+assert.ok(!fs.existsSync('candidate'), 'Use a new empty directory');
+fs.writeFileSync('candidate.zip', zip, { flag: 'wx' });
+const entries = command('unzip', ['-Z1', 'candidate.zip']).toString().trim().split('\n');
+assert.ok(entries.length > 0 && entries.length <= 100);
+assert.ok(entries.every(n => n && !n.startsWith('/') && !n.includes('\\') && !n.split('/').includes('..')), 'Unsafe ZIP path');
+const modes = command('unzip', ['-Z', '-l', 'candidate.zip']).toString().split('\n').filter(n => /^[bcdlps-][rwxstST-]{9}\s/.test(n));
+assert.equal(modes.length, entries.length, 'Unknown ZIP entry type');
+assert.ok(modes.every(n => n.startsWith('-') || n.startsWith('d')), 'ZIP links/special files refused');
+const totals = /^(\d+) files?, (\d+) bytes uncompressed,/m.exec(command('unzip', ['-Z', '-t', 'candidate.zip']).toString());
+assert.ok(totals && Number(totals[1]) === entries.length && Number(totals[2]) <= 8 * 1024 * 1024, 'ZIP expansion limit');
+command('unzip', ['-q', 'candidate.zip', '-d', 'candidate']);
+const m = read('candidate/metadata.json');
+assert.equal(m.schemaVersion, 1);
+for (const key of ['source', 'harness', 'tree', 'run', 'attempt']) assert.equal(m[key], h[key], key);
+const tgz = fs.readFileSync('candidate/candidate.tgz');
+assert.ok(tgz.length > 0 && tgz.length <= 1024 * 1024);
+assert.equal(m.size, tgz.length);
+assert.equal(hash(tgz), h.tgzSha256, 'Trusted tgz mismatch');
+assert.equal(m.sha256, h.tgzSha256);
+const lock = fs.readFileSync('candidate/consumer/package-lock.json');
+assert.equal(hash(lock), h.consumerLockSha256, 'Trusted consumer lock mismatch');
+assert.equal(m.lockSha256, h.consumerLockSha256);
+const pack = read('candidate/pack.json');
+assert.equal(pack.version, '2.0.0-rc.0');
+assert.equal(pack.integrity, 'sha512-' + hash(tgz, 'sha512', 'base64'), 'npm integrity mismatch');
+for (const [name, data] of Object.entries({ run, workflow, commit, artifact })) fs.writeFileSync(name + '.json', JSON.stringify(data, null, 2), { flag: 'wx' });
+console.log('Verified main source/harness/tree/run/attempt, Actions ZIP, tgz and consumer lock.');
+JS
+cd candidate/consumer
+npm ci --ignore-scripts --no-audit --no-fund
+./node_modules/.bin/cdn-security --version
 ./node_modules/.bin/cdn-security --help
 ```
 
-The retained `--version` value1.4.0 cannot distinguish this candidate from the published baseline. Only after2.0.0 is actually released may you replace the tarball install with `npm install --save-dev cdn-security-framework@2.0.0`. That future command is not claimed as tested here. Do not use npm latest to verify the candidate.
+Expect exit 0, the `Verified main source/harness/tree/run/attempt, Actions ZIP, tgz and consumer lock.` message, and `--version` **2.0.0-rc.0**. Remain in `consumer/candidate/consumer` for the sections below. The package's `npm integrity` is `sha512-` plus Base64 SHA-512 of the tgz; it is not either SHA-256 digest. `npm ci` uses the verified producer's common lock. An incomplete/unavailable hosted artifact stops handoff; a local repack cannot replace it. Only after a stable 2.0.0 publication may a separate guide use the registry package; that future installation is not validated here.
 
 ## 2. Profile init, lint and AWS build
 
@@ -30,7 +128,7 @@ All commands should exit0. Balanced allows GET/HEAD/POST and protects `/admin`, 
 
 `dist/aws/edge/` contains runtime artifacts; `dist/aws/infra/` contains IaC fragments. Build produces reviewable local files without cloud access or deployment. Edit Policy rather than generated JS or CFG.
 
-## 3. Local HTTP fixtures
+## 3. Local playground fixtures (stub)
 
 Save this JSON as `cases.json` in the empty consumer:
 
@@ -53,6 +151,8 @@ Save this JSON as `cases.json` in the empty consumer:
 Expect CLI exit0 and, in fixture order:200/pass,405/block,401/block,200/pass,200/pass. A200 is local stub passage, not a production-origin guarantee. AWS viewer-request cannot read bodies: including POST JSON does not prove body inspection. Repository-only commands such as `npm run test:unit` are not needed in a consumer.
 
 Auth gates require their referenced environment variables. `--allow-placeholder-token` is exclusively for non-production fixtures; never deploy placeholder artifacts. Cloudflare playground replaces external fetch with its existing stub and uses built-in non-production environment values. Do not reuse the AWS fixture's custom token unchanged against that stub. See the [CLI fixture contract](cli.md#playground).
+
+Historical B2 evidence used a normally generated Worker on local workerd with real loopback HTTP/JWKS and synthetic RSA signatures ([B2 record at its delivered commit](https://github.com/albert-einshutoin/cdn-security-framework/blob/efb67793054f0c1a26986fd067a3a45718795a8c/docs/reviews/issue-1024-jwks-refresh-fix.md)). This is separate from the consumer playground stub above, and proves neither public TLS/DNS nor deployed Cloudflare POP/AWS behaviour. B3 documentation confirmation is not a fresh runtime test or a real participant H01 result.
 
 ## 4. Guided setup and Cloudflare JWT
 

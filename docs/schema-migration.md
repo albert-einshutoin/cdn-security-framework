@@ -4,7 +4,7 @@
 
 ## Published and candidate contracts
 
-Published `cdn-security-framework@1.4.0` uses Policy **version 1**. The unpublished main candidate uses **version 2**; package.json still says 1.4.0 until the release GO gate. Identify a candidate by commit SHA and tarball SHA-256, not package version. No npm 2.0.0 release is implied here.
+Published `cdn-security-framework@1.4.0` uses Policy **version 1**. The unpublished main package **2.0.0-rc.0** requires Policy **version 2**. Package and Policy versions are separate. Install the main-run candidate using the [independent handoff verification](quickstart.md#1-install-the-unpublished-schema2-candidate-in-an-empty-consumer): source/harness/tree/run/attempt and actual ZIP/tgz/consumer-lock bytes identify it. This does not mean stable 2.0.0 is published or RC GO is approved.
 
 Core lint/build/API, each inherited policy document, init/guided, profiles/archetypes and OpenAPI candidates require v2. They do not silently migrate v1. Finding, Security IR, inspection, report and exception schema versions are independent and unchanged.
 

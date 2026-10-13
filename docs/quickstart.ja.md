@@ -2,20 +2,118 @@
 
 ## 1. 未公開schema2候補を空のconsumerへ導入
 
-公開済みは1.4.0/schema1です。この文書は未公開mainのschema2候補を対象にします。[Roadmap](ROADMAP.ja.md)で状態を確認してください。候補提供者が`npm run build:ts`後に`npm pack --ignore-scripts`で作ったtarballを受け取り、候補commit SHAとSHA-256を照合します。同梱docsが変わればdigestも変わります。以下の手順は空のconsumerで実行し、repository用npm scriptや開発repo/global install/NODE_PATHを使いません。
+公開済み`cdn-security-framework@1.4.0`はPolicy schema **version 1**です。現行の未公開main候補は **2.0.0-rc.0**、Policy schema **version 2**を要求します。packageとPolicyのversionは別契約で、npm latestは公開旧版です。[Roadmap](ROADMAP.ja.md)を参照してください。Node 20.17.0、22、24のいずれか、npm、artifactを読めるGitHub CLI（`gh`）、POSIXの`unzip`が前提です。
+
+### 担当者の受け渡しと独立照合
+
+成功した **main push** の`Policy Lint & Build Check` runと正確なattemptを使います。PR runはmerge前の証拠で、merge後候補へ無条件に流用しません。担当者はarchive外のレビュー済み経路で、次の形式の信頼済みhandoff JSONを渡します（placeholderはすべて実値に置き換える）。
+
+```json
+{
+  "source": "<40 lowercase hex characters>",
+  "harness": "<40 lowercase hex characters>",
+  "tree": "<40 lowercase hex characters>",
+  "run": "<main push run ID>",
+  "attempt": "<attempt number>",
+  "artifactId": "<Actions artifact ID>",
+  "artifactZipSha256": "<64 lowercase hex characters>",
+  "tgzSha256": "<64 lowercase hex characters>",
+  "consumerLockSha256": "<64 lowercase hex characters>"
+}
+```
+
+| Field | 意味と独立した照合元 |
+| --- | --- |
+| `source` | package producerのcheckout commit。GitHub runの`head_sha`とcommit APIの`sha`に照合 |
+| `harness` | 同梱するsingle-pack/smoke/journey検証コードの取得元checkout。現producerは`source`から明示的にコピーし同値を検証する。独立した受け渡し記録とrunに照合し、他producerでも同じだと推測しない |
+| `tree` | producer checkoutのGit tree。commit APIの`tree.sha`に照合 |
+| `run`, `attempt` | main push runとattempt。run-attempt API、completed/success、workflow pathに照合 |
+| `artifactId`, `artifactZipSha256` | 正確な名前のActions artifactと**ZIP bytes**。GitHub artifact APIの`digest`に照合 |
+| `tgzSha256` | **candidate.tgz bytes**。信頼済み記録とダウンロードmetadataに照合 |
+| `consumerLockSha256` | **consumer/package-lock.json bytes**。信頼済み記録とmetadataに照合 |
+
+未検証archiveの値をコピーして信頼済み記録を作らないでください。担当者はrun/commit/artifactとproducer/consumer受入記録を先に照合します。信頼済み記録と最終候補hashはpackage外の証拠directory等へ保存します。同梱docsへ最終tgz hashを書き、hashを追って再packする循環を作りません。同梱文書が変わるたび新しい候補artifactが必要です。
+
+以下は新規directoryで実行し、開発checkout/global install/NODE_PATHは不要です。必須値欠落、source/harness/tree/run/attempt、run/workflow、archive安全性、ZIP/tgz/lock/integrityの不一致で失敗し、照合成功前にはinstallしません。信頼済み記録とローカルdirectoryの排他的管理が前提で、並行編集は対象外です。
 
 ```bash
-# Set this to the verified tarball supplied with the candidate SHA and SHA-256.
-export CANDIDATE_TARBALL=/path/to/verified-candidate.tgz
-shasum -a 256 "$CANDIDATE_TARBALL"
+set -eu
+export CANDIDATE_HANDOFF=/absolute/path/to/trusted-candidate-handoff.json
 mkdir consumer
 cd consumer
-npm init -y
-npm install --save-dev "$CANDIDATE_TARBALL"
+node - <<'JS'
+const fs = require('node:fs');
+const cp = require('node:child_process');
+const crypto = require('node:crypto');
+const assert = require('node:assert/strict');
+const repo = 'albert-einshutoin/cdn-security-framework';
+const read = file => {
+  assert.ok(fs.statSync(file).size <= 2 * 1024 * 1024, 'JSON too large');
+  return JSON.parse(fs.readFileSync(file, 'utf8'));
+};
+const hash = (bytes, algorithm = 'sha256', encoding = 'hex') => crypto.createHash(algorithm).update(bytes).digest(encoding);
+const command = (name, args) => cp.execFileSync(name, args, { timeout: 30000, maxBuffer: 8 * 1024 * 1024, env: { ...process.env, LC_ALL: 'C' } });
+const api = endpoint => JSON.parse(command('gh', ['api', '--hostname', 'github.com', `repos/${repo}/${endpoint}`]).toString());
+assert.ok(process.env.CANDIDATE_HANDOFF, 'Trusted handoff is required');
+const h = read(process.env.CANDIDATE_HANDOFF);
+for (const key of ['source', 'harness', 'tree']) assert.match(h[key], /^[a-f0-9]{40}$/, key);
+for (const key of ['run', 'attempt', 'artifactId']) assert.match(h[key], /^[1-9][0-9]*$/, key);
+for (const key of ['artifactZipSha256', 'tgzSha256', 'consumerLockSha256']) assert.match(h[key], /^[a-f0-9]{64}$/, key);
+const run = api(`actions/runs/${h.run}/attempts/${h.attempt}`);
+assert.equal(String(run.id), h.run); assert.equal(String(run.run_attempt), h.attempt);
+assert.equal(run.repository.full_name, repo);
+assert.equal(run.event, 'push'); assert.equal(run.head_branch, 'main');
+assert.equal(run.status, 'completed'); assert.equal(run.conclusion, 'success');
+assert.equal(run.head_sha, h.source);
+const workflow = api(`actions/workflows/${run.workflow_id}`);
+assert.equal(workflow.path, '.github/workflows/policy-lint.yml');
+const commit = api(`git/commits/${h.source}`);
+assert.equal(commit.sha, h.source); assert.equal(commit.tree.sha, h.tree);
+// Current producer copies the harness from its source checkout; verify, do not infer.
+assert.equal(h.harness, run.head_sha);
+const artifact = api(`actions/artifacts/${h.artifactId}`);
+assert.equal(String(artifact.workflow_run.id), h.run);
+assert.equal(artifact.workflow_run.head_sha, h.source);
+assert.equal(artifact.name, `package-candidate-${h.run}-${h.attempt}`);
+assert.equal(artifact.expired, false);
+assert.equal(artifact.digest, 'sha256:' + h.artifactZipSha256);
+const zip = command('gh', ['api', '--hostname', 'github.com', `repos/${repo}/actions/artifacts/${h.artifactId}/zip`]);
+assert.equal(hash(zip), h.artifactZipSha256, 'Actions ZIP mismatch');
+assert.ok(!fs.existsSync('candidate'), 'Use a new empty directory');
+fs.writeFileSync('candidate.zip', zip, { flag: 'wx' });
+const entries = command('unzip', ['-Z1', 'candidate.zip']).toString().trim().split('\n');
+assert.ok(entries.length > 0 && entries.length <= 100);
+assert.ok(entries.every(n => n && !n.startsWith('/') && !n.includes('\\') && !n.split('/').includes('..')), 'Unsafe ZIP path');
+const modes = command('unzip', ['-Z', '-l', 'candidate.zip']).toString().split('\n').filter(n => /^[bcdlps-][rwxstST-]{9}\s/.test(n));
+assert.equal(modes.length, entries.length, 'Unknown ZIP entry type');
+assert.ok(modes.every(n => n.startsWith('-') || n.startsWith('d')), 'ZIP links/special files refused');
+const totals = /^(\d+) files?, (\d+) bytes uncompressed,/m.exec(command('unzip', ['-Z', '-t', 'candidate.zip']).toString());
+assert.ok(totals && Number(totals[1]) === entries.length && Number(totals[2]) <= 8 * 1024 * 1024, 'ZIP expansion limit');
+command('unzip', ['-q', 'candidate.zip', '-d', 'candidate']);
+const m = read('candidate/metadata.json');
+assert.equal(m.schemaVersion, 1);
+for (const key of ['source', 'harness', 'tree', 'run', 'attempt']) assert.equal(m[key], h[key], key);
+const tgz = fs.readFileSync('candidate/candidate.tgz');
+assert.ok(tgz.length > 0 && tgz.length <= 1024 * 1024);
+assert.equal(m.size, tgz.length);
+assert.equal(hash(tgz), h.tgzSha256, 'Trusted tgz mismatch');
+assert.equal(m.sha256, h.tgzSha256);
+const lock = fs.readFileSync('candidate/consumer/package-lock.json');
+assert.equal(hash(lock), h.consumerLockSha256, 'Trusted consumer lock mismatch');
+assert.equal(m.lockSha256, h.consumerLockSha256);
+const pack = read('candidate/pack.json');
+assert.equal(pack.version, '2.0.0-rc.0');
+assert.equal(pack.integrity, 'sha512-' + hash(tgz, 'sha512', 'base64'), 'npm integrity mismatch');
+for (const [name, data] of Object.entries({ run, workflow, commit, artifact })) fs.writeFileSync(name + '.json', JSON.stringify(data, null, 2), { flag: 'wx' });
+console.log('Verified main source/harness/tree/run/attempt, Actions ZIP, tgz and consumer lock.');
+JS
+cd candidate/consumer
+npm ci --ignore-scripts --no-audit --no-fund
+./node_modules/.bin/cdn-security --version
 ./node_modules/.bin/cdn-security --help
 ```
 
-`--version`の1.4.0表示はrelease GO前の保持値で、公開旧版と候補を区別できません。将来2.0.0が正式公開された後だけ、上のtarball導入を`npm install --save-dev cdn-security-framework@2.0.0`へ置き換えます。今回はその公開後コマンドを検証した扱いにしません。`npm latest`を候補の検証に使いません。
+期待exitは0、表示は`Verified main source/harness/tree/run/attempt, Actions ZIP, tgz and consumer lock.`、`--version`は **2.0.0-rc.0**です。以降は`consumer/candidate/consumer`内で実行します。npmの`integrity`はtgzのSHA-512をBase64化した`sha512-`形式で、2種類のSHA-256とは別物です。`npm ci`は照合済みproducerの共通lockを使います。hosted artifactが欠落・取得不能なら受け渡しを止め、ローカル再packで代用しません。正式2.0.0公開後のregistry導入は別手順で、今回の検証には含みません。
 
 ## 2. Profileからinit・lint・AWS build
 
@@ -30,7 +128,7 @@ node node_modules/cdn-security-framework/scripts/policy-lint.js policy/security.
 
 `dist/aws/edge/`はruntime、`dist/aws/infra/`はIaC断片です。buildはreview用ファイル生成であり、クラウドへ接続・deployしません。生成JSやCFGを手編集せずPolicyを編集します。
 
-## 3. ローカルHTTP fixture
+## 3. ローカルplayground fixture（stub）
 
 空consumerの`cases.json`へ次のJSONを保存します。
 
@@ -53,6 +151,8 @@ node node_modules/cdn-security-framework/scripts/policy-lint.js policy/security.
 CLI exit0、fixture順に200/pass、405/block、401/block、200/pass、200/passが期待値です。200はlocal stubの通過結果で、本番originの応答保証ではありません。AWS viewer-requestはbodyを読めないため、POST JSONを渡してもbody検査の証明にはしません。consumerに存在しない`npm run test:unit`等は不要です。
 
 認証gateには参照envが必要です。`--allow-placeholder-token`は非本番fixture専用で、placeholder artifactをdeployしてはいけません。Cloudflare playgroundは既存stubで外部fetchを置き換え、組込みの非本番envを使います。AWS fixtureのcustom tokenをCloudflare stubへそのまま流用しないでください。[CLIのfixture契約](cli.ja.md#playground)を参照。
+
+過去のB2証拠は通常CLI生成Workerをlocal workerdで動かし、loopback HTTP/JWKSと合成RSA署名を実検証しています（[納品commitのB2記録](https://github.com/albert-einshutoin/cdn-security-framework/blob/efb67793054f0c1a26986fd067a3a45718795a8c/docs/reviews/issue-1024-jwks-refresh-fix.md)）。上記consumer playgroundのstubとは別で、public TLS/DNS、実Cloudflare POP/AWSの動作を保証しません。B3文書確認を新規runtime検証や実参加者H01の結果へ置き換えません。
 
 ## 4. Guided setupとCloudflare JWT
 

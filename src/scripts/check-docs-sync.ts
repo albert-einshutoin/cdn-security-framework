@@ -159,6 +159,17 @@ export function checkDocsSync(repoRoot: string): void {
   }
   assertIncludes(roadmapEn, '#571', 'English release issue link');
   assertIncludes(roadmapJa, '#571', 'Japanese release issue link');
+  for (const relativePath of [
+    'docs/quickstart.md', 'docs/quickstart.ja.md',
+    'docs/schema-migration.md', 'docs/schema-migration.ja.md',
+    'docs/ROADMAP.md', 'docs/ROADMAP.ja.md',
+    'test/onboarding/novice-evaluation.md', 'test/onboarding/novice-evaluation.ja.md',
+  ]) {
+    const content = read(repoRoot, relativePath);
+    assertIncludes(content, '2.0.0-rc.0', `${relativePath} unpublished candidate`);
+    assertIncludes(content, '1.4.0', `${relativePath} published baseline`);
+    checkLocalLinks(repoRoot, relativePath, content);
+  }
 }
 
 export function main(repoRoot = path.join(__dirname, '..')): void {

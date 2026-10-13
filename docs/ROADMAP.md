@@ -32,7 +32,9 @@ and an absent guard is not proof of public access.
 
 ## 3. Current release and main status
 
-Status checked **2026-09-22**, main `111f995bd35d3b24bdd1ee7dd72c35bce19f9170`. [Main validation](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249). Schema2 is implemented on main but unpublished. Published1.4.0, the retained package version1.4.0, and the next target2.0.0 are distinct.
+Current package distinction (checked 2026-10-13 at main `27211fa91127b8cf978f7233ced7deb91c5053f7`): published **1.4.0 / Policy schema 1**, unpublished **2.0.0-rc.0 / Policy schema 2**, and future stable **2.0.0** are separate states. See [main-artifact handoff verification](quickstart.md#1-install-the-unpublished-schema2-candidate-in-an-empty-consumer). Bundled docs do not pin their own final tgz hash; the maintainer stores the final main run/attempt/source/harness/tree/tgz/lock identity outside the package.
+
+Historical implementation evidence below was checked **2026-09-22** at main `111f995bd35d3b24bdd1ee7dd72c35bce19f9170`: [Main validation](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249). Those dated links remain historical, not validation of the final current candidate. Schema2 remains implemented on main and unpublished; no RC GO, H01 result or publication is implied.
 
 | Area | Status | Evidence / boundary |
 | --- | --- | --- |
