@@ -10,6 +10,8 @@ coreのlint/build/API、継承する各Policy文書、init/guided、profiles/arc
 
 既存の有効入力を拒否する変更はPolicy schema majorとnpm majorを必要とします。任意fieldの追加だけならPolicy version変更は不要です。将来の廃止は個別の移行契約を定義します。仮想的なrenameや任意versionへの自動連鎖は実装していません。
 
+Cloudflareへv1のglobal/個別WAF rate-limitを移行するときは、プラン未指定のv2を成功保存せず、`MIGRATION_MANUAL`（exit2）で止めます。rateを含むv1はtarget未指定も手動判断です。入力byteやbackupを変えず、他の設定を保持したv2を利用者が明示的に作成してください。既存閾値/300秒を維持するにはBusiness、Freeでは10秒とその窓に適した閾値を明示します。有料プランの推定や比例換算はしません。[rateプロファイル](cloudflare-waf-parity.ja.md#cloudflare-rate-limit-の設定プロファイル)を参照。AWS migrationは既存rate設定を保持します。target Cloudflareのv2 noopも同じ共有validatorで検証します。これはローカル設定判定であり、実account/APIの証拠ではありません。
+
 ## 明示migration
 
 npm latestではなく、**候補tarballから導入した実行ファイル**を使用します。

@@ -1,5 +1,6 @@
 import v1Schema from './migration-v1-schema';
 import type { MigratePolicyResult } from './index';
+import { buildCloudflareRateRules } from '../scripts/lib/cloudflare-rate-limit';
 const Ajv = require('ajv');
 const v2Schema = require('../policy/schema.json');
 const { validatePolicy } = require('../validator');
@@ -67,6 +68,18 @@ export function transformPolicy(input: unknown, to: number | string = 2, target?
     if (Object.hasOwn(policy, 'extends') || Object.hasOwn(policy, '$ref')) throw new MigrationError('MIGRATION_MANUAL: extends/reference: migrate each dependency explicitly; graph migration is unsupported', 2);
     if (!validators[fromVersion](policy)) throw new MigrationError('MIGRATION_POLICY_INVALID: configuration does not match the declared schema');
     if (fromVersion === 2 && !validatePolicy({ policy, env: {} }).ok) throw new MigrationError('MIGRATION_POLICY_INVALID');
+    if (toVersion === 2) {
+      const waf = policy.firewall?.waf || {};
+      const hasRates = waf.rate_limit !== undefined || (Array.isArray(waf.rate_limit_rules) && waf.rate_limit_rules.length > 0);
+      if (fromVersion === 1 && target === undefined && hasRates) throw new MigrationError('MIGRATION_MANUAL: target: choose AWS or an explicit Cloudflare rate-limit configuration; no threshold conversion', 2);
+      if (target === 'cloudflare') {
+        try { buildCloudflareRateRules(waf); }
+        catch (error: unknown) {
+          if (!(error instanceof Error) || !error.message.startsWith('CLOUDFLARE_RATE_LIMIT_INVALID:')) throw error;
+          throw new MigrationError('MIGRATION_MANUAL: Cloudflare rate-limit configuration: ' + error.message, 2);
+        }
+      }
+    }
     if (fromVersion === toVersion) return { ok: true, errors: [], warnings: [], fromVersion, toVersion, migrated: false, noop: true, saved: false, exitCode: 0 };
     if (policy.firewall?.challenge?.difficulty > 4) throw new MigrationError('MIGRATION_MANUAL: firewall.challenge.difficulty: choose a supported value explicitly; no clamping', 2);
     const providerFields = [

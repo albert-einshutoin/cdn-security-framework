@@ -30,9 +30,12 @@ Default `--to` is **2**. Preview reads the input and prints a fixed summary; it 
 | AWS csp_nonce true | Exit 2: choose Cloudflare, origin-managed nonces, or explicitly change configuration; never disable automatically |
 | AWS JWT/signed_url | Exit 2: unsupported by the AWS cache-hit enforcement boundary; never remove or disable automatically |
 | Cloudflare nonce/JWT/signed_url | Preserve valid settings; schema validity does not establish deployment readiness |
-| Provider-sensitive settings without target | Exit 2: explicitly select aws/cloudflare |
+| Provider-sensitive settings without target | Exit 2: explicitly select aws/cloudflare (including v1 WAF rate limits) |
+| Cloudflare rate limits without a supported explicit profile | Exit 2/manual decision before preview/save/noop; input and backup unchanged |
 | Unknown fields / invalid data | Exit 1; do not discard unknown configuration |
 | extends or root $ref | Exit 2; graph migration is unsupported, no dependencies are read or flattened |
+
+Existing v1 WAF rate limits do not declare a Cloudflare plan. A Cloudflare migration with global or individual rates therefore stops with `MIGRATION_MANUAL` instead of producing an unbuildable v2 policy. Author the v2 configuration explicitly while preserving unrelated settings: choose Business to keep the existing threshold/300-second contract, or choose Free with an explicit 10-second window and a threshold chosen for it. No paid plan or rescaling is inferred. See [rate profiles](cloudflare-waf-parity.md#cloudflare-rate-limit-configuration-profiles). AWS migrations preserve the existing rate configuration. Explicit Cloudflare v2 noops are also validated through the shared profile validator. This is local configuration validation, not account or live API proof.
 
 The Policy schema has no target field. Migration's optional target is explicitly supplied by the user, unlike build's AWS default. Ordinary conversion is provider independent. Unknown target names are errors. No JWKS, external API or environment expansion occurs during migration. A separate target build still enforces #1017 and all existing safety checks.
 

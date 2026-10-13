@@ -24,6 +24,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Close auth-gate path-notation bypasses (`//admin`, `/Admin`, `/%61dmin`, matrix params, `/./admin`, encoded traversal) on AWS and Cloudflare; reject encoded slash/backslash (`%2f`/`%5c`) and dangerous double-encoding before auth matching.
 - Cloudflare rate-limit Terraform includes required `cf.colo.id`; mitigation 10s alone does not make a 300s counting window Free-compatible.
 - Breaking: Cloudflare rate limits require an explicit `free` or `business` profile. Free requires an explicit 10s period/threshold and one total rule; Business preserves the existing 300s default (up to five rules). IP/block/simple path expressions only; unsupported settings reject across build/API/direct compilers even with approximation allowed. AWS stays at 300s. See [rate-limit profiles](docs/cloudflare-waf-parity.md#cloudflare-rate-limit-configuration-profiles).
+- Cloudflare v1 rate-limit migration now stops for an explicit manual plan/window/threshold decision before preview/save; v2 target-specific noops use the same rate validator. AWS rates are preserved.
 - Cloudflare JWT unknown-`kid` handling no longer deletes the JWKS cache before refresh; unknown kids are negatively cached to stop fetch amplification.
 
 ### Fixed
