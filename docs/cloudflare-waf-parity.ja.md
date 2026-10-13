@@ -89,17 +89,41 @@ Cloudflare does not expose a managed anonymous-IP / VPN / Tor list as a Ruleset.
 
 AWS ATP (Account Takeover Prevention) runs credential-stuffing detection at the edge with stateful scoring. Cloudflare does not expose an equivalent via Ruleset Engine. Closest features (Bot Management, Super Bot Fight Mode) are not policy-portable. Declare ATP only on the AWS side for now.
 
+## Cloudflare rate-limit の設定プロファイル
+
+2026-10-13に[Availability](https://developers.cloudflare.com/waf/rate-limiting-rules/#availability)と[Rate limiting parameters](https://developers.cloudflare.com/waf/rate-limiting-rules/parameters/)を確認。対応範囲は明示した`free`または`business`、IPと必須`cf.colo.id`、block actionに限定します。有料プランの推定や既定指定はありません。ローカルの設定検証であり、実アカウントの契約・残りルール枠・権限・API受理・WAF全体のFree対応の証拠ではありません。
+
+- `free`: **10秒**と閾値を明示、mitigationは10秒、globalと個別の**合計1ルール**まで。
+- `business`: 期間省略時は既存の300秒契約を保持。離散期間10/60/120/300/600秒、mitigation 10/60/120/300/600/3600/86400秒（既定10）、**合計5ルール**まで。Pro/Enterpriseは未対応です。mitigation 0はblockのthrottlingでEnterprise限定のため、両profileで拒否します。
+- 閾値は整数100..2,000,000,000。2000回/300秒を比例換算したり2000回/10秒へ黙って変更したりしません。AWSの300秒契約と集約/action対応は維持します。
+- 式は`true`またはURI pathの単一`eq`/`starts_with`（`lower(path)`可）だけ。自動変換はURI pathのSTARTS_WITHと、省略/NONE/LOWERCASEのpriority 0変換に限定します。複雑な式、custom/header/forwarded key、count/captcha、未対応scope-downは近似許可でも拒否します。個別priorityは一意の昇順（省略時は配列位置）、globalは先頭。custom block responseは400..499、plain/HTML/JSON MIME、UTF-8で30,000 bytes以内です。
+
+明示的なFree例（10秒窓に適した閾値を利用者が選択）:
+
+```yaml
+firewall:
+  waf:
+    cloudflare_rate_limit_plan: free
+    cloudflare_rate_limit_period: 10
+    rate_limit: 200
+```
+
+この例を`cloudflare_rate_limit_period: 300`に変えると、成果物を書き込む前に失敗します。既存の2000回/300秒を保持するには、`cloudflare_rate_limit_plan: business`と`rate_limit: 2000`を明示し、期間を省略または300に指定します。Businessが前提であり、契約を推奨するものではありません。同梱の5分sampleはこの前提を宣言します。Cloudflare guided initは`--cloudflare-rate-limit-plan business`の明示指定が必要です。Free利用者は上記の明示policyを作成してください。
+
+計数はCloudflare locationごとで反映遅延があり、厳密な全体/origin上限を保証しません。ローカルworkerd HTTPテストはWorker/buildの検証であり、管理WAFの計数・429・実Free適用の証拠ではありません。
+
+
 ## `scope_down_statement` 形状
 
-AWS の `rate_limit_rules[].scope_down_statement` は構造化 AST ですが、Cloudflare のレートリミットは自由形式 `expression` でスコープを指定します。コンパイラは限られた形状だけ自動変換し、それ以外は policy 側で `rule.expression_cloudflare` を明示してもらう方針です。
+AWS の `rate_limit_rules[].scope_down_statement` は構造化 AST ですが、Cloudflare のレートリミットは自由形式 `expression` でスコープを指定します。コンパイラは限られた形状だけ自動変換し、それ以外は対応する単一path式を明示するか、近似許可でも拒否します。
 
 | 形状 | ステータス | Cloudflare expression | 備考 |
 | --- | --- | --- | --- |
-| `byte_match_statement(uri_path, STARTS_WITH)` | `EQUIVALENT` | `starts_with(http.request.uri.path, "<value>")` | Direct translation — Cloudflare expression language has starts_with/ends_with/contains helpers. |
-| `byte_match_statement(uri_path, EXACTLY)` | `APPROXIMATE` | `http.request.uri.path eq "<value>"` | Not yet auto-translated by the compiler. Set rule.expression_cloudflare to override. Will be promoted to equivalent once the translator is extended. |
-| `byte_match_statement(uri_path, CONTAINS)` | `APPROXIMATE` | `http.request.uri.path contains "<value>"` | Not yet auto-translated. Set rule.expression_cloudflare. Will be promoted once the translator is extended. |
-| `regex_match_statement` | `APPROXIMATE` | `http.request.uri.path matches "<regex>"` | Cloudflare supports regex via the `matches` operator but differs in flavor (RE2 vs AWS regex). Auto-translation would risk silent re-interpretation of edge cases. Require explicit expression_cloudflare. |
-| `label_match_statement / size_constraint_statement / geo_match_statement (inside scope-down)` | `UNSUPPORTED` | — | These AWS scope-down shapes have no direct expression counterpart. Either flatten the scope-down into a separate Cloudflare rule, or provide expression_cloudflare explicitly on the rate_limit rule. |
+| `byte_match_statement(uri_path, STARTS_WITH)` | `EQUIVALENT` | `starts_with(http.request.uri.path, "<value>")` | Direct URI-path STARTS_WITH translation, with only absent/NONE/LOWERCASE priority-0 transformation. |
+| `byte_match_statement(uri_path, EXACTLY)` | `APPROXIMATE` | `http.request.uri.path eq "<value>"` | Not auto-translated. An explicit single path eq expression is supported. Otherwise rejected, even with approximation allowed. |
+| `byte_match_statement(uri_path, CONTAINS)` | `APPROXIMATE` | `http.request.uri.path contains "<value>"` | Not supported by the local rate-limit profiles; rejected, even with approximation allowed. |
+| `regex_match_statement` | `APPROXIMATE` | `http.request.uri.path matches "<regex>"` | Regex is outside the local rate-limit expression subset and is rejected, even with approximation allowed. |
+| `label_match_statement / size_constraint_statement / geo_match_statement (inside scope-down)` | `UNSUPPORTED` | — | These AWS scope-down shapes have no direct expression counterpart. Use a supported explicit single path expression if it captures the intended scope; otherwise rejected, even with approximation allowed. |
 
 ## IP レピュテーション / リスト
 

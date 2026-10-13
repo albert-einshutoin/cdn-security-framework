@@ -156,13 +156,15 @@ CLI exit0、fixture順に200/pass、405/block、401/block、200/pass、200/pass�
 
 ## 4. Guided setupとCloudflare JWT
 
+Cloudflare guided initは5分窓を維持するためBusinessの明示指定が必要です。Freeの10秒policyは[rate-limitプロファイル](cloudflare-waf-parity.ja.md#cloudflare-rate-limit-の設定プロファイル)を参照してください。実アカウントの契約やWAF全体のFree対応を確認するものではありません。
+
 profileの代わりに`init --guided`でapp形状・認証を選べます。TTYでは対話式です。以下はstdinを閉じ、選択する設定をflagで渡す非TTYの例です。既存AWS policyを上書きせず、別directoryに作ります。
 
 ```bash
 mkdir cf-jwt
 (
   cd cf-jwt
-  ../node_modules/.bin/cdn-security init --guided --platform cloudflare \
+  ../node_modules/.bin/cdn-security init --guided --platform cloudflare --cloudflare-rate-limit-plan business \
     --app-shape rest-api --auth jwt --admin-paths /api \
     --cors-origins https://app.example.com --waf balanced \
     --geo-block '' --ip-allowlist '' --deployment build-only --project docs-jwt </dev/null

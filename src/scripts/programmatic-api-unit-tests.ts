@@ -69,6 +69,7 @@ firewall:
   waf:
     scope: CLOUDFRONT
     rate_limit: 1000
+    cloudflare_rate_limit_plan: business
     managed_rules:
       - AWSManagedRulesCommonRuleSet
 `;
@@ -98,6 +99,7 @@ firewall:
   waf:
     scope: CLOUDFRONT
     rate_limit: 1000
+    cloudflare_rate_limit_plan: business
     managed_rules:
       - AWSManagedRulesCommonRuleSet
       - AWSManagedRulesIPReputationList
@@ -133,6 +135,7 @@ firewall:
   waf:
     scope: CLOUDFRONT
     rate_limit: 1000
+    cloudflare_rate_limit_plan: business
     managed_rules:
       - AWSManagedRulesCommonRuleSet
 `;
@@ -908,6 +911,7 @@ test('CLI authoring DX: init --guided emits lintable policy with selected shape'
       cli, 'init',
       '--guided',
       '--platform', 'cloudflare',
+      '--cloudflare-rate-limit-plan', 'business',
       '--app-shape', 'rest-api',
       '--auth', 'jwt',
       '--admin-paths', '/api/',
@@ -1868,6 +1872,51 @@ test('CLI authoring DX: diff --semantic surfaces posture drift', () => {
   } finally {
     ctx.cleanup();
   }
+});
+
+test('guided Cloudflare init requires an explicit Business prerequisite before writing', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'guided-no-plan-'));
+  try {
+    const { spawnSync } = require('child_process');
+    const r = spawnSync(process.execPath, [path.join(repoRoot, 'bin/cli.js'), 'init', '--guided', '--platform', 'cloudflare'], { cwd: tmp, encoding: 'utf8', input: '' });
+    assert.notStrictEqual(r.status, 0);
+    assert.match(r.stderr, /No plan is inferred/);
+    assert.ok(!fs.existsSync(path.join(tmp, 'policy')));
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
+
+test('Cloudflare readiness shares the Free/Business rate profile boundary', () => {
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'readiness-rate-profile-'));
+  try {
+    const { spawnSync } = require('child_process');
+    const policyPath = path.join(tmp, 'security.yml');
+    const policy = `version: 2
+project: readiness-rate
+metadata: { risk_level: balanced }
+defaults: { mode: enforce }
+request: { allow_methods: [GET] }
+response_headers:
+  hsts: "max-age=31536000; includeSubDomains"
+  csp_public: "default-src 'self'; frame-ancestors 'none'"
+firewall:
+  waf:
+    cloudflare_rate_limit_plan: free
+    cloudflare_rate_limit_period: 300
+    rate_limit: 1000
+    managed_rules: [AWSManagedRulesCommonRuleSet]
+`;
+    for (const [plan, period, expected] of [['business', 300, 0], ['free', 300, 1], ['free', 10, 0]]) {
+      fs.writeFileSync(policyPath, policy.replace('plan: free', 'plan: ' + plan).replace('period: 300', 'period: ' + period));
+      for (const strict of [[], ['--strict']]) {
+        const r = spawnSync(process.execPath, [path.join(repoRoot, 'bin/cli.js'), 'readiness', '--policy', policyPath, '--target', 'cloudflare', '--json', ...strict], { cwd: tmp, encoding: 'utf8' });
+        assert.strictEqual(r.status, expected, r.stdout + r.stderr);
+        const report = JSON.parse(r.stdout);
+        assert.strictEqual(report.status, expected ? 'fail' : 'pass');
+        if (expected) assert.ok(report.findings.some((f: any) => f.id === 'firewall.waf.cloudflare_rate_limit.invalid' && /CLOUDFLARE_RATE_LIMIT_INVALID/.test(f.detail)));
+      }
+    }
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
 });
 
 if (process.exitCode) {

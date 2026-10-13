@@ -22,7 +22,8 @@
 - **破壊的変更:** CloudFrontのcache hitではorigin-request認証が省略されるため、AWSの `jwt` / `signed_url` buildを拒否。readiness・capability・Allowed Surfaceにも制限を反映。Cloudflare認証とAWSのstatic/basic認証は引き続き対応。[移行手順](docs/auth.ja.md#awsの認証対応範囲と移行)を参照。
 - AWS の未対応 CSP nonce を拒否し、Cloudflare は暗号学的 nonce を origin 描画前に渡すとともに response DLP の本文読取量を制限。
 - 認証ゲートのパス表記ゆれ迂回（`//admin`、`/Admin`、`/%61dmin`、matrix、`/./admin` 等）を AWS/Cloudflare 双方で封鎖。`%2f`/`%5c` と危険な二重エンコードは認証前に 400。
-- Cloudflare rate-limit Terraform に必須の `cf.colo.id` を付与し、`mitigation_timeout` 既定を Free 向け 10 秒に変更。
+- Cloudflare rate-limit Terraformに必須`cf.colo.id`を付与。mitigation 10秒だけでは300秒計測をFree適合と扱いません。
+- Breaking: Cloudflare rate-limitは`free`/`business`の明示指定が必要です。Freeは10秒・閾値を明示し合計1ルール、Businessは既存300秒の既定と合計5ルールまで。IP/block/単純path式だけに限定し、未対応設定は近似許可でもbuild/API/直接compilerで拒否。AWSは300秒を維持。[rate-limitプロファイル](docs/cloudflare-waf-parity.ja.md#cloudflare-rate-limit-の設定プロファイル)を参照。
 - Cloudflare JWT の未知 `kid` 処理で JWKS キャッシュを先消ししないよう変更し、kid-miss ネガティブキャッシュで再取得増幅を抑制。
 
 ### Fixed

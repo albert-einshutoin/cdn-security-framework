@@ -70,6 +70,8 @@ origin:
 
 firewall:
   waf:
+    # Existing 5-minute Cloudflare rate configuration requires Business; this is not a paid-plan default in the compiler.
+    cloudflare_rate_limit_plan: business
     rate_limit: 5000
     scope: REGIONAL
     managed_rules:

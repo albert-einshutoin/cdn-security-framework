@@ -544,15 +544,23 @@ export interface CDNSecurityFrameworkPolicy {
   firewall?: {
     waf?: {
       /**
-       * Per-IP request ceiling over the 5-minute WAF rate-based window. AWS WAFv2 accepts 100..2,000,000,000. Legacy single global rule; prefer `rate_limit_rules` for per-route / per-key controls.
+       * Per-IP request ceiling. AWS keeps its 300-second window; Cloudflare uses the explicit plan and counting period without threshold conversion. AWS WAFv2 accepts 100..2,000,000,000. Single global rule; counts toward the selected Cloudflare profile rule limit alongside individual rules.
        */
       rate_limit?: number;
       /**
-       * Cloudflare rate-limit mitigation_timeout in seconds. Defaults to 10 (Free-plan maximum). Pro+ plans may raise this (for example 600).
+       * Cloudflare block duration, default 10 seconds. API discrete values only; Free requires 10. Timeout alone does not establish Free compatibility. Zero means block throttling, which is Enterprise-only and rejected by these profiles. Ignored by AWS.
        */
       rate_limit_mitigation_timeout?: number;
       /**
-       * Fine-grained rate-limit rules. Each entry renders as one `aws_wafv2_rule_group` rule with its own `rate_based_statement` and optional `scope_down_statement` so you can scope by URI, auth state, or header keys without hand-editing Terraform. `limit` is per 5-minute window (AWS WAFv2 accepts 100..2,000,000,000). `aggregate_key_type` defaults to `IP`; `FORWARDED_IP` follows the `X-Forwarded-For` chain and `CUSTOM_KEYS` lets you pass a raw `custom_keys` block. `scope_down_statement` is forwarded verbatim as a raw JSON object — schema-free because AWS WAFv2 ships dozens of statement kinds; lint only checks the shell.
+       * Required for Cloudflare rate limits, with no default. Locally checked free/business subset only: block, IP plus cf.colo.id, simple URI-path expressions, total rules at most 1/5. Does not verify account entitlement, available slots or API acceptance; not a whole-WAF Free guarantee. AWS counting remains 300 seconds.
+       */
+      cloudflare_rate_limit_plan?: "free" | "business";
+      /**
+       * Cloudflare counting period, without threshold conversion. Free requires explicit 10 seconds and a chosen rate_limit/rule limit. Business defaults to the existing 300-second contract; supported API discrete periods up to 600 only. AWS always keeps its 300-second window.
+       */
+      cloudflare_rate_limit_period?: 10 | 60 | 120 | 300 | 600;
+      /**
+       * Fine-grained rate-limit rules. Each entry renders as one `aws_wafv2_rule_group` rule with its own `rate_based_statement` and optional `scope_down_statement` so you can scope by URI, auth state, or header keys without hand-editing Terraform. `limit` is per 300 seconds for AWS; Cloudflare uses cloudflare_rate_limit_period without conversion. The supported threshold subset is 100..2,000,000,000. Cloudflare supports only IP, block, and true or a single URI-path eq/starts_with expression. `aggregate_key_type` defaults to `IP`; `FORWARDED_IP` follows the `X-Forwarded-For` chain and `CUSTOM_KEYS` lets you pass a raw `custom_keys` block. `scope_down_statement` is forwarded verbatim as a raw JSON object — schema-free because AWS WAFv2 ships dozens of statement kinds; lint only checks the shell.
        */
       rate_limit_rules?: {
         name: string;
@@ -562,11 +570,11 @@ export interface CDNSecurityFrameworkPolicy {
           [k: string]: unknown;
         }[];
         /**
-         * Explicit Cloudflare expression for this rate-limit rule. Use when scope_down_statement cannot be translated safely.
+         * Explicit Cloudflare expression: true or one URI-path eq/starts_with, optionally lower(path). Other expressions are rejected even with WAF approximation allowed. Use a supported explicit expression instead of an unsupported AWS scope_down_statement.
          */
         expression_cloudflare?: string;
         /**
-         * Cloudflare rate-limit characteristics used when aggregate_key_type is CUSTOM_KEYS.
+         * Cloudflare IP subset only: ip.src, with optional cf.colo.id. The compiler always includes mandatory cf.colo.id. Custom/header keys are rejected.
          *
          * @minItems 1
          */
@@ -574,6 +582,9 @@ export interface CDNSecurityFrameworkPolicy {
         scope_down_statement?: {
           [k: string]: unknown;
         };
+        /**
+         * Individual rate rule order: unique priorities, ascending; omitted uses array position. Cloudflare global rule remains first.
+         */
         priority?: number;
         action?: "block" | "count" | "captcha";
       }[];

@@ -89,17 +89,41 @@ Cloudflare does not expose a managed anonymous-IP / VPN / Tor list as a Ruleset.
 
 AWS ATP (Account Takeover Prevention) runs credential-stuffing detection at the edge with stateful scoring. Cloudflare does not expose an equivalent via Ruleset Engine. Closest features (Bot Management, Super Bot Fight Mode) are not policy-portable. Declare ATP only on the AWS side for now.
 
+## Cloudflare rate-limit configuration profiles
+
+Checked 2026-10-13 against [Availability](https://developers.cloudflare.com/waf/rate-limiting-rules/#availability) and [Rate limiting parameters](https://developers.cloudflare.com/waf/rate-limiting-rules/parameters/). This compiler supports a conservative subset: explicit `free` or `business`, IP plus mandatory `cf.colo.id`, and block actions. There is no inferred or default paid plan. This is local configuration validation, not account entitlement, remaining rule slots, permission, API acceptance, or overall Free WAF support.
+
+- `free`: explicitly choose period **10 seconds** and a threshold, mitigation 10, at most **one total** global + individual rule.
+- `business`: the existing 300-second window when period is omitted; supported discrete periods 10/60/120/300/600 and mitigation 10/60/120/300/600/3600/86400 (default 10), at most **five total** rules. Pro/Enterprise are not supported profiles. Mitigation 0 means block throttling, which is Enterprise-only; it is rejected for both profiles.
+- Thresholds are integers 100..2,000,000,000. A 2000/300 configuration is never rescaled or silently converted to 2000/10. AWS keeps its 300-second window and aggregation/action support.
+- Expressions are `true` or one URI-path `eq`/`starts_with`, optionally `lower(path)`. Only URI-path STARTS_WITH with absent/NONE/LOWERCASE priority-0 transformation is automatically translated. Complex expressions, custom/header/forwarded keys, count/captcha actions, and unsupported scope-downs are rejected; approximation flags cannot bypass this. Individual priority is unique, ascending (omitted = array position); the global rule is first. Custom block responses require 400..499, supported plain/HTML/JSON MIME, and at most 30,000 UTF-8 bytes.
+
+Explicit Free example (choose the threshold for this 10-second window):
+
+```yaml
+firewall:
+  waf:
+    cloudflare_rate_limit_plan: free
+    cloudflare_rate_limit_period: 10
+    rate_limit: 200
+```
+
+Changing that example to `cloudflare_rate_limit_period: 300` fails before writing artifacts. To preserve an existing 2000/300 contract, explicitly set `cloudflare_rate_limit_plan: business` with `rate_limit: 2000`; leave period omitted or set 300. This requires Business and is not a recommendation to buy a plan. Shipped 5-minute samples declare this prerequisite. Guided Cloudflare init requires explicit `--cloudflare-rate-limit-plan business`; Free users should author the explicit policy above.
+
+Counters are per Cloudflare location and may have enforcement delay; this does not promise a precise global/origin ceiling. Local workerd HTTP tests exercise the Worker/build only, not managed WAF counting, 429 enforcement, or live Free applicability.
+
+
 ## `scope_down_statement` shapes
 
-AWS `rate_limit_rules[].scope_down_statement` is a structured AST. Cloudflare rate limits scope via the free-form `expression` field. The compiler translates a small set of shapes automatically; anything else must be expressed with `rule.expression_cloudflare` on the policy.
+AWS `rate_limit_rules[].scope_down_statement` is a structured AST. Cloudflare rate limits scope via the free-form `expression` field. The compiler translates a small set of shapes automatically; other shapes require a supported explicit path expression or are rejected even with approximation allowed.
 
 | Shape | Status | Cloudflare expression | Notes |
 | --- | --- | --- | --- |
-| `byte_match_statement(uri_path, STARTS_WITH)` | `EQUIVALENT` | `starts_with(http.request.uri.path, "<value>")` | Direct translation — Cloudflare expression language has starts_with/ends_with/contains helpers. |
-| `byte_match_statement(uri_path, EXACTLY)` | `APPROXIMATE` | `http.request.uri.path eq "<value>"` | Not yet auto-translated by the compiler. Set rule.expression_cloudflare to override. Will be promoted to equivalent once the translator is extended. |
-| `byte_match_statement(uri_path, CONTAINS)` | `APPROXIMATE` | `http.request.uri.path contains "<value>"` | Not yet auto-translated. Set rule.expression_cloudflare. Will be promoted once the translator is extended. |
-| `regex_match_statement` | `APPROXIMATE` | `http.request.uri.path matches "<regex>"` | Cloudflare supports regex via the `matches` operator but differs in flavor (RE2 vs AWS regex). Auto-translation would risk silent re-interpretation of edge cases. Require explicit expression_cloudflare. |
-| `label_match_statement / size_constraint_statement / geo_match_statement (inside scope-down)` | `UNSUPPORTED` | — | These AWS scope-down shapes have no direct expression counterpart. Either flatten the scope-down into a separate Cloudflare rule, or provide expression_cloudflare explicitly on the rate_limit rule. |
+| `byte_match_statement(uri_path, STARTS_WITH)` | `EQUIVALENT` | `starts_with(http.request.uri.path, "<value>")` | Direct URI-path STARTS_WITH translation, with only absent/NONE/LOWERCASE priority-0 transformation. |
+| `byte_match_statement(uri_path, EXACTLY)` | `APPROXIMATE` | `http.request.uri.path eq "<value>"` | Not auto-translated. An explicit single path eq expression is supported. Otherwise rejected, even with approximation allowed. |
+| `byte_match_statement(uri_path, CONTAINS)` | `APPROXIMATE` | `http.request.uri.path contains "<value>"` | Not supported by the local rate-limit profiles; rejected, even with approximation allowed. |
+| `regex_match_statement` | `APPROXIMATE` | `http.request.uri.path matches "<regex>"` | Regex is outside the local rate-limit expression subset and is rejected, even with approximation allowed. |
+| `label_match_statement / size_constraint_statement / geo_match_statement (inside scope-down)` | `UNSUPPORTED` | — | These AWS scope-down shapes have no direct expression counterpart. Use a supported explicit single path expression if it captures the intended scope; otherwise rejected, even with approximation allowed. |
 
 ## IP reputation and lists
 

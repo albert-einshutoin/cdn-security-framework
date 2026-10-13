@@ -67,6 +67,8 @@ response_headers:
 
 firewall:
   waf:
+    # Existing 5-minute Cloudflare rate configuration requires Business; this is not a paid-plan default in the compiler.
+    cloudflare_rate_limit_plan: business
     rate_limit: 2000
     scope: CLOUDFRONT
     managed_rules:

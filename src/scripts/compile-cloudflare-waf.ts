@@ -30,6 +30,7 @@ const {
 } = require('./lib/policy-io');
 
 const parity = require('./lib/cloudflare-waf-parity');
+const { buildCloudflareRateRules } = require('./lib/cloudflare-rate-limit');
 
 const repoRoot = path.join(__dirname, '..');
 const argv = process.argv.slice(2);
@@ -64,6 +65,10 @@ const waf = firewall.waf || {};
 const geo = firewall.geo || {};
 const ip = firewall.ip || {};
 const projectName = (policy.project || 'cdn-security').replace(/[^a-z0-9-]/gi, '-').toLowerCase();
+let rateRules: any[];
+try { rateRules = buildCloudflareRateRules(waf); }
+catch (error: unknown) { console.error((error as Error).message); process.exit(1); }
+if (rateRules!.length) console.error('Cloudflare rate-limit profile: ' + waf.cloudflare_rate_limit_plan + '; local configuration only, account entitlement and remaining rule slots are unverified.');
 
 const distDir = path.join(outDir, 'infra');
 fs.mkdirSync(distDir, { recursive: true });
@@ -216,90 +221,7 @@ if (customRules.length > 0) {
   };
 }
 
-// 3. Rate-limit ruleset — rate_limit (legacy global) + rate_limit_rules[]
-// Cloudflare API requires `cf.colo.id` in characteristics for rate limiting.
-// mitigation_timeout defaults to 10s (Free-plan maximum); Pro+ can override
-// via firewall.waf.rate_limit_mitigation_timeout.
-function ensureColoCharacteristic(chars: string[]): string[] {
-  const list = Array.isArray(chars) ? chars.slice() : [];
-  if (!list.includes('cf.colo.id')) list.unshift('cf.colo.id');
-  return list;
-}
-const rateMitigationTimeout = numberOr(
-  (waf as any).rate_limit_mitigation_timeout,
-  10,
-);
-
-const rateRules: any[] = [];
-if (waf.rate_limit) {
-  rateRules.push({
-    description: 'Global IP rate limit (legacy)',
-    enabled: true,
-    expression: 'true',
-    action: 'block',
-    action_parameters: makeBlockAction().action_parameters,
-    ratelimit: {
-      characteristics: ensureColoCharacteristic(['ip.src']),
-      period: 300,
-      requests_per_period: numberOr(waf.rate_limit, 2000),
-      mitigation_timeout: rateMitigationTimeout,
-    },
-  });
-}
-if (Array.isArray(waf.rate_limit_rules)) {
-  for (const rule of waf.rate_limit_rules) {
-    if (!rule || !rule.name || !rule.limit) continue;
-    const action = rule.action === 'count' ? 'log' : 'block';
-    // scope_down_statement is AWS-shaped; not portable. Cloudflare uses the
-    // `expression` field for scoping. We translate a minimal subset of well-
-    // known scope-downs (URI starts-with) when recognized; otherwise require
-    // `expression_cloudflare` to be set by the user. Unknown shapes degrade
-    // to a `true` expression (global).
-    let expression = 'true';
-    let translatedShape = null;
-    const sd = rule.scope_down_statement || {};
-    const bm = sd.byte_match_statement;
-    if (bm && bm.field_to_match && bm.field_to_match.uri_path && bm.positional_constraint === 'STARTS_WITH' && typeof bm.search_string === 'string') {
-      expression = `starts_with(http.request.uri.path, "${String(bm.search_string).replace(/"/g, '\\"')}")`;
-      translatedShape = 'byte_match_statement(uri_path, STARTS_WITH)';
-    }
-    if (typeof rule.expression_cloudflare === 'string' && rule.expression_cloudflare.trim()) {
-      expression = rule.expression_cloudflare;
-      translatedShape = 'expression_cloudflare override';
-    }
-    // Warn if a scope_down_statement was declared but not auto-translated and
-    // no explicit expression_cloudflare override is present. This is the
-    // silent-match-all class of drift the parity policy exists to prevent.
-    if (Object.keys(sd).length > 0 && translatedShape === null) {
-      parityWarnings.push(
-        `[cloudflare-waf-parity] APPROXIMATE: rate_limit rule "${rule.name}" has scope_down_statement that this compiler does not auto-translate to a Cloudflare expression (shape: ${Object.keys(sd).join(', ')}). Rule degraded to expression: "true" (match-all). Set rule.expression_cloudflare on the policy to provide the exact scope. See docs/cloudflare-waf-parity.md#scope_down_statement-shapes.`,
-      );
-      sawApproximationOrUnsupported = true;
-    }
-    const characteristicsMap: Record<string, string[]> = {
-      IP: ['ip.src'],
-      FORWARDED_IP: ['http.x_forwarded_for'],
-      CUSTOM_KEYS: Array.isArray(rule.cloudflare_characteristics) && rule.cloudflare_characteristics.length > 0
-        ? rule.cloudflare_characteristics
-        : ['ip.src'],
-    };
-    rateRules.push({
-      description: rule.name,
-      enabled: true,
-      expression,
-      action,
-      action_parameters: action === 'block' ? makeBlockAction().action_parameters : {},
-      ratelimit: {
-        characteristics: ensureColoCharacteristic(
-          characteristicsMap[rule.aggregate_key_type || 'IP'] || ['ip.src'],
-        ),
-        period: 300,
-        requests_per_period: Number(rule.limit),
-        mitigation_timeout: rateMitigationTimeout,
-      },
-    });
-  }
-}
+// 3. Shared, prevalidated rate-limit rules. No plan guessing or threshold rescaling.
 if (rateRules.length > 0) {
   tfJson.resource.cloudflare_ruleset = tfJson.resource.cloudflare_ruleset || {};
   tfJson.resource.cloudflare_ruleset[projectName + '_ratelimit'] = {

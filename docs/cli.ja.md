@@ -114,11 +114,13 @@ runnable example、limit、review workflow、troubleshootingは
 
 ## `init`
 
+Cloudflare guided initは5分窓を維持するためBusinessの明示指定が必要です。Freeの10秒policyは[rate-limitプロファイル](cloudflare-waf-parity.ja.md#cloudflare-rate-limit-の設定プロファイル)を参照してください。実アカウントの契約やWAF全体のFree対応を確認するものではありません。
+
 ```bash
 ./node_modules/.bin/cdn-security init                                      # 対話形式
 ./node_modules/.bin/cdn-security init --platform aws --profile balanced    # 非対話
 ./node_modules/.bin/cdn-security init --platform aws --archetype rest-api  # アーキタイプ
-./node_modules/.bin/cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com
+./node_modules/.bin/cdn-security init --guided --platform cloudflare --cloudflare-rate-limit-plan business --app-shape rest-api --auth jwt --cors-origins https://app.example.com
 ```
 
 - `--profile` と `--archetype` は排他指定です。スターターはセキュリティ強度（プロファイル）かアプリ形状（アーキタイプ）のいずれか。
@@ -297,7 +299,7 @@ npx cdn-security readiness --json
 npx cdn-security readiness --report readiness-report.json
 ```
 
-選択した policy に対して、本番向けのリリースゲートを実行します。環境診断と policy validation を再利用し、そのうえで risk level、enforce mode、HTTP method 制限、レスポンスヘッダー、WAF rate limit、managed rule のカバレッジ、target 固有の未対応機能を確認します。
+選択した policy に対して、本番向けのリリースゲートを実行します。Cloudflare rate-limitはbuild/emit-wafと同じローカル設定判定を使います。実アカウントの契約・残りルール枠・権限・API受理・実WAFの施行を確認するものではありません。環境診断と policy validation を再利用し、そのうえで risk level、enforce mode、HTTP method 制限、レスポンスヘッダー、WAF rate limit、managed rule のカバレッジ、target 固有の未対応機能を確認します。
 
 `fail` finding が 1 件でもあれば exit `1` です。`--strict` では warning finding も失敗扱いになります。`--json` は stdout に JSON を出力し、`--report <path>` は人間向け summary を出しつつ同じ machine-readable report をファイルに書き出します。
 

@@ -67,5 +67,7 @@ response_headers:
 # Phase 3: Infra Config (WAF). Omit to skip dist/infra/*.tf.json generation.
 firewall:
   waf:
+    # Existing 5-minute Cloudflare rate configuration requires Business; this is not a paid-plan default in the compiler.
+    cloudflare_rate_limit_plan: business
     rate_limit: 2000   # requests per 5 min per IP (rate-based rule)
     scope: REGIONAL    # REGIONAL | CLOUDFRONT
