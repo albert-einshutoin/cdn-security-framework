@@ -25,6 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Cloudflare rate-limit Terraform includes required `cf.colo.id`; mitigation 10s alone does not make a 300s counting window Free-compatible.
 - Breaking: Cloudflare rate limits require an explicit `free` or `business` profile. Free requires an explicit 10s period/threshold and one total rule; Business preserves the existing 300s default (up to five rules). IP/block/simple path expressions only; unsupported settings reject across build/API/direct compilers even with approximation allowed. AWS stays at 300s. See [rate-limit profiles](docs/cloudflare-waf-parity.md#cloudflare-rate-limit-configuration-profiles).
 - Cloudflare v1 rate-limit migration now stops for an explicit manual plan/window/threshold decision before preview/save; v2 target-specific noops use the same rate validator. AWS rates are preserved.
+- AWS edge writes now create exclusive0600 staging and0600 outputs, clean only owned temporary files on caught failures, and report sanitized write/descriptor/cleanup failure diagnostics. File-level only; no multi-file transaction or crash-cleanup promise.
 - Cloudflare JWT unknown-`kid` handling no longer deletes the JWKS cache before refresh; unknown kids are negatively cached to stop fetch amplification.
 
 ### Fixed

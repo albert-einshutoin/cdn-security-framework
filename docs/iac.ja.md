@@ -18,6 +18,15 @@
 
 ---
 
+## AWS成果物の書き込み安全性
+
+AWS edgeコードにはbuild時の認証・origin秘密値が含まれ得ます。共有writerは一時ファイルを排他的な0600で作成し、ファイルごとにrenameします。成功したviewer-request、viewer-response、origin-requestも0600です。後続の読込み・uploadは所有者で行うか、安全な受け渡しを別途reviewしてください。生成distはnpm packageへ含めず、package/compiler自身の配布modeは維持します。
+
+捕捉できるcreate/write/close/rename失敗は非成功です。cleanupは今回の作成identityが一致するstagingだけを削除します。ARTIFACT_WRITE_FAILEDは固定phase/errno、descriptor/staging cleanupとランダムtemp識別子を返し、内容・資格情報・出力pathは出しません。cleanup=failed/unverified/ownership_lostは残留し得るためoperator対応が必要で、残留なしとは報告しません。既存target symlinkは置換せず拒否します。
+
+保証は信頼できる排他的管理の出力directoryでのファイル単位です。後続失敗前に確定したファイルは残ります。3ファイルtransaction、強制終了・停電時cleanup、crash耐久性、任意の同時namespace変更、Windows ACLを保証しません。失敗結果は完全な成果物一覧を返しません。
+
+
 ## Terraform: CloudFront Functions（Edge）
 
 生成された JS を `file()` で参照し、`cdn-security build` をやり直したときに Terraform が変更を検知できるようにします。

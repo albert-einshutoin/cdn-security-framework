@@ -18,6 +18,15 @@ After `npx cdn-security build`:
 
 ---
 
+## AWS artifact write safety
+
+AWS edge files may contain build-time authentication and origin secrets. The shared writer exclusively creates private staging files with mode0600 and commits each file by rename; successful viewer-request, viewer-response and origin-request outputs are also0600. Run subsequent reads/uploads as the owning user or arrange a reviewed secure transfer. Generated dist files remain excluded from the npm package; package/compiler files keep their existing distribution modes.
+
+Caught create/write/close/rename errors return non-success. Cleanup removes only the staging file whose identity matches this call. ARTIFACT_WRITE_FAILED reports fixed phase/errno, descriptor cleanup, staging cleanup and a random temp identifier without contents, credentials or output paths. cleanup=failed/unverified/ownership_lost means residue is possible and requires operator attention; it is never reported as residue-free. Existing target symlinks are rejected rather than replaced.
+
+This is file-level writing in a trusted, exclusively managed output directory. Earlier files successfully committed before a later failure remain. It does not provide a three-file transaction, crash/power-loss cleanup, crash durability, arbitrary concurrent namespace safety, or Windows ACL proof. The error result does not advertise a complete artifact list.
+
+
 ## Terraform: CloudFront Functions (Edge)
 
 Reference the generated JS files with `file()` so Terraform picks up changes when you re-run `cdn-security build`.
