@@ -271,3 +271,36 @@ test('M11 post-commit cleanup warning does not claim an unchanged input', () => 
   expect(r).toMatchObject({ ok: true, saved: true, warnings: ['MIGRATION_CLEANUP_INCOMPLETE'] });
   expect(hash(input)).not.toBe(before); expect(hash(`${input}.v1.bak`)).toBe(before);
 }));
+
+for (const rates of [{ rate_limit: 2000 }, { rate_limit_rules: [{ name: 'login', limit: 100 }] }, { rate_limit: 2000, rate_limit_rules: [{ name: 'login', limit: 100 }] }]) {
+  for (const write of [false, true]) {
+    test(`B4 Cloudflare rate migration is manual before preview/save: ${JSON.stringify(rates)} write=${write}`, () => fixture((root, input) => {
+      const p = base(); p.firewall = { waf: rates };
+      const content = yaml.dump(p); fs.writeFileSync(input, content); const before = hash(input);
+      const r = migratePolicy({ policyPath: input, target: 'cloudflare', write });
+      expect(r).toMatchObject({ ok: false, exitCode: 2, migrated: false, saved: false });
+      expect(r.errors.join()).toMatch(/MIGRATION_MANUAL.*Cloudflare.*rate/);
+      expect(r).not.toHaveProperty('policy');
+      unchanged(input, before, content); expect(fs.readdirSync(root)).toEqual(['policy.yml']);
+      const cliResult = cliRun(root, input, ['--target', 'cloudflare', ...(write ? ['--write'] : [])]);
+      expect(cliResult.status).toBe(2); expect(cliResult.stdout).toBe('');
+      unchanged(input, before, content); expect(fs.readdirSync(root)).toEqual(['policy.yml']);
+      const aws = migratePolicy({ policyPath: input, target: 'aws' });
+      expect(aws.ok).toBe(true); expect(aws.policy.firewall.waf).toEqual(rates);
+    }));
+  }
+}
+
+
+test('B4 migration with rates requires target selection and validates v2 Cloudflare noops', () => fixture((root, input) => {
+  const p = base(); p.firewall = { waf: { rate_limit: 2000 } };
+  expect(transformPolicy(p)).toMatchObject({ ok: false, exitCode: 2 });
+  expect(p.version).toBe(1);
+  const v2 = { ...p, version: 2 };
+  for (const [plan, period, ok] of [['free', 10, true], ['free', 300, false], ['business', 300, true]]) {
+    v2.firewall.waf = { rate_limit: 2000, cloudflare_rate_limit_plan: plan, cloudflare_rate_limit_period: period };
+    const content = yaml.dump(v2); fs.writeFileSync(input, content); const before = hash(input);
+    expect(migratePolicy({ policyPath: input, target: 'cloudflare', write: true })).toMatchObject({ ok, saved: false, exitCode: ok ? 0 : 2 });
+    unchanged(input, before, content); expect(fs.readdirSync(root)).toEqual(['policy.yml']);
+  }
+}));
