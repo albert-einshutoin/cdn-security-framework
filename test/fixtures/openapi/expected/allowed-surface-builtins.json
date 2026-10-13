@@ -172,13 +172,13 @@
         }
       }
     ],
-    "policyDigest": "sha256:24b41016ef8f81845464371014132cc9589e9bd1e66b38f7497f1d4798acbb16",
+    "policyDigest": "sha256:4560948c67d638a8f5b48d9d661d1498b4b9444f62121f620cc6b99587cb04e8",
     "provenance": [
       {
         "analyzer": "allowed-surface@1",
         "capability": "policy-projection-v1",
         "complete": true,
-        "digest": "sha256:24b41016ef8f81845464371014132cc9589e9bd1e66b38f7497f1d4798acbb16",
+        "digest": "sha256:4560948c67d638a8f5b48d9d661d1498b4b9444f62121f620cc6b99587cb04e8",
         "source": "policy",
         "uri": "policy/archetypes/admin-panel.yml"
       }
@@ -394,13 +394,13 @@
       }
     },
     "orderedRules": [],
-    "policyDigest": "sha256:b89a7f15d4cb5df0bedd7a8c1e8eae61b9c07c126fa6cd742a30fa937ef2d09a",
+    "policyDigest": "sha256:703d9fa6d73db9e34823ebe53bff82f56ca7f404908371163ff5933c91476804",
     "provenance": [
       {
         "analyzer": "allowed-surface@1",
         "capability": "policy-projection-v1",
         "complete": true,
-        "digest": "sha256:b89a7f15d4cb5df0bedd7a8c1e8eae61b9c07c126fa6cd742a30fa937ef2d09a",
+        "digest": "sha256:703d9fa6d73db9e34823ebe53bff82f56ca7f404908371163ff5933c91476804",
         "source": "policy",
         "uri": "policy/archetypes/microservice-origin.yml"
       }
@@ -710,13 +710,13 @@
         }
       }
     ],
-    "policyDigest": "sha256:eb8bad59126f51542a726219c3ef8fed6dda3274f3c6f860b433c8306ea43c1d",
+    "policyDigest": "sha256:37fc4b86089277ae32d0da07da6fa3ee12d1ef48e923edd54781b640fc51db8d",
     "provenance": [
       {
         "analyzer": "allowed-surface@1",
         "capability": "policy-projection-v1",
         "complete": true,
-        "digest": "sha256:eb8bad59126f51542a726219c3ef8fed6dda3274f3c6f860b433c8306ea43c1d",
+        "digest": "sha256:37fc4b86089277ae32d0da07da6fa3ee12d1ef48e923edd54781b640fc51db8d",
         "source": "policy",
         "uri": "policy/archetypes/rest-api.yml"
       }
@@ -924,13 +924,13 @@
       }
     },
     "orderedRules": [],
-    "policyDigest": "sha256:b3864f522f7f28a555b6dc5d0029065706bf7ac180c3e19c4ce87a0cdf6d9e60",
+    "policyDigest": "sha256:6d07bfb47c794300b6a11d6ddb050dbfca1d0d612608a4ecb60a1c176f545fff",
     "provenance": [
       {
         "analyzer": "allowed-surface@1",
         "capability": "policy-projection-v1",
         "complete": true,
-        "digest": "sha256:b3864f522f7f28a555b6dc5d0029065706bf7ac180c3e19c4ce87a0cdf6d9e60",
+        "digest": "sha256:6d07bfb47c794300b6a11d6ddb050dbfca1d0d612608a4ecb60a1c176f545fff",
         "source": "policy",
         "uri": "policy/archetypes/spa-static-site.yml"
       }
@@ -1228,13 +1228,13 @@
         }
       }
     ],
-    "policyDigest": "sha256:b5b45cca20df07d8dfc37080e4405ca564bdfd505bb693de05673dabe0fc17d5",
+    "policyDigest": "sha256:ab6182ef98eba62885d4f7633af32b67bd3d8316b3fce3fe9994c9c991ce6524",
     "provenance": [
       {
         "analyzer": "allowed-surface@1",
         "capability": "policy-projection-v1",
         "complete": true,
-        "digest": "sha256:b5b45cca20df07d8dfc37080e4405ca564bdfd505bb693de05673dabe0fc17d5",
+        "digest": "sha256:ab6182ef98eba62885d4f7633af32b67bd3d8316b3fce3fe9994c9c991ce6524",
         "source": "policy",
         "uri": "policy/base.yml"
       }
@@ -1532,13 +1532,13 @@
         }
       }
     ],
-    "policyDigest": "sha256:1051080b66443133353d0d88a66aac4d62ed1a65133f1de1fca7d1a9e86b09c9",
+    "policyDigest": "sha256:48a52fb1cd9444da675d49302f43f70ce51fb6351fb2f868b4d4fbd538042268",
     "provenance": [
       {
         "analyzer": "allowed-surface@1",
         "capability": "policy-projection-v1",
         "complete": true,
-        "digest": "sha256:1051080b66443133353d0d88a66aac4d62ed1a65133f1de1fca7d1a9e86b09c9",
+        "digest": "sha256:48a52fb1cd9444da675d49302f43f70ce51fb6351fb2f868b4d4fbd538042268",
         "source": "policy",
         "uri": "policy/profiles/balanced.yml"
       }
@@ -2164,13 +2164,13 @@
         }
       }
     ],
-    "policyDigest": "sha256:871e1aeede1186dabe3949288cd8b2f9e8fa2d7cf095a0fbd1c71abe46d9c942",
+    "policyDigest": "sha256:a2dc16db539b21dde1bfafc96adfe1301f4f57480ecf7e2812a206c0291f3314",
     "provenance": [
       {
         "analyzer": "allowed-surface@1",
         "capability": "policy-projection-v1",
         "complete": true,
-        "digest": "sha256:871e1aeede1186dabe3949288cd8b2f9e8fa2d7cf095a0fbd1c71abe46d9c942",
+        "digest": "sha256:a2dc16db539b21dde1bfafc96adfe1301f4f57480ecf7e2812a206c0291f3314",
         "source": "policy",
         "uri": "policy/profiles/strict.yml"
       }
