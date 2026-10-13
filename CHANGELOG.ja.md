@@ -25,6 +25,7 @@
 - Cloudflare rate-limit Terraformに必須`cf.colo.id`を付与。mitigation 10秒だけでは300秒計測をFree適合と扱いません。
 - Breaking: Cloudflare rate-limitは`free`/`business`の明示指定が必要です。Freeは10秒・閾値を明示し合計1ルール、Businessは既存300秒の既定と合計5ルールまで。IP/block/単純path式だけに限定し、未対応設定は近似許可でもbuild/API/直接compilerで拒否。AWSは300秒を維持。[rate-limitプロファイル](docs/cloudflare-waf-parity.ja.md#cloudflare-rate-limit-の設定プロファイル)を参照。
 - Cloudflareのv1 rate-limit移行はプラン・期間・閾値の手動判断へ保存前に止め、v2のtarget指定noopにも同じvalidatorを適用します。AWS rateは保持。
+- AWS edgeの一時fileと成果物を排他的0600で保護し、捕捉した失敗ではowned tmpだけcleanup。write/descriptor/cleanup失敗を秘密値なしの診断で返します。ファイル単位で、複数file transactionやcrash cleanupは保証しません。
 - Cloudflare JWT の未知 `kid` 処理で JWKS キャッシュを先消ししないよう変更し、kid-miss ネガティブキャッシュで再取得増幅を抑制。
 
 ### Fixed

@@ -1,5 +1,6 @@
 const fs = require('fs');
 const path = require('path');
+const crypto = require('node:crypto');
 const {
   assertInjectedConstDeclarations,
   injectTemplateCode,
@@ -510,9 +511,57 @@ function build(policy: any, options: any = {}) {
 
 function atomicWriteFile(filePath: string, contents: string) {
   const dir = path.dirname(filePath);
-  const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${Date.now()}.tmp`);
-  fs.writeFileSync(tmp, contents, 'utf8');
-  fs.renameSync(tmp, filePath);
+  const id = crypto.randomBytes(16).toString('hex');
+  const tmp = path.join(dir, `.${path.basename(filePath)}.${process.pid}.${id}.tmp`);
+  let fd: number | undefined;
+  let owned: { dev: number; ino: number; birthtimeMs: number } | undefined;
+  let created = false;
+  let phase = 'create';
+  const same = (s: any) => Boolean(owned && s.isFile() && s.dev === owned.dev && s.ino === owned.ino && s.birthtimeMs === owned.birthtimeMs);
+  // Native errno only: injected messages, paths and file contents must never escape.
+  const errno = (e: any) => ['EACCES', 'EPERM', 'EEXIST', 'EISDIR', 'ENOTDIR', 'ENOENT', 'ENOSPC', 'EIO', 'EBADF', 'EMFILE', 'ENFILE', 'EXDEV', 'EINVAL', 'ELOOP'].includes(e?.code) ? e.code : 'UNKNOWN';
+  try {
+    fd = fs.openSync(tmp, 'wx', 0o600);
+    created = true;
+    const stat = fs.fstatSync(fd);
+    owned = { dev: stat.dev, ino: stat.ino, birthtimeMs: stat.birthtimeMs };
+    if (!stat.isFile() || stat.nlink !== 1 || (stat.mode & 0o777) !== 0o600) throw Object.assign(new Error(), { code: 'EPERM' });
+    phase = 'write';
+    fs.writeFileSync(fd, contents, 'utf8');
+    phase = 'close';
+    fs.closeSync(fd);
+    fd = undefined;
+    phase = 'rename';
+    const staged = fs.lstatSync(tmp);
+    if (!same(staged) || staged.nlink !== 1 || (staged.mode & 0o777) !== 0o600) throw Object.assign(new Error(), { code: 'EPERM' });
+    try {
+      if (fs.lstatSync(filePath).isSymbolicLink()) throw Object.assign(new Error(), { code: 'ELOOP' });
+    } catch (e: any) { if (e?.code !== 'ENOENT') throw e; }
+    fs.renameSync(tmp, filePath);
+  } catch (error: unknown) {
+    let close = fd === undefined ? 'closed' : 'failed';
+    let closeError = 'NONE';
+    if (fd !== undefined) {
+      try {
+        // A failed close may have closed/reused the descriptor. Do not close a foreign one.
+        if (owned && !same(fs.fstatSync(fd))) close = 'ownership_lost';
+        else { fs.closeSync(fd); close = 'closed'; }
+      } catch (e: any) { close = e?.code === 'EBADF' ? 'already_closed' : 'failed'; closeError = errno(e); }
+    }
+    let cleanup = created ? 'unverified' : 'not_owned';
+    let cleanupError = 'NONE';
+    if (created && owned) {
+      try {
+        const stat = fs.lstatSync(tmp);
+        if (same(stat)) { fs.unlinkSync(tmp); cleanup = 'removed'; }
+        else cleanup = 'ownership_lost';
+      } catch (e: any) { cleanup = e?.code === 'ENOENT' ? 'missing' : 'failed'; cleanupError = errno(e); }
+    }
+    // File-level only: earlier successful artifacts stay committed; no file-set/crash guarantee.
+    const failure = new Error(`ARTIFACT_WRITE_FAILED target=${path.basename(filePath)} phase=${phase} error=${errno(error)} close=${close} close_error=${closeError} cleanup=${cleanup} cleanup_error=${cleanupError} temp_id=${id}`);
+    Object.assign(failure, { code: 'ARTIFACT_WRITE_FAILED' });
+    throw failure;
+  }
 }
 
 function main(argv: string[] = process.argv.slice(2)) {
