@@ -1,41 +1,14 @@
 # EN novice walkthrough — unpublished schema 2 candidate
 
-Give this sheet to a person who did not implement the candidate. A maintainer supplies the **final PR run/attempt, PR HEAD SHA, and tgz SHA-256** from the PR acceptance comment. Leave the result fields blank until a real person performs the walkthrough. Do not substitute an AI or an implementer's rehearsal for a novice result.
+Give this sheet to a person who did not implement the candidate. A maintainer supplies a trusted **final main push source/harness/tree/run/attempt, Actions ZIP digest, tgz SHA-256 and consumer-lock SHA-256** from the same candidate acceptance record. Leave the result fields blank until a real person performs the walkthrough. Do not substitute an AI or an implementer's rehearsal for a novice result.
 
-This evaluates the local first-run path from an empty consumer through a useful Contract Diff finding and local GitHub Summary. It does not deploy, call GitHub APIs, use cloud credentials, or accept the release. Use synthetic examples only. Node.js must be **20.17.0, 22, or 24**; record the exact `node --version` and `npm --version`. Node 18.20.8 and 20.16.0 are expected to be rejected. The retained package `--version` can display 1.4.0; use the SHA/digest below to identify this unpublished schema 2 candidate.
+This evaluates the local first-run path from an empty consumer through a useful Contract Diff finding and local GitHub Summary. It does not deploy, call GitHub APIs, use cloud credentials, or accept the release. Use synthetic examples only. Node.js must be **20.17.0, 22, or 24**; record the exact `node --version` and `npm --version`. Node 18.20.8 and 20.16.0 are expected to be rejected. Published1.4.0 uses schema1; this unpublished candidate displays `--version` **2.0.0-rc.0** and requires Policy schema2. Version alone is insufficient: verify the main artifact identity before evaluation.
 
 ## Facilitator preparation — outside the ten-minute clock
 
-Use a disposable POSIX local directory and a GitHub account with read access to the PR run artifact. Set all four values from the **same final PR evidence**, never from an older run. The artifact container digest shown by GitHub Actions is different from the tgz SHA-256.
+Use a disposable POSIX directory, Node 20.17.0/22/24, npm, `gh`, and `unzip`. Follow the [English Quickstart section 1](../../docs/quickstart.md#1-install-the-unpublished-schema2-candidate-in-an-empty-consumer), using the trusted main-run handoff record. Execute through the `Verified main source/harness/tree/run/attempt, Actions ZIP, tgz and consumer lock.` message, then stop **before** `cd candidate/consumer` and `npm ci`. This verifies GitHub run/commit/artifact and actual ZIP/tgz/lock against the separate record; metadata's self-consistency alone is insufficient. Remain in outer `consumer`, with `candidate/consumer` free of `node_modules`, Policy and reports.
 
-```bash
-export RUN_ID='<final PR run ID>'
-export ATTEMPT='<run attempt>'
-export PR_HEAD_SHA='<40-character PR HEAD SHA>'
-export EXPECTED_TGZ_SHA256='<64-character tgz SHA-256>'
-mkdir novice-evaluation && cd novice-evaluation
-gh run download "$RUN_ID" --repo albert-einshutoin/cdn-security-framework \
-  --name "package-candidate-${RUN_ID}-${ATTEMPT}" --dir candidate
-node - <<'JS'
-const fs = require('node:fs');
-const crypto = require('node:crypto');
-const assert = require('node:assert/strict');
-const m = JSON.parse(fs.readFileSync('candidate/metadata.json', 'utf8'));
-const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-assert.equal(m.source, process.env.PR_HEAD_SHA);
-assert.equal(m.harness, process.env.PR_HEAD_SHA);
-assert.equal(m.run, process.env.RUN_ID);
-assert.equal(m.attempt, process.env.ATTEMPT);
-assert.equal(hash('candidate/candidate.tgz'), process.env.EXPECTED_TGZ_SHA256);
-assert.equal(hash('candidate/candidate.tgz'), m.sha256);
-assert.equal(hash('candidate/consumer/package-lock.json'), m.lockSha256);
-console.log('Candidate SHA, run/attempt, tgz and common lock verified.');
-JS
-node --version
-npm --version
-```
-
-Prepare a **dedicated** npm cache with the producer's lock, then remove the disposable installation before handing the directory to the evaluator. The evaluator's `candidate/consumer` starts without `node_modules`, user Policy, or reports. Online dependency preparation time belongs in the separate field below.
+Prepare a dedicated npm cache using the producer's verified common lock. This online preparation is outside the human ten-minute clock:
 
 ```bash
 mkdir .npm-cache
@@ -43,7 +16,7 @@ mkdir .npm-cache
 rm -rf candidate/consumer/node_modules
 ```
 
-The timed offline `npm ci` below substitutes for the public Quickstart's `npm install --save-dev "$CANDIDATE_TARBALL"`: it uses the **same tarball** plus the producer's common lock/cache so dependency download variance is excluded. Record this substitution; do not claim it is a byte-for-byte execution of the online install command. No repository source, global install, `NODE_PATH`, or development `node_modules` is permitted. `npm --offline` alone does not prove every child process is network-blocked; the automated CI lane uses an OS network namespace.
+The timed `npm ci` uses the same verified producer lock/tgz as Quickstart section1, adding `--offline` and the prepared cache to exclude download variance. Record the different flags; this is not byte-for-byte execution of the online command. No repository source, global install, `NODE_PATH`, or development `node_modules` is permitted. `npm --offline` alone does not prove all child-process networking is blocked; CI uses an OS network namespace.
 
 ## Evaluator instructions — start the clock at the first command
 
@@ -106,7 +79,7 @@ To observe the real finding gate after the timed walkthrough, repeat the Text di
 |---|---|
 | Evaluator ID (pseudonym), date, language (EN) | **Not performed** |
 | Developer/security background and prior use of this tool | **Not performed** |
-| PR HEAD / run / attempt / tgz SHA-256; Node/npm; OS/filesystem | **Not performed** |
+| Source / harness / tree / main run / attempt / ZIP / tgz / consumer-lock SHA-256; Node/npm; OS/filesystem | **Not performed** |
 | Facilitator online dependency preparation start/end/duration | **Not performed** |
 | Timed walkthrough start/end; total through local Summary | **Not performed** |
 | Offline install, init/build, inspect, candidate/lint/build, Text finding, JSON/SARIF/Summary: step durations and exit codes | **Not performed** |

@@ -31,7 +31,9 @@ finding として返します。Runtime に観測がないことは route 削除
 
 ## 3. 現行リリースと main の状態
 
-状態確認: **2026-09-22**、main `111f995bd35d3b24bdd1ee7dd72c35bce19f9170`。[main検証](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249)。schema2はmain実装済みですが未公開です。公開済み1.4.0、package表示1.4.0、次期目標2.0.0を区別します。
+現行packageの区別（2026-10-13、main `27211fa91127b8cf978f7233ced7deb91c5053f7`で確認）: 公開済み **1.4.0 / Policy schema 1**、未公開 **2.0.0-rc.0 / Policy schema 2**、将来の正式 **2.0.0**は別状態です。[main artifactの独立照合](quickstart.ja.md#1-未公開schema2候補を空のconsumerへ導入)を使います。同梱docsへ最終tgz自身のhashを固定せず、担当者が最終mainのrun/attempt/source/harness/tree/tgz/lockをpackage外へ保存します。
+
+下表の実装証拠は過去の **2026-09-22**、main `111f995bd35d3b24bdd1ee7dd72c35bce19f9170`での確認です。[main検証](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249)。日付付きlinkは過去の証拠として保持し、最終現候補の検証とは扱いません。schema2はmain実装済み・未公開で、RC GO・H01結果・公開を意味しません。
 
 | Area | Status | Evidence / boundary |
 | --- | --- | --- |

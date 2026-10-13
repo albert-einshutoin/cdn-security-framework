@@ -4,7 +4,7 @@
 
 ## 公開済みと候補の契約
 
-公開済み`cdn-security-framework@1.4.0`はPolicy **version 1**です。未公開main候補は**version 2**ですが、release GOまではpackage.jsonのversionを1.4.0のまま保持します。候補はcommit SHAとtarball SHA-256で識別してください。npm 2.0.0の公開済みを意味しません。
+公開済み`cdn-security-framework@1.4.0`はPolicy **version 1**です。未公開main package **2.0.0-rc.0**はPolicy **version 2**を要求し、packageとPolicyのversionは別契約です。[独立した候補照合](quickstart.ja.md#1-未公開schema2候補を空のconsumerへ導入)でmain runのsource/harness/tree/run/attemptとZIP/tgz/consumer lockの実bytesを確認して導入します。正式2.0.0公開やRC GO承認を意味しません。
 
 coreのlint/build/API、継承する各Policy文書、init/guided、profiles/archetypes、OpenAPI candidateはv2のみを扱い、v1を暗黙変換しません。Finding、Security IR、inspection、report、exceptionのschema versionは別契約で変更しません。
 

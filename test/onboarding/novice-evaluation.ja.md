@@ -1,41 +1,14 @@
 # JA 初学者評価シート — 未公開schema 2候補
 
-このシートを候補の実装者以外の評価者へ渡してください。担当者は、**最終PR run/attempt、PR HEADの完全SHA、tgz SHA-256**をPRの受入記録から記入します。実際の人間が実施するまで結果欄は空欄のままです。AI代理実行や実装者の再現を初学者の結果に置き換えません。
+このシートを候補の実装者以外の評価者へ渡してください。担当者は、**最終main pushのsource/harness/tree/run/attempt、Actions ZIP digest、tgz SHA-256、consumer lock SHA-256**を同じ候補の信頼済み受入記録から記入します。実際の人間が実施するまで結果欄は空欄のままです。AI代理実行や実装者の再現を初学者の結果に置き換えません。
 
-測定対象は、空consumerへのローカル導入から、有用なContract Diff Findingの理解とローカルGitHub Summaryまでです。deploy、GitHub API投稿、クラウドcredential、公開承認は含みません。入力はsynthetic例だけを使います。Node.js条件は **20.17.0、22、24**。`node --version`と`npm --version`の実値を記録します。18.20.8と20.16.0は期待どおり拒否される対象です。CLIの`--version`は1.4.0表示を保持しているため、未公開schema 2候補の識別にはSHA/digestを使います。
+測定対象は、空consumerへのローカル導入から、有用なContract Diff Findingの理解とローカルGitHub Summaryまでです。deploy、GitHub API投稿、クラウドcredential、公開承認は含みません。入力はsynthetic例だけを使います。Node.js条件は **20.17.0、22、24**。`node --version`と`npm --version`の実値を記録します。18.20.8と20.16.0は期待どおり拒否される対象です。公開1.4.0はschema1、未公開候補の`--version`は **2.0.0-rc.0**、Policyはschema2です。versionだけで候補を識別せず、評価前にmain artifactを照合します。
 
 ## 担当者による準備 — 10分計測の外
 
-使い捨てのPOSIXローカルdirectoryと、PR run artifactを読めるGitHubアカウントを使います。4変数は必ず**同じ最終PR受入記録**から取得し、古いrunの値を混ぜません。GitHub Actionsのartifact container digestとtgz SHA-256は別物です。
+使い捨てPOSIX directory、Node 20.17.0/22/24、npm、`gh`、`unzip`を使います。[日本語Quickstartの第1節](../../docs/quickstart.ja.md#1-未公開schema2候補を空のconsumerへ導入)で、信頼済みmain runの受け渡し記録を使い、`Verified main source/harness/tree/run/attempt, Actions ZIP, tgz and consumer lock.`まで実行します。**末尾の`cd candidate/consumer`と`npm ci`の前で止めます。** GitHub run/commit/artifactとZIP/tgz/lockの実bytesを独立記録に照合し、metadata内の自己一致だけでは合格にしません。外側の`consumer`に留まり、`candidate/consumer`は`node_modules`・Policy・reportなしです。
 
-```bash
-export RUN_ID='<最終PR run ID>'
-export ATTEMPT='<run attempt>'
-export PR_HEAD_SHA='<40文字のPR HEAD SHA>'
-export EXPECTED_TGZ_SHA256='<64文字のtgz SHA-256>'
-mkdir novice-evaluation && cd novice-evaluation
-gh run download "$RUN_ID" --repo albert-einshutoin/cdn-security-framework \
-  --name "package-candidate-${RUN_ID}-${ATTEMPT}" --dir candidate
-node - <<'JS'
-const fs = require('node:fs');
-const crypto = require('node:crypto');
-const assert = require('node:assert/strict');
-const m = JSON.parse(fs.readFileSync('candidate/metadata.json', 'utf8'));
-const hash = file => crypto.createHash('sha256').update(fs.readFileSync(file)).digest('hex');
-assert.equal(m.source, process.env.PR_HEAD_SHA);
-assert.equal(m.harness, process.env.PR_HEAD_SHA);
-assert.equal(m.run, process.env.RUN_ID);
-assert.equal(m.attempt, process.env.ATTEMPT);
-assert.equal(hash('candidate/candidate.tgz'), process.env.EXPECTED_TGZ_SHA256);
-assert.equal(hash('candidate/candidate.tgz'), m.sha256);
-assert.equal(hash('candidate/consumer/package-lock.json'), m.lockSha256);
-console.log('Candidate SHA, run/attempt, tgz and common lock verified.');
-JS
-node --version
-npm --version
-```
-
-producerの共通lockを使い、専用npm cacheをonlineで準備します。その後、使い捨てinstallを消してから評価者へ渡します。評価開始時の`candidate/consumer`には`node_modules`、利用者Policy、reportがありません。依存取得の所要時間は下の別欄へ記録します。
+照合済みproducerの共通lockで専用npm cacheをonline準備します。これは人間の10分計測の外です。
 
 ```bash
 mkdir .npm-cache
@@ -43,7 +16,7 @@ mkdir .npm-cache
 rm -rf candidate/consumer/node_modules
 ```
 
-計測中のoffline `npm ci`は、公開Quickstartの`npm install --save-dev "$CANDIDATE_TARBALL"`を、**同一tgz**とproducerの共通lock/cacheを使う形へ置換したものです。online依存取得の揺れを除外するための置換で、文書のonline installコマンドをbyte単位で実行した証拠とはしません。repository source、global install、`NODE_PATH`、開発用`node_modules`を利用しません。`npm --offline`だけでは全子processの通信遮断を証明できません。自動CIではOSのnetwork namespaceで遮断します。
+計測中の`npm ci`はQuickstart第1節と同じ照合済みproducer lock/tgzを使い、`--offline`と準備済みcacheを追加してdownloadの揺れを除外します。異なるflagを記録し、online commandのbyte単位実行とは扱いません。repository source、global install、`NODE_PATH`、開発用`node_modules`は利用しません。`npm --offline`だけでは全子processの通信遮断を証明できず、CIではOSのnetwork namespaceを使います。
 
 ## 評価者の操作 — 最初のコマンドから計測
 
@@ -106,7 +79,7 @@ JS
 |---|---|
 | 評価者ID（仮名）、日付、言語（JA） | **未実施** |
 | 開発・security経験、本ツールの利用経験 | **未実施** |
-| PR HEAD/run/attempt/tgz SHA-256、Node/npm、OS/filesystem | **未実施** |
+| Source / harness / tree / main run / attempt / ZIP / tgz / consumer-lock SHA-256; Node/npm; OS/filesystem | **未実施** |
 | 担当者のonline依存準備の開始/終了/所要時間 | **未実施** |
 | 初回導線の開始/終了、local Summaryまでの総時間 | **未実施** |
 | offline install、init/build、inspect、candidate/lint/build、Text Finding、JSON/SARIF/Summaryのstep時間・exit | **未実施** |

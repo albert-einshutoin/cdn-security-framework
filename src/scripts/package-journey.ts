@@ -118,8 +118,8 @@ function docs(root: string): void {
     const quickstart = section(en, 2);
     need(JSON.stringify(commands) === JSON.stringify(quickstart), 'README_QUICKSTART_DRIFT');
   }
-  // The CI consumer uses the producer's fixed lock and offline npm ci. This is the one documented install substitution.
-  need(section(en, 1).includes('npm install --save-dev "$CANDIDATE_TARBALL"'), 'DOC_INSTALL_SUBSTITUTION');
+  // Quickstart and CI use the producer lock; CI adds offline/network isolation.
+  need(section(en, 1).includes('npm ci --ignore-scripts --no-audit --no-fund'), 'DOC_LOCKED_INSTALL');
   fs.symlinkSync(path.join(consumer, 'node_modules'), path.join(root, 'node_modules'), 'dir');
   for (const n of [2, 5]) {
     for (const line of section(en, n)) {
