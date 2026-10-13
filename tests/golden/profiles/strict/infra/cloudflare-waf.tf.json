@@ -68,7 +68,7 @@
             "ref": "rate_2",
             "description": "login-ip-limit",
             "enabled": true,
-            "expression": "starts_with(http.request.uri.path, \"/login\")",
+            "expression": "starts_with(lower(http.request.uri.path), \"/login\")",
             "action": "block",
             "action_parameters": {
               "response": {

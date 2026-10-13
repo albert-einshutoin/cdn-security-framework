@@ -66,6 +66,9 @@ try {
   process.exit(1);
 }
 
+try { require('./lib/cloudflare-rate-limit').buildCloudflareRateRules(policy.firewall?.waf || {}); }
+catch (error: unknown) { console.error((error as Error).message); process.exit(1); }
+
 const permissive = warnIfPermissive(policy, { failOnPermissive });
 if (permissive.failed) {
   process.exit(1);

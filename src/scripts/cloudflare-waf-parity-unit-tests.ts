@@ -155,6 +155,7 @@ response_headers:
 firewall:
   waf:
     scope: CLOUDFRONT
+    cloudflare_rate_limit_plan: business
     rate_limit_rules:
       - name: exact-match
         aggregate_key_type: IP
@@ -229,20 +230,16 @@ test('compiler: unknown AWS managed rule treated as unsupported (disabled, warne
   }
 });
 
-test('compiler: untranslated scope_down emits parity warning and degrades expression', () => {
+test('compiler: untranslated scope_down rejects before output even with approximation opt-out', () => {
   const ctx = tmpProject(POLICY_SCOPE_DOWN_UNTRANSLATED);
   try {
-    const r = runCompiler(ctx.policyPath, ctx.dir, ['--allow-waf-approximation']);
-    assert.strictEqual(r.status, 0);
-    assert.ok(/scope_down_statement/i.test(r.stderr));
-    assert.ok(/match-all/.test(r.stderr));
-    const tf = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra', 'cloudflare-waf.tf.json'), 'utf8'));
-    const rl = tf.resource.cloudflare_ruleset['parity-unit_ratelimit'];
-    const rule = rl.rules.find((r: any) => r.description === 'exact-match');
-    assert.strictEqual(rule.expression, 'true');
-  } finally {
-    ctx.cleanup();
-  }
+    for (const args of [[], ['--allow-waf-approximation']]) {
+      const r = runCompiler(ctx.policyPath, ctx.dir, args);
+      assert.strictEqual(r.status, 1);
+      assert.match(r.stderr, /CLOUDFLARE_RATE_LIMIT_INVALID.*scope_down_statement/);
+      assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra', 'cloudflare-waf.tf.json')));
+    }
+  } finally { ctx.cleanup(); }
 });
 
 test('compiler: expression_cloudflare override suppresses the scope_down warning', () => {
@@ -281,6 +278,7 @@ firewall:
     allowlist: ["198.51.100.10/32"]
   waf:
     scope: CLOUDFRONT
+    cloudflare_rate_limit_plan: business
     rate_limit: 1234
     fingerprint_action: count
     ja3_fingerprints:
@@ -293,10 +291,10 @@ firewall:
       content_type: APPLICATION_JSON
     rate_limit_rules:
       - name: login-starts-with
-        aggregate_key_type: CUSTOM_KEYS
-        cloudflare_characteristics: ["ip.src", "http.request.headers[\\"x-api-key\\"]"]
-        limit: 25
-        action: count
+        aggregate_key_type: IP
+        cloudflare_characteristics: ["ip.src"]
+        limit: 100
+        action: block
         scope_down_statement:
           byte_match_statement:
             field_to_match: { uri_path: {} }
@@ -328,12 +326,12 @@ firewall:
     assert.strictEqual(blockedRule.action_parameters.response.content_type, 'application/json');
 
     const rateRules = tf.resource.cloudflare_ruleset['cf-custom-test_ratelimit'].rules;
-    const globalRate = rateRules.find((rule: any) => /legacy/.test(rule.description));
+    const globalRate = rateRules.find((rule: any) => rule.description === 'Global IP rate limit');
     assert.strictEqual(globalRate.ratelimit.requests_per_period, 1234);
     const scopedRate = rateRules.find((rule: any) => rule.description === 'login-starts-with');
-    assert.strictEqual(scopedRate.action, 'log');
+    assert.strictEqual(scopedRate.action, 'block');
     assert.strictEqual(scopedRate.expression, 'starts_with(http.request.uri.path, "/login")');
-    assert.deepStrictEqual(scopedRate.ratelimit.characteristics, ['cf.colo.id', 'ip.src', 'http.request.headers["x-api-key"]']);
+    assert.deepStrictEqual(scopedRate.ratelimit.characteristics, ['cf.colo.id', 'ip.src']);
     assert.strictEqual(scopedRate.ratelimit.mitigation_timeout, 10);
     assert.strictEqual(globalRate.ratelimit.mitigation_timeout, 10);
 
@@ -404,3 +402,87 @@ test('drift: committed docs/cloudflare-waf-parity.ja.md matches generator output
   const committed = fs.readFileSync(path.join(repoRoot, 'docs', 'cloudflare-waf-parity.ja.md'), 'utf8');
   assert.strictEqual(committed, generator.renderJa(), 'run `node scripts/generate-parity-doc.js --write --lang=ja` to regenerate');
 });
+
+test('explicit Free rate limit preserves the chosen 2000 requests per 10 seconds', () => {
+  const ctx = tmpProject(`version: 2
+project: free-rate
+firewall:
+  waf:
+    cloudflare_rate_limit_plan: free
+    cloudflare_rate_limit_period: 10
+    rate_limit: 2000
+`);
+  try {
+    const r = runCompiler(ctx.policyPath, ctx.dir);
+    assert.strictEqual(r.status, 0, r.stderr);
+    const tf = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json'), 'utf8'));
+    const rate = tf.resource.cloudflare_ruleset['free-rate_ratelimit'].rules[0].ratelimit;
+    assert.strictEqual(rate.period, 10);
+    assert.strictEqual(rate.requests_per_period, 2000);
+    assert.deepStrictEqual(rate.characteristics, ['cf.colo.id', 'ip.src']);
+  } finally { fs.rmSync(ctx.dir, { recursive: true, force: true }); }
+});
+
+test('Free plus 300 seconds fails before writing even with approximation opt-out', () => {
+  const ctx = tmpProject(`version: 2
+firewall:
+  waf:
+    cloudflare_rate_limit_plan: free
+    cloudflare_rate_limit_period: 300
+    rate_limit: 2000
+`);
+  try {
+    const r = runCompiler(ctx.policyPath, ctx.dir, ['--allow-waf-approximation']);
+    assert.notStrictEqual(r.status, 0);
+    assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
+  } finally { fs.rmSync(ctx.dir, { recursive: true, force: true }); }
+});
+
+const { buildCloudflareRateRules } = require('./lib/cloudflare-rate-limit');
+const freeRate = { cloudflare_rate_limit_plan: 'free', cloudflare_rate_limit_period: 10, rate_limit: 200 };
+test('rate profiles preserve explicit thresholds and the Business 5-minute window', () => {
+  assert.strictEqual(buildCloudflareRateRules({ cloudflare_rate_limit_plan: 'business', rate_limit: 2000 })[0].ratelimit.period, 300);
+  const rules = buildCloudflareRateRules({ cloudflare_rate_limit_plan: 'free', cloudflare_rate_limit_period: 10, rate_limit_rules: [
+    { name: 'login', limit: 100, expression_cloudflare: 'lower(http.request.uri.path) eq "/login"' },
+  ] });
+  assert.strictEqual(rules.length, 1);
+  assert.strictEqual(rules[0].expression, 'lower(http.request.uri.path) eq "/login"');
+  assert.deepStrictEqual(rules[0].ratelimit, { characteristics: ['cf.colo.id', 'ip.src'], period: 10, requests_per_period: 100, mitigation_timeout: 10 });
+  const business = buildCloudflareRateRules({ cloudflare_rate_limit_plan: 'business', rate_limit: 2000,
+    rate_limit_rules: Array.from({ length: 4 }, (_, i) => ({ name: 'route-' + i, limit: 100 + i })) });
+  assert.strictEqual(business.length, 5);
+  assert.strictEqual(business[4].ratelimit.requests_per_period, 103);
+  assert.deepStrictEqual(buildCloudflareRateRules({}), []);
+});
+
+for (const [name, config] of Object.entries({
+  'non-object configuration': [],
+  'missing plan': { rate_limit: 2000 },
+  'missing Free period': { cloudflare_rate_limit_plan: 'free', rate_limit: 2000 },
+  'unknown plan': { ...freeRate, cloudflare_rate_limit_plan: 'pro' },
+  'Free 300 seconds': { ...freeRate, cloudflare_rate_limit_period: 300 },
+  'unsupported discrete period 15': { ...freeRate, cloudflare_rate_limit_plan: 'business', cloudflare_rate_limit_period: 15 },
+  'Free block throttling zero': { ...freeRate, rate_limit_mitigation_timeout: 0 },
+  'Business block throttling zero': { ...freeRate, cloudflare_rate_limit_plan: 'business', rate_limit_mitigation_timeout: 0 },
+  'Free 60-second mitigation': { ...freeRate, rate_limit_mitigation_timeout: 60 },
+  'unsupported discrete mitigation 30': { ...freeRate, cloudflare_rate_limit_plan: 'business', rate_limit_mitigation_timeout: 30 },
+  'zero threshold': { ...freeRate, rate_limit: 0 },
+  'fractional threshold': { ...freeRate, rate_limit: 200.5 },
+  'string threshold': { ...freeRate, rate_limit: '200' },
+  'Free global plus individual': { ...freeRate, rate_limit_rules: [{ name: 'login', limit: 100 }] },
+  'Free two individual': { ...freeRate, rate_limit: undefined, rate_limit_rules: [{ name: 'a', limit: 100 }, { name: 'b', limit: 100 }] },
+  'Business six total': { ...freeRate, cloudflare_rate_limit_plan: 'business', rate_limit_rules: Array.from({ length: 5 }, (_, i) => ({ name: 'r-' + i, limit: 100 })) },
+  'header characteristic': { ...freeRate, rate_limit: undefined, rate_limit_rules: [{ name: 'login', limit: 100, cloudflare_characteristics: ['ip.src', 'http.request.headers["x-api-key"]'] }] },
+  'characteristics without IP': { ...freeRate, rate_limit: undefined, rate_limit_rules: [{ name: 'login', limit: 100, cloudflare_characteristics: ['cf.colo.id'] }] },
+  'custom keys': { ...freeRate, rate_limit: undefined, rate_limit_rules: [{ name: 'login', limit: 100, custom_keys: [] }] },
+  'missing individual threshold': { ...freeRate, rate_limit: undefined, rate_limit_rules: [{ name: 'login' }] },
+  'count action': { ...freeRate, rate_limit: undefined, rate_limit_rules: [{ name: 'login', limit: 100, action: 'count' }] },
+  'captcha action': { ...freeRate, rate_limit: undefined, rate_limit_rules: [{ name: 'login', limit: 100, action: 'captcha' }] },
+  'forwarded IP': { ...freeRate, rate_limit: undefined, rate_limit_rules: [{ name: 'login', limit: 100, aggregate_key_type: 'FORWARDED_IP' }] },
+  'complex expression': { ...freeRate, rate_limit: undefined, rate_limit_rules: [{ name: 'login', limit: 100, expression_cloudflare: 'http.request.uri.path eq "/login" or true' }] },
+  'regex expression': { ...freeRate, rate_limit: undefined, rate_limit_rules: [{ name: 'login', limit: 100, expression_cloudflare: 'http.request.uri.path matches "^/"' }] },
+  'unknown rule field': { ...freeRate, rate_limit: undefined, rate_limit_rules: [{ name: 'login', limit: 100, custom_count: true }] },
+  'non-error block response': { ...freeRate, block_response: { status_code: 200 } },
+})) {
+  test('rate profiles reject ' + name, () => assert.throws(() => buildCloudflareRateRules(config), /CLOUDFLARE_RATE_LIMIT_INVALID/));
+}

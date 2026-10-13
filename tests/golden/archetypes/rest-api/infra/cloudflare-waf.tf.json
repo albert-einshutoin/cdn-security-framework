@@ -39,7 +39,7 @@
         "rules": [
           {
             "ref": "rate_1",
-            "description": "Global IP rate limit (legacy)",
+            "description": "Global IP rate limit",
             "enabled": true,
             "expression": "true",
             "action": "block",
@@ -60,7 +60,7 @@
             "ref": "rate_2",
             "description": "auth-ip-limit",
             "enabled": true,
-            "expression": "starts_with(http.request.uri.path, \"/api/auth\")",
+            "expression": "starts_with(lower(http.request.uri.path), \"/api/auth\")",
             "action": "block",
             "action_parameters": {
               "response": null

@@ -81,6 +81,8 @@ response_headers:
 
 firewall:
   waf:
+    # Preserves the existing 5-minute Cloudflare rate window; requires Business.
+    cloudflare_rate_limit_plan: business
     rate_limit: 5000
     scope: REGIONAL
     managed_rules:

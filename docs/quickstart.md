@@ -156,13 +156,16 @@ Historical B2 evidence used a normally generated Worker on local workerd with re
 
 ## 4. Guided setup and Cloudflare JWT
 
+Guided Cloudflare keeps the 5-minute rate window and requires explicit Business selection. For a Free 10-second policy, see [rate-limit profiles](cloudflare-waf-parity.md#cloudflare-rate-limit-configuration-profiles). This does not verify account entitlement or overall WAF Free support.
+
+
 Instead of a profile, `init --guided` selects application shape and authentication. It prompts in a TTY; this example closes stdin and supplies the selected configuration flags. Use a separate directory rather than overwriting the AWS policy:
 
 ```bash
 mkdir cf-jwt
 (
   cd cf-jwt
-  ../node_modules/.bin/cdn-security init --guided --platform cloudflare \
+  ../node_modules/.bin/cdn-security init --guided --platform cloudflare --cloudflare-rate-limit-plan business \
     --app-shape rest-api --auth jwt --admin-paths /api \
     --cors-origins https://app.example.com --waf balanced \
     --geo-block '' --ip-allowlist '' --deployment build-only --project docs-jwt </dev/null

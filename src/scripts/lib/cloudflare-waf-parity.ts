@@ -129,31 +129,31 @@ const SCOPE_DOWN_TRANSLATIONS = [
     shape: 'byte_match_statement(uri_path, STARTS_WITH)',
     status: 'equivalent',
     cloudflareExpression: 'starts_with(http.request.uri.path, "<value>")',
-    rationale: 'Direct translation — Cloudflare expression language has starts_with/ends_with/contains helpers.',
+    rationale: 'Direct URI-path STARTS_WITH translation, with only absent/NONE/LOWERCASE priority-0 transformation.',
   },
   {
     shape: 'byte_match_statement(uri_path, EXACTLY)',
     status: 'approximate',
     cloudflareExpression: 'http.request.uri.path eq "<value>"',
-    rationale: 'Not yet auto-translated by the compiler. Set rule.expression_cloudflare to override. Will be promoted to equivalent once the translator is extended.',
+    rationale: 'Not auto-translated. An explicit single path eq expression is supported. Otherwise rejected, even with approximation allowed.',
   },
   {
     shape: 'byte_match_statement(uri_path, CONTAINS)',
     status: 'approximate',
     cloudflareExpression: 'http.request.uri.path contains "<value>"',
-    rationale: 'Not yet auto-translated. Set rule.expression_cloudflare. Will be promoted once the translator is extended.',
+    rationale: 'Not supported by the local rate-limit profiles; rejected, even with approximation allowed.',
   },
   {
     shape: 'regex_match_statement',
     status: 'approximate',
     cloudflareExpression: 'http.request.uri.path matches "<regex>"',
-    rationale: 'Cloudflare supports regex via the `matches` operator but differs in flavor (RE2 vs AWS regex). Auto-translation would risk silent re-interpretation of edge cases. Require explicit expression_cloudflare.',
+    rationale: 'Regex is outside the local rate-limit expression subset and is rejected, even with approximation allowed.',
   },
   {
     shape: 'label_match_statement / size_constraint_statement / geo_match_statement (inside scope-down)',
     status: 'unsupported',
     cloudflareExpression: null,
-    rationale: 'These AWS scope-down shapes have no direct expression counterpart. Either flatten the scope-down into a separate Cloudflare rule, or provide expression_cloudflare explicitly on the rate_limit rule.',
+    rationale: 'These AWS scope-down shapes have no direct expression counterpart. Use a supported explicit single path expression if it captures the intended scope; otherwise rejected, even with approximation allowed.',
   },
 ];
 

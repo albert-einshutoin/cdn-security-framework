@@ -38,6 +38,7 @@ type InitOptions = {
   adminPaths?: string;
   corsOrigins?: string;
   waf?: string;
+  cloudflareRateLimitPlan?: string;
   geoBlock?: string;
   ipAllowlist?: string;
   deployment?: string;
@@ -704,6 +705,10 @@ function renderGuidedPolicy(opts: {
     '  waf:',
     `    rate_limit: ${guidedRateLimit(opts.waf)}`,
   );
+  if (opts.platform === 'cloudflare') {
+    lines.push('    # Preserves the selected 5-minute rate threshold; requires a Business account for Cloudflare rate limiting.');
+    lines.push('    cloudflare_rate_limit_plan: business');
+  }
   // scope / logging are AWS WAFv2 concepts — omit them for Cloudflare scaffolds.
   if (opts.platform === 'aws') {
     lines.push('    scope: CLOUDFRONT');
@@ -2412,6 +2417,14 @@ function evaluateReadiness(
   const firewall = (policy && policy.firewall) || {};
   const waf = firewall.waf || {};
 
+  if (target === 'cloudflare') {
+    try { require(path.join(pkgRoot, 'scripts/lib/cloudflare-rate-limit')).buildCloudflareRateRules(waf); }
+    catch (error: unknown) {
+      findings.push(readinessFinding('fail', 'firewall.waf.cloudflare_rate_limit.invalid', errorMessage(error),
+        'Choose a supported explicit rate-limit profile, period and threshold before building Cloudflare artifacts. Account entitlement and remaining slots require separate confirmation.'));
+    }
+  }
+
   const riskLevel = metadata.risk_level;
   if (riskLevel === 'permissive') {
     findings.push(readinessFinding(
@@ -2874,6 +2887,7 @@ program
   .option('--admin-paths <paths>', 'Guided: comma-separated protected path prefixes')
   .option('--cors-origins <origins>', 'Guided: comma-separated CORS origins')
   .option('--waf <posture>', 'Guided: basic | balanced | strict')
+  .option('--cloudflare-rate-limit-plan <plan>', 'Guided Cloudflare: explicitly choose business to preserve the 300-second rate window; for Free, author an explicit 10-second policy')
   .option('--geo-block <countries>', 'Guided: comma-separated country codes to block')
   .option('--ip-allowlist <cidrs>', 'Guided: comma-separated CIDR allowlist')
   .option('--deployment <intent>', 'Guided: build-only | github-actions | terraform | wrangler')
@@ -2993,6 +3007,10 @@ program
     }
 
     if (guided) {
+      if (platform === 'cloudflare' && opts.cloudflareRateLimitPlan !== 'business') {
+        console.error('[ERROR] Guided Cloudflare rate limits use 300 seconds. Explicitly choose --cloudflare-rate-limit-plan business, or author a Free policy with a chosen threshold and period 10 (docs/cloudflare-waf-parity.md). No plan is inferred.');
+        process.exit(1);
+      }
       if (platform && !['aws', 'cloudflare'].includes(platform)) {
         console.error('[ERROR] Invalid --platform. Use aws or cloudflare.');
         process.exit(1);

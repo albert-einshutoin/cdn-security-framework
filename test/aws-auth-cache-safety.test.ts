@@ -139,7 +139,9 @@ test.each([
 ])('init refuses unsupported AWS starter before writes: %j', (...options) => {
   const f = fixture({ type: 'jwt' });
   for (const platform of ['aws', 'cloudflare']) {
-    const result = spawnSync(process.execPath, [path.join(root, 'bin/cli.js'), 'init', '--platform', platform, ...options], {
+    const ratePlan = platform === 'cloudflare' && options.includes('--guided')
+      ? ['--cloudflare-rate-limit-plan', 'business'] : [];
+    const result = spawnSync(process.execPath, [path.join(root, 'bin/cli.js'), 'init', '--platform', platform, ...options, ...ratePlan], {
       cwd: f.dir, encoding: 'utf8',
     });
     expect(result.status).toBe(platform === 'aws' ? 1 : 0);

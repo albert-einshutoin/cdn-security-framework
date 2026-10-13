@@ -39,7 +39,7 @@
         "rules": [
           {
             "ref": "rate_1",
-            "description": "Global IP rate limit (legacy)",
+            "description": "Global IP rate limit",
             "enabled": true,
             "expression": "true",
             "action": "block",

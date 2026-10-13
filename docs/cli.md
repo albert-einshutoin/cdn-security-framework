@@ -115,11 +115,13 @@ example, limits, review workflow, and troubleshooting.
 
 ## `init`
 
+Guided Cloudflare keeps the 5-minute rate window and requires explicit Business selection. For a Free 10-second policy, see [rate-limit profiles](cloudflare-waf-parity.md#cloudflare-rate-limit-configuration-profiles). This does not verify account entitlement or overall WAF Free support.
+
 ```bash
 ./node_modules/.bin/cdn-security init                                      # interactive
 ./node_modules/.bin/cdn-security init --platform aws --profile balanced    # non-interactive
 ./node_modules/.bin/cdn-security init --platform aws --archetype rest-api  # archetype
-./node_modules/.bin/cdn-security init --guided --platform cloudflare --app-shape rest-api --auth jwt --cors-origins https://app.example.com
+./node_modules/.bin/cdn-security init --guided --platform cloudflare --cloudflare-rate-limit-plan business --app-shape rest-api --auth jwt --cors-origins https://app.example.com
 ```
 
 - `--profile` and `--archetype` are mutually exclusive — a starter is either a security posture (profile) or an app shape (archetype).
@@ -301,7 +303,7 @@ npx cdn-security readiness --json
 npx cdn-security readiness --report readiness-report.json
 ```
 
-Runs a production-oriented release gate over the selected policy. It reuses environment diagnostics and policy validation, then adds production posture checks for risk level, enforce mode, method restrictions, response headers, WAF rate limits, managed-rule coverage, and target-specific unsupported controls.
+Runs a production-oriented release gate over the selected policy. For Cloudflare, rate-limit profiles use the same local configuration validation as build/emit-waf; this does not verify account entitlement, remaining rule slots, permissions, API acceptance or live WAF enforcement. It reuses environment diagnostics and policy validation, then adds production posture checks for risk level, enforce mode, method restrictions, response headers, WAF rate limits, managed-rule coverage, and target-specific unsupported controls.
 
 Exit code is `1` when any finding has severity `fail`. With `--strict`, warning findings also fail the command. Use `--json` for stdout JSON, or `--report <path>` to write the same machine-readable report while keeping the human summary on stdout/stderr.
 

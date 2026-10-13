@@ -128,6 +128,10 @@ export function compileArtifacts(opts: CompileArtifactsOptions = {}): CompileArt
     errors.push(...lint.errors);
     return { ok: false, errors, warnings, ...baseResult };
   }
+  if (target === 'cloudflare') {
+    try { require('../scripts/lib/cloudflare-rate-limit').buildCloudflareRateRules(lint.policy?.firewall?.waf || {}); }
+    catch (error: unknown) { errors.push((error as Error).message); return { ok: false, errors, warnings, ...baseResult }; }
+  }
 
   const permissiveFlag = opts.failOnPermissive ? ['--fail-on-permissive'] : [];
   const placeholderFlag = opts.allowPlaceholderToken ? ['--allow-placeholder-token'] : [];

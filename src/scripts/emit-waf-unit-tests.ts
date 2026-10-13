@@ -63,6 +63,7 @@ firewall:
   waf:
     scope: CLOUDFRONT
     rate_limit: 1000
+    cloudflare_rate_limit_plan: business
 `;
 
 function runEmitWaf(policyYaml: string, extraArgs: string[]) {
@@ -226,6 +227,62 @@ test('build still emits both edge/ and infra/ (emit-waf does not replace build)'
     fs.rmSync(tmp, { recursive: true, force: true });
   }
 });
+
+// Public CLI/API and both direct compilers must agree before creating any artifact.
+test('Cloudflare Free profile agrees across CLI/API and preserves existing bytes on rejection', () => {
+  const api = require('../lib');
+  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'free-rate-entry-'));
+  const policyPath = path.join(tmp, 'security.yml');
+  const env = { ...process.env, EDGE_ADMIN_TOKEN: 'ci-build-token-not-for-deploy', ORIGIN_SECRET: 'ci-origin-secret-not-for-deploy' };
+  const free = BASIC_CF_POLICY.replace('cloudflare_rate_limit_plan: business', 'cloudflare_rate_limit_plan: free\n    cloudflare_rate_limit_period: 10');
+  try {
+    fs.writeFileSync(policyPath, free);
+    const outputDirs: string[] = [];
+    for (const method of ['compile', 'emitWaf']) {
+      const outDir = path.join(tmp, method);
+      const r = api[method]({ policyPath, outDir, target: 'cloudflare', env });
+      assert.strictEqual(r.ok, true, JSON.stringify(r.errors));
+      const tf = JSON.parse(fs.readFileSync(path.join(outDir, 'infra/cloudflare-waf.tf.json'), 'utf8'));
+      const rate = tf.resource.cloudflare_ruleset['emit-waf-cf-test_ratelimit'].rules[0].ratelimit;
+      assert.strictEqual(rate.period, 10);
+      assert.strictEqual(rate.requests_per_period, 1000);
+      outputDirs.push(outDir);
+    }
+    for (const method of ['build', 'emit-waf']) {
+      const outDir = path.join(tmp, 'good-cli-' + method);
+      const r = spawnSync(process.execPath, [cliPath, method, '--policy', policyPath, '--out-dir', outDir, '--target', 'cloudflare'], { cwd: tmp, env, encoding: 'utf8' });
+      assert.strictEqual(r.status, 0, r.stderr);
+      assert.deepStrictEqual(fs.readFileSync(path.join(outDir, 'infra/cloudflare-waf.tf.json')), fs.readFileSync(path.join(outputDirs[0], 'infra/cloudflare-waf.tf.json')));
+    }
+    const prior = fs.readFileSync(path.join(outputDirs[0], 'edge/cloudflare/index.ts'));
+    fs.writeFileSync(policyPath, free.replace('cloudflare_rate_limit_period: 10', 'cloudflare_rate_limit_period: 300'));
+    for (const method of ['compile', 'emitWaf']) {
+      for (const existing of [false, true]) {
+        const outDir = existing ? path.join(tmp, method) : path.join(tmp, 'bad-' + method);
+        const before = existing ? fs.readFileSync(path.join(outDir, 'infra/cloudflare-waf.tf.json')) : null;
+        const r = api[method]({ policyPath, outDir, target: 'cloudflare', env, failOnWafApproximation: false });
+        assert.strictEqual(r.ok, false);
+        assert.match(r.errors.join(' '), /CLOUDFLARE_RATE_LIMIT_INVALID/);
+        assert.deepStrictEqual(r.edgeFiles, []);
+        assert.deepStrictEqual(r.infraFiles, []);
+        if (existing) assert.deepStrictEqual(fs.readFileSync(path.join(outDir, 'infra/cloudflare-waf.tf.json')), before);
+        else assert.ok(!fs.existsSync(outDir));
+      }
+    }
+    assert.deepStrictEqual(fs.readFileSync(path.join(outputDirs[0], 'edge/cloudflare/index.ts')), prior);
+    for (const command of [['build', '--target', 'cloudflare'], ['emit-waf', '--target', 'cloudflare'],
+      [path.join(repoRoot, 'scripts/compile-cloudflare.js')], [path.join(repoRoot, 'scripts/compile-cloudflare-waf.js')]]) {
+      const direct = command[0].endsWith('.js');
+      const outDir = path.join(tmp, 'bad-cli-' + command[0].split('/').pop());
+      const r = spawnSync(process.execPath, [...(direct ? command : [cliPath, ...command]), '--policy', policyPath, '--out-dir', outDir], { cwd: tmp, env, encoding: 'utf8' });
+      assert.notStrictEqual(r.status, 0, r.stdout + r.stderr);
+      assert.match(r.stderr, /CLOUDFLARE_RATE_LIMIT_INVALID/);
+      assert.ok(!/SUCCESS/.test(r.stdout));
+      assert.ok(!fs.existsSync(outDir));
+    }
+  } finally { fs.rmSync(tmp, { recursive: true, force: true }); }
+});
+
 
 if (process.exitCode) {
   process.exit(process.exitCode);
