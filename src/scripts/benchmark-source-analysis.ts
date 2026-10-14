@@ -29,7 +29,11 @@ export interface SourceAnalysisBenchmarkOptions {
   iterations?: number;
   profile?: 'full' | 'ci' | 'test';
   workloadRoot?: string;
+  workload?: SourceAnalysisWorkload;
+  assignmentsPerController?: number;
 }
+
+export type SourceAnalysisWorkload = 'routes' | 'mutable-decorators' | 'namespace-decorators' | 'assignment-heavy';
 
 export interface SourceAnalysisBenchmarkSample {
   projectLoadCache: 'cold' | 'cached';
@@ -43,6 +47,7 @@ export interface SourceAnalysisBenchmarkSample {
   astNodes: number;
   operations: number;
   diagnostics: number;
+  unknownAuthOperations: number;
   cacheHits: 0 | 1;
   cacheMisses: 0 | 1;
   cacheInvalidations: 0 | 1;
@@ -54,6 +59,10 @@ export interface SourceAnalysisBenchmarkReport {
   environment: Readonly<{ node: string; platform: string; arch: string }>;
   controllers: number;
   expectedOperations: number;
+  workload: SourceAnalysisWorkload;
+  assignmentsPerController: number;
+  expectedUnknownAuthOperations: number;
+  limits: Readonly<typeof DEFAULT_SOURCE_ANALYSIS_LIMITS>;
   samples: SourceAnalysisBenchmarkSample[];
 }
 
@@ -63,7 +72,7 @@ const SOURCE_CONFIG = Object.freeze({
   roles_decorators: Object.freeze([]),
   guard_mappings: Object.freeze({ BenchGuard: Object.freeze({ auth_kind: 'bearer' as const }) }),
 });
-const LIMITS = Object.freeze({ ...DEFAULT_SOURCE_ANALYSIS_LIMITS, timeoutMs: 60_000 });
+const LIMITS = Object.freeze({ ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxDiagnostics: 10_000, timeoutMs: 60_000 });
 
 function elapsed(start: number): number {
   return Math.round((performance.now() - start) * 1_000) / 1_000;
@@ -79,9 +88,21 @@ function write(file: string, contents: string): void {
   fs.writeFileSync(file, contents, 'utf8');
 }
 
-export function generateSourceAnalysisWorkload(root: string, controllers = 100): void {
+export function generateSourceAnalysisWorkload(
+  root: string,
+  controllers = 100,
+  options: Pick<SourceAnalysisBenchmarkOptions, 'workload' | 'assignmentsPerController'> = {},
+): void {
   if (!Number.isInteger(controllers) || controllers < 1 || controllers > 1_000) {
     throw new Error('controllers must be an integer between 1 and 1000');
+  }
+  const workload = options.workload ?? 'routes';
+  if (!['routes', 'mutable-decorators', 'namespace-decorators', 'assignment-heavy'].includes(workload)) {
+    throw new Error('invalid source analysis workload');
+  }
+  const assignments = options.assignmentsPerController ?? (workload === 'assignment-heavy' ? 32 : 0);
+  if (!Number.isInteger(assignments) || assignments < 0 || assignments > 1_000) {
+    throw new Error('assignmentsPerController must be an integer between 0 and 1000');
   }
   write(path.join(root, 'node_modules/@nestjs/common/package.json'), JSON.stringify({
     name: '@nestjs/common', version: '0.0.0-benchmark', main: 'index.js', types: 'index.d.ts',
@@ -96,18 +117,44 @@ export function generateSourceAnalysisWorkload(root: string, controllers = 100):
   const files = ['src/guard.ts'];
   for (let controller = 0; controller < controllers; controller += 1) {
     const relative = `src/controller-${controller}.ts`;
+    const guarded = controller % 2 === 1;
+    const declarations: string[] = [];
+    let decorator = '';
+    if (workload === 'mutable-decorators') {
+      declarations.push('let BenchAudit: MethodDecorator = () => {};', guarded
+        ? 'BenchAudit = UseGuards(BenchGuard);' : 'BenchAudit = () => {};');
+      decorator = '@BenchAudit ';
+    } else if (workload === 'namespace-decorators') {
+      const auditFile = `src/audit-${controller}.ts`;
+      write(path.join(root, auditFile), 'export function Audit(..._args: unknown[]): void {}\n');
+      files.push(auditFile);
+      declarations.push(`import * as audit from './audit-${controller}';`);
+      if (guarded) declarations.push('(audit.Audit as any).tag = 1;');
+      decorator = '@audit.Audit ';
+    } else if (workload === 'assignment-heavy') {
+      declarations.push('function Audit(): MethodDecorator { return () => {}; }');
+      if (guarded) declarations.push('Audit = undefined as any;');
+      declarations.push('const BenchAudit = Audit || UseGuards(BenchGuard);');
+      decorator = '@BenchAudit ';
+    }
+    if (assignments > 0) {
+      declarations.push('let unrelated = 0;', ...Array.from(
+        { length: assignments }, () => 'unrelated += 1;',
+      ));
+    }
     const methods = Array.from({ length: 9 }, (_, operation) => (
-      `  @Read('operation-${operation}') operation${operation}(): void {}`
+      `  @Read('operation-${operation}') ${decorator}operation${operation}(): void {}`
     ));
     write(path.join(root, relative), [
       "import { Controller as HttpController, Get as Read, UseGuards } from '@nestjs/common';",
       "import { BenchGuard } from '@app/guard';",
+      ...declarations,
       'declare function runtimePath(): string;',
       `@HttpController('controller-${controller}')`,
       '@UseGuards(BenchGuard)',
       `export class Controller${controller} {`,
       ...methods,
-      '  @Read(runtimePath()) dynamic(): void {}',
+      `  @Read(runtimePath()) ${decorator}dynamic(): void {}`,
       '}',
     ].join('\n'));
     files.push(relative);
@@ -184,13 +231,16 @@ export async function runSourceAnalysisBenchmark(
   const profile = options.profile ?? 'full';
   if (!['full', 'ci', 'test'].includes(profile)) throw new Error('invalid source analysis benchmark profile');
   const controllers = options.controllers ?? 100;
+  const workload = options.workload ?? 'routes';
+  const assignmentsPerController = options.assignmentsPerController ?? (workload === 'assignment-heavy' ? 32 : 0);
+  const expectedUnknownAuthOperations = workload === 'routes' ? 0 : Math.floor(controllers / 2) * 9;
   const iterations = positiveInteger(options.iterations ?? (profile === 'full' ? 3 : 1), 'iterations');
   const ownedRoot = options.workloadRoot === undefined;
   const root = options.workloadRoot ?? fs.mkdtempSync(path.join(os.tmpdir(), 'source-analysis-benchmark-'));
-  generateSourceAnalysisWorkload(root, controllers);
   const cache = new TypeScriptAnalysisCache();
   const samples: SourceAnalysisBenchmarkSample[] = [];
   try {
+    generateSourceAnalysisWorkload(root, controllers, { workload, assignmentsPerController });
     for (let iteration = 0; iteration < iterations; iteration += 1) {
       const heapStart = process.memoryUsage().heapUsed;
       const totalStart = performance.now();
@@ -209,6 +259,12 @@ export async function runSourceAnalysisBenchmark(
       });
       const irGenerationMs = elapsed(irStart);
       if (execution.status !== 'success') throw new Error(execution.diagnostics[0]?.safeMessage ?? 'analysis failed');
+      const unknownAuthOperations = execution.result.contract.operations.filter(
+        operation => operation.auth.mode === 'unknown',
+      ).length;
+      if (unknownAuthOperations !== expectedUnknownAuthOperations) {
+        throw new Error('source analysis benchmark authentication classification mismatch');
+      }
       const comparisonStart = performance.now();
       compare(execution.result);
       const comparisonMs = elapsed(comparisonStart);
@@ -221,6 +277,7 @@ export async function runSourceAnalysisBenchmark(
         astNodes: execution.result.metrics.astNodes,
         operations: execution.result.metrics.operations,
         diagnostics: execution.result.metrics.diagnostics,
+        unknownAuthOperations,
         cacheHits: project.metrics.cacheHits,
         cacheMisses: project.metrics.cacheMisses,
         cacheInvalidations: project.metrics.cacheInvalidations,
@@ -232,6 +289,8 @@ export async function runSourceAnalysisBenchmark(
       environment: { node: process.versions.node, platform: process.platform, arch: process.arch },
       controllers,
       expectedOperations: controllers * 10,
+      workload, assignmentsPerController, expectedUnknownAuthOperations,
+      limits: LIMITS,
       samples,
     };
     if (samples.some(({ operations }) => operations !== report.expectedOperations)) {
@@ -255,9 +314,12 @@ if (require.main === module) {
   const profile = (argument('--profile') ?? 'full') as SourceAnalysisBenchmarkReport['profile'];
   const controllers = Number(argument('--controllers') ?? '100');
   const iterationsValue = argument('--iterations');
+  const assignmentsValue = argument('--assignments');
   runSourceAnalysisBenchmark({
     profile,
     controllers,
+    workload: (argument('--workload') ?? 'routes') as SourceAnalysisWorkload,
+    ...(assignmentsValue !== undefined ? { assignmentsPerController: Number(assignmentsValue) } : {}),
     ...(iterationsValue ? { iterations: Number(iterationsValue) } : {}),
   }).then((report) => console.log(JSON.stringify(report, null, 2))).catch((error: unknown) => {
     console.error((error as Error).message);

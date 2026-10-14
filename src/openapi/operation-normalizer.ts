@@ -230,6 +230,7 @@ export function normalizeOpenApiOperations(
   const rootDocument = documents.get(graph.root.sourceUri);
   if (!rootDocument) fail();
   const edges = new Map(graph.references.map((edge) => [edge.from.id, edge]));
+  const referenceTargets = new Map<string, LocatedValue>();
   let resolutionVisits = 0;
 
   const materialize = (
@@ -250,15 +251,22 @@ export function normalizeOpenApiOperations(
       if (!edge) fail(current);
       const document = documents.get(edge.target.sourceUri);
       if (!document) fail(current);
-      current = {
-        value: resolveJsonPointerValue(
-          document.document,
-          `#${edge.target.pointer.replace(/%/g, '%25')}`,
-          document.sourceUri,
-        ).value,
-        sourceUri: document.sourceUri,
-        pointer: edge.target.pointer,
-      };
+      let target = referenceTargets.get(edge.target.id);
+      if (!target) {
+        target = {
+          value: resolveJsonPointerValue(
+            document.document,
+            `#${edge.target.pointer.replace(/%/g, '%25')}`,
+            document.sourceUri,
+          ).value,
+          sourceUri: document.sourceUri,
+          pointer: edge.target.pointer,
+        };
+        referenceTargets.set(edge.target.id, target);
+      }
+      // Only the pointer target is shared; callbacks, cycles and hop accounting
+      // still run for every reference context, including a cached target.
+      current = target;
     }
     return current;
   };

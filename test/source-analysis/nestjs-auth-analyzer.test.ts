@@ -852,6 +852,39 @@ describe('NestJS auth metadata analyzer', () => {
     });
   });
 
+  test('keeps namespace writes conservative while evaluating mutable assignment values', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard, ApiKeyGuard } from './auth';
+      import * as audit from './audit';
+      let Clean: MethodDecorator = () => {};
+      (Clean as any).tag = 1;
+      let Guarded: MethodDecorator = () => {};
+      [Guarded] = [UseGuards(ApiKeyGuard)];
+      (audit.Audit as any).tag = 1;
+      @Controller('write-index') @UseGuards(JwtAuthGuard)
+      class WriteIndexController {
+        @Get('clean') @Clean clean() {}
+        @Get('guarded') @Guarded guarded() {}
+        @Get('namespace') @audit.Audit namespace() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
+      'src/audit.ts': 'export function Audit(..._args: unknown[]): void {}\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    const modes = Object.fromEntries(execution.result.contract.operations.map(operation => (
+      [operation.routeKey, operation.auth.mode]
+    )));
+    expect(modes).toEqual({
+      'GET /write-index/clean': 'alternatives',
+      'GET /write-index/guarded': 'unknown',
+      'GET /write-index/namespace': 'unknown',
+    });
+  });
+
   test('fails closed on a mutable precomputed guard decorator', async () => {
     const deepAliases = ["const alias99 = UseGuards(ApiKeyGuard);"];
     for (let index = 98; index >= 0; index -= 1) deepAliases.push(`const alias${index} = alias${index + 1};`);

@@ -204,6 +204,47 @@ describe('normalizeOpenApiOperations', () => {
       .toMatchObject({ type: 'string', maxLength: 8 });
   });
 
+  test('keeps reference siblings and separate graph targets independent when targets repeat', () => {
+    const normalize = (maxLength: number) => normalizeOpenApiOperations(temporaryGraph({
+      openapi: '3.1.0',
+      components: { schemas: { Id: { type: 'string', maxLength } } },
+      paths: { '/items': { get: {
+        parameters: [
+          { name: 'first', in: 'query', schema: { $ref: '#/components/schemas/Id' } },
+          { name: 'second', in: 'query', schema: { $ref: '#/components/schemas/Id', maxLength: 1 } },
+        ],
+        responses: {},
+      } } },
+    })).operations[0].request.queryParameters;
+    for (const maxLength of [8, 16]) {
+      const parameters = normalize(maxLength);
+      expect(parameters[0].constraints).toMatchObject({ type: 'string', maxLength });
+      expect(parameters[0].unsupportedReasons ?? []).not.toContain('schema:ref-siblings');
+      expect(parameters[1].constraints).toMatchObject({ type: 'string', maxLength });
+      expect(parameters[1].unsupportedReasons).toContain('schema:ref-siblings');
+    }
+  });
+
+  test('counts every reference hop when a shared target is reused', () => {
+    const graph = temporaryGraph({
+      openapi: '3.1.0',
+      components: { schemas: Object.fromEntries(Array.from({ length: 16 }, (_, index) => [
+        `Value${index}`, index === 15 ? { type: 'string' }
+          : { $ref: `#/components/schemas/Value${index + 1}` },
+      ])) },
+      paths: Object.fromEntries(Array.from({ length: 40 }, (_, index) => [
+        `/items/${index}`, { get: {
+          parameters: [{ name: 'q', in: 'query', schema: { $ref: '#/components/schemas/Value0' } }],
+          responses: {},
+        } },
+      ])),
+    });
+    expect(normalizeOpenApiOperations(graph).operations).toHaveLength(40);
+    // The document fits, but normalization revisits reference hops in each context.
+    expect(() => normalizeOpenApiOperations(graph, { limits: { maxNodes: 500 } }))
+      .toThrow(expect.objectContaining({ code: 'OPENAPI_NODE_LIMIT' }));
+  });
+
   test('rejects optional path parameters and duplicate parameters at one level', () => {
     for (const parameters of [
       [{ name: 'id', in: 'path', required: false, schema: { type: 'string' } }],
