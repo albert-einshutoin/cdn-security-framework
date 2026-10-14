@@ -1,0 +1,4158 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "3bf4d0dbfd309641830cbf86e77259114bf92677",
+  "environment": {
+    "node": "v24.2.0",
+    "platform": "darwin",
+    "arch": "arm64"
+  },
+  "methodology": {
+    "iterationsPerProcess": 6,
+    "warmSamplesPerProcess": 5,
+    "independentProcessesPerPhase": 2,
+    "sourceOrder": "AB/BA per workload",
+    "openapiOrder": "AB, BA, then one bounded AB confirmation",
+    "sourceMetric": "loader probe + AST traversal probe + complete NestJS analyzer + contract comparison",
+    "warmMeaning": "subsequent repetitions in one Node process; source probe loader cached, complete analyzer loads its own project",
+    "openapiPair1": "Observed major variation across parse/resolve/normalize (1000-op warm 124.560..1305.671ms, 10000-op warm 1131.288..4002.482ms). Preserve all samples and all-observed statistics; do not attribute that difference to the patch. Pairs 2 and 3 are reported separately for the reproducible comparison.",
+    "comparisonLimits": "One local macOS arm64 host; synthetic fixtures; no production latency or hosted performance baseline claim."
+  },
+  "beforeInputs": {
+    "src/source/nestjs/analyzer.ts": "9d93d2433fc434447e900760a2370c9606df764793d44b6485abb186c665e251",
+    "src/openapi/ref-resolver.ts": "f78c99f96ccd72ab809a64ca61cec4458f34caafa2cb04d3102c97f8dd160401",
+    "src/scripts/benchmark-source-analysis.ts": "0b9aee4459fabb996e170d59797a0f55487c5948984e2a1d0220f141ff221f03",
+    "src/scripts/benchmark-openapi.ts": "88b770ca7881fc3f0973bbeefb5bee4befcccb2811882d76a5f34b5d05bdaaf3",
+    "source/nestjs/analyzer.js": "cfe8998fd0cc5c44dd1fdbcbd4ab502ce81546afa97c810567890fc73b7ede0b",
+    "openapi/ref-resolver.js": "bce4ac7acc0b23479b0b5e9db7abd4c47bbad2fc9b563abbff92ad8d3b8a422a"
+  },
+  "afterInputs": {
+    "src/source/nestjs/analyzer.ts": "063b0da9aaf73ca39195ba20091f79ed28b60a75a91f11b5412e31e3848d4c7f",
+    "src/openapi/ref-resolver.ts": "876ecf47f2cf3c793122957ba7c6e4a4f6636d93ccf9531d2c30fd6f58002db5",
+    "src/scripts/benchmark-source-analysis.ts": "0b9aee4459fabb996e170d59797a0f55487c5948984e2a1d0220f141ff221f03",
+    "src/scripts/benchmark-openapi.ts": "88b770ca7881fc3f0973bbeefb5bee4befcccb2811882d76a5f34b5d05bdaaf3",
+    "source/nestjs/analyzer.js": "2d00b80ca5271004882d2e2bf85dc34e06c5318ed6d95bab4092926a082200e2",
+    "openapi/ref-resolver.js": "84585a4f290f3e51674cdcb676a57c96cf026c075202629075b02161a78fb6f1"
+  },
+  "source": [
+    {
+      "operations": 100,
+      "before": {
+        "count": 10,
+        "meanMs": 56.17900000000001,
+        "medianMs": 55.6275,
+        "minMs": 48.963,
+        "maxMs": 67.887,
+        "standardDeviationMs": 5.519754179309075
+      },
+      "after": {
+        "count": 10,
+        "meanMs": 60.0499,
+        "medianMs": 60.588499999999996,
+        "minMs": 47.131,
+        "maxMs": 74.37,
+        "standardDeviationMs": 8.355468657711548
+      },
+      "savedMeanMs": -3.870899999999992,
+      "reductionPercent": -6.890297086099761,
+      "pairs": [
+        {
+          "pair": 1,
+          "before": [
+            {
+              "projectLoadCache": "cold",
+              "projectLoadMs": 31.031,
+              "astTraversalMs": 0.137,
+              "irGenerationMs": 76.441,
+              "comparisonMs": 14.441,
+              "totalMs": 122.076,
+              "heapDeltaBytes": 5879040,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 6.476,
+              "astTraversalMs": 0.072,
+              "irGenerationMs": 46.146,
+              "comparisonMs": 9.33,
+              "totalMs": 62.037,
+              "heapDeltaBytes": 4906648,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 4.61,
+              "astTraversalMs": 0.057,
+              "irGenerationMs": 43.851,
+              "comparisonMs": 8.839,
+              "totalMs": 57.37,
+              "heapDeltaBytes": 11434264,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 5.72,
+              "astTraversalMs": 0.041,
+              "irGenerationMs": 40.493,
+              "comparisonMs": 8.112,
+              "totalMs": 54.374,
+              "heapDeltaBytes": -2520104,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 3.603,
+              "astTraversalMs": 0.04,
+              "irGenerationMs": 37.759,
+              "comparisonMs": 7.948,
+              "totalMs": 49.357,
+              "heapDeltaBytes": -3608456,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 3.323,
+              "astTraversalMs": 0.038,
+              "irGenerationMs": 37.728,
+              "comparisonMs": 7.862,
+              "totalMs": 48.963,
+              "heapDeltaBytes": 11622936,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            }
+          ],
+          "after": [
+            {
+              "projectLoadCache": "cold",
+              "projectLoadMs": 30.995,
+              "astTraversalMs": 0.126,
+              "irGenerationMs": 86.719,
+              "comparisonMs": 17.15,
+              "totalMs": 135.015,
+              "heapDeltaBytes": 4204680,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 7.534,
+              "astTraversalMs": 0.059,
+              "irGenerationMs": 48.207,
+              "comparisonMs": 8.389,
+              "totalMs": 64.2,
+              "heapDeltaBytes": 5588192,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 5.332,
+              "astTraversalMs": 0.036,
+              "irGenerationMs": 39.98,
+              "comparisonMs": 8.964,
+              "totalMs": 54.321,
+              "heapDeltaBytes": 4810712,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 4.583,
+              "astTraversalMs": 0.206,
+              "irGenerationMs": 37.969,
+              "comparisonMs": 7.838,
+              "totalMs": 50.607,
+              "heapDeltaBytes": 8591904,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 3.556,
+              "astTraversalMs": 0.028,
+              "irGenerationMs": 35.692,
+              "comparisonMs": 7.849,
+              "totalMs": 47.131,
+              "heapDeltaBytes": -4292472,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 3.96,
+              "astTraversalMs": 0.033,
+              "irGenerationMs": 40.174,
+              "comparisonMs": 8.394,
+              "totalMs": 52.574,
+              "heapDeltaBytes": 8078864,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            }
+          ]
+        },
+        {
+          "pair": 2,
+          "before": [
+            {
+              "projectLoadCache": "cold",
+              "projectLoadMs": 34.777,
+              "astTraversalMs": 0.158,
+              "irGenerationMs": 89.153,
+              "comparisonMs": 14.403,
+              "totalMs": 138.523,
+              "heapDeltaBytes": 5868184,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 6.524,
+              "astTraversalMs": 0.085,
+              "irGenerationMs": 51.902,
+              "comparisonMs": 9.36,
+              "totalMs": 67.887,
+              "heapDeltaBytes": 4985264,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 4.503,
+              "astTraversalMs": 0.051,
+              "irGenerationMs": 43.234,
+              "comparisonMs": 9.083,
+              "totalMs": 56.881,
+              "heapDeltaBytes": 11336200,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 4.827,
+              "astTraversalMs": 0.055,
+              "irGenerationMs": 40.035,
+              "comparisonMs": 8.97,
+              "totalMs": 53.897,
+              "heapDeltaBytes": -2495216,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 3.265,
+              "astTraversalMs": 0.044,
+              "irGenerationMs": 40.589,
+              "comparisonMs": 8.181,
+              "totalMs": 52.091,
+              "heapDeltaBytes": -3549184,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 4.094,
+              "astTraversalMs": 0.05,
+              "irGenerationMs": 45.975,
+              "comparisonMs": 8.797,
+              "totalMs": 58.933,
+              "heapDeltaBytes": 11464296,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            }
+          ],
+          "after": [
+            {
+              "projectLoadCache": "cold",
+              "projectLoadMs": 31.791,
+              "astTraversalMs": 0.506,
+              "irGenerationMs": 96.535,
+              "comparisonMs": 15.729,
+              "totalMs": 144.591,
+              "heapDeltaBytes": 4324280,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 7.156,
+              "astTraversalMs": 0.105,
+              "irGenerationMs": 56.939,
+              "comparisonMs": 10.135,
+              "totalMs": 74.37,
+              "heapDeltaBytes": 5634280,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 6.095,
+              "astTraversalMs": 0.09,
+              "irGenerationMs": 50.089,
+              "comparisonMs": 12.045,
+              "totalMs": 68.332,
+              "heapDeltaBytes": 4617912,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 5.82,
+              "astTraversalMs": 0.306,
+              "irGenerationMs": 46.904,
+              "comparisonMs": 8.553,
+              "totalMs": 61.598,
+              "heapDeltaBytes": 8545312,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 5.261,
+              "astTraversalMs": 0.045,
+              "irGenerationMs": 44.703,
+              "comparisonMs": 9.556,
+              "totalMs": 59.579,
+              "heapDeltaBytes": -4314352,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 4.456,
+              "astTraversalMs": 0.081,
+              "irGenerationMs": 54.538,
+              "comparisonMs": 8.695,
+              "totalMs": 67.787,
+              "heapDeltaBytes": 8109600,
+              "files": 12,
+              "astNodes": 1201,
+              "operations": 100,
+              "diagnostics": 10,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "operations": 1000,
+      "before": {
+        "count": 10,
+        "meanMs": 540.2640000000001,
+        "medianMs": 540.9369999999999,
+        "minMs": 518.398,
+        "maxMs": 565.286,
+        "standardDeviationMs": 15.069357166116937
+      },
+      "after": {
+        "count": 10,
+        "meanMs": 441.04310000000004,
+        "medianMs": 432.50199999999995,
+        "minMs": 412.281,
+        "maxMs": 517.522,
+        "standardDeviationMs": 29.148549800804858
+      },
+      "savedMeanMs": 99.22090000000009,
+      "reductionPercent": 18.36526216812523,
+      "pairs": [
+        {
+          "pair": 1,
+          "before": [
+            {
+              "projectLoadCache": "cold",
+              "projectLoadMs": 61.1,
+              "astTraversalMs": 0.705,
+              "irGenerationMs": 478.446,
+              "comparisonMs": 86.174,
+              "totalMs": 626.451,
+              "heapDeltaBytes": 46947888,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 21.345,
+              "astTraversalMs": 0.669,
+              "irGenerationMs": 430.38,
+              "comparisonMs": 72.093,
+              "totalMs": 524.507,
+              "heapDeltaBytes": 13393872,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 19.799,
+              "astTraversalMs": 0.66,
+              "irGenerationMs": 442.242,
+              "comparisonMs": 74.246,
+              "totalMs": 536.959,
+              "heapDeltaBytes": -490648,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 18.991,
+              "astTraversalMs": 0.473,
+              "irGenerationMs": 427.743,
+              "comparisonMs": 71.178,
+              "totalMs": 518.398,
+              "heapDeltaBytes": 18386864,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 18.832,
+              "astTraversalMs": 0.3,
+              "irGenerationMs": 455.482,
+              "comparisonMs": 70.288,
+              "totalMs": 544.915,
+              "heapDeltaBytes": -5274144,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 21.618,
+              "astTraversalMs": 0.487,
+              "irGenerationMs": 450.602,
+              "comparisonMs": 72.929,
+              "totalMs": 545.65,
+              "heapDeltaBytes": 10846632,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            }
+          ],
+          "after": [
+            {
+              "projectLoadCache": "cold",
+              "projectLoadMs": 62.357,
+              "astTraversalMs": 0.729,
+              "irGenerationMs": 386.511,
+              "comparisonMs": 93.061,
+              "totalMs": 542.687,
+              "heapDeltaBytes": 44665656,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 22.526,
+              "astTraversalMs": 0.468,
+              "irGenerationMs": 342.936,
+              "comparisonMs": 75.133,
+              "totalMs": 441.084,
+              "heapDeltaBytes": 14850456,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 20.639,
+              "astTraversalMs": 0.483,
+              "irGenerationMs": 333.158,
+              "comparisonMs": 75.095,
+              "totalMs": 429.404,
+              "heapDeltaBytes": 1213568,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 21.637,
+              "astTraversalMs": 0.49,
+              "irGenerationMs": 318.273,
+              "comparisonMs": 73.544,
+              "totalMs": 413.957,
+              "heapDeltaBytes": 21803672,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 19.838,
+              "astTraversalMs": 0.571,
+              "irGenerationMs": 331.575,
+              "comparisonMs": 69.493,
+              "totalMs": 421.493,
+              "heapDeltaBytes": 13111608,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 19.221,
+              "astTraversalMs": 0.384,
+              "irGenerationMs": 323.623,
+              "comparisonMs": 69.039,
+              "totalMs": 412.281,
+              "heapDeltaBytes": 14201520,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            }
+          ]
+        },
+        {
+          "pair": 2,
+          "before": [
+            {
+              "projectLoadCache": "cold",
+              "projectLoadMs": 60.933,
+              "astTraversalMs": 0.987,
+              "irGenerationMs": 515.558,
+              "comparisonMs": 90.067,
+              "totalMs": 667.574,
+              "heapDeltaBytes": 47427272,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 23.027,
+              "astTraversalMs": 0.696,
+              "irGenerationMs": 453.669,
+              "comparisonMs": 78.182,
+              "totalMs": 555.626,
+              "heapDeltaBytes": 13370768,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 23.143,
+              "astTraversalMs": 0.361,
+              "irGenerationMs": 462.338,
+              "comparisonMs": 79.431,
+              "totalMs": 565.286,
+              "heapDeltaBytes": -260864,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 24.323,
+              "astTraversalMs": 0.928,
+              "irGenerationMs": 423.275,
+              "comparisonMs": 74.604,
+              "totalMs": 523.145,
+              "heapDeltaBytes": 18368768,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 21.07,
+              "astTraversalMs": 0.387,
+              "irGenerationMs": 459.809,
+              "comparisonMs": 75.016,
+              "totalMs": 556.297,
+              "heapDeltaBytes": -5581200,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 19.272,
+              "astTraversalMs": 0.357,
+              "irGenerationMs": 440.855,
+              "comparisonMs": 71.357,
+              "totalMs": 531.857,
+              "heapDeltaBytes": -31888448,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            }
+          ],
+          "after": [
+            {
+              "projectLoadCache": "cold",
+              "projectLoadMs": 75.079,
+              "astTraversalMs": 1.329,
+              "irGenerationMs": 458.164,
+              "comparisonMs": 94.947,
+              "totalMs": 629.549,
+              "heapDeltaBytes": 44727888,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 22.821,
+              "astTraversalMs": 0.646,
+              "irGenerationMs": 410.975,
+              "comparisonMs": 83.042,
+              "totalMs": 517.522,
+              "heapDeltaBytes": 14290248,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 21.348,
+              "astTraversalMs": 0.508,
+              "irGenerationMs": 360.846,
+              "comparisonMs": 76.649,
+              "totalMs": 459.367,
+              "heapDeltaBytes": 1345336,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 23.22,
+              "astTraversalMs": 0.577,
+              "irGenerationMs": 351.173,
+              "comparisonMs": 75.334,
+              "totalMs": 450.319,
+              "heapDeltaBytes": 21851472,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 21.92,
+              "astTraversalMs": 0.423,
+              "irGenerationMs": 335.781,
+              "comparisonMs": 73.638,
+              "totalMs": 431.775,
+              "heapDeltaBytes": 13046328,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 20.835,
+              "astTraversalMs": 0.43,
+              "irGenerationMs": 330.042,
+              "comparisonMs": 81.897,
+              "totalMs": 433.229,
+              "heapDeltaBytes": 14287160,
+              "files": 102,
+              "astNodes": 11641,
+              "operations": 1000,
+              "diagnostics": 100,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "operations": 5000,
+      "before": {
+        "count": 10,
+        "meanMs": 4685.1,
+        "medianMs": 4598.191,
+        "minMs": 4414.919,
+        "maxMs": 5421.237,
+        "standardDeviationMs": 281.7996437414356
+      },
+      "after": {
+        "count": 10,
+        "meanMs": 2148.7737,
+        "medianMs": 2073.9505,
+        "minMs": 2020.83,
+        "maxMs": 2694.004,
+        "standardDeviationMs": 192.57453287755885
+      },
+      "savedMeanMs": 2536.3263,
+      "reductionPercent": 54.13601203816354,
+      "pairs": [
+        {
+          "pair": 1,
+          "before": [
+            {
+              "projectLoadCache": "cold",
+              "projectLoadMs": 159.158,
+              "astTraversalMs": 2.557,
+              "irGenerationMs": 4574.837,
+              "comparisonMs": 372.862,
+              "totalMs": 5109.44,
+              "heapDeltaBytes": 104192432,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 104.631,
+              "astTraversalMs": 2.002,
+              "irGenerationMs": 4345.575,
+              "comparisonMs": 377.609,
+              "totalMs": 4829.847,
+              "heapDeltaBytes": 63430128,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 89.445,
+              "astTraversalMs": 3.026,
+              "irGenerationMs": 3988.965,
+              "comparisonMs": 346.315,
+              "totalMs": 4427.767,
+              "heapDeltaBytes": 90243488,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 90.837,
+              "astTraversalMs": 2.023,
+              "irGenerationMs": 4089.33,
+              "comparisonMs": 348.844,
+              "totalMs": 4531.049,
+              "heapDeltaBytes": -122175752,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 90.869,
+              "astTraversalMs": 1.659,
+              "irGenerationMs": 4170.291,
+              "comparisonMs": 346.47,
+              "totalMs": 4609.303,
+              "heapDeltaBytes": 11819704,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 94.253,
+              "astTraversalMs": 2.081,
+              "irGenerationMs": 4306.463,
+              "comparisonMs": 362.566,
+              "totalMs": 4765.382,
+              "heapDeltaBytes": -3983320,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            }
+          ],
+          "after": [
+            {
+              "projectLoadCache": "cold",
+              "projectLoadMs": 147.677,
+              "astTraversalMs": 2.474,
+              "irGenerationMs": 1659.476,
+              "comparisonMs": 365.396,
+              "totalMs": 2175.057,
+              "heapDeltaBytes": 138888176,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 107.385,
+              "astTraversalMs": 1.967,
+              "irGenerationMs": 1626.189,
+              "comparisonMs": 355.86,
+              "totalMs": 2091.42,
+              "heapDeltaBytes": -23939080,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 89.593,
+              "astTraversalMs": 1.989,
+              "irGenerationMs": 1649.576,
+              "comparisonMs": 378.905,
+              "totalMs": 2120.083,
+              "heapDeltaBytes": 78922312,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 102.736,
+              "astTraversalMs": 2.329,
+              "irGenerationMs": 1702.102,
+              "comparisonMs": 390.631,
+              "totalMs": 2197.828,
+              "heapDeltaBytes": 73919848,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 105.486,
+              "astTraversalMs": 2.132,
+              "irGenerationMs": 1731.095,
+              "comparisonMs": 364.733,
+              "totalMs": 2203.467,
+              "heapDeltaBytes": -156995312,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 95.381,
+              "astTraversalMs": 1.667,
+              "irGenerationMs": 1804.222,
+              "comparisonMs": 792.704,
+              "totalMs": 2694.004,
+              "heapDeltaBytes": 69075480,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            }
+          ]
+        },
+        {
+          "pair": 2,
+          "before": [
+            {
+              "projectLoadCache": "cold",
+              "projectLoadMs": 152.147,
+              "astTraversalMs": 2.746,
+              "irGenerationMs": 4259.574,
+              "comparisonMs": 364.67,
+              "totalMs": 4779.166,
+              "heapDeltaBytes": 104549448,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 97.006,
+              "astTraversalMs": 2.093,
+              "irGenerationMs": 4970.001,
+              "comparisonMs": 352.119,
+              "totalMs": 5421.237,
+              "heapDeltaBytes": 17719144,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 88.42,
+              "astTraversalMs": 2.305,
+              "irGenerationMs": 4142.876,
+              "comparisonMs": 353.462,
+              "totalMs": 4587.079,
+              "heapDeltaBytes": 11107040,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 94.355,
+              "astTraversalMs": 2.05,
+              "irGenerationMs": 3970.688,
+              "comparisonMs": 347.811,
+              "totalMs": 4414.919,
+              "heapDeltaBytes": 11615216,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 83.496,
+              "astTraversalMs": 1.741,
+              "irGenerationMs": 4060.248,
+              "comparisonMs": 343.678,
+              "totalMs": 4489.174,
+              "heapDeltaBytes": 28718632,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 102.7,
+              "astTraversalMs": 1.938,
+              "irGenerationMs": 4326.418,
+              "comparisonMs": 344.143,
+              "totalMs": 4775.243,
+              "heapDeltaBytes": 72965208,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            }
+          ],
+          "after": [
+            {
+              "projectLoadCache": "cold",
+              "projectLoadMs": 150.281,
+              "astTraversalMs": 2.733,
+              "irGenerationMs": 1684.591,
+              "comparisonMs": 364.893,
+              "totalMs": 2202.53,
+              "heapDeltaBytes": 140785680,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 0,
+              "cacheMisses": 1,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 98.158,
+              "astTraversalMs": 2.125,
+              "irGenerationMs": 1587.07,
+              "comparisonMs": 343.427,
+              "totalMs": 2030.802,
+              "heapDeltaBytes": 75747440,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 103.265,
+              "astTraversalMs": 1.62,
+              "irGenerationMs": 1602.295,
+              "comparisonMs": 349.288,
+              "totalMs": 2056.481,
+              "heapDeltaBytes": -108181152,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 88.221,
+              "astTraversalMs": 1.641,
+              "irGenerationMs": 1588.897,
+              "comparisonMs": 355.695,
+              "totalMs": 2034.47,
+              "heapDeltaBytes": 78527704,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 90.864,
+              "astTraversalMs": 1.514,
+              "irGenerationMs": 1604.279,
+              "comparisonMs": 341.679,
+              "totalMs": 2038.352,
+              "heapDeltaBytes": 69675480,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            },
+            {
+              "projectLoadCache": "cached",
+              "projectLoadMs": 109.231,
+              "astTraversalMs": 1.655,
+              "irGenerationMs": 1566.576,
+              "comparisonMs": 343.353,
+              "totalMs": 2020.83,
+              "heapDeltaBytes": -161631520,
+              "files": 502,
+              "astNodes": 58041,
+              "operations": 5000,
+              "diagnostics": 500,
+              "cacheHits": 1,
+              "cacheMisses": 0,
+              "cacheInvalidations": 0
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "openapi": [
+    {
+      "id": "operations-100",
+      "allObserved": {
+        "before": {
+          "count": 15,
+          "meanMs": 6.188533333333334,
+          "medianMs": 4.316,
+          "minMs": 3.019,
+          "maxMs": 13.983,
+          "standardDeviationMs": 3.321344544340774
+        },
+        "after": {
+          "count": 15,
+          "meanMs": 3.8697999999999997,
+          "medianMs": 3.972,
+          "minMs": 2.939,
+          "maxMs": 4.674,
+          "standardDeviationMs": 0.5934508348071753
+        },
+        "savedMeanMs": 2.318733333333334,
+        "reductionPercent": 37.46822079544966
+      },
+      "adjacentPairs2And3": {
+        "before": {
+          "count": 10,
+          "meanMs": 4.0104,
+          "medianMs": 4.0405,
+          "minMs": 3.019,
+          "maxMs": 4.785,
+          "standardDeviationMs": 0.4832008278138604
+        },
+        "after": {
+          "count": 10,
+          "meanMs": 3.8457,
+          "medianMs": 3.835,
+          "minMs": 3.003,
+          "maxMs": 4.674,
+          "standardDeviationMs": 0.6136736999415894
+        },
+        "savedMeanMs": 0.16469999999999985,
+        "reductionPercent": 4.106822262118492
+      },
+      "pairs": [
+        {
+          "pair": 1,
+          "comparisonStatus": "inconclusive-variation",
+          "before": {
+            "count": 5,
+            "meanMs": 10.5448,
+            "medianMs": 10.539,
+            "minMs": 7.688,
+            "maxMs": 13.983,
+            "standardDeviationMs": 2.0399592544950504
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 3.918,
+            "medianMs": 4.003,
+            "minMs": 2.939,
+            "maxMs": 4.577,
+            "standardDeviationMs": 0.5476093498106108
+          },
+          "savedMeanMs": 6.6268,
+          "reductionPercent": 62.8442455048934,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 14.2,
+              "resolveMs": 3.942,
+              "normalizeMs": 3.998,
+              "totalMs": 24.81,
+              "approximateHeapDeltaBytes": 1137104,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 6.03,
+              "resolveMs": 1.71,
+              "normalizeMs": 1.119,
+              "totalMs": 13.983,
+              "approximateHeapDeltaBytes": 160296,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 5.74,
+              "resolveMs": 0.828,
+              "normalizeMs": 1.441,
+              "totalMs": 10.831,
+              "approximateHeapDeltaBytes": 345800,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 5.256,
+              "resolveMs": 1.27,
+              "normalizeMs": 2.093,
+              "totalMs": 10.539,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 3.877,
+              "resolveMs": 1.28,
+              "normalizeMs": 1.837,
+              "totalMs": 9.683,
+              "approximateHeapDeltaBytes": 8240,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 2.12,
+              "resolveMs": 0.479,
+              "normalizeMs": 1.787,
+              "totalMs": 7.688,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 6.18,
+              "resolveMs": 1.003,
+              "normalizeMs": 3.007,
+              "totalMs": 11.216,
+              "approximateHeapDeltaBytes": 386728,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.654,
+              "resolveMs": 0.96,
+              "normalizeMs": 0.916,
+              "totalMs": 4.577,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.757,
+              "resolveMs": 0.507,
+              "normalizeMs": 0.766,
+              "totalMs": 4.003,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.828,
+              "resolveMs": 0.486,
+              "normalizeMs": 0.691,
+              "totalMs": 3.846,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.951,
+              "resolveMs": 0.556,
+              "normalizeMs": 0.65,
+              "totalMs": 4.225,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.892,
+              "resolveMs": 0.559,
+              "normalizeMs": 0.607,
+              "totalMs": 2.939,
+              "approximateHeapDeltaBytes": 2018240,
+              "outputBytes": 61029
+            }
+          ]
+        },
+        {
+          "pair": 2,
+          "comparisonStatus": "completed",
+          "before": {
+            "count": 5,
+            "meanMs": 4.062,
+            "medianMs": 4.306,
+            "minMs": 3.019,
+            "maxMs": 4.785,
+            "standardDeviationMs": 0.5943591506824809
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 4.027200000000001,
+            "medianMs": 4.044,
+            "minMs": 3.051,
+            "maxMs": 4.674,
+            "standardDeviationMs": 0.6151225568941525
+          },
+          "savedMeanMs": 0.03479999999999972,
+          "reductionPercent": 0.8567208271787252,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 6.326,
+              "resolveMs": 0.973,
+              "normalizeMs": 3.125,
+              "totalMs": 11.809,
+              "approximateHeapDeltaBytes": 192240,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.542,
+              "resolveMs": 0.686,
+              "normalizeMs": 0.994,
+              "totalMs": 4.316,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.906,
+              "resolveMs": 0.526,
+              "normalizeMs": 0.963,
+              "totalMs": 4.306,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.638,
+              "resolveMs": 0.74,
+              "normalizeMs": 0.712,
+              "totalMs": 3.884,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 2.229,
+              "resolveMs": 0.478,
+              "normalizeMs": 1.115,
+              "totalMs": 4.785,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.98,
+              "resolveMs": 0.719,
+              "normalizeMs": 0.61,
+              "totalMs": 3.019,
+              "approximateHeapDeltaBytes": 2018704,
+              "outputBytes": 61029
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 6.25,
+              "resolveMs": 0.967,
+              "normalizeMs": 2.579,
+              "totalMs": 11.067,
+              "approximateHeapDeltaBytes": 1166096,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 2.211,
+              "resolveMs": 0.551,
+              "normalizeMs": 0.873,
+              "totalMs": 4.674,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.401,
+              "resolveMs": 0.474,
+              "normalizeMs": 0.855,
+              "totalMs": 3.698,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.466,
+              "resolveMs": 0.661,
+              "normalizeMs": 0.971,
+              "totalMs": 4.669,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.644,
+              "resolveMs": 0.552,
+              "normalizeMs": 0.818,
+              "totalMs": 4.044,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.947,
+              "resolveMs": 0.621,
+              "normalizeMs": 0.642,
+              "totalMs": 3.051,
+              "approximateHeapDeltaBytes": 2021464,
+              "outputBytes": 61029
+            }
+          ]
+        },
+        {
+          "pair": 3,
+          "comparisonStatus": "completed",
+          "before": {
+            "count": 5,
+            "meanMs": 3.9588,
+            "medianMs": 3.9,
+            "minMs": 3.457,
+            "maxMs": 4.428,
+            "standardDeviationMs": 0.32920838385436063
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 3.6641999999999997,
+            "medianMs": 3.538,
+            "minMs": 3.003,
+            "maxMs": 4.568,
+            "standardDeviationMs": 0.5558152210942048
+          },
+          "savedMeanMs": 0.2946000000000004,
+          "reductionPercent": 7.441648984540783,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 6.223,
+              "resolveMs": 1.341,
+              "normalizeMs": 2.906,
+              "totalMs": 11.49,
+              "approximateHeapDeltaBytes": 178680,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.472,
+              "resolveMs": 0.535,
+              "normalizeMs": 0.886,
+              "totalMs": 3.9,
+              "approximateHeapDeltaBytes": 12784,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.666,
+              "resolveMs": 0.735,
+              "normalizeMs": 0.742,
+              "totalMs": 4.428,
+              "approximateHeapDeltaBytes": 64712,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.282,
+              "resolveMs": 0.461,
+              "normalizeMs": 1.064,
+              "totalMs": 3.828,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.89,
+              "resolveMs": 0.415,
+              "normalizeMs": 0.606,
+              "totalMs": 4.181,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.334,
+              "resolveMs": 0.389,
+              "normalizeMs": 1.023,
+              "totalMs": 3.457,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 5.908,
+              "resolveMs": 1.052,
+              "normalizeMs": 2.827,
+              "totalMs": 10.756,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.445,
+              "resolveMs": 0.564,
+              "normalizeMs": 1.481,
+              "totalMs": 4.568,
+              "approximateHeapDeltaBytes": 95240,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.356,
+              "resolveMs": 0.628,
+              "normalizeMs": 0.747,
+              "totalMs": 3.972,
+              "approximateHeapDeltaBytes": 64048,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.325,
+              "resolveMs": 0.487,
+              "normalizeMs": 0.651,
+              "totalMs": 3.24,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.307,
+              "resolveMs": 0.408,
+              "normalizeMs": 1.032,
+              "totalMs": 3.538,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.997,
+              "resolveMs": 0.416,
+              "normalizeMs": 0.791,
+              "totalMs": 3.003,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 61029
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "shared-refs-1000",
+      "allObserved": {
+        "before": {
+          "count": 15,
+          "meanMs": 233.9758666666667,
+          "medianMs": 44.519,
+          "minMs": 36.139,
+          "maxMs": 1305.671,
+          "standardDeviationMs": 357.10140210326193
+        },
+        "after": {
+          "count": 15,
+          "meanMs": 40.71513333333334,
+          "medianMs": 41.336,
+          "minMs": 35.897,
+          "maxMs": 49.488,
+          "standardDeviationMs": 3.4754051440883207
+        },
+        "savedMeanMs": 193.26073333333335,
+        "reductionPercent": 82.59857569356156
+      },
+      "adjacentPairs2And3": {
+        "before": {
+          "count": 10,
+          "meanMs": 42.022400000000005,
+          "medianMs": 40.8305,
+          "minMs": 36.139,
+          "maxMs": 52.286,
+          "standardDeviationMs": 4.591851787677821
+        },
+        "after": {
+          "count": 10,
+          "meanMs": 39.53849999999999,
+          "medianMs": 39.6315,
+          "minMs": 35.897,
+          "maxMs": 43.088,
+          "standardDeviationMs": 2.718291457883059
+        },
+        "savedMeanMs": 2.4839000000000127,
+        "reductionPercent": 5.910895141638772
+      },
+      "pairs": [
+        {
+          "pair": 1,
+          "comparisonStatus": "inconclusive-variation",
+          "before": {
+            "count": 5,
+            "meanMs": 617.8828000000001,
+            "medianMs": 503.253,
+            "minMs": 124.56,
+            "maxMs": 1305.671,
+            "standardDeviationMs": 401.8025183526853
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 43.068400000000004,
+            "medianMs": 41.376,
+            "minMs": 39.465,
+            "maxMs": 49.488,
+            "standardDeviationMs": 3.6263355939570725
+          },
+          "savedMeanMs": 574.8144000000001,
+          "reductionPercent": 93.029681357047,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 40.796,
+              "resolveMs": 34.579,
+              "normalizeMs": 41.306,
+              "totalMs": 192.881,
+              "approximateHeapDeltaBytes": 9180816,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 18.951,
+              "resolveMs": 38.368,
+              "normalizeMs": 42,
+              "totalMs": 124.56,
+              "approximateHeapDeltaBytes": 8295272,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 21.806,
+              "resolveMs": 36.699,
+              "normalizeMs": 258.869,
+              "totalMs": 384.989,
+              "approximateHeapDeltaBytes": 23626824,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 27.865,
+              "resolveMs": 527.855,
+              "normalizeMs": 401.596,
+              "totalMs": 1305.671,
+              "approximateHeapDeltaBytes": 22963472,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 65.954,
+              "resolveMs": 83.016,
+              "normalizeMs": 480.799,
+              "totalMs": 770.941,
+              "approximateHeapDeltaBytes": 23003568,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 58.943,
+              "resolveMs": 286.687,
+              "normalizeMs": 78.125,
+              "totalMs": 503.253,
+              "approximateHeapDeltaBytes": 22889800,
+              "outputBytes": 700729
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 17.076,
+              "resolveMs": 10.726,
+              "normalizeMs": 15.155,
+              "totalMs": 55.874,
+              "approximateHeapDeltaBytes": 7183648,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 12.006,
+              "resolveMs": 8.606,
+              "normalizeMs": 14.266,
+              "totalMs": 49.488,
+              "approximateHeapDeltaBytes": 11216152,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 9.62,
+              "resolveMs": 8.099,
+              "normalizeMs": 12.342,
+              "totalMs": 41.376,
+              "approximateHeapDeltaBytes": 29539432,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 9.247,
+              "resolveMs": 7.454,
+              "normalizeMs": 10.732,
+              "totalMs": 39.465,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 9.824,
+              "resolveMs": 9.926,
+              "normalizeMs": 11.325,
+              "totalMs": 44.514,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 10.14,
+              "resolveMs": 7.367,
+              "normalizeMs": 11.174,
+              "totalMs": 40.499,
+              "approximateHeapDeltaBytes": 6090504,
+              "outputBytes": 700729
+            }
+          ]
+        },
+        {
+          "pair": 2,
+          "comparisonStatus": "completed",
+          "before": {
+            "count": 5,
+            "meanMs": 44.37740000000001,
+            "medianMs": 44.519,
+            "minMs": 39.45,
+            "maxMs": 52.286,
+            "standardDeviationMs": 4.739006503477285
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 40.5348,
+            "medianMs": 41.336,
+            "minMs": 37.382,
+            "maxMs": 43.088,
+            "standardDeviationMs": 2.436855301407945
+          },
+          "savedMeanMs": 3.8426000000000116,
+          "reductionPercent": 8.65891196870482,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 37.097,
+              "resolveMs": 13.145,
+              "normalizeMs": 16.62,
+              "totalMs": 80.677,
+              "approximateHeapDeltaBytes": 9680272,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 13.618,
+              "resolveMs": 13.081,
+              "normalizeMs": 13.195,
+              "totalMs": 52.286,
+              "approximateHeapDeltaBytes": 9386568,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 11.619,
+              "resolveMs": 9.56,
+              "normalizeMs": 13.211,
+              "totalMs": 46.023,
+              "approximateHeapDeltaBytes": 22946336,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 9.248,
+              "resolveMs": 7.986,
+              "normalizeMs": 10.611,
+              "totalMs": 39.45,
+              "approximateHeapDeltaBytes": 22886080,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.46,
+              "resolveMs": 8.312,
+              "normalizeMs": 10.399,
+              "totalMs": 39.609,
+              "approximateHeapDeltaBytes": 22948264,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.748,
+              "resolveMs": 13.075,
+              "normalizeMs": 12.255,
+              "totalMs": 44.519,
+              "approximateHeapDeltaBytes": 22899760,
+              "outputBytes": 700729
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 18.265,
+              "resolveMs": 9.423,
+              "normalizeMs": 14.936,
+              "totalMs": 54.045,
+              "approximateHeapDeltaBytes": 7052592,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 10.591,
+              "resolveMs": 8.311,
+              "normalizeMs": 11.338,
+              "totalMs": 42.941,
+              "approximateHeapDeltaBytes": 11173976,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 8.983,
+              "resolveMs": 6.845,
+              "normalizeMs": 11.205,
+              "totalMs": 37.382,
+              "approximateHeapDeltaBytes": 29493008,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 8.041,
+              "resolveMs": 6.627,
+              "normalizeMs": 10.676,
+              "totalMs": 37.927,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 9.159,
+              "resolveMs": 9.211,
+              "normalizeMs": 11.079,
+              "totalMs": 43.088,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 10.89,
+              "resolveMs": 6.954,
+              "normalizeMs": 11.394,
+              "totalMs": 41.336,
+              "approximateHeapDeltaBytes": 6291208,
+              "outputBytes": 700729
+            }
+          ]
+        },
+        {
+          "pair": 3,
+          "comparisonStatus": "completed",
+          "before": {
+            "count": 5,
+            "meanMs": 39.6674,
+            "medianMs": 39.543,
+            "minMs": 36.139,
+            "maxMs": 43.776,
+            "standardDeviationMs": 2.93597905987083
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 38.542199999999994,
+            "medianMs": 37.483,
+            "minMs": 35.897,
+            "maxMs": 41.749,
+            "standardDeviationMs": 2.6181531200447403
+          },
+          "savedMeanMs": 1.1252000000000066,
+          "reductionPercent": 2.8365862143725273,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 14.641,
+              "resolveMs": 10.924,
+              "normalizeMs": 12.596,
+              "totalMs": 49.892,
+              "approximateHeapDeltaBytes": 9296144,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 10.939,
+              "resolveMs": 9.049,
+              "normalizeMs": 9.992,
+              "totalMs": 43.776,
+              "approximateHeapDeltaBytes": 8347248,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 9.902,
+              "resolveMs": 9.299,
+              "normalizeMs": 11.723,
+              "totalMs": 42.052,
+              "approximateHeapDeltaBytes": 23062832,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 8.025,
+              "resolveMs": 8.069,
+              "normalizeMs": 9.621,
+              "totalMs": 36.139,
+              "approximateHeapDeltaBytes": 22925952,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.552,
+              "resolveMs": 8.251,
+              "normalizeMs": 8.791,
+              "totalMs": 36.827,
+              "approximateHeapDeltaBytes": 23016088,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 6.943,
+              "resolveMs": 8.033,
+              "normalizeMs": 14.49,
+              "totalMs": 39.543,
+              "approximateHeapDeltaBytes": 22914248,
+              "outputBytes": 700729
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 14.131,
+              "resolveMs": 10.623,
+              "normalizeMs": 13.795,
+              "totalMs": 49.77,
+              "approximateHeapDeltaBytes": 6487480,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 10.281,
+              "resolveMs": 9.036,
+              "normalizeMs": 10.619,
+              "totalMs": 41.749,
+              "approximateHeapDeltaBytes": 21708760,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 9.408,
+              "resolveMs": 6.633,
+              "normalizeMs": 10.401,
+              "totalMs": 37.483,
+              "approximateHeapDeltaBytes": 5909192,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 9.145,
+              "resolveMs": 6.683,
+              "normalizeMs": 9.425,
+              "totalMs": 35.897,
+              "approximateHeapDeltaBytes": 6223616,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 8.369,
+              "resolveMs": 6.235,
+              "normalizeMs": 9.735,
+              "totalMs": 35.985,
+              "approximateHeapDeltaBytes": 6142800,
+              "outputBytes": 700729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 10.833,
+              "resolveMs": 8.788,
+              "normalizeMs": 11.094,
+              "totalMs": 41.597,
+              "approximateHeapDeltaBytes": 14099520,
+              "outputBytes": 700729
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "nested-refs-10000",
+      "allObserved": {
+        "before": {
+          "count": 15,
+          "meanMs": 1297.9176,
+          "medianMs": 632.708,
+          "minMs": 571.838,
+          "maxMs": 4002.482,
+          "standardDeviationMs": 1173.934523438498
+        },
+        "after": {
+          "count": 15,
+          "meanMs": 524.3749333333334,
+          "medianMs": 513.912,
+          "minMs": 469.309,
+          "maxMs": 623.196,
+          "standardDeviationMs": 46.50000778274726
+        },
+        "savedMeanMs": 773.5426666666666,
+        "reductionPercent": 59.59875007987152
+      },
+      "adjacentPairs2And3": {
+        "before": {
+          "count": 10,
+          "meanMs": 609.9051999999999,
+          "medianMs": 610.712,
+          "minMs": 571.838,
+          "maxMs": 665.22,
+          "standardDeviationMs": 29.812314012166187
+        },
+        "after": {
+          "count": 10,
+          "meanMs": 496.9629,
+          "medianMs": 491.33849999999995,
+          "minMs": 469.309,
+          "maxMs": 529.609,
+          "standardDeviationMs": 19.21919872653384
+        },
+        "savedMeanMs": 112.94229999999993,
+        "reductionPercent": 18.51800902828832
+      },
+      "pairs": [
+        {
+          "pair": 1,
+          "comparisonStatus": "inconclusive-variation",
+          "before": {
+            "count": 5,
+            "meanMs": 2673.9424,
+            "medianMs": 2706.59,
+            "minMs": 1131.288,
+            "maxMs": 4002.482,
+            "standardDeviationMs": 1136.847778951184
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 579.199,
+            "medianMs": 594.672,
+            "minMs": 524.406,
+            "maxMs": 623.196,
+            "standardDeviationMs": 35.2062429577483
+          },
+          "savedMeanMs": 2094.7434,
+          "reductionPercent": 78.33913699861299,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 1150.563,
+              "resolveMs": 1644.311,
+              "normalizeMs": 1581.81,
+              "totalMs": 5059.617,
+              "approximateHeapDeltaBytes": 80546136,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 808.323,
+              "resolveMs": 2098.842,
+              "normalizeMs": 802.392,
+              "totalMs": 4002.482,
+              "approximateHeapDeltaBytes": 102626144,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 546.03,
+              "resolveMs": 809.756,
+              "normalizeMs": 1627.321,
+              "totalMs": 3837.006,
+              "approximateHeapDeltaBytes": 169699808,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 860.783,
+              "resolveMs": 1196.492,
+              "normalizeMs": 345.11,
+              "totalMs": 2706.59,
+              "approximateHeapDeltaBytes": 72757528,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 398.186,
+              "resolveMs": 747.427,
+              "normalizeMs": 400.545,
+              "totalMs": 1692.346,
+              "approximateHeapDeltaBytes": 171261488,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 271.68,
+              "resolveMs": 469.304,
+              "normalizeMs": 287.559,
+              "totalMs": 1131.288,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 7085729
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 122.803,
+              "resolveMs": 132.924,
+              "normalizeMs": 228.153,
+              "totalMs": 587.268,
+              "approximateHeapDeltaBytes": 99704840,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 133.269,
+              "resolveMs": 189.792,
+              "normalizeMs": 198.141,
+              "totalMs": 623.196,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 125.462,
+              "resolveMs": 125.87,
+              "normalizeMs": 187.928,
+              "totalMs": 554.399,
+              "approximateHeapDeltaBytes": 178770392,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 133.599,
+              "resolveMs": 153.162,
+              "normalizeMs": 209.584,
+              "totalMs": 599.322,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 141.53,
+              "resolveMs": 143.66,
+              "normalizeMs": 213.683,
+              "totalMs": 594.672,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 119.173,
+              "resolveMs": 118.364,
+              "normalizeMs": 182.323,
+              "totalMs": 524.406,
+              "approximateHeapDeltaBytes": 120944912,
+              "outputBytes": 7085729
+            }
+          ]
+        },
+        {
+          "pair": 2,
+          "comparisonStatus": "completed",
+          "before": {
+            "count": 5,
+            "meanMs": 612.9358,
+            "medianMs": 612.879,
+            "minMs": 577.223,
+            "maxMs": 665.22,
+            "standardDeviationMs": 30.21996011512923
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 495.8594,
+            "medianMs": 490.727,
+            "minMs": 475.357,
+            "maxMs": 518.586,
+            "standardDeviationMs": 16.820057129510584
+          },
+          "savedMeanMs": 117.07639999999998,
+          "reductionPercent": 19.100923783534917,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 149.374,
+              "resolveMs": 235.328,
+              "normalizeMs": 183.855,
+              "totalMs": 664.745,
+              "approximateHeapDeltaBytes": 83619704,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 129.281,
+              "resolveMs": 218.184,
+              "normalizeMs": 224.46,
+              "totalMs": 665.22,
+              "approximateHeapDeltaBytes": 98903616,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 108.629,
+              "resolveMs": 225.381,
+              "normalizeMs": 166.436,
+              "totalMs": 590.173,
+              "approximateHeapDeltaBytes": 169908208,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 114.263,
+              "resolveMs": 220.021,
+              "normalizeMs": 156.887,
+              "totalMs": 577.223,
+              "approximateHeapDeltaBytes": 108785192,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 132.126,
+              "resolveMs": 225.853,
+              "normalizeMs": 172.231,
+              "totalMs": 619.184,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 119.133,
+              "resolveMs": 214.536,
+              "normalizeMs": 167.195,
+              "totalMs": 612.879,
+              "approximateHeapDeltaBytes": 164874528,
+              "outputBytes": 7085729
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 123.611,
+              "resolveMs": 127.02,
+              "normalizeMs": 182.243,
+              "totalMs": 532.367,
+              "approximateHeapDeltaBytes": 100038504,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 121.797,
+              "resolveMs": 122.681,
+              "normalizeMs": 175.379,
+              "totalMs": 512.266,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 110.335,
+              "resolveMs": 114.102,
+              "normalizeMs": 157.108,
+              "totalMs": 482.361,
+              "approximateHeapDeltaBytes": 179603008,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 124.857,
+              "resolveMs": 112.089,
+              "normalizeMs": 165.637,
+              "totalMs": 490.727,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 118.898,
+              "resolveMs": 130.336,
+              "normalizeMs": 180.948,
+              "totalMs": 518.586,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 112.825,
+              "resolveMs": 122.654,
+              "normalizeMs": 153.651,
+              "totalMs": 475.357,
+              "approximateHeapDeltaBytes": 121594472,
+              "outputBytes": 7085729
+            }
+          ]
+        },
+        {
+          "pair": 3,
+          "comparisonStatus": "completed",
+          "before": {
+            "count": 5,
+            "meanMs": 606.8745999999999,
+            "medianMs": 608.545,
+            "minMs": 571.838,
+            "maxMs": 644.579,
+            "standardDeviationMs": 29.084928596095946
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 498.0664,
+            "medianMs": 491.95,
+            "minMs": 469.309,
+            "maxMs": 529.609,
+            "standardDeviationMs": 21.293319446248873
+          },
+          "savedMeanMs": 108.80819999999989,
+          "reductionPercent": 17.929272373567773,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 127.556,
+              "resolveMs": 244.307,
+              "normalizeMs": 184.649,
+              "totalMs": 657.101,
+              "approximateHeapDeltaBytes": 51606368,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 129.047,
+              "resolveMs": 227.573,
+              "normalizeMs": 180.259,
+              "totalMs": 632.708,
+              "approximateHeapDeltaBytes": 99956544,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 115.813,
+              "resolveMs": 212.646,
+              "normalizeMs": 159.055,
+              "totalMs": 576.703,
+              "approximateHeapDeltaBytes": 167872040,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 119.168,
+              "resolveMs": 213.904,
+              "normalizeMs": 151.702,
+              "totalMs": 571.838,
+              "approximateHeapDeltaBytes": 106895536,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 124.364,
+              "resolveMs": 219.585,
+              "normalizeMs": 165.259,
+              "totalMs": 608.545,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 116.865,
+              "resolveMs": 264.721,
+              "normalizeMs": 170.126,
+              "totalMs": 644.579,
+              "approximateHeapDeltaBytes": 165333344,
+              "outputBytes": 7085729
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 122.996,
+              "resolveMs": 124.304,
+              "normalizeMs": 189.849,
+              "totalMs": 530.946,
+              "approximateHeapDeltaBytes": 120778864,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 112.119,
+              "resolveMs": 134.661,
+              "normalizeMs": 177.431,
+              "totalMs": 513.912,
+              "approximateHeapDeltaBytes": 89582456,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 112.029,
+              "resolveMs": 111.332,
+              "normalizeMs": 156.345,
+              "totalMs": 469.309,
+              "approximateHeapDeltaBytes": 123932040,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 120.368,
+              "resolveMs": 116.896,
+              "normalizeMs": 169.993,
+              "totalMs": 491.95,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 111.348,
+              "resolveMs": 111.434,
+              "normalizeMs": 171.511,
+              "totalMs": 485.552,
+              "approximateHeapDeltaBytes": 122256320,
+              "outputBytes": 7085729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 129.308,
+              "resolveMs": 127.565,
+              "normalizeMs": 176.58,
+              "totalMs": 529.609,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 7085729
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "deep-schema",
+      "allObserved": {
+        "before": {
+          "count": 15,
+          "meanMs": 0.5680000000000001,
+          "medianMs": 0.536,
+          "minMs": 0.376,
+          "maxMs": 0.874,
+          "standardDeviationMs": 0.14481206211270292
+        },
+        "after": {
+          "count": 15,
+          "meanMs": 0.8732,
+          "medianMs": 0.464,
+          "minMs": 0.371,
+          "maxMs": 5.124,
+          "standardDeviationMs": 1.1690364237268231
+        },
+        "savedMeanMs": -0.3051999999999999,
+        "reductionPercent": -53.73239436619717
+      },
+      "adjacentPairs2And3": {
+        "before": {
+          "count": 10,
+          "meanMs": 0.5951000000000001,
+          "medianMs": 0.5605,
+          "minMs": 0.453,
+          "maxMs": 0.78,
+          "standardDeviationMs": 0.1104992760157278
+        },
+        "after": {
+          "count": 10,
+          "meanMs": 0.4638999999999999,
+          "medianMs": 0.444,
+          "minMs": 0.379,
+          "maxMs": 0.645,
+          "standardDeviationMs": 0.0826951630991801
+        },
+        "savedMeanMs": 0.13120000000000015,
+        "reductionPercent": 22.04671483784241
+      },
+      "pairs": [
+        {
+          "pair": 1,
+          "comparisonStatus": "inconclusive-variation",
+          "before": {
+            "count": 5,
+            "meanMs": 0.5138,
+            "medianMs": 0.448,
+            "minMs": 0.376,
+            "maxMs": 0.874,
+            "standardDeviationMs": 0.18462112555176344
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 1.6918,
+            "medianMs": 1.138,
+            "minMs": 0.371,
+            "maxMs": 5.124,
+            "standardDeviationMs": 1.7553069703046245
+          },
+          "savedMeanMs": -1.178,
+          "reductionPercent": -229.27209030751263,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 1.34,
+              "resolveMs": 0.231,
+              "normalizeMs": 0.144,
+              "totalMs": 1.751,
+              "approximateHeapDeltaBytes": 431320,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.697,
+              "resolveMs": 0.123,
+              "normalizeMs": 0.032,
+              "totalMs": 0.874,
+              "approximateHeapDeltaBytes": 421296,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.22,
+              "resolveMs": 0.128,
+              "normalizeMs": 0.02,
+              "totalMs": 0.385,
+              "approximateHeapDeltaBytes": 421440,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.199,
+              "resolveMs": 0.218,
+              "normalizeMs": 0.04,
+              "totalMs": 0.486,
+              "approximateHeapDeltaBytes": 422528,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.276,
+              "resolveMs": 0.123,
+              "normalizeMs": 0.027,
+              "totalMs": 0.448,
+              "approximateHeapDeltaBytes": 440728,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.233,
+              "resolveMs": 0.104,
+              "normalizeMs": 0.021,
+              "totalMs": 0.376,
+              "approximateHeapDeltaBytes": 432024,
+              "outputBytes": 861
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 0.946,
+              "resolveMs": 0.243,
+              "normalizeMs": 0.151,
+              "totalMs": 1.384,
+              "approximateHeapDeltaBytes": 437376,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 1.12,
+              "resolveMs": 3.738,
+              "normalizeMs": 0.151,
+              "totalMs": 5.124,
+              "approximateHeapDeltaBytes": 214640,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.867,
+              "resolveMs": 0.346,
+              "normalizeMs": 0.079,
+              "totalMs": 1.338,
+              "approximateHeapDeltaBytes": 433904,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.717,
+              "resolveMs": 0.341,
+              "normalizeMs": 0.039,
+              "totalMs": 1.138,
+              "approximateHeapDeltaBytes": 437664,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.327,
+              "resolveMs": 0.111,
+              "normalizeMs": 0.028,
+              "totalMs": 0.488,
+              "approximateHeapDeltaBytes": 433840,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.221,
+              "resolveMs": 0.11,
+              "normalizeMs": 0.021,
+              "totalMs": 0.371,
+              "approximateHeapDeltaBytes": 434864,
+              "outputBytes": 861
+            }
+          ]
+        },
+        {
+          "pair": 2,
+          "comparisonStatus": "completed",
+          "before": {
+            "count": 5,
+            "meanMs": 0.6312,
+            "medianMs": 0.631,
+            "minMs": 0.466,
+            "maxMs": 0.78,
+            "standardDeviationMs": 0.10644322430291182
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 0.4984,
+            "medianMs": 0.456,
+            "minMs": 0.391,
+            "maxMs": 0.645,
+            "standardDeviationMs": 0.0938905746068262
+          },
+          "savedMeanMs": 0.13279999999999997,
+          "reductionPercent": 21.039290240811148,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 0.575,
+              "resolveMs": 0.229,
+              "normalizeMs": 0.117,
+              "totalMs": 0.955,
+              "approximateHeapDeltaBytes": 428144,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.414,
+              "resolveMs": 0.118,
+              "normalizeMs": 0.028,
+              "totalMs": 0.58,
+              "approximateHeapDeltaBytes": 421320,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.21,
+              "resolveMs": 0.351,
+              "normalizeMs": 0.042,
+              "totalMs": 0.631,
+              "approximateHeapDeltaBytes": 422024,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.297,
+              "resolveMs": 0.124,
+              "normalizeMs": 0.026,
+              "totalMs": 0.466,
+              "approximateHeapDeltaBytes": 421352,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.256,
+              "resolveMs": 0.392,
+              "normalizeMs": 0.029,
+              "totalMs": 0.699,
+              "approximateHeapDeltaBytes": 440608,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.508,
+              "resolveMs": 0.225,
+              "normalizeMs": 0.026,
+              "totalMs": 0.78,
+              "approximateHeapDeltaBytes": 421600,
+              "outputBytes": 861
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 1.008,
+              "resolveMs": 0.276,
+              "normalizeMs": 0.376,
+              "totalMs": 1.72,
+              "approximateHeapDeltaBytes": 437408,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.413,
+              "resolveMs": 0.152,
+              "normalizeMs": 0.051,
+              "totalMs": 0.645,
+              "approximateHeapDeltaBytes": 432192,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.285,
+              "resolveMs": 0.167,
+              "normalizeMs": 0.092,
+              "totalMs": 0.568,
+              "approximateHeapDeltaBytes": 432320,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.258,
+              "resolveMs": 0.128,
+              "normalizeMs": 0.024,
+              "totalMs": 0.432,
+              "approximateHeapDeltaBytes": 431600,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.24,
+              "resolveMs": 0.172,
+              "normalizeMs": 0.023,
+              "totalMs": 0.456,
+              "approximateHeapDeltaBytes": 432752,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.229,
+              "resolveMs": 0.124,
+              "normalizeMs": 0.02,
+              "totalMs": 0.391,
+              "approximateHeapDeltaBytes": 431464,
+              "outputBytes": 861
+            }
+          ]
+        },
+        {
+          "pair": 3,
+          "comparisonStatus": "completed",
+          "before": {
+            "count": 5,
+            "meanMs": 0.5589999999999999,
+            "medianMs": 0.536,
+            "minMs": 0.453,
+            "maxMs": 0.754,
+            "standardDeviationMs": 0.10238945258179673
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 0.42940000000000006,
+            "medianMs": 0.403,
+            "minMs": 0.379,
+            "maxMs": 0.51,
+            "standardDeviationMs": 0.04981003914874992
+          },
+          "savedMeanMs": 0.12959999999999988,
+          "reductionPercent": 23.184257602862235,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 1.176,
+              "resolveMs": 0.275,
+              "normalizeMs": 0.138,
+              "totalMs": 1.657,
+              "approximateHeapDeltaBytes": 425904,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.564,
+              "resolveMs": 0.12,
+              "normalizeMs": 0.045,
+              "totalMs": 0.754,
+              "approximateHeapDeltaBytes": 421288,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.319,
+              "resolveMs": 0.146,
+              "normalizeMs": 0.031,
+              "totalMs": 0.536,
+              "approximateHeapDeltaBytes": 426696,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.289,
+              "resolveMs": 0.122,
+              "normalizeMs": 0.022,
+              "totalMs": 0.453,
+              "approximateHeapDeltaBytes": 421312,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.322,
+              "resolveMs": 0.13,
+              "normalizeMs": 0.033,
+              "totalMs": 0.511,
+              "approximateHeapDeltaBytes": 440640,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.303,
+              "resolveMs": 0.102,
+              "normalizeMs": 0.025,
+              "totalMs": 0.541,
+              "approximateHeapDeltaBytes": 432072,
+              "outputBytes": 861
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 0.729,
+              "resolveMs": 0.325,
+              "normalizeMs": 0.116,
+              "totalMs": 1.201,
+              "approximateHeapDeltaBytes": 441280,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.297,
+              "resolveMs": 0.124,
+              "normalizeMs": 0.024,
+              "totalMs": 0.464,
+              "approximateHeapDeltaBytes": 431288,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.221,
+              "resolveMs": 0.12,
+              "normalizeMs": 0.021,
+              "totalMs": 0.379,
+              "approximateHeapDeltaBytes": 431504,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.195,
+              "resolveMs": 0.136,
+              "normalizeMs": 0.038,
+              "totalMs": 0.391,
+              "approximateHeapDeltaBytes": 431960,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.317,
+              "resolveMs": 0.127,
+              "normalizeMs": 0.041,
+              "totalMs": 0.51,
+              "approximateHeapDeltaBytes": 479248,
+              "outputBytes": 861
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.248,
+              "resolveMs": 0.112,
+              "normalizeMs": 0.024,
+              "totalMs": 0.403,
+              "approximateHeapDeltaBytes": 413608,
+              "outputBytes": 861
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "repeated-refs",
+      "allObserved": {
+        "before": {
+          "count": 15,
+          "meanMs": 72.0954,
+          "medianMs": 67.985,
+          "minMs": 65.698,
+          "maxMs": 92.698,
+          "standardDeviationMs": 7.609238304412166
+        },
+        "after": {
+          "count": 15,
+          "meanMs": 67.65586666666665,
+          "medianMs": 65.624,
+          "minMs": 61.604,
+          "maxMs": 81.646,
+          "standardDeviationMs": 5.60733740577667
+        },
+        "savedMeanMs": 4.439533333333344,
+        "reductionPercent": 6.157859354873329
+      },
+      "adjacentPairs2And3": {
+        "before": {
+          "count": 10,
+          "meanMs": 67.64710000000001,
+          "medianMs": 66.864,
+          "minMs": 65.698,
+          "maxMs": 72.484,
+          "standardDeviationMs": 2.008745401986026
+        },
+        "after": {
+          "count": 10,
+          "meanMs": 64.1919,
+          "medianMs": 63.809,
+          "minMs": 61.604,
+          "maxMs": 66.324,
+          "standardDeviationMs": 1.4149558615024003
+        },
+        "savedMeanMs": 3.455200000000005,
+        "reductionPercent": 5.107683847496791
+      },
+      "pairs": [
+        {
+          "pair": 1,
+          "comparisonStatus": "inconclusive-variation",
+          "before": {
+            "count": 5,
+            "meanMs": 80.992,
+            "medianMs": 78.267,
+            "minMs": 74.495,
+            "maxMs": 92.698,
+            "standardDeviationMs": 6.848880872084136
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 74.58380000000001,
+            "medianMs": 75.447,
+            "minMs": 70.09,
+            "maxMs": 81.646,
+            "standardDeviationMs": 4.281133933901156
+          },
+          "savedMeanMs": 6.408199999999994,
+          "reductionPercent": 7.912139470564982,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 9.418,
+              "resolveMs": 53.786,
+              "normalizeMs": 11.355,
+              "totalMs": 86.488,
+              "approximateHeapDeltaBytes": 23052432,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 12.085,
+              "resolveMs": 47.881,
+              "normalizeMs": 10.919,
+              "totalMs": 84.482,
+              "approximateHeapDeltaBytes": 49028984,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 11.499,
+              "resolveMs": 59.377,
+              "normalizeMs": 10.104,
+              "totalMs": 92.698,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 8.334,
+              "resolveMs": 45.696,
+              "normalizeMs": 9.163,
+              "totalMs": 74.495,
+              "approximateHeapDeltaBytes": 23034800,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 10.818,
+              "resolveMs": 45.562,
+              "normalizeMs": 8.847,
+              "totalMs": 78.267,
+              "approximateHeapDeltaBytes": 23026640,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 9.063,
+              "resolveMs": 44.242,
+              "normalizeMs": 10.453,
+              "totalMs": 75.018,
+              "approximateHeapDeltaBytes": 63344720,
+              "outputBytes": 697729
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 9.221,
+              "resolveMs": 47.348,
+              "normalizeMs": 11.159,
+              "totalMs": 78.357,
+              "approximateHeapDeltaBytes": 64247840,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 10.398,
+              "resolveMs": 41.691,
+              "normalizeMs": 9.392,
+              "totalMs": 70.135,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 8.084,
+              "resolveMs": 41.826,
+              "normalizeMs": 8.597,
+              "totalMs": 70.09,
+              "approximateHeapDeltaBytes": 22973792,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 8.635,
+              "resolveMs": 45.221,
+              "normalizeMs": 9.519,
+              "totalMs": 75.447,
+              "approximateHeapDeltaBytes": 47057664,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 12.159,
+              "resolveMs": 46.968,
+              "normalizeMs": 10.407,
+              "totalMs": 81.646,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 8.34,
+              "resolveMs": 47.042,
+              "normalizeMs": 9.059,
+              "totalMs": 75.601,
+              "approximateHeapDeltaBytes": 23025176,
+              "outputBytes": 697729
+            }
+          ]
+        },
+        {
+          "pair": 2,
+          "comparisonStatus": "completed",
+          "before": {
+            "count": 5,
+            "meanMs": 68.2574,
+            "medianMs": 66.453,
+            "minMs": 65.99,
+            "maxMs": 72.484,
+            "standardDeviationMs": 2.576520568518715
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 64.4366,
+            "medianMs": 63.805,
+            "minMs": 63.157,
+            "maxMs": 65.965,
+            "standardDeviationMs": 1.1339842326946183
+          },
+          "savedMeanMs": 3.8208000000000055,
+          "reductionPercent": 5.597634835197363,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 9.728,
+              "resolveMs": 50.731,
+              "normalizeMs": 9.205,
+              "totalMs": 78.912,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.383,
+              "resolveMs": 41.339,
+              "normalizeMs": 7.784,
+              "totalMs": 65.99,
+              "approximateHeapDeltaBytes": 22931664,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.109,
+              "resolveMs": 39.858,
+              "normalizeMs": 8.087,
+              "totalMs": 66.32,
+              "approximateHeapDeltaBytes": 48736552,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 11.235,
+              "resolveMs": 44.238,
+              "normalizeMs": 7.882,
+              "totalMs": 72.484,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 9.149,
+              "resolveMs": 42.992,
+              "normalizeMs": 8.988,
+              "totalMs": 70.04,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.337,
+              "resolveMs": 40.989,
+              "normalizeMs": 7.744,
+              "totalMs": 66.453,
+              "approximateHeapDeltaBytes": 22924424,
+              "outputBytes": 697729
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 16.82,
+              "resolveMs": 45.052,
+              "normalizeMs": 11.726,
+              "totalMs": 82.898,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.905,
+              "resolveMs": 40.223,
+              "normalizeMs": 7.946,
+              "totalMs": 65.965,
+              "approximateHeapDeltaBytes": 23041360,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.247,
+              "resolveMs": 38.943,
+              "normalizeMs": 7.828,
+              "totalMs": 63.157,
+              "approximateHeapDeltaBytes": 46882240,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 8.292,
+              "resolveMs": 38.002,
+              "normalizeMs": 8.698,
+              "totalMs": 63.632,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.588,
+              "resolveMs": 39.116,
+              "normalizeMs": 7.216,
+              "totalMs": 63.805,
+              "approximateHeapDeltaBytes": 23055696,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.765,
+              "resolveMs": 38.378,
+              "normalizeMs": 8.751,
+              "totalMs": 65.624,
+              "approximateHeapDeltaBytes": 23017248,
+              "outputBytes": 697729
+            }
+          ]
+        },
+        {
+          "pair": 3,
+          "comparisonStatus": "completed",
+          "before": {
+            "count": 5,
+            "meanMs": 67.0368,
+            "medianMs": 67.129,
+            "minMs": 65.698,
+            "maxMs": 67.985,
+            "standardDeviationMs": 0.8286891817804801
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 63.947199999999995,
+            "medianMs": 63.813,
+            "minMs": 61.604,
+            "maxMs": 66.324,
+            "standardDeviationMs": 1.6119937220721416
+          },
+          "savedMeanMs": 3.0896000000000043,
+          "reductionPercent": 4.6088118764618935,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 7.989,
+              "resolveMs": 46.734,
+              "normalizeMs": 9.213,
+              "totalMs": 72.774,
+              "approximateHeapDeltaBytes": 22977144,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.969,
+              "resolveMs": 41.928,
+              "normalizeMs": 7.654,
+              "totalMs": 67.985,
+              "approximateHeapDeltaBytes": 22931664,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.846,
+              "resolveMs": 40.711,
+              "normalizeMs": 7.486,
+              "totalMs": 65.698,
+              "approximateHeapDeltaBytes": 48853952,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 8.993,
+              "resolveMs": 39.505,
+              "normalizeMs": 8.361,
+              "totalMs": 66.599,
+              "approximateHeapDeltaBytes": 1429256,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.47,
+              "resolveMs": 41.798,
+              "normalizeMs": 8.086,
+              "totalMs": 67.129,
+              "approximateHeapDeltaBytes": 22932888,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.987,
+              "resolveMs": 41.924,
+              "normalizeMs": 7.955,
+              "totalMs": 67.773,
+              "approximateHeapDeltaBytes": 23023024,
+              "outputBytes": 697729
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 9.572,
+              "resolveMs": 44.291,
+              "normalizeMs": 9.144,
+              "totalMs": 72.622,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 8.522,
+              "resolveMs": 40.026,
+              "normalizeMs": 8.641,
+              "totalMs": 66.324,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.697,
+              "resolveMs": 39.854,
+              "normalizeMs": 7.491,
+              "totalMs": 64.954,
+              "approximateHeapDeltaBytes": 23022360,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.17,
+              "resolveMs": 38.142,
+              "normalizeMs": 7.217,
+              "totalMs": 61.604,
+              "approximateHeapDeltaBytes": 46605416,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 8.053,
+              "resolveMs": 38.297,
+              "normalizeMs": 7.929,
+              "totalMs": 63.041,
+              "approximateHeapDeltaBytes": 0,
+              "outputBytes": 697729
+            },
+            {
+              "mode": "warm",
+              "parseMs": 7.682,
+              "resolveMs": 38.831,
+              "normalizeMs": 7.418,
+              "totalMs": 63.813,
+              "approximateHeapDeltaBytes": 22957416,
+              "outputBytes": 697729
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "early-document-limit",
+      "allObserved": {
+        "before": {
+          "count": 15,
+          "meanMs": 0.09766666666666667,
+          "medianMs": 0.073,
+          "minMs": 0.063,
+          "maxMs": 0.251,
+          "standardDeviationMs": 0.05498929188689578
+        },
+        "after": {
+          "count": 15,
+          "meanMs": 0.08233333333333334,
+          "medianMs": 0.069,
+          "minMs": 0.063,
+          "maxMs": 0.157,
+          "standardDeviationMs": 0.028075295585660753
+        },
+        "savedMeanMs": 0.015333333333333324,
+        "reductionPercent": 15.699658703071663
+      },
+      "adjacentPairs2And3": {
+        "before": {
+          "count": 10,
+          "meanMs": 0.1076,
+          "medianMs": 0.075,
+          "minMs": 0.063,
+          "maxMs": 0.251,
+          "standardDeviationMs": 0.06335487352998188
+        },
+        "after": {
+          "count": 10,
+          "meanMs": 0.0799,
+          "medianMs": 0.0695,
+          "minMs": 0.063,
+          "maxMs": 0.14,
+          "standardDeviationMs": 0.023308582110458796
+        },
+        "savedMeanMs": 0.027700000000000002,
+        "reductionPercent": 25.743494423791823
+      },
+      "pairs": [
+        {
+          "pair": 1,
+          "comparisonStatus": "inconclusive-variation",
+          "before": {
+            "count": 5,
+            "meanMs": 0.07780000000000001,
+            "medianMs": 0.067,
+            "minMs": 0.065,
+            "maxMs": 0.12,
+            "standardDeviationMs": 0.021254646550813307
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 0.0872,
+            "medianMs": 0.069,
+            "minMs": 0.065,
+            "maxMs": 0.157,
+            "standardDeviationMs": 0.03524996453898925
+          },
+          "savedMeanMs": -0.009399999999999992,
+          "reductionPercent": -12.082262210796912,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 0.368,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.369,
+              "approximateHeapDeltaBytes": 45144,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.12,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.12,
+              "approximateHeapDeltaBytes": 40968,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.072,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.072,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.067,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.067,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.065,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.065,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.065,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.065,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 0.673,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.674,
+              "approximateHeapDeltaBytes": 45128,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.157,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.157,
+              "approximateHeapDeltaBytes": 40936,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.079,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.079,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.068,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.069,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.066,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.066,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.065,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.065,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            }
+          ]
+        },
+        {
+          "pair": 2,
+          "comparisonStatus": "completed",
+          "before": {
+            "count": 5,
+            "meanMs": 0.08080000000000001,
+            "medianMs": 0.075,
+            "minMs": 0.066,
+            "maxMs": 0.115,
+            "standardDeviationMs": 0.017417232845661795
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 0.08480000000000001,
+            "medianMs": 0.071,
+            "minMs": 0.066,
+            "maxMs": 0.14,
+            "standardDeviationMs": 0.02788117644576714
+          },
+          "savedMeanMs": -0.0040000000000000036,
+          "reductionPercent": -4.950495049504955,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 0.335,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.336,
+              "approximateHeapDeltaBytes": 45144,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.115,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.115,
+              "approximateHeapDeltaBytes": 40936,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.075,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.075,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.073,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.073,
+              "approximateHeapDeltaBytes": 37672,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.075,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.075,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.066,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.066,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 0.432,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.433,
+              "approximateHeapDeltaBytes": 45128,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.14,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.14,
+              "approximateHeapDeltaBytes": 40936,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.078,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.078,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.069,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.069,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.066,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.066,
+              "approximateHeapDeltaBytes": 37608,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.071,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.071,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            }
+          ]
+        },
+        {
+          "pair": 3,
+          "comparisonStatus": "completed",
+          "before": {
+            "count": 5,
+            "meanMs": 0.13440000000000002,
+            "medianMs": 0.076,
+            "minMs": 0.063,
+            "maxMs": 0.251,
+            "standardDeviationMs": 0.07929590153343362
+          },
+          "after": {
+            "count": 5,
+            "meanMs": 0.075,
+            "medianMs": 0.068,
+            "minMs": 0.063,
+            "maxMs": 0.107,
+            "standardDeviationMs": 0.016161683080669533
+          },
+          "savedMeanMs": 0.05940000000000002,
+          "reductionPercent": 44.196428571428584,
+          "beforeSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 0.528,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.53,
+              "approximateHeapDeltaBytes": 45152,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.25,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.251,
+              "approximateHeapDeltaBytes": 40936,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.073,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.073,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.209,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.209,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.063,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.063,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.075,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.076,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            }
+          ],
+          "afterSamples": [
+            {
+              "mode": "cold",
+              "parseMs": 0.396,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.396,
+              "approximateHeapDeltaBytes": 45136,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.107,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.107,
+              "approximateHeapDeltaBytes": 40936,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.07,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.07,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.068,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.068,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.067,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.067,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            },
+            {
+              "mode": "warm",
+              "parseMs": 0.063,
+              "resolveMs": 0,
+              "normalizeMs": 0,
+              "totalMs": 0.063,
+              "approximateHeapDeltaBytes": 37600,
+              "outputBytes": 0
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "initialMemoOnly": {
+    "status": "performance-target-not-met",
+    "source": [
+      {
+        "operations": 100,
+        "before": {
+          "count": 10,
+          "meanMs": 55.7895,
+          "medianMs": 54.788,
+          "minMs": 49.301,
+          "maxMs": 68.439,
+          "standardDeviationMs": 5.417938450185641
+        },
+        "after": {
+          "count": 10,
+          "meanMs": 87.94120000000001,
+          "medianMs": 72.844,
+          "minMs": 58.644,
+          "maxMs": 217.33,
+          "standardDeviationMs": 44.76100892920088
+        },
+        "savedMeanMs": -32.15170000000001,
+        "reductionPercent": -57.6303784762366
+      },
+      {
+        "operations": 1000,
+        "before": {
+          "count": 10,
+          "meanMs": 569.195,
+          "medianMs": 563.6695,
+          "minMs": 494.193,
+          "maxMs": 760.966,
+          "standardDeviationMs": 74.54230583098432
+        },
+        "after": {
+          "count": 10,
+          "meanMs": 592.1124999999998,
+          "medianMs": 565.066,
+          "minMs": 525.739,
+          "maxMs": 680.896,
+          "standardDeviationMs": 61.84504837778042
+        },
+        "savedMeanMs": -22.91749999999979,
+        "reductionPercent": -4.026300301302688
+      },
+      {
+        "operations": 5000,
+        "before": {
+          "count": 10,
+          "meanMs": 5075.2088,
+          "medianMs": 5034.4165,
+          "minMs": 4539.989,
+          "maxMs": 5893.608,
+          "standardDeviationMs": 414.09297957362196
+        },
+        "after": {
+          "count": 10,
+          "meanMs": 5058.8965,
+          "medianMs": 4692.591,
+          "minMs": 4377.877,
+          "maxMs": 7785.155,
+          "standardDeviationMs": 948.8713689579055
+        },
+        "savedMeanMs": 16.312300000000505,
+        "reductionPercent": 0.3214114067582874
+      }
+    ]
+  },
+  "outputParity": {
+    "source": [
+      {
+        "controllers": 10,
+        "expectedOperations": 100,
+        "inputDigest": "fb466737f8c7af22f36e2edd730f309446bfba903f56dcfe4672bbe53efebb59",
+        "fullResultDigest": "74e343d84b29815d783055cd52104cecf44a0c9f049c2ed3a7351beec2105a00",
+        "diagnostics": 10
+      },
+      {
+        "controllers": 100,
+        "expectedOperations": 1000,
+        "inputDigest": "e5586545cb8c36255d739b4da2b5a1df464c761d423db52069114aa671971733",
+        "fullResultDigest": "ecabe5b2aab534ae66fdcb03ff5e75c2a5294e26c1d966913b005593705f9e78",
+        "diagnostics": 100
+      },
+      {
+        "controllers": 500,
+        "expectedOperations": 5000,
+        "inputDigest": "3da05a0a46751c311c73cfece6a8feacbcbd2f17127e1216acefdd8337ef6b51",
+        "fullResultDigest": "439409df6b269d5f64c964babeffc53493bdf7f3ae397dd178a20296d302d23f",
+        "diagnostics": 500
+      }
+    ],
+    "openapi": [
+      {
+        "id": "operations-100",
+        "inputDigest": "d19e760429432eb12d5d5af34f951f762ceb5dc18ae2e74330c0a478139f7811",
+        "resultDigest": "9e851525864b026127a822b85774412103aefd179f51336c7bbb69d66f857d4b"
+      },
+      {
+        "id": "shared-refs-1000",
+        "inputDigest": "95a146f7a5ef8f0c11fcd5d658eb2f178ff841907b81c16f0c39971f790bc008",
+        "resultDigest": "431dd8bf7cb43e5fe6efab913350a78fe45a2b9d78e3b567989eb44aec123f8e"
+      },
+      {
+        "id": "nested-refs-10000",
+        "inputDigest": "c785895b5a5efc4e77caaf2178db3e9160ec121aebef1639dfbd622d5a3feb34",
+        "resultDigest": "89700f082cfb9d6fb38c17e6d5a74777f20f442ed9767fc27eaac9cf3bd1d9d6"
+      },
+      {
+        "id": "deep-schema",
+        "inputDigest": "b8c9b1757dd9043c399c17c942f3be209b981797a99c197fb24d7d564f7a4704",
+        "resultDigest": "f4c1d614ca9ce0a3f08913e2fc07a40cb4249097a4daecc1d38a9ea5c1b13374"
+      },
+      {
+        "id": "repeated-refs",
+        "inputDigest": "8fc3df0b795e5c03b1ecbd219bf6bc7d02997c35d4fc2bfd227474d297ad74ac",
+        "resultDigest": "31dfa281a94ba0b725fd20b6027350cb0c84bb8da00344a859ca619a65c798c5"
+      },
+      {
+        "id": "early-document-limit",
+        "inputDigest": "5d0848477a13ac23e5bc71d204f44ac9c21a5b58c4f3235fed4810de15ce35f9",
+        "resultDigest": "2ccd6889d351e7a8c6491512dc597a87ffdca2735b5356196c120d0904bc5912",
+        "rejection": "OPENAPI_DOCUMENT_TOO_LARGE"
+      }
+    ]
+  },
+  "targets": [
+    {
+      "workload": "source-1000",
+      "targetMs": 400,
+      "observedMs": 441.04310000000004,
+      "met": false
+    },
+    {
+      "workload": "source-5000",
+      "targetMs": 3300,
+      "observedMs": 2148.7737,
+      "met": true
+    },
+    {
+      "workload": "openapi-10000",
+      "targetMs": 500,
+      "observedMs": 496.9629,
+      "met": true
+    }
+  ],
+  "safety": "Candidate write index and symbol facts are scoped to one projectSources identity and published after complete traversal. Pointer cache is scoped to one resolver call and document identity. Cancellation/deadline, dynamic/unknown behavior, reference-context checks, depth/node accounting and realpath boundaries remain in the canonical path.",
+  "rawEvidenceHashes": {
+    "final-pointer-execution.json": "e8693f2d85f6e8ca1ab981d76cd3a9c3f353a81a87cc4715f07cdb15d2500753",
+    "paired-1-after-openapi.json": "a37a44732bee7afed971f9344e843ddde2f6707b87b0826f2635fde6eaf41a97",
+    "paired-1-after-source-10.json": "f3fd1a2100fc9773702e61ebfed49f8bb93a4d2c5fad708ded95a33e238e5ecb",
+    "paired-1-after-source-100.json": "63eb8e813b4a919bcd09d6ca843388858de4bc687fa0ef26b9600ea124e452e5",
+    "paired-1-after-source-500.json": "6819158f062bf650933a838d2301ddded869e4436cf01802e9406d677c897b08",
+    "paired-1-before-openapi.json": "1abb9600bee39118495280f9babf416a7135708356675af29d14ed018a630e52",
+    "paired-1-before-source-10.json": "eba072a0091696f24e60f28a9b8651f078f137b1b97c1d2b6276e28a7ce9c89a",
+    "paired-1-before-source-100.json": "bc57b78adcb2857de7fd554ceb72a8758416c7a40a1b03195525b1ff3b07a961",
+    "paired-1-before-source-500.json": "6a4069954fed1006a8c2bb5bfbd647c6541138e461d7d3bf0ba6e9130dfc2901",
+    "paired-2-after-openapi.json": "72e85a0f45e0c54b6e1a7311b88a91f76786e590b61ec08d6ff712a40d45789a",
+    "paired-2-after-source-10.json": "2245b364d989a9dd0e15f840d995e3128c1b0963b14d1c81d607ef7652266742",
+    "paired-2-after-source-100.json": "4df095efaa56ffc772a806aa56f7928bd3b58cb352818d03d4fd1221664f0125",
+    "paired-2-after-source-500.json": "fe1a9a4d0b5256c71cefb02d3c6f74c62957db20eeff8e2109872e51322788a5",
+    "paired-2-before-openapi.json": "ca1901af254cf45f9c0f562d50210aa730c3a07c374cb5bf60f32d865843e0da",
+    "paired-2-before-source-10.json": "6335316de470e1b08303909bbded308bae8af6b8d75815c7d8692a056ef0ffb3",
+    "paired-2-before-source-100.json": "cc5795bf35bf6ba5dee555137ae1997c89c8804f2880ff65342d3d9fe08c2d2a",
+    "paired-2-before-source-500.json": "87105e81b890d94f31cbffff4a746a6a6a84e91366ca929226c8374310f06762",
+    "paired-3-after-openapi.json": "5752a1245bc1fddd4d8fddc68b4981122da03161b637c891cde2435a6a2a282f",
+    "paired-3-before-openapi.json": "cc5d47bc1d2237b96c13214295411e2d17b04546513a165f7a25c062e7cf6055",
+    "paired-3-execution.json": "8b6aadc37760d3ce2888e1376b0352138e922db374c19a9c9354f49db3be9c5e",
+    "paired-execution.json": "25fa8b3d7a424dfbb1ab6f16bf7aec6e5b3ca35848261ed0800c55cd219373ce",
+    "parity-openapi-final.json": "9313b7cf7e897808318edeefa934e79a77029ac18e0876103212b31ccd48febb",
+    "parity.json": "f529039e6fbe8c0fd6edb4fea3fa86ca09c2a100cbb20b530ee69113b67c1414",
+    "target-index-execution.json": "b13ba438c86b16f4cc25252c50e4af148868952849abfb79f198c52f914506e1"
+  }
+}

@@ -90,6 +90,52 @@ describe('resolveOpenApiReferences', () => {
     })).toThrow(expect.objectContaining({ code: 'OPENAPI_INVALID_ROOT' }));
   });
 
+  test('keeps identical fragments in different referenced documents separate', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'openapi-ref-fragments-'));
+    temporaryDirectories.push(workspace);
+    fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
+      openapi: '3.1.0',
+      paths: {
+        '/a': { get: { responses: { 200: { $ref: 'a.json#/Shared' } } } },
+        '/b': { get: { responses: { 200: { $ref: 'b.json#/Shared' } } } },
+      },
+    }));
+    for (const name of ['a', 'b']) {
+      fs.writeFileSync(path.join(workspace, name + '.json'), JSON.stringify({
+        Shared: { $ref: '#/' + name },
+        [name]: { description: name },
+      }));
+    }
+    const graph = resolveOpenApiReferences({
+      root: loadOpenApiDocument({ inputPath: path.join(workspace, 'root.json'), workspaceRoot: workspace }),
+      workspaceRoot: workspace,
+      limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
+    });
+    expect(graph.references.map(reference => reference.target.id).sort()).toEqual([
+      'a.json#/Shared', 'a.json#/a', 'b.json#/Shared', 'b.json#/b',
+    ].sort());
+  });
+
+  test('checks each reference context when reusing a scalar schema target', () => {
+    const workspace = fs.mkdtempSync(path.join(os.tmpdir(), 'openapi-ref-context-'));
+    temporaryDirectories.push(workspace);
+    fs.writeFileSync(path.join(workspace, 'root.json'), JSON.stringify({
+      openapi: '3.1.0',
+      paths: {
+        '/schema': { get: { responses: { 200: {
+          content: { 'application/json': { schema: { $ref: '#/components/schemas/Enabled' } } },
+        } } } },
+        '/response': { get: { responses: { 200: { $ref: '#/components/schemas/Enabled' } } } },
+      },
+      components: { schemas: { Enabled: true } },
+    }));
+    expect(() => resolveOpenApiReferences({
+      root: loadOpenApiDocument({ inputPath: path.join(workspace, 'root.json'), workspaceRoot: workspace }),
+      workspaceRoot: workspace,
+      limits: DEFAULT_OPENAPI_ANALYSIS_LIMITS,
+    })).toThrow(expect.objectContaining({ code: 'OPENAPI_REF_NOT_FOUND' }));
+  });
+
   test('binds loaded roots to their original workspace and current limits', () => {
     const workspaceA = fs.mkdtempSync(path.join(os.tmpdir(), 'openapi-workspace-a-'));
     const workspaceB = fs.mkdtempSync(path.join(os.tmpdir(), 'openapi-workspace-b-'));

@@ -70,6 +70,12 @@ const CALLBACK_ARRAY_METHODS = new Set([
 const MUTABLE_STORED_GUARD_CACHE = new WeakMap<
   ReadonlySet<ts.SourceFile>, WeakMap<ts.Symbol, boolean>
 >();
+const STORED_GUARD_ASSIGNMENT_CACHE = new WeakMap<
+  ReadonlySet<ts.SourceFile>, {
+    writes: readonly (ts.BinaryExpression | ts.ForOfStatement | ts.ForInStatement)[];
+    values: WeakMap<ts.Symbol, readonly ts.Expression[] | null>;
+  }
+>();
 const METHOD_DECORATORS: Readonly<Partial<Record<NestJsRouteDecorator, readonly HttpMethod[]>>> = Object.freeze({
   All: HTTP_METHODS,
   Delete: ['DELETE'],
@@ -4266,6 +4272,66 @@ function emptyAuthMetadata(): AuthDecoratorMetadata {
   };
 }
 
+function storedGuardAssignmentValues(
+  symbol: ts.Symbol,
+  checker: ts.TypeChecker,
+  projectSources: ReadonlySet<ts.SourceFile>,
+  check: () => void,
+): readonly ts.Expression[] | undefined {
+  check();
+  let assignments = STORED_GUARD_ASSIGNMENT_CACHE.get(projectSources);
+  if (!assignments) {
+    const writes: (ts.BinaryExpression | ts.ForOfStatement | ts.ForInStatement)[] = [];
+    const nodes: ts.Node[] = [...projectSources];
+    while (nodes.length > 0) {
+      check();
+      const node = nodes.pop()!;
+      if ((ts.isBinaryExpression(node) && !isNestedDestructuringDefault(node)
+        && node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment)
+        || ts.isForOfStatement(node) || ts.isForInStatement(node)) {
+        writes.push(node);
+      }
+      ts.forEachChild(node, (child) => { nodes.push(child); });
+    }
+    assignments = { writes, values: new WeakMap() };
+    STORED_GUARD_ASSIGNMENT_CACHE.set(projectSources, assignments);
+  }
+  const cached = assignments.values.get(symbol);
+  if (cached !== undefined) return cached ?? undefined;
+  const values: ts.Expression[] = [];
+  let unresolved = false;
+  for (const node of assignments.writes) {
+    check();
+    if (ts.isBinaryExpression(node)
+      && assignmentTargetContainsSymbol(node.left, symbol, checker, check)) {
+      if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
+        const assigned = assignmentValuesForSymbol(
+          node.left, node.right, symbol, checker, projectSources, check,
+        );
+        if (assigned) values.push(...assigned);
+        else unresolved = true;
+      }
+      else if (node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
+        && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) unresolved = true;
+    } else if ((ts.isForOfStatement(node) || ts.isForInStatement(node))
+      && assignmentTargetContainsSymbol(node.initializer, symbol, checker, check)) {
+      if (ts.isVariableDeclarationList(node.initializer)) unresolved = true;
+      else {
+        const assigned = assignmentValuesForSymbol(
+          node.initializer, node.expression, symbol, checker, projectSources, check,
+        );
+        if (assigned) values.push(...assigned);
+        else unresolved = true;
+      }
+    }
+  }
+  // The write list and facts belong to one project snapshot. Scan its AST once
+  // even when decorators reference many distinct symbols; publish completed work only.
+  assignments.values.set(symbol, unresolved ? null : values);
+  return unresolved ? undefined : values;
+}
+
 function isUnresolvedStoredGuardDecorator(
   decorator: ts.Decorator,
   checker: ts.TypeChecker,
@@ -4289,7 +4355,6 @@ function isUnresolvedStoredGuardDecorator(
     };
     const expressions: ts.Expression[] = [input];
     const visited = new Set<ts.Symbol>();
-    const assignments = new Map<ts.Symbol, readonly ts.Expression[] | null>();
     const stateCache = new Map<ts.Symbol, StaticExpressionState>();
     const staticExpressionState = (
       inputExpression: ts.Expression,
@@ -4316,7 +4381,7 @@ function isUnresolvedStoredGuardDecorator(
         if (symbol.declarations?.some((declaration) => (
           ts.isFunctionDeclaration(declaration) || ts.isClassDeclaration(declaration)
         ))) {
-          const writes = assignmentValues(symbol);
+          const writes = storedGuardAssignmentValues(symbol, checker, projectSources, check);
           return finish(writes && writes.length === 0
             ? { truth: true, nullish: false }
             : { truth: undefined, nullish: undefined });
@@ -4339,42 +4404,6 @@ function isUnresolvedStoredGuardDecorator(
       }
       return finish({ truth: undefined, nullish: staticNullish(value) });
     };
-    function assignmentValues(symbol: ts.Symbol): readonly ts.Expression[] | undefined {
-      const cached = assignments.get(symbol);
-      if (cached !== undefined) return cached ?? undefined;
-      const values: ts.Expression[] = [];
-      let unresolved = false;
-      const nodes: ts.Node[] = [...projectSources];
-      while (nodes.length > 0) {
-        check();
-        const node = nodes.pop()!;
-        if (ts.isBinaryExpression(node) && !isNestedDestructuringDefault(node)
-          && assignmentTargetContainsSymbol(node.left, symbol, checker, check)) {
-          if (node.operatorToken.kind === ts.SyntaxKind.EqualsToken) {
-            const assigned = assignmentValuesForSymbol(
-              node.left, node.right, symbol, checker, projectSources, check,
-            );
-            if (assigned) values.push(...assigned);
-            else unresolved = true;
-          }
-          else if (node.operatorToken.kind >= ts.SyntaxKind.FirstAssignment
-            && node.operatorToken.kind <= ts.SyntaxKind.LastAssignment) unresolved = true;
-        } else if ((ts.isForOfStatement(node) || ts.isForInStatement(node))
-          && assignmentTargetContainsSymbol(node.initializer, symbol, checker, check)) {
-          if (ts.isVariableDeclarationList(node.initializer)) unresolved = true;
-          else {
-            const assigned = assignmentValuesForSymbol(
-              node.initializer, node.expression, symbol, checker, projectSources, check,
-            );
-            if (assigned) values.push(...assigned);
-            else unresolved = true;
-          }
-        }
-        ts.forEachChild(node, (child) => { nodes.push(child); });
-      }
-      assignments.set(symbol, unresolved ? null : values);
-      return unresolved ? undefined : values;
-    }
     let steps = 0;
     while (expressions.length > 0) {
       check();
@@ -4425,7 +4454,7 @@ function isUnresolvedStoredGuardDecorator(
         if (calleeSymbol?.declarations?.some((declaration) => (
           projectSources.has(declaration.getSourceFile())
         ))) {
-          const values = assignmentValues(calleeSymbol);
+          const values = storedGuardAssignmentValues(calleeSymbol, checker, projectSources, check);
           if (!values) return true;
           expressions.push(...values);
         }
@@ -4485,7 +4514,7 @@ function isUnresolvedStoredGuardDecorator(
         ));
         if (declaration?.initializer) expressions.push(declaration.initializer);
         if (symbol.declarations?.some((entry) => projectSources.has(entry.getSourceFile()))) {
-          const values = assignmentValues(symbol);
+          const values = storedGuardAssignmentValues(symbol, checker, projectSources, check);
           if (!values) return true;
           expressions.push(...values);
         }
