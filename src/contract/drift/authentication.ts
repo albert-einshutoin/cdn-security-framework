@@ -3,10 +3,10 @@ import type { AllowedRouteRuleV1 } from '../allowed-surface';
 import type { SecurityFindingV1 } from '../finding';
 import {
   makeFinding,
-  matchingAuthRules,
   policyEvidence,
   stableFindings,
-  validateComparisonInput,
+  createComparisonContext,
+  type ComparisonContext,
   type ContractDriftInput,
 } from './shared';
 
@@ -65,7 +65,11 @@ function actualAuth(rules: readonly AllowedRouteRuleV1[], target: ContractDriftI
 }
 
 export function compareAuthContracts(input: ContractDriftInput): SecurityFindingV1[] {
-  validateComparisonInput(input);
+  return compareAuthContractsInContext(createComparisonContext(input));
+}
+
+export function compareAuthContractsInContext(context: ComparisonContext): SecurityFindingV1[] {
+  const { input } = context;
   const { declared, allowed, target } = input;
   const findings: SecurityFindingV1[] = [];
   const corsOriginCanMatch = allowed.defaults.corsPreflight.origins.kind === 'any'
@@ -74,7 +78,7 @@ export function compareAuthContracts(input: ContractDriftInput): SecurityFinding
   for (const operation of declared.operations) {
     if (allowed.defaults.requestDecision === 'block'
       && !allowed.defaults.methods.includes(operation.method)) continue;
-    const matches = matchingAuthRules(operation, allowed);
+    const matches = context.matchingAuthRules(operation);
     const bypassesAuth = (rule: AllowedRouteRuleV1) => corsOriginCanMatch
       && rule.auth.preAuthBypassMethods.includes(operation.method);
     const definiteRules = matches

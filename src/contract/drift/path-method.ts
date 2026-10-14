@@ -6,12 +6,17 @@ import {
   pathRelation,
   policyEvidence,
   stableFindings,
-  validateComparisonInput,
+  createComparisonContext,
+  type ComparisonContext,
   type ContractDriftInput,
 } from './shared';
 
 export function comparePathMethodContracts(input: ContractDriftInput): SecurityFindingV1[] {
-  validateComparisonInput(input);
+  return comparePathMethodContractsInContext(createComparisonContext(input));
+}
+
+export function comparePathMethodContractsInContext(context: ComparisonContext): SecurityFindingV1[] {
+  const { input } = context;
   const { declared, allowed } = input;
   const findings: SecurityFindingV1[] = [];
   const methodsPointer = allowed.defaults.methodSource === 'configured'

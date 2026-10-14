@@ -3,9 +3,9 @@ import type { SecurityFindingV1 } from '../finding';
 import {
   evidenceFor,
   makeFinding,
-  matchingAuthRules,
   stableFindings,
-  validateComparisonInput,
+  createComparisonContext,
+  type ComparisonContext,
   type ContractDriftInput,
 } from './shared';
 
@@ -89,7 +89,14 @@ export function compareRequestContracts(
   input: ContractDriftInput,
   options: RequestDriftOptions = {},
 ): SecurityFindingV1[] {
-  validateComparisonInput(input);
+  return compareRequestContractsInContext(createComparisonContext(input), options);
+}
+
+export function compareRequestContractsInContext(
+  context: ComparisonContext,
+  options: RequestDriftOptions = {},
+): SecurityFindingV1[] {
+  const { input } = context;
   const ratio = options.materiallyBroaderRatio ?? DEFAULT_BROADER_RATIO;
   if (!Number.isFinite(ratio) || ratio < 1 || ratio > 100) {
     throw new Error('invalid materially broader ratio');
@@ -129,7 +136,7 @@ export function compareRequestContracts(
     const requiredHeadersPointer = requiredHeaders?.source === 'configured'
       ? '/request/block/header_missing' : '/request';
     if (!preflightBypassesValidation) {
-      for (const { rule, relation } of matchingAuthRules(operation, input.allowed)) {
+      for (const { rule, relation } of context.matchingAuthRules(operation)) {
         if (relation === 'definitely-covered' && rule.auth.verifiability[input.target] === 'enforced'
           && rule.auth.credential?.location === 'header') {
           rule.auth.credential.names.forEach((header) => checkedHeaders.add(header));

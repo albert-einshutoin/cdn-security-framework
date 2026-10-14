@@ -78,6 +78,46 @@ const LOCAL_CONST_INITIALIZER_CACHE = new WeakMap<
   >
 >();
 
+type AliasDeclarationIndex = {
+  declarations: readonly ts.VariableDeclaration[];
+  readers: ReadonlyMap<ts.Symbol, readonly ts.VariableDeclaration[]>;
+};
+const ALIAS_DECLARATION_INDEX = new WeakMap<ReadonlySet<ts.SourceFile>, AliasDeclarationIndex>();
+
+function aliasDeclarationIndex(sources: ReadonlySet<ts.SourceFile>, checker: ts.TypeChecker, check: () => void): AliasDeclarationIndex {
+  const cached = ALIAS_DECLARATION_INDEX.get(sources);
+  if (cached) return cached;
+  const declarations: ts.VariableDeclaration[] = [];
+  const readers = new Map<ts.Symbol, ts.VariableDeclaration[]>();
+  const nodes: ts.Node[] = [...sources];
+  while (nodes.length) {
+    check();
+    const node = nodes.pop()!;
+    if (ts.isVariableDeclaration(node) && node.initializer) {
+      declarations.push(node);
+      // Alias-set membership is read only for a bare initializer or a member's
+      // base. Property values/types depend on the fixed receiver, not this set.
+      let expression = unwrapExpression(node.initializer);
+      while (ts.isPropertyAccessExpression(expression) || ts.isElementAccessExpression(expression)) {
+        check();
+        expression = unwrapExpression(expression.expression);
+      }
+      if (ts.isIdentifier(expression)) {
+        let symbol = checker.getSymbolAtLocation(expression);
+        if (symbol?.flags && symbol.flags & ts.SymbolFlags.Alias) symbol = checker.getAliasedSymbol(symbol);
+        if (symbol) {
+          const entries = readers.get(symbol) ?? [];
+          entries.push(node); readers.set(symbol, entries);
+        }
+      }
+    }
+    ts.forEachChild(node, child => { nodes.push(child); });
+  }
+  const index = { declarations, readers };
+  ALIAS_DECLARATION_INDEX.set(sources, index);
+  return index;
+}
+
 function callableWriteIndex(
   projectSources: ReadonlySet<ts.SourceFile>,
   checker: ts.TypeChecker,
@@ -3064,20 +3104,20 @@ export function containsStaticSymbolFrom(
             return valueSymbol === receiverSymbol;
           });
         };
-        const aliasDeclarations: ts.VariableDeclaration[] = [];
-        const aliasNodes: ts.Node[] = [...projectSources];
-        while (aliasNodes.length > 0) {
-          check();
-          const candidate = aliasNodes.pop()!;
-          if (ts.isVariableDeclaration(candidate) && candidate.initializer) {
-            aliasDeclarations.push(candidate);
+        const aliasIndex = aliasDeclarationIndex(projectSources, checker, check);
+        const queue = [...aliasIndex.declarations];
+        const pending = new Set(queue);
+        const addWrapperAlias = (alias: ts.Symbol): void => {
+          if (wrapperAliases.has(alias)) return;
+          wrapperAliases.add(alias);
+          for (const dependent of aliasIndex.readers.get(alias) ?? []) {
+            check();
+            if (!pending.has(dependent)) { pending.add(dependent); queue.push(dependent); }
           }
-          ts.forEachChild(candidate, (child) => { aliasNodes.push(child); });
-        }
-        let aliasesChanged = true;
-        while (aliasesChanged) {
-          aliasesChanged = false;
-          for (const declaration of aliasDeclarations) {
+        };
+        for (let cursor = 0; cursor < queue.length; cursor++) {
+            const declaration = queue[cursor];
+            pending.delete(declaration);
             check();
             const initializer = unwrapExpression(declaration.initializer!);
             let initializerSymbol = ts.isIdentifier(initializer)
@@ -3090,8 +3130,7 @@ export function containsStaticSymbolFrom(
             if (ts.isIdentifier(declaration.name)) {
               const alias = checker.getSymbolAtLocation(declaration.name);
               if (!alias || wrapperAliases.has(alias) || !aliasesWrapper) continue;
-              wrapperAliases.add(alias);
-              aliasesChanged = true;
+              addWrapperAlias(alias);
               continue;
             }
             if (!ts.isObjectBindingPattern(declaration.name)) continue;
@@ -3124,11 +3163,9 @@ export function containsStaticSymbolFrom(
               if (!propertyAliasesReceiver) continue;
               const alias = checker.getSymbolAtLocation(element.name);
               if (alias && !wrapperAliases.has(alias)) {
-                wrapperAliases.add(alias);
-                aliasesChanged = true;
+                addWrapperAlias(alias);
               }
             }
-          }
         }
         let wrapperMutated = false;
         const wrapperNodes: ts.Node[] = [...projectSources];

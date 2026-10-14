@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { StringDecoder } from 'node:string_decoder';
 import { redactSensitiveText } from '../contract/sensitive-text';
 
 type AnalyzeLogOptions = {
@@ -210,6 +211,28 @@ function incrementCounter(map: Record<string, number>, key: string) {
   map[key] = (map[key] || 0) + 1;
 }
 
+function* readAnalyzeLines(input: string): Generator<string> {
+  let fd: number | undefined;
+  try {
+    fd = fs.openSync(input, 'r');
+    const buffer = Buffer.allocUnsafe(64 * 1024);
+    const decoder = new StringDecoder('utf8');
+    let pending = '';
+    while (true) {
+      const count = fs.readSync(fd, buffer, 0, buffer.length, null);
+      pending += count === 0 ? decoder.end() : decoder.write(buffer.subarray(0, count));
+      let start = 0;
+      for (let end = pending.indexOf('\n'); end !== -1; end = pending.indexOf('\n', start)) {
+        yield pending.slice(start, pending[end - 1] === '\r' ? end - 1 : end);
+        start = end + 1;
+      }
+      pending = pending.slice(start);
+      if (count === 0) { yield pending; break; }
+    }
+  } catch { throw new AnalyzeError('ANALYZE_INPUT_READ_FAILED'); }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
+}
+
 export function runAnalyze(opts: AnalyzeLogOptions): AnalyzeReport {
   const cwd = process.cwd();
   const inputPath = opts.input
@@ -233,13 +256,6 @@ export function runAnalyze(opts: AnalyzeLogOptions): AnalyzeReport {
   }
 
   const report = buildEmptyAnalyzeReport(normalizeAnalyzeInput(cwd, inputPath), Math.floor(minCount), Math.floor(top));
-  let text: string;
-  try {
-    text = fs.readFileSync(inputPath, 'utf8');
-  } catch {
-    throw new AnalyzeError('ANALYZE_INPUT_READ_FAILED');
-  }
-  const lines = text.split(/\r?\n/);
   const candidateMap: Record<string, {
     policyRoute: string;
     blockReason: string;
@@ -248,7 +264,9 @@ export function runAnalyze(opts: AnalyzeLogOptions): AnalyzeReport {
     events: AnalyzeEvent[];
   }> = Object.create(null);
 
-  for (const [index, rawLine] of lines.entries()) {
+  let lineNumber = 0;
+  for (const rawLine of readAnalyzeLines(inputPath)) {
+    lineNumber += 1;
     if (!rawLine.trim()) {
       continue;
     }
@@ -257,7 +275,7 @@ export function runAnalyze(opts: AnalyzeLogOptions): AnalyzeReport {
     if (!parsed.ok) {
       report.diagnostics.total += 1;
       report.diagnostics.counts[parsed.code] += 1;
-      if (report.diagnostics.examples.length < 20) report.diagnostics.examples.push({ line: index + 1, code: parsed.code });
+      if (report.diagnostics.examples.length < 20) report.diagnostics.examples.push({ line: lineNumber, code: parsed.code });
       else report.diagnostics.omitted += 1;
       report.summary.unparseableLines += 1;
       continue;

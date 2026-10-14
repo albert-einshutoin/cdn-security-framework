@@ -130,3 +130,21 @@ export function validateComparisonInput(input: ContractDriftInput): void {
 export function normalizedPathShape(value: string): string {
   return value.replace(/\{[^{}\/]+\}/g, '{}');
 }
+
+export interface ComparisonContext {
+  input: ContractDriftInput;
+  matchingAuthRules(operation: ApiOperationContractV1): ReturnType<typeof matchingAuthRules>;
+}
+
+export function createComparisonContext(input: ContractDriftInput): ComparisonContext {
+  validateComparisonInput(input);
+  const matches = new Map<ApiOperationContractV1, ReturnType<typeof matchingAuthRules>>();
+  return {
+    input,
+    matchingAuthRules(operation) {
+      let result = matches.get(operation);
+      if (!result) { result = matchingAuthRules(operation, input.allowed); matches.set(operation, result); }
+      return result;
+    },
+  };
+}

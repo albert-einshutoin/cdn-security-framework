@@ -311,6 +311,8 @@ export class TypeScriptProjectLoadError extends Error {
   }
 }
 
+const sourceAstMetrics = new WeakMap<ts.SourceFile, { nodes: number; depth: number }>();
+
 interface CacheRead {
   value?: LoadedTypeScriptProject;
   invalidated: 0 | 1;
@@ -810,6 +812,9 @@ async function loadTypeScriptProjectInternal(
 
   const compilerOptions: ts.CompilerOptions = { ...parsed.options, noEmit: true, plugins: [] };
   const identity = projectIdentity(workspaceRoot, resolvedConfig.relative);
+  const previousProject = options.cache?.latest(identity);
+  const reuseSources = previousProject && JSON.stringify(previousProject.compilerOptions) === JSON.stringify(compilerOptions)
+    ? previousProject.program : undefined;
   const defaultHost = ts.createCompilerHost(compilerOptions, true);
   const defaultLibraryRoot = fileSystem.realpath(path.dirname(ts.getDefaultLibFilePath(compilerOptions)));
   const isStandardLibrary = (absolute: string): boolean => (
@@ -1049,6 +1054,15 @@ async function loadTypeScriptProjectInternal(
   const accountSourceFile = (sourceFile: ts.SourceFile): void => {
     if (accountedSourceFiles.has(sourceFile)) return;
     accountedSourceFiles.add(sourceFile);
+    const prior = sourceAstMetrics.get(sourceFile);
+    if (prior && prior.nodes <= limits.maxAstNodes - astNodes && prior.depth <= limits.maxAnalysisDepth) {
+      checkInterruption(options.cancellationSignal, deadline);
+      astNodes += prior.nodes;
+      maxDepth = Math.max(maxDepth, prior.depth);
+      return;
+    }
+    const beforeNodes = astNodes;
+    let sourceDepth = 0;
     const stack: Array<readonly [ts.Node, number]> = [[sourceFile, 1]];
     while (stack.length > 0) {
       checkInterruption(options.cancellationSignal, deadline);
@@ -1057,10 +1071,12 @@ async function loadTypeScriptProjectInternal(
       const [node, depth] = current;
       astNodes += 1;
       maxDepth = Math.max(maxDepth, depth);
+      sourceDepth = Math.max(sourceDepth, depth);
       if (astNodes > limits.maxAstNodes) throw new TypeScriptProjectLoadError('TS_PROJECT_AST_NODE_LIMIT');
       if (depth > limits.maxAnalysisDepth) throw new TypeScriptProjectLoadError('TS_PROJECT_DEPTH_LIMIT');
       node.forEachChild((child) => { stack.push([child, depth + 1]); });
     }
+    sourceAstMetrics.set(sourceFile, { nodes: astNodes - beforeNodes, depth: sourceDepth });
   };
   const host: ts.CompilerHost = {
     ...defaultHost,
@@ -1074,7 +1090,10 @@ async function loadTypeScriptProjectInternal(
       }
       const text = readProgramFile(candidate);
       if (text === undefined) return undefined;
-      const sourceFile = ts.createSourceFile(candidate, text, languageVersion, true);
+      const previous = reuseSources?.getSourceFile(candidate);
+      const format = typeof languageVersion === 'object' ? languageVersion.impliedNodeFormat : undefined;
+      const sourceFile = previous?.text === text && previous.impliedNodeFormat === format
+        ? previous : ts.createSourceFile(candidate, text, languageVersion, true);
       validateJsxImportSourcePragma(sourceFile, kind);
       if (kind === 'workspace' || kind === 'library') accountSourceFile(sourceFile);
       return sourceFile;
@@ -1136,7 +1155,7 @@ async function loadTypeScriptProjectInternal(
       rootNames,
       options: compilerOptions,
       host,
-      oldProgram: options.cache?.latest(identity)?.program,
+      // Resolve every import against the current filesystem, including unchanged ASTs.
     });
   } catch (error) {
     if (error instanceof TypeScriptProjectLoadError) throw error;
