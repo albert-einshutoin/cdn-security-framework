@@ -1,0 +1,1419 @@
+{
+  "schemaVersion": 1,
+  "baselineCommit": "0dcf905817ae205d970e5465bebb04d145defcea",
+  "sourceHashes": {
+    "templates/aws/viewer-request.js": "08d12c9b87e328520e38e0afe9ebb96d360ca518a39d36a077cd42ebf581460a",
+    "templates/cloudflare/index.ts": "de495c3f13ec3be901dd9330fcdfe3fe75113501232b3b57ce67e8d3c678f157",
+    "test/aws-query-normalization.test.ts": "b842d280a0a06b293c9275c89cadf164675dafb1b1801c27ef0ada9d8bc20188",
+    "test/cloudflare-body-inspection.test.ts": "4197440c019a726230fa0e9ce1bda538cb8eca20313f74b327b5798d4bdff036",
+    "src/scripts/cloudflare-http-e2e-tests.ts": "192c63e7d006a8cd0dcf33dea78a686e9120d5c4ac6e569306b8aed79ca930ea",
+    "tests/golden/archetypes/admin-panel/edge/cloudflare/index.ts": "dd6e293303e0a234329b383370e638d3be93c4a38bc0d272a04a04c1a01d7345",
+    "tests/golden/archetypes/admin-panel/edge/viewer-request.js": "921c67c4e2b43b6b3aa55721cd1d8c0767ecc33edb21f2bafd582421c66c2c6c",
+    "tests/golden/archetypes/microservice-origin/edge/cloudflare/index.ts": "9ebd163e8cc047670252cca9c52a005110d8649a0a419f2ffc114f49901e5eb7",
+    "tests/golden/archetypes/microservice-origin/edge/viewer-request.js": "3f04d4731d1703a08913d53fe396d53f730b6fa3e9e9a178f26ae3e5f12dc19d",
+    "tests/golden/archetypes/rest-api/edge/cloudflare/index.ts": "39006d6afd5ddafbc997265e651146100de8ad4427fa5e4bd3222f7bc31ccc7f",
+    "tests/golden/archetypes/spa-static-site/edge/cloudflare/index.ts": "d172695ab838fa4c470630863cfaa0dd73a3538db3c78837af3fff681d54caf2",
+    "tests/golden/archetypes/spa-static-site/edge/viewer-request.js": "3e36a6429e576a3e9b0818868300d9054b676779d12a4ba886d65d6b8405e455",
+    "tests/golden/base/edge/cloudflare/index.ts": "4ce6fbb1be5a62c3bdd510e96a3f14be2918e40b0317e447b330fcc16e8a2904",
+    "tests/golden/base/edge/viewer-request.js": "c1318d139d777567ce678ef6e203363c64937fbfe97a50d596609238b635eb40",
+    "tests/golden/profiles/balanced/edge/cloudflare/index.ts": "4ce6fbb1be5a62c3bdd510e96a3f14be2918e40b0317e447b330fcc16e8a2904",
+    "tests/golden/profiles/balanced/edge/viewer-request.js": "c1318d139d777567ce678ef6e203363c64937fbfe97a50d596609238b635eb40",
+    "tests/golden/profiles/permissive/edge/cloudflare/index.ts": "f86404c43909a5156790311d771e8e676084383bb1f627449c39b3dd17782100",
+    "tests/golden/profiles/permissive/edge/viewer-request.js": "f955d4acb42366cce491b4401656db9738417c6cb628faca7871d1b9a3e1b3cd",
+    "tests/golden/profiles/strict/edge/cloudflare/index.ts": "4aafffe46f3ebee9a5fe5bb9248e73453932e41335dcb37af60c52461ab2535e",
+    "tests/golden/profiles/strict/edge/viewer-request.js": "8a51626bf747e058052e34dddf25de0ec4a74b988f8e8b6684d8817a0eb02457"
+  },
+  "inventory": {
+    "files": 145,
+    "lines": 55656,
+    "functionBodies": 3715,
+    "exactDuplicateGroups": 5,
+    "method": "Read-only TypeScript AST inventory and identical-token function bodies >=80 tokens. Not semantic equivalence proof; test helpers excluded from duplicate ranking."
+  },
+  "benchmark": {
+    "head": "0dcf905817ae205d970e5465bebb04d145defcea",
+    "environment": {
+      "node": "v24.2.0",
+      "platform": "darwin",
+      "arch": "arm64"
+    },
+    "methodology": "Local Node native Request/Response and WebCrypto; generated code, stub origin, no network. Per-request wall and whole-process CPU include construction and response drain. Five sequential warm batches; cold recorded separately. Not CloudFront/Cloudflare production CPU or TTFB. Baseline templates copied before edits; compiler identical.",
+    "sourceHashes": {
+      "templates/aws/viewer-request.js": "08d12c9b87e328520e38e0afe9ebb96d360ca518a39d36a077cd42ebf581460a",
+      "templates/cloudflare/index.ts": "de495c3f13ec3be901dd9330fcdfe3fe75113501232b3b57ce67e8d3c678f157",
+      "src/scripts/compile-cloudflare.ts": "31e14d06f4c15c0d1aa0033815aab3108cf34a4ca05c7396d7b92d918c55e976",
+      "src/scripts/lib/compile-core.ts": "f8f9365efa5ade736afd78b1ddb5c6685a5c5c93c0855a6ce7602ab1b47abdf7"
+    },
+    "harnessSha256": "d9eb313e143beb99bcd7f95129bf6e3039ce80c8a4742a7ed626255bbe5cfdaa",
+    "generated": [
+      {
+        "target": "aws",
+        "phase": "before",
+        "policySha256": "d4f6ec6a5def8368a936fc883c8762308339b65ea35293339f89d3de2f4874b7",
+        "sourceSha256": "e7b106099c7d60bdbb35c20df6e8dc759b84590444e2d0a55d90875d20708473",
+        "bytes": 8079
+      },
+      {
+        "target": "aws",
+        "phase": "after",
+        "policySha256": "d4f6ec6a5def8368a936fc883c8762308339b65ea35293339f89d3de2f4874b7",
+        "sourceSha256": "5af00a36535902466671e8c76295ac55b0d03e44dfa73b9f180fba5f4f58475a",
+        "bytes": 8096
+      },
+      {
+        "target": "aws",
+        "phase": "before",
+        "policySha256": "3b021bb175b4e557b35b8277fd4b9141a3d9fba681f038f5e3dcdde761414548",
+        "sourceSha256": "a2987292bf801c1ab3ce045c8a9e9dbdf926b6456ac7f802a3ad2a05fa5fbe37",
+        "bytes": 9603
+      },
+      {
+        "target": "aws",
+        "phase": "after",
+        "policySha256": "3b021bb175b4e557b35b8277fd4b9141a3d9fba681f038f5e3dcdde761414548",
+        "sourceSha256": "bf867ad9153fc44d34a79fa6c9951e6743a1b25bcb9cbb8d83f23bd1e07ed903",
+        "bytes": 9620
+      },
+      {
+        "target": "aws",
+        "phase": "before",
+        "policySha256": "78f223cc8fcdcba950b972e4d9a2ea56994d2b4254fa73f7053422b33a279aa3",
+        "sourceSha256": "71ea9baed3eed6ec30ec9f02a138fa78fc23a280ae145e234a5e61db0ab0ec72",
+        "bytes": 9979
+      },
+      {
+        "target": "aws",
+        "phase": "after",
+        "policySha256": "78f223cc8fcdcba950b972e4d9a2ea56994d2b4254fa73f7053422b33a279aa3",
+        "sourceSha256": "e4068d8ef9a32dd5fb415912905da2df9693d5afb183d883c543d13bf3c43e51",
+        "bytes": 9996
+      },
+      {
+        "target": "aws",
+        "phase": "after",
+        "policySha256": "8ab6c7189bcd2b7f14d64d408678fe30e28a7d55f205035ae9abd71ccda8d165",
+        "sourceSha256": "5af00a36535902466671e8c76295ac55b0d03e44dfa73b9f180fba5f4f58475a",
+        "bytes": 8096
+      },
+      {
+        "target": "aws",
+        "phase": "after",
+        "policySha256": "8ab6c7189bcd2b7f14d64d408678fe30e28a7d55f205035ae9abd71ccda8d165",
+        "sourceSha256": "5af00a36535902466671e8c76295ac55b0d03e44dfa73b9f180fba5f4f58475a",
+        "bytes": 8096
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "d4f6ec6a5def8368a936fc883c8762308339b65ea35293339f89d3de2f4874b7",
+        "sourceSha256": "fc8988beeb4999f30a1ef2128a3cd741b108f4590f55353f8a29cd8539d74caa",
+        "bytes": 71225
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "c5d0701d545f3fdf4dbd7cad177946e671306cc7da00272fe7b1df652e2d8121",
+        "sourceSha256": "e0af51697b053d10a40b8afc501be153504ebb56330522543414f91117f61429",
+        "bytes": 85977
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "c5d0701d545f3fdf4dbd7cad177946e671306cc7da00272fe7b1df652e2d8121",
+        "sourceSha256": "e0af51697b053d10a40b8afc501be153504ebb56330522543414f91117f61429",
+        "bytes": 85977
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "691fba439a262d84e8871528b73cb498f6ff3bbde2544395e6fa67027f97723d",
+        "sourceSha256": "cedd2f9afab7c8bd51e5ff191eac10b094c87c6db28f42ad335cd2ca7c1b14d9",
+        "bytes": 146377
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "691fba439a262d84e8871528b73cb498f6ff3bbde2544395e6fa67027f97723d",
+        "sourceSha256": "cedd2f9afab7c8bd51e5ff191eac10b094c87c6db28f42ad335cd2ca7c1b14d9",
+        "bytes": 146377
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "dbc2dae866f9843d71a09831712fe12303d52c6a108ed8de6db80168b9309f04",
+        "sourceSha256": "04597c8d2228aaf7bb494d4210ff580bad64cfc5c608da3443a839fc6db3ee03",
+        "bytes": 71450
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "e98bd5e30eea59d251ca5b27f9ce2c624dcaca2c62407c57180f4de0a144fd81",
+        "sourceSha256": "834d4b44ae8fef85556262399540d464b7273c51efab7d2c8b19c7d1c058c99f",
+        "bytes": 71467
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "fc685a8f1b090df6228216a52521de30e00f01d838bac25a6636e4eff6c8569c",
+        "sourceSha256": "eb83cbef0d9851eecbd14faa69501730d01f0c11cd3d330be7e3f3524051c5d0",
+        "bytes": 71333
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "fc685a8f1b090df6228216a52521de30e00f01d838bac25a6636e4eff6c8569c",
+        "sourceSha256": "eb83cbef0d9851eecbd14faa69501730d01f0c11cd3d330be7e3f3524051c5d0",
+        "bytes": 71333
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "b1771b202414c0d180c958e3e7131cdab79b254191c3c42a25130d4a592cf9dc",
+        "sourceSha256": "431fd65e1e8d4cd877c4e2f29968cfc555ab5029c54b767d1c8fc3785dc1152f",
+        "bytes": 71155
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "b1771b202414c0d180c958e3e7131cdab79b254191c3c42a25130d4a592cf9dc",
+        "sourceSha256": "431fd65e1e8d4cd877c4e2f29968cfc555ab5029c54b767d1c8fc3785dc1152f",
+        "bytes": 71155
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "1f23c623845908a9775f8249d5fcdac5c3b6a4202fbf0f6c974e6cae1b516c06",
+        "sourceSha256": "a83068457b0e313879867a08acf89fcb899f9eaee1a390b68858b81f307b2f01",
+        "bytes": 71148
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "1f23c623845908a9775f8249d5fcdac5c3b6a4202fbf0f6c974e6cae1b516c06",
+        "sourceSha256": "a83068457b0e313879867a08acf89fcb899f9eaee1a390b68858b81f307b2f01",
+        "bytes": 71148
+      },
+      {
+        "target": "cf",
+        "phase": "after",
+        "policySha256": "f579c3e1901afe2c3e8dc27ec65e4dc15c8610aac93a2723a6c450c7a0e67913",
+        "sourceSha256": "882166df740173a1e66fcfe909fcc090eb716144e82b9e57b758dedbab4e6f8f",
+        "bytes": 71300
+      }
+    ],
+    "rejectedConfigurations": [
+      {
+        "target": "aws",
+        "phase": "before",
+        "routes": 10,
+        "reason": "viewer-request.js is 11295 bytes after optimization; CloudFront Functions allow at most 10240 bytes"
+      },
+      {
+        "target": "aws",
+        "phase": "after",
+        "routes": 10,
+        "reason": "viewer-request.js is 11312 bytes after optimization; CloudFront Functions allow at most 10240 bytes"
+      }
+    ],
+    "unmeasuredWorkloads": [
+      {
+        "name": "cf-origin-body-hash-1048576",
+        "status": "failed-in-node-harness",
+        "reason": "Repeated Response body object should not be disturbed or locked; isolated generated Worker probe also failed at iteration 96. Native workerd proof is separate in origin-hash-workerd.json; no Node latency is claimed."
+      }
+    ],
+    "results": [
+      {
+        "name": "aws-before-routes-0",
+        "countPerBatch": 2000,
+        "batches": 5,
+        "coldMs": 0.4070419999999899,
+        "wallMsPerRequest": {
+          "mean": 0.0009103207999999995,
+          "min": 0.0006861459999999937,
+          "median": 0.0008191874999999982,
+          "max": 0.0012014585000000011,
+          "samples": [
+            0.0012014585000000011,
+            0.0010900414999999981,
+            0.0007547705000000064,
+            0.0006861459999999937,
+            0.0008191874999999982
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.0015290000000000002,
+          "min": 0.0012230000000000001,
+          "median": 0.001292,
+          "max": 0.0021265,
+          "samples": [
+            0.0021265,
+            0.0012875,
+            0.001292,
+            0.0012230000000000001,
+            0.001716
+          ]
+        }
+      },
+      {
+        "name": "aws-after-routes-0",
+        "countPerBatch": 2000,
+        "batches": 5,
+        "coldMs": 0.2696250000000191,
+        "wallMsPerRequest": {
+          "mean": 0.0009388457999999957,
+          "min": 0.0006664580000000057,
+          "median": 0.0008864580000000047,
+          "max": 0.0013402084999999885,
+          "samples": [
+            0.0013402084999999885,
+            0.0008855834999999956,
+            0.0008864580000000047,
+            0.0006664580000000057,
+            0.000915520999999984
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.0016072,
+          "min": 0.000896,
+          "median": 0.001863,
+          "max": 0.0022545,
+          "samples": [
+            0.0022545,
+            0.001019,
+            0.001863,
+            0.000896,
+            0.0020034999999999996
+          ]
+        }
+      },
+      {
+        "name": "aws-before-routes-1",
+        "countPerBatch": 2000,
+        "batches": 5,
+        "coldMs": 0.26175000000000637,
+        "wallMsPerRequest": {
+          "mean": 0.0009887083999999958,
+          "min": 0.0008241045000000043,
+          "median": 0.0008859999999999957,
+          "max": 0.001211500000000001,
+          "samples": [
+            0.001211500000000001,
+            0.0008859999999999957,
+            0.0011774164999999925,
+            0.0008241045000000043,
+            0.0008445209999999861
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.0018806,
+          "min": 0.001304,
+          "median": 0.002095,
+          "max": 0.0024045,
+          "samples": [
+            0.0024045,
+            0.001304,
+            0.0022519999999999997,
+            0.0013475,
+            0.002095
+          ]
+        }
+      },
+      {
+        "name": "aws-after-routes-1",
+        "countPerBatch": 2000,
+        "batches": 5,
+        "coldMs": 0.2682909999999765,
+        "wallMsPerRequest": {
+          "mean": 0.0010514456999999992,
+          "min": 0.0007050624999999968,
+          "median": 0.0008591665000000148,
+          "max": 0.0015673329999999909,
+          "samples": [
+            0.0015673329999999909,
+            0.0013966039999999964,
+            0.0008591665000000148,
+            0.0007290624999999977,
+            0.0007050624999999968
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.0018225000000000001,
+          "min": 0.0007375000000000001,
+          "median": 0.001627,
+          "max": 0.002891,
+          "samples": [
+            0.002891,
+            0.001627,
+            0.0015235000000000001,
+            0.0007375000000000001,
+            0.0023335
+          ]
+        }
+      },
+      {
+        "name": "aws-before-routes-3",
+        "countPerBatch": 2000,
+        "batches": 5,
+        "coldMs": 0.2565420000000813,
+        "wallMsPerRequest": {
+          "mean": 0.0009991750000000023,
+          "min": 0.0006918959999999856,
+          "median": 0.0009396875000000478,
+          "max": 0.0014675624999999854,
+          "samples": [
+            0.0014675624999999854,
+            0.0009699999999999705,
+            0.0009396875000000478,
+            0.0006918959999999856,
+            0.000926729000000023
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.0018197999999999999,
+          "min": 0.000844,
+          "median": 0.0016005,
+          "max": 0.0025945,
+          "samples": [
+            0.0025945,
+            0.0015565,
+            0.0025034999999999996,
+            0.000844,
+            0.0016005
+          ]
+        }
+      },
+      {
+        "name": "aws-after-routes-3",
+        "countPerBatch": 2000,
+        "batches": 5,
+        "coldMs": 0.2819170000000213,
+        "wallMsPerRequest": {
+          "mean": 0.0010441790999999967,
+          "min": 0.0006942500000000109,
+          "median": 0.0009751454999999964,
+          "max": 0.0014443959999999834,
+          "samples": [
+            0.0014443959999999834,
+            0.0009751454999999964,
+            0.0012282289999999989,
+            0.0006942500000000109,
+            0.0008788749999999936
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.0017801000000000002,
+          "min": 0.000704,
+          "median": 0.00182,
+          "max": 0.0024980000000000002,
+          "samples": [
+            0.0024980000000000002,
+            0.001418,
+            0.0024605,
+            0.000704,
+            0.00182
+          ]
+        }
+      },
+      {
+        "name": "aws-query-0",
+        "countPerBatch": 1000,
+        "batches": 5,
+        "coldMs": 0.3229160000000775,
+        "wallMsPerRequest": {
+          "mean": 0.0012676831999999876,
+          "min": 0.0008507919999999558,
+          "median": 0.0009051660000000083,
+          "max": 0.002313332999999943,
+          "samples": [
+            0.002313332999999943,
+            0.0009051660000000083,
+            0.0008507919999999558,
+            0.0008611250000000154,
+            0.0014080000000000154
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.0018289999999999997,
+          "min": 0.000877,
+          "median": 0.001554,
+          "max": 0.004006999999999999,
+          "samples": [
+            0.004006999999999999,
+            0.0009459999999999999,
+            0.000877,
+            0.001554,
+            0.001761
+          ]
+        }
+      },
+      {
+        "name": "aws-query-100",
+        "countPerBatch": 1000,
+        "batches": 5,
+        "coldMs": 0.24499999999989086,
+        "wallMsPerRequest": {
+          "mean": 0.06322596680000006,
+          "min": 0.06081245899999999,
+          "median": 0.06244100000000003,
+          "max": 0.0663721250000001,
+          "samples": [
+            0.06434887500000014,
+            0.0663721250000001,
+            0.06215537500000005,
+            0.06081245899999999,
+            0.06244100000000003
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.06239420000000001,
+          "min": 0.059051,
+          "median": 0.061016,
+          "max": 0.068685,
+          "samples": [
+            0.068685,
+            0.063099,
+            0.06012,
+            0.059051,
+            0.061016
+          ]
+        }
+      },
+      {
+        "name": "cf-routes-0-public",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 9.758749999999964,
+        "wallMsPerRequest": {
+          "mean": 0.025837750000000142,
+          "min": 0.0162793750000003,
+          "median": 0.026762290000000348,
+          "max": 0.04248646000000008,
+          "samples": [
+            0.04248646000000008,
+            0.026762290000000348,
+            0.02679875000000038,
+            0.0162793750000003,
+            0.0168618749999996
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.046345,
+          "min": 0.019085,
+          "median": 0.050515,
+          "max": 0.072115,
+          "samples": [
+            0.072115,
+            0.050515,
+            0.06325,
+            0.019085,
+            0.026760000000000003
+          ]
+        },
+        "importKeyCalls": 0,
+        "jwksCalls": 0
+      },
+      {
+        "name": "cf-routes-100-public",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 0.9205829999998514,
+        "wallMsPerRequest": {
+          "mean": 0.02658687399999985,
+          "min": 0.020239789999999404,
+          "median": 0.029859579999999823,
+          "max": 0.03134103999999979,
+          "samples": [
+            0.03134103999999979,
+            0.029859579999999823,
+            0.021175210000000107,
+            0.030318750000000137,
+            0.020239789999999404
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.047693,
+          "min": 0.028384999999999997,
+          "median": 0.0356,
+          "max": 0.07484,
+          "samples": [
+            0.07013,
+            0.02951,
+            0.028384999999999997,
+            0.07484,
+            0.0356
+          ]
+        },
+        "importKeyCalls": 0,
+        "jwksCalls": 0
+      },
+      {
+        "name": "cf-routes-100-last-auth",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 0.9398329999999078,
+        "wallMsPerRequest": {
+          "mean": 0.028290624999999864,
+          "min": 0.024117915000000493,
+          "median": 0.028004584999999905,
+          "max": 0.0344237499999997,
+          "samples": [
+            0.0344237499999997,
+            0.026064999999999828,
+            0.028841874999999392,
+            0.028004584999999905,
+            0.024117915000000493
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.06119000000000001,
+          "min": 0.038025,
+          "median": 0.061255,
+          "max": 0.09109500000000001,
+          "samples": [
+            0.09109500000000001,
+            0.038025,
+            0.061255,
+            0.06519,
+            0.050385
+          ]
+        },
+        "importKeyCalls": 0,
+        "jwksCalls": 0
+      },
+      {
+        "name": "cf-routes-500-public",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 1.300000000000182,
+        "wallMsPerRequest": {
+          "mean": 0.04788008500000024,
+          "min": 0.04111396000000014,
+          "median": 0.049995000000001254,
+          "max": 0.053806459999998425,
+          "samples": [
+            0.05250896000000012,
+            0.049995000000001254,
+            0.053806459999998425,
+            0.04111396000000014,
+            0.04197604500000125
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.08206699999999999,
+          "min": 0.047104999999999994,
+          "median": 0.10047,
+          "max": 0.112005,
+          "samples": [
+            0.101425,
+            0.10047,
+            0.112005,
+            0.04933,
+            0.047104999999999994
+          ]
+        },
+        "importKeyCalls": 0,
+        "jwksCalls": 0
+      },
+      {
+        "name": "cf-routes-500-last-auth",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 1.2411660000002485,
+        "wallMsPerRequest": {
+          "mean": 0.05725649900000007,
+          "min": 0.05144228999999996,
+          "median": 0.05901291499999843,
+          "max": 0.06361437500000193,
+          "samples": [
+            0.05901291499999843,
+            0.05930833500000063,
+            0.06361437500000193,
+            0.05144228999999996,
+            0.052904579999999445
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.085455,
+          "min": 0.050140000000000004,
+          "median": 0.09516999999999999,
+          "max": 0.11724,
+          "samples": [
+            0.09516999999999999,
+            0.114375,
+            0.11724,
+            0.050140000000000004,
+            0.05035
+          ]
+        },
+        "importKeyCalls": 0,
+        "jwksCalls": 0
+      },
+      {
+        "name": "cf-jwt-HS256",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 1.7770000000000437,
+        "wallMsPerRequest": {
+          "mean": 0.04874024999999938,
+          "min": 0.04070354499999894,
+          "median": 0.04926166499999909,
+          "max": 0.058959585000000064,
+          "samples": [
+            0.058959585000000064,
+            0.052110414999999646,
+            0.04926166499999909,
+            0.04070354499999894,
+            0.042666039999999156
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.081839,
+          "min": 0.041740000000000006,
+          "median": 0.076515,
+          "max": 0.14737,
+          "samples": [
+            0.14737,
+            0.076515,
+            0.077385,
+            0.066185,
+            0.041740000000000006
+          ]
+        },
+        "importKeyCalls": 1031,
+        "jwksCalls": 0
+      },
+      {
+        "name": "cf-jwt-RS256",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 2.1300420000002305,
+        "wallMsPerRequest": {
+          "mean": 0.07279275099999996,
+          "min": 0.06901853999999957,
+          "median": 0.07298791999999821,
+          "max": 0.07587312500000053,
+          "samples": [
+            0.07587312500000053,
+            0.07073624999999993,
+            0.07534792000000153,
+            0.06901853999999957,
+            0.07298791999999821
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.08728100000000001,
+          "min": 0.08122,
+          "median": 0.08526,
+          "max": 0.09733499999999999,
+          "samples": [
+            0.090175,
+            0.08526,
+            0.082415,
+            0.08122,
+            0.09733499999999999
+          ]
+        },
+        "importKeyCalls": 1031,
+        "jwksCalls": 1
+      },
+      {
+        "name": "cf-graphql-1024",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 2.3272500000002765,
+        "wallMsPerRequest": {
+          "mean": 0.04114975000000005,
+          "min": 0.037351459999999864,
+          "median": 0.03874729500000058,
+          "max": 0.04823437500000182,
+          "samples": [
+            0.04823437500000182,
+            0.03874729500000058,
+            0.03850145499999826,
+            0.042914164999999685,
+            0.037351459999999864
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.064268,
+          "min": 0.042275,
+          "median": 0.066675,
+          "max": 0.08033,
+          "samples": [
+            0.066675,
+            0.05739,
+            0.07467,
+            0.08033,
+            0.042275
+          ]
+        },
+        "importKeyCalls": 0,
+        "jwksCalls": 0
+      },
+      {
+        "name": "cf-graphql-32768",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 1.0732910000001539,
+        "wallMsPerRequest": {
+          "mean": 0.11834216600000036,
+          "min": 0.11326125000000048,
+          "median": 0.11598729000000048,
+          "max": 0.1281877099999997,
+          "samples": [
+            0.1281877099999997,
+            0.119425205,
+            0.11326125000000048,
+            0.11598729000000048,
+            0.11484937500000114
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.14790799999999998,
+          "min": 0.12946,
+          "median": 0.14639,
+          "max": 0.179815,
+          "samples": [
+            0.179815,
+            0.14639,
+            0.130195,
+            0.15368,
+            0.12946
+          ]
+        },
+        "importKeyCalls": 0,
+        "jwksCalls": 0
+      },
+      {
+        "name": "cf-dlp-report_only-4096",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 1.0829170000001795,
+        "wallMsPerRequest": {
+          "mean": 0.045874249999999395,
+          "min": 0.04120999999999867,
+          "median": 0.04531271000000061,
+          "max": 0.0498608349999995,
+          "samples": [
+            0.0498608349999995,
+            0.04120999999999867,
+            0.04817041499999959,
+            0.04531271000000061,
+            0.044817289999998594
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.067387,
+          "min": 0.051550000000000006,
+          "median": 0.060925,
+          "max": 0.090555,
+          "samples": [
+            0.090555,
+            0.051550000000000006,
+            0.074205,
+            0.060925,
+            0.059699999999999996
+          ]
+        },
+        "importKeyCalls": 0,
+        "jwksCalls": 0
+      },
+      {
+        "name": "cf-dlp-report_only-65536",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 1.7930420000002414,
+        "wallMsPerRequest": {
+          "mean": 0.27252295899999945,
+          "min": 0.2622347949999994,
+          "median": 0.26382916499999737,
+          "max": 0.2977458350000006,
+          "samples": [
+            0.2977458350000006,
+            0.2764035399999989,
+            0.262401460000001,
+            0.2622347949999994,
+            0.26382916499999737
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.302027,
+          "min": 0.262335,
+          "median": 0.284775,
+          "max": 0.410565,
+          "samples": [
+            0.410565,
+            0.284775,
+            0.28586500000000004,
+            0.262335,
+            0.266595
+          ]
+        },
+        "importKeyCalls": 0,
+        "jwksCalls": 0
+      },
+      {
+        "name": "cf-dlp-mask-4096",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 0.9849169999997684,
+        "wallMsPerRequest": {
+          "mean": 0.05070450000000073,
+          "min": 0.046119790000002464,
+          "median": 0.050720625000003565,
+          "max": 0.054064999999995964,
+          "samples": [
+            0.054064999999995964,
+            0.05270562500000324,
+            0.04991145999999844,
+            0.050720625000003565,
+            0.046119790000002464
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.06503900000000001,
+          "min": 0.045090000000000005,
+          "median": 0.066065,
+          "max": 0.080225,
+          "samples": [
+            0.05899,
+            0.066065,
+            0.080225,
+            0.074825,
+            0.045090000000000005
+          ]
+        },
+        "importKeyCalls": 0,
+        "jwksCalls": 0
+      },
+      {
+        "name": "cf-dlp-mask-65536",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 1.893000000000029,
+        "wallMsPerRequest": {
+          "mean": 0.33777870800000076,
+          "min": 0.3161627099999987,
+          "median": 0.3384110400000009,
+          "max": 0.35679854500000147,
+          "samples": [
+            0.3384110400000009,
+            0.35679854500000147,
+            0.33460583000000044,
+            0.3161627099999987,
+            0.3429154150000022
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.387819,
+          "min": 0.32462,
+          "median": 0.37954,
+          "max": 0.45984,
+          "samples": [
+            0.37954,
+            0.45984,
+            0.32462,
+            0.327495,
+            0.4476
+          ]
+        },
+        "importKeyCalls": 0,
+        "jwksCalls": 0
+      },
+      {
+        "name": "cf-origin-body-hash-0",
+        "countPerBatch": 200,
+        "batches": 5,
+        "coldMs": 5.395792000000256,
+        "wallMsPerRequest": {
+          "mean": 0.13875529299999925,
+          "min": 0.06774333500000011,
+          "median": 0.07803499999999985,
+          "max": 0.39515416999999614,
+          "samples": [
+            0.07803499999999985,
+            0.07346270999999888,
+            0.07938125000000128,
+            0.39515416999999614,
+            0.06774333500000011
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 0.103872,
+          "min": 0.075155,
+          "median": 0.095665,
+          "max": 0.144515,
+          "samples": [
+            0.095665,
+            0.093525,
+            0.1105,
+            0.144515,
+            0.075155
+          ]
+        },
+        "importKeyCalls": 1031,
+        "jwksCalls": 0
+      },
+      {
+        "name": "tooling-validate-policy",
+        "countPerBatch": 10,
+        "batches": 5,
+        "coldMs": 33.71049999999923,
+        "wallMsPerRequest": {
+          "mean": 10.015553299999993,
+          "min": 9.264129099999991,
+          "median": 9.984050000000025,
+          "max": 10.958012499999949,
+          "samples": [
+            10.09598329999999,
+            9.984050000000025,
+            9.775591600000007,
+            10.958012499999949,
+            9.264129099999991
+          ]
+        },
+        "processCpuMsPerRequest": {
+          "mean": 11.31078,
+          "min": 9.4755,
+          "median": 10.8463,
+          "max": 15.1842,
+          "samples": [
+            15.1842,
+            10.8463,
+            10.0589,
+            10.989,
+            9.4755
+          ]
+        }
+      }
+    ]
+  },
+  "validation": {
+    "full": {
+      "command": "EDGE_ADMIN_TOKEN=<README dummy> npm run test:ci",
+      "exitCode": 0,
+      "signal": null,
+      "elapsedMs": 148909.225333
+    },
+    "vitest": {
+      "files": 36,
+      "tests": 644
+    },
+    "previousFull": {
+      "command": "EDGE_ADMIN_TOKEN=<README dummy> npm run test:ci",
+      "exitCode": 1,
+      "signal": null,
+      "elapsedMs": 15436.780541999999
+    },
+    "goldens": {
+      "command": "node scripts/check-drift.js --update",
+      "generatedFiles": 15,
+      "cloudflare": 8,
+      "aws": 7,
+      "results": [
+        {
+          "file": "tests/golden/archetypes/admin-panel/edge/cloudflare/index.ts",
+          "status": "passed",
+          "method": "exact expected text replacement",
+          "sha256": "dd6e293303e0a234329b383370e638d3be93c4a38bc0d272a04a04c1a01d7345"
+        },
+        {
+          "file": "tests/golden/archetypes/admin-panel/edge/viewer-request.js",
+          "status": "passed",
+          "method": "expected dictionary replacement; AST comparison with bound identifiers normalized",
+          "sha256": "921c67c4e2b43b6b3aa55721cd1d8c0767ecc33edb21f2bafd582421c66c2c6c"
+        },
+        {
+          "file": "tests/golden/archetypes/microservice-origin/edge/cloudflare/index.ts",
+          "status": "passed",
+          "method": "exact expected text replacement",
+          "sha256": "9ebd163e8cc047670252cca9c52a005110d8649a0a419f2ffc114f49901e5eb7"
+        },
+        {
+          "file": "tests/golden/archetypes/microservice-origin/edge/viewer-request.js",
+          "status": "passed",
+          "method": "expected dictionary replacement; AST comparison with bound identifiers normalized",
+          "sha256": "3f04d4731d1703a08913d53fe396d53f730b6fa3e9e9a178f26ae3e5f12dc19d"
+        },
+        {
+          "file": "tests/golden/archetypes/rest-api/edge/cloudflare/index.ts",
+          "status": "passed",
+          "method": "exact expected text replacement",
+          "sha256": "39006d6afd5ddafbc997265e651146100de8ad4427fa5e4bd3222f7bc31ccc7f"
+        },
+        {
+          "file": "tests/golden/archetypes/spa-static-site/edge/cloudflare/index.ts",
+          "status": "passed",
+          "method": "exact expected text replacement",
+          "sha256": "d172695ab838fa4c470630863cfaa0dd73a3538db3c78837af3fff681d54caf2"
+        },
+        {
+          "file": "tests/golden/archetypes/spa-static-site/edge/viewer-request.js",
+          "status": "passed",
+          "method": "expected dictionary replacement; AST comparison with bound identifiers normalized",
+          "sha256": "3e36a6429e576a3e9b0818868300d9054b676779d12a4ba886d65d6b8405e455"
+        },
+        {
+          "file": "tests/golden/base/edge/cloudflare/index.ts",
+          "status": "passed",
+          "method": "exact expected text replacement",
+          "sha256": "4ce6fbb1be5a62c3bdd510e96a3f14be2918e40b0317e447b330fcc16e8a2904"
+        },
+        {
+          "file": "tests/golden/base/edge/viewer-request.js",
+          "status": "passed",
+          "method": "expected dictionary replacement; AST comparison with bound identifiers normalized",
+          "sha256": "c1318d139d777567ce678ef6e203363c64937fbfe97a50d596609238b635eb40"
+        },
+        {
+          "file": "tests/golden/profiles/balanced/edge/cloudflare/index.ts",
+          "status": "passed",
+          "method": "exact expected text replacement",
+          "sha256": "4ce6fbb1be5a62c3bdd510e96a3f14be2918e40b0317e447b330fcc16e8a2904"
+        },
+        {
+          "file": "tests/golden/profiles/balanced/edge/viewer-request.js",
+          "status": "passed",
+          "method": "expected dictionary replacement; AST comparison with bound identifiers normalized",
+          "sha256": "c1318d139d777567ce678ef6e203363c64937fbfe97a50d596609238b635eb40"
+        },
+        {
+          "file": "tests/golden/profiles/permissive/edge/cloudflare/index.ts",
+          "status": "passed",
+          "method": "exact expected text replacement",
+          "sha256": "f86404c43909a5156790311d771e8e676084383bb1f627449c39b3dd17782100"
+        },
+        {
+          "file": "tests/golden/profiles/permissive/edge/viewer-request.js",
+          "status": "passed",
+          "method": "expected dictionary replacement; AST comparison with bound identifiers normalized",
+          "sha256": "f955d4acb42366cce491b4401656db9738417c6cb628faca7871d1b9a3e1b3cd"
+        },
+        {
+          "file": "tests/golden/profiles/strict/edge/cloudflare/index.ts",
+          "status": "passed",
+          "method": "exact expected text replacement",
+          "sha256": "4aafffe46f3ebee9a5fe5bb9248e73453932e41335dcb37af60c52461ab2535e"
+        },
+        {
+          "file": "tests/golden/profiles/strict/edge/viewer-request.js",
+          "status": "passed",
+          "method": "expected dictionary replacement; AST comparison with bound identifiers normalized",
+          "sha256": "8a51626bf747e058052e34dddf25de0ec4a74b988f8e8b6684d8817a0eb02457"
+        }
+      ]
+    },
+    "http": {
+      "status": "pass",
+      "cases": 46,
+      "jwksCases": 50,
+      "cleanup": {
+        "runtimeExited": true,
+        "originClosed": true,
+        "tempRemoved": true,
+        "workerPortClosed": true,
+        "originPortClosed": true
+      }
+    },
+    "nativeOriginHash": {
+      "status": "passed",
+      "cases": [
+        {
+          "bodyBytes": 1024,
+          "requests": 110,
+          "warmSamples": 100,
+          "wallMs": [
+            0.48604199999999764,
+            0.5263749999999732,
+            0.5481670000000349,
+            0.4466249999999832,
+            0.4872090000000071,
+            0.43375000000003183,
+            0.7993329999999901,
+            1.2218330000000037,
+            0.5958749999999782,
+            0.45799999999997,
+            0.5736670000000004,
+            0.47254200000003266,
+            1.024959000000024,
+            0.5792079999999942,
+            0.5066669999999931,
+            0.5149999999999864,
+            0.4505829999999946,
+            0.4356250000000159,
+            0.3682089999999789,
+            0.4115419999999972,
+            0.5825000000000387,
+            0.46674999999999045,
+            2.3698340000000258,
+            0.4156250000000341,
+            1.0868750000000205,
+            0.5333330000000274,
+            0.5955000000000155,
+            3.477041999999983,
+            1.3673339999999712,
+            0.7200420000000349,
+            0.5512499999999818,
+            2.3147500000000036,
+            0.5784590000000094,
+            1.0617500000000177,
+            0.7560000000000286,
+            0.5158750000000509,
+            0.41124999999999545,
+            0.3725000000000023,
+            0.9785840000000121,
+            0.40641699999997627,
+            0.3707499999999868,
+            0.4947499999999536,
+            0.3751659999999788,
+            0.37162499999999454,
+            0.46591699999999037,
+            0.427708999999993,
+            0.3177919999999972,
+            0.2688330000000292,
+            0.30637500000000273,
+            0.3660419999999931,
+            0.4249580000000037,
+            0.43695900000000165,
+            0.4314170000000104,
+            0.39879099999996015,
+            0.3980409999999779,
+            0.3672499999999559,
+            0.33791700000000446,
+            0.34504200000003493,
+            0.40108299999997143,
+            0.9195829999999887,
+            0.3830829999999992,
+            0.3813329999999837,
+            0.38574999999997317,
+            0.43320899999997664,
+            0.3991659999999797,
+            0.44766600000002654,
+            0.8146659999999883,
+            0.3342079999999896,
+            0.3375419999999849,
+            0.3956660000000056,
+            0.5636250000000018,
+            0.3414579999999887,
+            0.3691249999999968,
+            0.39133300000003146,
+            0.8247499999999945,
+            0.43241599999998925,
+            0.36412500000000136,
+            0.34854199999995217,
+            0.3136669999999526,
+            0.3068749999999909,
+            0.27391700000003993,
+            0.2911669999999731,
+            0.353917000000024,
+            0.34524999999996453,
+            0.4029170000000022,
+            0.8304160000000138,
+            0.2970830000000433,
+            0.28804200000001856,
+            0.3557920000000081,
+            0.3862500000000182,
+            0.36299999999999955,
+            0.3384590000000003,
+            0.35504200000002584,
+            0.3375000000000341,
+            0.39229199999999764,
+            1.0562920000000418,
+            0.59212500000001,
+            0.31024999999999636,
+            0.33216700000002675,
+            0.4367920000000254
+          ],
+          "meanMs": 0.560357560000001,
+          "minMs": 0.2688330000000292,
+          "maxMs": 3.477041999999983
+        },
+        {
+          "bodyBytes": 1048576,
+          "requests": 110,
+          "warmSamples": 100,
+          "wallMs": [
+            3.398584000000028,
+            3.209000000000003,
+            3.3675830000000246,
+            3.421042,
+            2.9852500000000077,
+            3.2008749999999964,
+            2.8955830000000446,
+            3.394042000000013,
+            3.0594169999999963,
+            3.260499999999979,
+            3.547457999999949,
+            3.1064590000000294,
+            2.945083000000011,
+            3.242457999999999,
+            3.4047919999999863,
+            3.0777499999999804,
+            2.8442079999999805,
+            3.640207999999973,
+            3.3373750000000086,
+            3.119457999999952,
+            3.6085840000000076,
+            3.0203750000000014,
+            3.7803749999999923,
+            3.1750829999999723,
+            2.9586669999999913,
+            3.059832999999969,
+            2.876000000000033,
+            3.9567499999999995,
+            3.3231250000000045,
+            4.042124999999942,
+            3.7270420000000968,
+            3.623166000000083,
+            4.041500000000042,
+            3.557374999999979,
+            3.2895829999999933,
+            3.9067079999999805,
+            3.6488749999999754,
+            3.38245900000004,
+            3.1390420000000177,
+            3.2114579999999933,
+            3.365332999999964,
+            3.363666999999964,
+            3.544708000000014,
+            3.132041999999956,
+            3.2140829999999596,
+            2.873958000000016,
+            3.9350420000000668,
+            3.4355419999999413,
+            3.2631659999999556,
+            2.9878330000000233,
+            3.805500000000052,
+            3.3062499999999773,
+            2.8487499999999955,
+            3.753541999999925,
+            2.954083999999966,
+            3.164083000000005,
+            3.408625000000029,
+            3.842375000000061,
+            3.5806669999999485,
+            3.260499999999979,
+            3.808834000000047,
+            3.0642500000000155,
+            3.562417000000096,
+            3.079291000000012,
+            3.802415999999994,
+            3.2978749999999764,
+            3.1688329999999496,
+            2.941958999999997,
+            4.150040999999987,
+            3.314707999999996,
+            3.461541000000011,
+            3.119042000000036,
+            2.9468330000000833,
+            3.0097500000000537,
+            3.211541000000011,
+            3.846041000000014,
+            3.6377090000000862,
+            3.4647079999999733,
+            4.075749999999971,
+            3.2534580000000233,
+            3.2065830000000233,
+            2.9423329999999623,
+            3.2609999999999673,
+            2.9100409999999783,
+            3.1027919999999085,
+            2.8840830000000324,
+            4.592167000000018,
+            3.2611249999999927,
+            3.4167079999999714,
+            3.654290999999944,
+            3.318125000000009,
+            2.940417000000025,
+            3.18262500000003,
+            3.7446670000000495,
+            3.0711670000000595,
+            3.5110409999999774,
+            3.6922909999999547,
+            3.2168750000000728,
+            2.994250000000079,
+            2.790875000000028
+          ],
+          "meanMs": 3.3473545300000027,
+          "minMs": 2.790875000000028,
+          "maxMs": 4.592167000000018
+        }
+      ],
+      "cleanup": {
+        "runtimeExited": true,
+        "originClosed": true,
+        "tempRemoved": true
+      },
+      "received": 220,
+      "identity": {
+        "node": "v24.2.0",
+        "workerd": "1.20261012.1",
+        "compatibilityDate": "2026-07-20",
+        "generatedSha256": "8771e235e4833e13ca124b351c8b85b7fdf41746689ab7e864b6925a4eae3bf3",
+        "harnessSha256": "8e0742c784d59f48fb0c8a4291e54a70b75afff15d2cb0f9f678259d548227bf",
+        "network": "loopback only; no Internet; wall time includes client/origin/body hash verification"
+      }
+    },
+    "regressions": {
+      "initialCleanupFailurePreserved": true,
+      "bodyBefore": {
+        "failed": 4,
+        "passed": 1
+      },
+      "bodyAfter": {
+        "passed": 5
+      },
+      "queryBefore": {
+        "failed": 3
+      },
+      "queryAfter": {
+        "passed": 3
+      }
+    }
+  },
+  "reviews": {
+    "specialist": "ALLOW, five code/test files and final 15 generated golden fixtures, no remaining findings",
+    "self": "complete",
+    "companion": "see separate final bound gate receipt"
+  },
+  "remaining": [
+    "Node generated Worker large-body origin HMAC forwarding intermittently throws disturbed/locked body; native workerd passed; Node root cause not established.",
+    "Managed CloudFront/Cloudflare CPU, cold-start, network latency and production traffic not observed.",
+    "Optimization candidates are designs; no unmeasured savings are claimed."
+  ],
+  "evidenceHashes": {
+    "reports/edge-optimization-audit/static-inventory.json": "05b7097fc237a040acb8dd42fa0687e91db062b2ac2cd18ee49e7d2cd85a9c8a",
+    "reports/edge-optimization-audit/edge-benchmark.json": "c34b1ee3be4aa7f587a9393b74864996f9dad776a61870404717804b0ca44ee9",
+    "reports/edge-optimization-audit/measure-edge.cjs": "d9eb313e143beb99bcd7f95129bf6e3039ce80c8a4742a7ed626255bbe5cfdaa",
+    "reports/edge-optimization-audit/edge-benchmark-attempt1.log": "9698948d655f129e4c61e9341cb8aff0c6df2ec2b3c0681c08b06c7149457d08",
+    "reports/edge-optimization-audit/edge-benchmark-attempt2.log": "e89264b6bddcf6ec57af5888e01ff9c56a0daee1bc4a86f6005cbbb29074dd68",
+    "reports/edge-optimization-audit/edge-benchmark-attempt3.log": "ae3a05f0bb53d7e1b5a30ec0eaace8f9aee054483d825ca1f7f028dd027431a6",
+    "reports/edge-optimization-audit/regression-before.json": "18d274364075790f27d9f9f0efc459d0f85f8a3754085c7c85ee6174141bc317",
+    "reports/edge-optimization-audit/regression-before-corrected.json": "067e16c156326df74b6c04d4f27e999a276f055d12ca0cc703258073606e496c",
+    "reports/edge-optimization-audit/regression-after.json": "fc5ca669d4bd760b7034872046d37e9af9176768c6c0c0bc1be5f39e3f702665",
+    "reports/edge-optimization-audit/aws-query-before.json": "cf50fd15e51b02b35948dea582f98aa4c5761d5658abac37e294eb00144c11b2",
+    "reports/edge-optimization-audit/aws-query-after.json": "453361ab0e67b15859cebf1671ef457b659f1c09d06d4dfe09e3874d1ba4272f",
+    "reports/edge-optimization-audit/http-e2e.json": "8dd59ea3c35f81977e4608f9d1a478bc4007aa886716c3e6a0e98260e68e030d",
+    "reports/edge-optimization-audit/origin-hash-workerd.json": "c801d2829c0ae835133b2227b159aca2079baccff65da72d10365e7c708d2c5e",
+    "reports/edge-optimization-audit/probe-origin-hash.cjs": "68a50cd2236d44f9945ff7dc0d0106c8d03f9b1c539d8781d9b115e744977c71",
+    "reports/edge-optimization-audit/probe-origin-workerd.cjs": "8e0742c784d59f48fb0c8a4291e54a70b75afff15d2cb0f9f678259d548227bf",
+    "reports/edge-optimization-audit/cloudflare-runtime.log": "44396ef1dbdc539a67ed16eaeb8159dba88b75029880ff6ded278981cffa6a7f",
+    "reports/edge-optimization-audit/full-validation.json": "c193e3aba3cb2844f882b67828486f89a590d18527fdb004f43a6f108e386d31",
+    "reports/edge-optimization-audit/full-validation.stdout.log": "135d508be7fed0d96427d4a46200fe998f83f9445bcb29251e7a195b0b562349",
+    "reports/edge-optimization-audit/full-validation.stderr.log": "f783b4c6a850634f864d973630dd84fc78d4dbb4d5b59b2fbf676eae24c79ac0",
+    "reports/edge-optimization-audit/specialist-review.md": "b535e21de2791fcb282ddf727bf0ce1e94ac4aa684a9e9d9d05e727b1248ba81",
+    "reports/edge-optimization-audit/self-review.md": "72d68e091299f76e47142507045c3f54c5ae74d8b6e63b34081f9c26f7decc6a",
+    "reports/edge-optimization-audit/full-validation-before-golden.json": "9329de3a848ce5d978cf2afe44ea34e5ee806b0a3ba2af8ca6f815c2959f37dd",
+    "reports/edge-optimization-audit/full-validation-before-golden.stdout.log": "bc0471b77a04539d61ede260e45f3fc8162e4404c5c6d860d346d9a39929b5f1",
+    "reports/edge-optimization-audit/full-validation-before-golden.stderr.log": "6dbc26792a349f85b56f17b4e32c5c272fc9c2c66ff93a38bd13298286b5d320",
+    "reports/edge-optimization-audit/golden-update.log": "c33b908657ff3e9bfa799fd4297a1eebf5270af9007e3ca7eea8823027861d3c",
+    "reports/edge-optimization-audit/golden-verification.json": "cb59688d44264a9ba77c2640bd584e6e44ba28622ab2a0d4fbc7e5c420e6436e",
+    "reports/edge-optimization-audit/verify-goldens.cjs": "d9e8498de80c7280bd10b72ead5df32c778198d33a86f5492593c98c9c9fcf16",
+    "reports/edge-optimization-audit/specialist-review-goldens.md": "052baac17882b800f177d341e7d7997c702edb9815187a88361b2f74e2534103",
+    "reports/edge-optimization-audit/aws-prototype-before.json": "cd3ac2dd7c00c1d2ecbf4c9812db5e3ecbfc28329f62afa013681a7ee1568a26",
+    "reports/edge-optimization-audit/node-origin-probe-observation.json": "c5b45daa6f79aafb8f3fa4614e46283747900834b3376423846d47859fe14c6f"
+  },
+  "stage": "historical-audit-before-implementation",
+  "supersededBy": "edge-runtime-optimization.json"
+}

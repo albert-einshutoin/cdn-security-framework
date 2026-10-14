@@ -33,6 +33,14 @@ request:
     path_patterns: { contains: ['/../'] }
   normalize:
     drop_query_keys: [utm_source]
+  graphql_guard:
+    endpoint_paths: [/graphql]
+    max_body_bytes: 1024
+    mode: report
+response_dlp:
+  enabled: true
+  action: mask
+  body: { max_bytes: 1024, content_types: [application/json] }
 routes:
   - name: admin
     match: { path_prefixes: [/admin] }
@@ -333,6 +341,8 @@ const config :Workerd.Config = (
     const tests: Case[] = [
       { id: 'public', target: '/public?keep=1&utm_source=discard', status: 200, forwarded: '/public?keep=1' },
       { id: 'post', target: '/echo', method: 'POST', body: '{"synthetic":true}', headers: { 'content-type': 'application/json', 'x-forwarded-for': 'spoofed', 'x-edge-authenticated': 'spoofed' }, status: 200, forwarded: '/echo' },
+      { id: 'graphql-oversized-report', target: '/graphql', method: 'POST', body: JSON.stringify({ query: '{ viewer { id } }', padding: 'x'.repeat(2048) }), headers: { 'content-type': 'application/json' }, status: 200, forwarded: '/graphql' },
+      { id: 'dlp-oversized-pass-through', target: '/echo', method: 'POST', body: JSON.stringify({ value: 'sk-live-abcdefghijklmnop', padding: 'x'.repeat(2048) }), headers: { 'content-type': 'application/json' }, status: 200, forwarded: '/echo' },
       { id: 'admin-missing', target: '/admin', status: 401, reason: 'Unauthorized' },
       { id: 'admin-wrong', target: '/admin', headers: { 'x-edge-token': 'wrong-synthetic' }, status: 401, reason: 'Unauthorized' },
       { id: 'admin-valid', target: '/admin', headers: { 'x-edge-token': token }, status: 200, forwarded: '/admin' },
@@ -379,9 +389,11 @@ const config :Workerd.Config = (
     const caseErrors: unknown[] = [];
     for (const test of tests) {
       const before = receipts.length;
+      const startedAt = performance.now();
       const result = await request(workerPort, test, controller.signal);
+      const elapsedMs = performance.now() - startedAt;
       const observed = receipts.slice(before);
-      cases.push({ id: test.id, requestTarget: test.target, method: test.method || 'GET', response: result, origin: observed, expectedStatus: test.status });
+      cases.push({ id: test.id, requestTarget: test.target, method: test.method || 'GET', elapsedMs, response: result, origin: observed, expectedStatus: test.status });
       try {
       assert.equal(result.status, test.status, test.id + ': status');
       assert.equal(observed.length, test.forwarded ? 1 : 0, test.id + ': origin arrivals');

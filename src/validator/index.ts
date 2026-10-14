@@ -5,7 +5,7 @@ const fs = require('fs');
 const path = require('path');
 const Ajv = require('ajv');
 
-import type { ErrorObject } from 'ajv';
+import type { ErrorObject, ValidateFunction } from 'ajv';
 import type { CDNSecurityFrameworkPolicy } from '../types/policy';
 import {
   errorMessage,
@@ -20,6 +20,8 @@ const { collectWafHygieneWarnings } = require('../scripts/lib/waf-hygiene');
 
 const DEFAULT_PKG_ROOT = path.join(__dirname, '..');
 export type PolicyDraft = Partial<CDNSecurityFrameworkPolicy>;
+let compiledSchema: { path: string; text: string; validate: ValidateFunction } | undefined;
+
 type StringRecord = Record<string, unknown>;
 
 export type ValidatePolicyOptions = {
@@ -71,26 +73,25 @@ export function validatePolicy(opts: ValidatePolicyOptions): ValidatePolicyResul
   const errors: string[] = [];
   const warnings: string[] = [];
 
+  const schemaPath = path.resolve(pkgRoot, 'policy', 'schema.json');
+  const cached = compiledSchema;
   let schema: unknown;
+  let schemaText: string;
   try {
-    schema = JSON.parse(
-      fs.readFileSync(path.join(pkgRoot, 'policy', 'schema.json'), 'utf8'),
-    );
+    schemaText = fs.readFileSync(schemaPath, 'utf8');
+    if (!cached || cached.path !== schemaPath || cached.text !== schemaText) schema = JSON.parse(schemaText);
   } catch (e: unknown) {
-    return {
-      ok: false,
-      errors: [`failed to load schema: ${errorMessage(e)}`],
-      warnings,
-    };
+    return { ok: false, errors: [`failed to load schema: ${errorMessage(e)}`], warnings };
   }
-
-  const ajv = new Ajv({
-    allErrors: true,
-    strict: true,
-    strictRequired: false,
-    allowUnionTypes: true,
-  });
-  const validate = ajv.compile(schema);
+  let validate: ValidateFunction;
+  if (cached && cached.path === schemaPath && cached.text === schemaText) {
+    validate = cached.validate;
+  } else {
+    const ajv = new Ajv({ allErrors: true, strict: true, strictRequired: false, allowUnionTypes: true });
+    validate = ajv.compile(schema);
+    // Retain only one exact schema version; reads and env-dependent checks stay live.
+    compiledSchema = { path: schemaPath, text: schemaText, validate };
+  }
   if (!validate(policy)) {
     errors.push('Schema validation failed:');
     errors.push(...formatAjvErrors(validate.errors || []));

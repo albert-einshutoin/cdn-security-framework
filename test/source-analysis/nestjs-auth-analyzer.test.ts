@@ -778,6 +778,113 @@ describe('NestJS auth metadata analyzer', () => {
     }
   });
 
+  test('rechecks stored guard assignments after a source change', async () => {
+    const source = `
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard, JwtAuthGuard } from './auth';
+      function Audit(): MethodDecorator { return () => {}; }
+      const LogicalAudit = Audit || UseGuards(ApiKeyGuard);
+      @Controller('assignment-cache') @UseGuards(JwtAuthGuard)
+      class AssignmentCacheController {
+        @Get('first') @LogicalAudit first() {}
+        @Get('second') @LogicalAudit second() {}
+      }
+    `;
+    const root = workspace(source, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
+    });
+    const analyzer = createNestJsSourceAnalyzer(authConfig);
+    const first = await runSourceAnalyzer(analyzer, context(root));
+    expect(first.status).toBe('success');
+    if (first.status !== 'success') return;
+    expect(first.result.contract.operations).toHaveLength(2);
+    for (const operation of first.result.contract.operations) {
+      expect(operation.auth).toMatchObject({
+        mode: 'alternatives', analysis: { enforcementConfidence: 'high' },
+      });
+    }
+
+    write(root, 'src/controller.ts', source.replace(
+      'const LogicalAudit', 'Audit = undefined as any;\nconst LogicalAudit',
+    ));
+    const changed = await runSourceAnalyzer(analyzer, context(root));
+    expect(changed.status).toBe('success');
+    if (changed.status !== 'success') return;
+    expect(changed.result.contract.operations).toHaveLength(2);
+    for (const operation of changed.result.contract.operations) {
+      expect(operation.auth).toMatchObject({
+        mode: 'unknown', analysis: { enforcementConfidence: 'unknown' },
+      });
+    }
+  });
+
+  test('keeps same-named stored guard bindings separate within one project', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { ApiKeyGuard, JwtAuthGuard } from './auth';
+      function Audit(): MethodDecorator { return () => {}; }
+      const LogicalAudit = Audit || UseGuards(ApiKeyGuard);
+      @Controller('stable') @UseGuards(JwtAuthGuard)
+      class StableController { @Get() @LogicalAudit read() {} }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
+      'src/changed.ts': `
+        import { Controller, Get, UseGuards } from '@nestjs/common';
+        import { ApiKeyGuard, JwtAuthGuard } from './auth';
+        function Audit(): MethodDecorator { return () => {}; }
+        Audit = undefined as any;
+        const LogicalAudit = Audit || UseGuards(ApiKeyGuard);
+        @Controller('changed') @UseGuards(JwtAuthGuard)
+        class ChangedController { @Get() @LogicalAudit read() {} }
+      `,
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    const operations = Object.fromEntries(execution.result.contract.operations.map(operation => (
+      [operation.routeKey, operation]
+    )));
+    expect(operations['GET /stable'].auth).toMatchObject({
+      mode: 'alternatives', analysis: { enforcementConfidence: 'high' },
+    });
+    expect(operations['GET /changed'].auth).toMatchObject({
+      mode: 'unknown', analysis: { enforcementConfidence: 'unknown' },
+    });
+  });
+
+  test('keeps namespace writes conservative while evaluating mutable assignment values', async () => {
+    const root = workspace(`
+      import { Controller, Get, UseGuards } from '@nestjs/common';
+      import { JwtAuthGuard, ApiKeyGuard } from './auth';
+      import * as audit from './audit';
+      let Clean: MethodDecorator = () => {};
+      (Clean as any).tag = 1;
+      let Guarded: MethodDecorator = () => {};
+      [Guarded] = [UseGuards(ApiKeyGuard)];
+      (audit.Audit as any).tag = 1;
+      @Controller('write-index') @UseGuards(JwtAuthGuard)
+      class WriteIndexController {
+        @Get('clean') @Clean clean() {}
+        @Get('guarded') @Guarded guarded() {}
+        @Get('namespace') @audit.Audit namespace() {}
+      }
+    `, {
+      'src/auth.ts': 'export class JwtAuthGuard {}\nexport class ApiKeyGuard {}\n',
+      'src/audit.ts': 'export function Audit(..._args: unknown[]): void {}\n',
+    });
+    const execution = await runSourceAnalyzer(createNestJsSourceAnalyzer(authConfig), context(root));
+    expect(execution.status).toBe('success');
+    if (execution.status !== 'success') return;
+    const modes = Object.fromEntries(execution.result.contract.operations.map(operation => (
+      [operation.routeKey, operation.auth.mode]
+    )));
+    expect(modes).toEqual({
+      'GET /write-index/clean': 'alternatives',
+      'GET /write-index/guarded': 'unknown',
+      'GET /write-index/namespace': 'unknown',
+    });
+  });
+
   test('fails closed on a mutable precomputed guard decorator', async () => {
     const deepAliases = ["const alias99 = UseGuards(ApiKeyGuard);"];
     for (let index = 98; index >= 0; index -= 1) deepAliases.push(`const alias${index} = alias${index + 1};`);

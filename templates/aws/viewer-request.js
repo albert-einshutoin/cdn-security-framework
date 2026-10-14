@@ -440,11 +440,7 @@
   }
 
   function pathMatchesPrefix(uri, prefix) {
-    var left = uri || '/', right = prefix || '';
-    if ((CFG.normalizePath || {}).caseInsensitive !== false) {
-      left = left.toLowerCase();
-      right = right.toLowerCase();
-    }
+    var left = uri, right = prefix;
     return left === right || left.indexOf(right + '/') === 0;
   }
 
@@ -491,28 +487,14 @@
     return null;
   }
 
-  function guardAndNormalizeQuery(req) {
-    const limited = blockIfQueryLimits(req);
-    if (limited) return limited;
-    normalizeQuery(req);
-    return null;
-  }
-
-  function blockIfQueryLimits(req) {
-    const originalQuerystring = req.querystring;
-    const qs = serializeQuerystring(originalQuerystring);
-
-    if (qs.length > CFG.maxQueryLength) return resp(414, "URI Too Long");
-
-    const parts = qs ? qs.split("&") : [];
+  function blockIfQueryLimits(raw, parts) {
+    if (raw.length > CFG.maxQueryLength) return resp(414, "URI Too Long");
     if (parts.length > CFG.maxQueryParams) return resp(400, "Too many query params");
     return null;
   }
 
-  function normalizeQuery(req) {
+  function normalizeQuery(req, parts) {
     const originalQuerystring = req.querystring;
-    const qs = serializeQuerystring(originalQuerystring);
-    const parts = qs ? qs.split("&") : [];
 
     const kept = [];
     for (const p of parts) {
@@ -557,7 +539,8 @@
     if (!originalQuerystring || typeof originalQuerystring === "string") {
       return parts.join("&");
     }
-    const next = {};
+    // Query names are untrusted and may equal Object.prototype property names.
+    const next = Object.create(null);
     for (const p of parts) {
       const eq = p.indexOf("=");
       const key = decodeURIComponent(eq === -1 ? p : p.slice(0, eq));
@@ -588,7 +571,8 @@
   }
 
   function checkAuthGates(req) {
-    const uri = req.uri || "/";
+    const path = req.uri || "/";
+    const uri = CFG.normalizePath.caseInsensitive !== false ? path.toLowerCase() : path;
 
     for (const gate of CFG.authGates) {
       const isProtected = gate.protectedPrefixes.some(
@@ -596,12 +580,12 @@
       );
       if (!isProtected) continue;
 
-      if (gate.type === 'static_token') {
+      if (/* {{FEATURE_STATIC_TOKEN}} */ true && gate.type === 'static_token') {
         const token = req.headers[gate.tokenHeaderName]?.value || "";
         if (!constantTimeEqual(token, gate.token)) {
           return resp(401, "Unauthorized");
         }
-      } else if (gate.type === 'basic_auth') {
+      } else if (/* {{FEATURE_BASIC_AUTH}} */ true && gate.type === 'basic_auth') {
         const authHeader = req.headers['authorization']?.value || "";
         if (!authHeader.startsWith('Basic ')) {
           return basicAuthResp();
@@ -662,7 +646,10 @@
     if (hc) return hc;
 
     // 3) Query length / count caps before any query anomaly scan.
-    const qLimit = shouldBlock(blockIfQueryLimits(req), req);
+    const rawQuery = serializeQuerystring(req.querystring);
+    // Oversized raw input stays unsplit until monitor mode actually forwards it.
+    const queryParts = rawQuery.length <= CFG.maxQueryLength ? (rawQuery ? rawQuery.split('&') : []) : null;
+    const qLimit = shouldBlock(blockIfQueryLimits(rawQuery, queryParts), req);
     if (qLimit) return qLimit;
 
     // 4) Lightweight anomaly guards. Run after cheap caps, before path
@@ -699,7 +686,7 @@
     if (u) return u;
 
     // 9) Query normalize after anomaly checks have seen the raw query.
-    normalizeQuery(req);
+    normalizeQuery(req, queryParts || (rawQuery ? rawQuery.split('&') : []));
 
     // 10) Auth gates (static token, basic auth)
     if (/* {{FEATURE_VIEWER_AUTH}} */ true) {

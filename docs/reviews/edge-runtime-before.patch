@@ -1,0 +1,51 @@
+diff --git a/templates/aws/viewer-request.js b/templates/aws/viewer-request.js
+index b74760e..8989879 100644
+--- a/templates/aws/viewer-request.js
++++ b/templates/aws/viewer-request.js
+@@ -557,7 +557,8 @@
+     if (!originalQuerystring || typeof originalQuerystring === "string") {
+       return parts.join("&");
+     }
+-    const next = {};
++    // Query names are untrusted and may equal Object.prototype property names.
++    const next = Object.create(null);
+     for (const p of parts) {
+       const eq = p.indexOf("=");
+       const key = decodeURIComponent(eq === -1 ? p : p.slice(0, eq));
+diff --git a/templates/cloudflare/index.ts b/templates/cloudflare/index.ts
+index 6bea012..305bc96 100644
+--- a/templates/cloudflare/index.ts
++++ b/templates/cloudflare/index.ts
+@@ -333,6 +333,14 @@ function isGraphqlPath(pathname: string): boolean {
+   return guard.endpointPaths.some((p: string) => pathname === p || pathname.startsWith(p + '/'));
+ }
+ 
++function cancelBodyInspection(reader: ReadableStreamDefaultReader<Uint8Array>): void {
++  // A clone's cancellation can wait for the original body to be consumed.
++  // Return the policy decision first so forwarding/response consumption can proceed.
++  void reader.cancel().catch(() => {
++    console.error('[body-inspection] clone cancellation failed');
++  });
++}
++
+ async function readLimitedRequestText(request: Request, maxBytes: number): Promise<{ ok: boolean; text: string; reason?: string }> {
+   const body = request.clone().body;
+   if (!body) return { ok: true, text: '' };
+@@ -347,7 +355,7 @@ async function readLimitedRequestText(request: Request, maxBytes: number): Promi
+     if (chunk.done) break;
+     total += chunk.value.byteLength;
+     if (total > maxBytes) {
+-      try { await reader.cancel(); } catch (_e) { /* ignore */ }
++      cancelBodyInspection(reader);
+       return { ok: false, text: '', reason: 'GraphQL body too large' };
+     }
+     text += decoder.decode(chunk.value, { stream: true });
+@@ -1272,7 +1280,7 @@ async function applyResponseDlp(out: Response, ctx: ReqCtx): Promise<Response> {
+     if (totalBytes > maxBytes) {
+       // Stop consuming the clone as soon as the policy inspection budget is
+       // exceeded. This bounds Worker memory independently of origin honesty.
+-      await reader.cancel();
++      cancelBodyInspection(reader);
+       return out;
+     }
+     chunks.push(part.value);

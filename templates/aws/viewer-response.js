@@ -31,6 +31,13 @@ function appendVary(headers, token) {
 
 // {{INJECT_RESPONSE_CONFIG}}
 
+const adminMatchPrefixes = RESPONSE_CFG.adminPathPrefixes.map(function (prefix) {
+  return RESPONSE_CFG.caseInsensitive !== false ? prefix.toLowerCase() : prefix;
+});
+const authMatchPrefixes = (RESPONSE_CFG.authProtectedPrefixes || []).map(function (prefix) {
+  return RESPONSE_CFG.caseInsensitive !== false ? prefix.toLowerCase() : prefix;
+});
+
 // Non-cryptographic CSP nonce. CloudFront Functions do not expose crypto.
 function weakNonce() {
   var chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -63,12 +70,8 @@ function handler(event) {
   // Mirror request-side matching so response cache protections cannot drift
   // from auth-gate decisions (honors normalize.path.case_insensitive).
   function pathMatchesPrefix(uri, prefix) {
-    var left = uri || '/';
-    var right = prefix || '';
-    if (RESPONSE_CFG.caseInsensitive !== false) {
-      left = left.toLowerCase();
-      right = right.toLowerCase();
-    }
+    var left = uri;
+    var right = prefix;
     return left === right || left.indexOf(right + '/') === 0;
   }
 
@@ -106,10 +109,11 @@ function handler(event) {
   }
   const uri = canonicalizeResponsePath(req.uri || '/');
   if (uri === null) throw new Error('Invalid response request path');
-  const isAdminPath = RESPONSE_CFG.adminPathPrefixes.some(function (p) { return pathMatchesPrefix(uri, p); });
+  const matchPath = RESPONSE_CFG.caseInsensitive !== false ? uri.toLowerCase() : uri;
+  const isAdminPath = adminMatchPrefixes.some(function (p) { return pathMatchesPrefix(matchPath, p); });
   // Union of auth-gate prefixes — broader than admin-only; catches jwt/basic/signed_url too.
-  const isAuthPath = (RESPONSE_CFG.authProtectedPrefixes || []).some(function (p) {
-    return pathMatchesPrefix(uri, p);
+  const isAuthPath = authMatchPrefixes.some(function (p) {
+    return pathMatchesPrefix(matchPath, p);
   });
 
   // CSP: substitute per-response nonce into any `'nonce-PLACEHOLDER'` in policy strings.

@@ -16,6 +16,9 @@ type JwksCacheEntry = {
   keys: Array<Record<string, any>>;
 };
 
+const rsaVerifyKeys = new WeakMap<object, Promise<CryptoKey>>();
+const hmacKeys = new WeakMap<object, { secret: string; key: Promise<CryptoKey> }>();
+
 const jwksCache = new Map<string, JwksCacheEntry>();
 
 type JwksNegativeEntry = { failedAt: number; reason: string };
@@ -182,14 +185,20 @@ function normalizeForMatch(value: string): string {
 }
 
 function pathMatchesExact(uri: string, prefix: string): boolean {
-  return normalizeForMatch(uri) === normalizeForMatch(prefix);
+  return uri === prefix;
 }
 
 function pathMatchesPrefix(uri: string, prefix: string): boolean {
-  const left = normalizeForMatch(uri);
-  const right = normalizeForMatch(prefix);
+  const left = uri;
+  const right = prefix;
   return left === right || left.startsWith(right + '/');
 }
+
+const authMatchPrefixes = CFG.authGates.map((gate: any) => gate.protectedPrefixes.map(normalizeForMatch));
+const adminMatchPrefixes = RESPONSE_CFG.adminPathPrefixes.map(normalizeForMatch);
+const protectedMatchPrefixes = (RESPONSE_CFG.authProtectedPrefixes || []).map(normalizeForMatch);
+const dlpGlobalRegexes: RegExp[] = (RESPONSE_CFG.responseDlpCustomRegexes || []).map((re: RegExp) =>
+  new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g'));
 
 function normalizePath(pathname: string): string | null {
   return canonicalizePath(pathname);
@@ -333,27 +342,65 @@ function isGraphqlPath(pathname: string): boolean {
   return guard.endpointPaths.some((p: string) => pathname === p || pathname.startsWith(p + '/'));
 }
 
-async function readLimitedRequestText(request: Request, maxBytes: number): Promise<{ ok: boolean; text: string; reason?: string }> {
-  const body = request.clone().body;
-  if (!body) return { ok: true, text: '' };
-
-  const reader = body.getReader();
-  const decoder = new TextDecoder();
-  let total = 0;
-  let text = '';
-
-  while (true) {
-    const chunk = await reader.read();
-    if (chunk.done) break;
-    total += chunk.value.byteLength;
-    if (total > maxBytes) {
-      try { await reader.cancel(); } catch (_e) { /* ignore */ }
-      return { ok: false, text: '', reason: 'GraphQL body too large' };
-    }
-    text += decoder.decode(chunk.value, { stream: true });
+type ForwardBody = { body: BodyInit | null };
+function cancelForwardBody(state: ForwardBody): void {
+  const body = state.body;
+  state.body = null;
+  if (body instanceof ReadableStream) {
+    void body.cancel().catch(() => console.error('[body-inspection] cancellation failed'));
   }
-  text += decoder.decode();
-  return { ok: true, text };
+}
+type InspectedBody = { body: Uint8Array | ReadableStream<Uint8Array>; bytes?: Uint8Array };
+
+async function readBoundedBody(body: ReadableStream<Uint8Array>, maxBytes: number): Promise<InspectedBody> {
+  const reader = body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  try {
+    while (true) {
+      const part = await reader.read();
+      if (part.done) {
+        reader.releaseLock();
+        const bytes = chunks.length === 1 ? chunks[0] : new Uint8Array(total);
+        if (chunks.length !== 1) {
+          let offset = 0;
+          for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.byteLength; }
+        }
+        return { body: bytes, bytes };
+      }
+      chunks.push(part.value);
+      total += part.value.byteLength;
+      if (total > maxBytes) break;
+    }
+  } catch (error) { reader.releaseLock(); throw error; }
+  // Keep one owner: replay exactly the inspected prefix, then pull the remainder
+  // only as the origin/client consumes it. No tee branch can buffer independently.
+  let index = 0;
+  const replay = new ReadableStream<Uint8Array>({
+    async pull(controller) {
+      if (index < chunks.length) {
+        const chunk = chunks[index];
+        chunks[index++] = new Uint8Array(0);
+        controller.enqueue(chunk);
+        return;
+      }
+      try {
+        const part = await reader.read();
+        if (part.done) { reader.releaseLock(); controller.close(); }
+        else controller.enqueue(part.value);
+      } catch (error) { reader.releaseLock(); controller.error(error); }
+    },
+    async cancel(reason) { try { await reader.cancel(reason); } finally { reader.releaseLock(); } },
+  });
+  return { body: replay };
+}
+
+async function readLimitedRequestText(request: Request, state: ForwardBody, maxBytes: number): Promise<{ ok: boolean; text: string; reason?: string }> {
+  if (!request.body) return { ok: true, text: '' };
+  const inspected = await readBoundedBody(request.body, maxBytes);
+  state.body = inspected.body;
+  if (!inspected.bytes) return { ok: false, text: '', reason: 'GraphQL body too large' };
+  return { ok: true, text: new TextDecoder().decode(inspected.bytes) };
 }
 
 function extractGraphqlQuery(bodyText: string, contentType: string): { ok: boolean; query: string; reason?: string } {
@@ -480,11 +527,11 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
   return { ok: true, depth: maxDepth, aliases, fields };
 }
 
-async function enforceGraphqlGuard(request: Request, pathname: string, ctx: ReqCtx): Promise<Response | null> {
+async function enforceGraphqlGuard(request: Request, state: ForwardBody, pathname: string, ctx: ReqCtx): Promise<Response | null> {
   const guard = CFG.graphqlGuard;
   if (!guard || request.method !== 'POST' || !isGraphqlPath(pathname)) return null;
 
-  const body = await readLimitedRequestText(request, guard.maxBodyBytes || 65536);
+  const body = await readLimitedRequestText(request, state, guard.maxBodyBytes || 65536);
   let scan: GraphqlScanResult;
   if (!body.ok) {
     scan = { ok: false, reason: body.reason || 'GraphQL body too large', depth: 0, aliases: 0, fields: 0 };
@@ -547,10 +594,17 @@ function timingSafeEqual(a: string, b: string): boolean {
   return diff === 0;
 }
 
-async function hmacSha256Base64Url(secret: string, message: string): Promise<string> {
-  const keyData = new TextEncoder().encode(secret);
+async function hmacSha256Base64Url(secret: string, message: string, owner: object): Promise<string> {
+  let entry = hmacKeys.get(owner);
+  if (!entry || entry.secret !== secret) {
+    const key = crypto.subtle.importKey('raw', new TextEncoder().encode(secret), { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
+    entry = { secret, key };
+    hmacKeys.set(owner, entry);
+    // Failed and superseded imports must never replace a newer secret's state.
+    void key.catch(() => { if (hmacKeys.get(owner) === entry) hmacKeys.delete(owner); });
+  }
+  const key = await entry.key;
   const msgData = new TextEncoder().encode(message);
-  const key = await crypto.subtle.importKey('raw', keyData, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
   const sig = await crypto.subtle.sign('HMAC', key, msgData);
   const bytes = new Uint8Array(sig);
   let binary = '';
@@ -764,7 +818,7 @@ async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ va
   if (gate.algorithm === 'HS256') {
     const secret = env[gate.secret_env] || '';
     if (!secret) return { valid: false, error: 'JWT secret not configured' };
-    const expected = await hmacSha256Base64Url(secret, signData);
+    const expected = await hmacSha256Base64Url(secret, signData, gate);
     if (!timingSafeEqual(expected, signatureB64)) return { valid: false, error: 'Invalid signature' };
     return { valid: true, payload };
   }
@@ -786,13 +840,13 @@ async function verifyJwt(gate: any, token: string, env: WorkerEnv): Promise<{ va
         return { valid: false, error: 'JWK key not found' };
       }
 
-      const verifyKey = await crypto.subtle.importKey(
-        'jwk',
-        jwk,
-        { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' },
-        false,
-        ['verify'],
-      );
+      let imported = rsaVerifyKeys.get(jwk);
+      if (!imported) {
+        imported = crypto.subtle.importKey('jwk', jwk, { name: 'RSASSA-PKCS1-v1_5', hash: 'SHA-256' }, false, ['verify']);
+        rsaVerifyKeys.set(jwk, imported);
+        void imported.catch(() => { if (rsaVerifyKeys.get(jwk) === imported) rsaVerifyKeys.delete(jwk); });
+      }
+      const verifyKey = await imported;
       const ok = await crypto.subtle.verify(
         'RSASSA-PKCS1-v1_5',
         verifyKey,
@@ -831,7 +885,7 @@ async function verifySignedUrl(gate: any, url: URL, env: WorkerEnv): Promise<{ v
   if (!secret) return { valid: false, error: 'URL signing secret not configured' };
 
   const signData = canonicalSignedUrlPayload(url.pathname, url.searchParams, gate.signature_param || 'sig');
-  const expected = await hmacSha256Base64Url(secret, signData);
+  const expected = await hmacSha256Base64Url(secret, signData, gate);
   if (!timingSafeEqual(expected, sig)) return { valid: false, error: 'Invalid signature' };
   return { valid: true, nonce };
 }
@@ -999,7 +1053,7 @@ async function verifyChallengeCookie(request: Request, env: WorkerEnv, ua: strin
   const sig = parts[1];
   if (!Number.isFinite(exp) || Math.floor(Date.now() / 1000) > exp) return false;
   const uaHash = await challengeUaBinding(ua);
-  const expected = await hmacSha256Base64Url(secret, String(exp) + ':' + uaHash);
+  const expected = await hmacSha256Base64Url(secret, String(exp) + ':' + uaHash, ch);
   return timingSafeEqual(expected, sig);
 }
 
@@ -1018,7 +1072,7 @@ async function verifyChallengeSolution(url: URL, env: WorkerEnv, ua: string): Pr
   const exp = Number(expRaw);
   if (!Number.isFinite(exp) || Math.floor(Date.now() / 1000) > exp) return false;
   const uaHash = await challengeUaBinding(ua);
-  const expectedSig = await hmacSha256Base64Url(secret, seed + ':' + expRaw + ':' + uaHash);
+  const expectedSig = await hmacSha256Base64Url(secret, seed + ':' + expRaw + ':' + uaHash, ch);
   if (!timingSafeEqual(expectedSig, sig)) return false;
   const difficulty = Math.max(1, Math.min(4, Number(ch.difficulty) || 3));
   const digest = await sha256Hex(seed + ':' + nonce);
@@ -1049,7 +1103,7 @@ async function challengeResponse(url: URL, env: WorkerEnv, ua: string, ctx: ReqC
   const seed = randomChallengeSeed();
   const exp = String(Math.floor(Date.now() / 1000) + Math.min(300, Math.max(60, Number(ch.ttlSec) || 900)));
   const uaHash = await challengeUaBinding(ua);
-  const sig = await hmacSha256Base64Url(secret, seed + ':' + exp + ':' + uaHash);
+  const sig = await hmacSha256Base64Url(secret, seed + ':' + exp + ':' + uaHash, ch);
   const target = removeChallengeParams(url).toString();
   const difficulty = Math.max(1, Math.min(4, Number(ch.difficulty) || 3));
   const payload = JSON.stringify({ seed, exp, sig, target, difficulty }).replace(/</g, '\\u003c');
@@ -1123,7 +1177,7 @@ async function handleChallenge(request: Request, url: URL, env: WorkerEnv, ua: s
     const exp = Math.floor(Date.now() / 1000) + ttl;
     const uaHash = await challengeUaBinding(ua);
     const secret = env[ch.secretEnv || 'CHALLENGE_SECRET'] || '';
-    const sig = await hmacSha256Base64Url(secret, String(exp) + ':' + uaHash);
+    const sig = await hmacSha256Base64Url(secret, String(exp) + ':' + uaHash, ch);
     return new Response(null, {
       status: 302,
       headers: {
@@ -1177,9 +1231,8 @@ function luhnOk(value: string): boolean {
 }
 
 function replaceAllWithDetector(input: string, re: RegExp, detector: string, mask: string, detectors: Set<string>): string {
-  const flags = re.flags.indexOf('g') === -1 ? re.flags + 'g' : re.flags;
-  const globalRe = new RegExp(re.source, flags);
-  return input.replace(globalRe, (match: string) => {
+  re.lastIndex = 0;
+  return input.replace(re, (match: string) => {
     detectors.add(detector);
     return mask;
   });
@@ -1209,9 +1262,7 @@ function scanAndMaskDlp(input: string): DlpScanResult {
     });
   }
 
-  const customRegexes: RegExp[] = Array.isArray(RESPONSE_CFG.responseDlpCustomRegexes)
-    ? RESPONSE_CFG.responseDlpCustomRegexes
-    : [];
+  const customRegexes = dlpGlobalRegexes;
   const customNames: string[] = dlp.detectors && Array.isArray(dlp.detectors.customRegexNames)
     ? dlp.detectors.customRegexNames
     : [];
@@ -1260,32 +1311,12 @@ async function applyResponseDlp(out: Response, ctx: ReqCtx): Promise<Response> {
 
   if (!dlpCanInspectBody(out)) return out;
   const maxBytes = Number(dlp.body.maxBytes) || 32768;
-  const clone = out.clone();
-  const reader = clone.body && clone.body.getReader();
-  if (!reader) return out;
-  const chunks: Uint8Array[] = [];
-  let totalBytes = 0;
-  while (true) {
-    const part = await reader.read();
-    if (part.done) break;
-    totalBytes += part.value.byteLength;
-    if (totalBytes > maxBytes) {
-      // Stop consuming the clone as soon as the policy inspection budget is
-      // exceeded. This bounds Worker memory independently of origin honesty.
-      await reader.cancel();
-      return out;
-    }
-    chunks.push(part.value);
-  }
-  const bodyBytes = new Uint8Array(totalBytes);
-  let bodyOffset = 0;
-  for (const chunk of chunks) {
-    bodyBytes.set(chunk, bodyOffset);
-    bodyOffset += chunk.byteLength;
-  }
-  const text = new TextDecoder().decode(bodyBytes);
+  if (!out.body) return out;
+  const inspected = await readBoundedBody(out.body, maxBytes);
+  if (!inspected.bytes) return new Response(inspected.body, out);
+  const text = new TextDecoder().decode(inspected.bytes);
   const scan = scanAndMaskDlp(text);
-  if (!scan.matched) return out;
+  if (!scan.matched) return new Response(inspected.bytes, out);
   responseDlpLog(action, scan.detectors, ctx, 'body', blockStatus);
   out.headers.set('X-Edge-DLP', action);
   if (action === 'block') {
@@ -1294,7 +1325,7 @@ async function applyResponseDlp(out: Response, ctx: ReqCtx): Promise<Response> {
       headers: { 'Cache-Control': 'no-store', 'X-Edge-DLP': 'block' },
     });
   }
-  if (action === 'report_only') return out;
+  if (action === 'report_only') return new Response(inspected.bytes, out);
   const maskedHeaders = new Headers(out.headers);
   maskedHeaders.delete('content-length');
   maskedHeaders.set('X-Edge-DLP', 'mask');
@@ -1437,56 +1468,47 @@ export default {
 
     for (const k of CFG.dropQueryKeys) url.searchParams.delete(k);
 
-    const graphqlGuardResponse = await enforceGraphqlGuard(request, url.pathname, ctx);
-    if (graphqlGuardResponse) return graphqlGuardResponse;
+    const bodyState: ForwardBody = { body: request.body };
+    try {
+      const graphqlGuardResponse = await enforceGraphqlGuard(request, bodyState, url.pathname, ctx);
+      if (graphqlGuardResponse) return graphqlGuardResponse;
 
-    // Nonce to forward to origin after a successful signed_url verification.
-    // Collected here and attached when we build the origin-facing Request.
-    let signedUrlNonce: string | null = null;
-    for (const gate of CFG.authGates) {
-      // signed_url gates may opt into exact_path matching to prevent a signature
-      // for /assets/ from being replayed against /assets/other-file.
-      const useExact = gate.type === 'signed_url' && gate.exact_path === true;
-      const isProtected = useExact
-        ? gate.protectedPrefixes.some((p: string) => pathMatchesExact(url.pathname, p))
-        : gate.protectedPrefixes.some((p: string) => pathMatchesPrefix(url.pathname, p));
-      if (!isProtected) continue;
+      // Nonce to forward to origin after a successful signed_url verification.
+      // Collected here and attached when we build the origin-facing Request.
+      let signedUrlNonce: string | null = null;
+      const matchPath = normalizeForMatch(url.pathname);
+      for (let gateIndex = 0; gateIndex < CFG.authGates.length; gateIndex++) {
+        const gate = CFG.authGates[gateIndex];
+        const prefixes = authMatchPrefixes[gateIndex];
+        // signed_url gates may opt into exact_path matching to prevent a signature
+        // for /assets/ from being replayed against /assets/other-file.
+        const useExact = gate.type === 'signed_url' && gate.exact_path === true;
+        const isProtected = useExact
+          ? prefixes.some((p: string) => pathMatchesExact(matchPath, p))
+          : prefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
+        if (!isProtected) continue;
 
-      if (gate.type === 'static_token') {
-        const tok = request.headers.get(gate.tokenHeaderName) || '';
-        const expectedToken = env[gate.tokenEnv] || '';
-        if (!expectedToken) {
-          console.error('[auth] static_token env missing:', gate.tokenEnv);
-          return shouldBlockAuth(503, 'Auth misconfigured', ctx);
-        }
-        if (!timingSafeEqual(tok, expectedToken)) {
-          return shouldBlockAuth(401, 'Unauthorized', ctx);
-        }
-      } else if (gate.type === 'basic_auth') {
-        const authHeader = request.headers.get('authorization') || '';
-        const expectedCreds = env[gate.credentialsEnv] || '';
-        if (!expectedCreds) {
-          console.error('[auth] basic_auth env missing:', gate.credentialsEnv);
-          return shouldBlockAuth(503, 'Auth misconfigured', ctx);
-        }
-        if (!authHeader.startsWith('Basic ')) {
-          logEvent(CFG.mode === 'monitor' ? 'monitor' : 'block', {
-            status: 401,
-            block_reason: 'Missing Basic auth',
-            method: ctx.method,
-            uri: ctx.uri,
-            correlation_id: ctx.correlationId,
-          });
-          return new Response('Unauthorized', {
-            status: 401,
-            headers: { 'WWW-Authenticate': 'Basic realm="Protected"', 'Cache-Control': 'no-store' },
-          });
-        } else {
-          const provided = authHeader.slice(6);
-          if (!timingSafeEqual(provided, expectedCreds)) {
+        if (gate.type === 'static_token') {
+          const tok = request.headers.get(gate.tokenHeaderName) || '';
+          const expectedToken = env[gate.tokenEnv] || '';
+          if (!expectedToken) {
+            console.error('[auth] static_token env missing:', gate.tokenEnv);
+            return shouldBlockAuth(503, 'Auth misconfigured', ctx);
+          }
+          if (!timingSafeEqual(tok, expectedToken)) {
+            return shouldBlockAuth(401, 'Unauthorized', ctx);
+          }
+        } else if (gate.type === 'basic_auth') {
+          const authHeader = request.headers.get('authorization') || '';
+          const expectedCreds = env[gate.credentialsEnv] || '';
+          if (!expectedCreds) {
+            console.error('[auth] basic_auth env missing:', gate.credentialsEnv);
+            return shouldBlockAuth(503, 'Auth misconfigured', ctx);
+          }
+          if (!authHeader.startsWith('Basic ')) {
             logEvent(CFG.mode === 'monitor' ? 'monitor' : 'block', {
               status: 401,
-              block_reason: 'Invalid Basic auth credentials',
+              block_reason: 'Missing Basic auth',
               method: ctx.method,
               uri: ctx.uri,
               correlation_id: ctx.correlationId,
@@ -1495,255 +1517,280 @@ export default {
               status: 401,
               headers: { 'WWW-Authenticate': 'Basic realm="Protected"', 'Cache-Control': 'no-store' },
             });
+          } else {
+            const provided = authHeader.slice(6);
+            if (!timingSafeEqual(provided, expectedCreds)) {
+              logEvent(CFG.mode === 'monitor' ? 'monitor' : 'block', {
+                status: 401,
+                block_reason: 'Invalid Basic auth credentials',
+                method: ctx.method,
+                uri: ctx.uri,
+                correlation_id: ctx.correlationId,
+              });
+              return new Response('Unauthorized', {
+                status: 401,
+                headers: { 'WWW-Authenticate': 'Basic realm="Protected"', 'Cache-Control': 'no-store' },
+              });
+            }
           }
-        }
-      } else if (gate.type === 'jwt') {
-        const authHeader = request.headers.get('authorization') || '';
-        if (!authHeader.startsWith('Bearer ')) {
-          return shouldBlockAuth(401, 'Missing or invalid Authorization header', ctx);
-        }
-        const token = authHeader.slice(7);
-        const verified = await verifyJwt(gate, token, env);
-        if (!verified.valid) {
-          return shouldBlockAuth(401, verified.error || 'Invalid token', ctx);
-        }
-        if (CFG.obs && CFG.obs.auditLogAuth) {
-          const rawSub = (verified.payload && verified.payload.sub) || '';
-          logEvent('audit', {
-            auth_event: 'auth_pass',
-            gate_type: 'jwt',
-            gate_name: gate.name || '',
-            sub: CFG.obs.auditHashSub ? await hashSub(rawSub) : rawSub,
-            method: ctx.method,
-            uri: ctx.uri,
-            correlation_id: ctx.correlationId,
-          });
-        }
-      } else if (gate.type === 'signed_url') {
-        const verified = await verifySignedUrl(gate, url, env);
-        if (!verified.valid) {
-          return shouldBlockAuth(403, verified.error || 'Invalid signature', ctx);
-        }
-        if (gate.nonce_param && verified.nonce) {
-          signedUrlNonce = verified.nonce;
-        }
-        if (CFG.obs && CFG.obs.auditLogAuth) {
-          logEvent('audit', {
-            auth_event: 'auth_pass',
-            gate_type: 'signed_url',
-            gate_name: gate.name || '',
-            method: ctx.method,
-            uri: ctx.uri,
-            correlation_id: ctx.correlationId,
-          });
+        } else if (gate.type === 'jwt') {
+          const authHeader = request.headers.get('authorization') || '';
+          if (!authHeader.startsWith('Bearer ')) {
+            return shouldBlockAuth(401, 'Missing or invalid Authorization header', ctx);
+          }
+          const token = authHeader.slice(7);
+          const verified = await verifyJwt(gate, token, env);
+          if (!verified.valid) {
+            return shouldBlockAuth(401, verified.error || 'Invalid token', ctx);
+          }
+          if (CFG.obs && CFG.obs.auditLogAuth) {
+            const rawSub = (verified.payload && verified.payload.sub) || '';
+            logEvent('audit', {
+              auth_event: 'auth_pass',
+              gate_type: 'jwt',
+              gate_name: gate.name || '',
+              sub: CFG.obs.auditHashSub ? await hashSub(rawSub) : rawSub,
+              method: ctx.method,
+              uri: ctx.uri,
+              correlation_id: ctx.correlationId,
+            });
+          }
+        } else if (gate.type === 'signed_url') {
+          const verified = await verifySignedUrl(gate, url, env);
+          if (!verified.valid) {
+            return shouldBlockAuth(403, verified.error || 'Invalid signature', ctx);
+          }
+          if (gate.nonce_param && verified.nonce) {
+            signedUrlNonce = verified.nonce;
+          }
+          if (CFG.obs && CFG.obs.auditLogAuth) {
+            logEvent('audit', {
+              auth_event: 'auth_pass',
+              gate_type: 'signed_url',
+              gate_name: gate.name || '',
+              method: ctx.method,
+              uri: ctx.uri,
+              correlation_id: ctx.correlationId,
+            });
+          }
         }
       }
-    }
 
-    const forwardHeaders = new Headers(request.headers);
-    // Strip any client-supplied edge-auth marker before forwarding to origin.
-    // Only the edge is allowed to assert this; trusting an incoming value
-    // would let a client spoof authenticated state.
-    forwardHeaders.delete('x-edge-authenticated');
-    // Never trust a viewer-provided nonce. Mint it before origin fetch so the
-    // origin can apply the same nonce to the HTML it returns.
-    forwardHeaders.delete('x-csp-nonce');
-    let cspNonce = '';
-    if (RESPONSE_CFG.csp_nonce) {
-      const nonceBytes = new Uint8Array(16);
-      crypto.getRandomValues(nonceBytes);
-      cspNonce = btoa(String.fromCharCode(...nonceBytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-      forwardHeaders.set('X-CSP-Nonce', cspNonce);
-    }
-    // Strip client-supplied X-Forwarded-For unless explicitly trusted. The
-    // real client IP is already available via cf-connecting-ip, and a spoofed
-    // XFF value can poison downstream rate limiters, IP allowlists, and logs.
-    if (!CFG.trustForwardedFor) {
-      forwardHeaders.delete('x-forwarded-for');
-    }
-    // Request-smuggling defense: strip hop-by-hop headers before origin
-    // forward. Any client-supplied Transfer-Encoding / Connection / Upgrade
-    // can desynchronize Worker ↔ origin framing (CL.TE, TE.CL, H2.TE) and
-    // smuggle a second request. Cloudflare re-frames the request, so these
-    // headers carry no legitimate meaning from the viewer.
-    for (const h of ['transfer-encoding', 'connection', 'keep-alive', 'te', 'upgrade', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'trailer']) {
-      forwardHeaders.delete(h);
-    }
-    if (CFG.originAuth && (CFG.originAuth.type === 'custom_header' || CFG.originAuth.type === 'hmac_signature')) {
-      const envName = CFG.originAuth.secret_env || '';
-      const secret = envName ? (env[envName] || '') : '';
-      if (secret) {
-        if (CFG.originAuth.type === 'hmac_signature') {
-          const prefix = CFG.originAuth.header_prefix || 'X-CDN-Auth';
-          const timestamp = String(Math.floor(Date.now() / 1000));
-          const nonce = randomOriginAuthNonce();
-          let bodyHash = '';
-          if (CFG.originAuth.include_body_hash === true) {
-            bodyHash = await sha256HexBytes(await request.clone().arrayBuffer());
+      const forwardHeaders = new Headers(request.headers);
+      // Strip any client-supplied edge-auth marker before forwarding to origin.
+      // Only the edge is allowed to assert this; trusting an incoming value
+      // would let a client spoof authenticated state.
+      forwardHeaders.delete('x-edge-authenticated');
+      // Never trust a viewer-provided nonce. Mint it before origin fetch so the
+      // origin can apply the same nonce to the HTML it returns.
+      forwardHeaders.delete('x-csp-nonce');
+      let cspNonce = '';
+      if (RESPONSE_CFG.csp_nonce) {
+        const nonceBytes = new Uint8Array(16);
+        crypto.getRandomValues(nonceBytes);
+        cspNonce = btoa(String.fromCharCode(...nonceBytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+        forwardHeaders.set('X-CSP-Nonce', cspNonce);
+      }
+      // Strip client-supplied X-Forwarded-For unless explicitly trusted. The
+      // real client IP is already available via cf-connecting-ip, and a spoofed
+      // XFF value can poison downstream rate limiters, IP allowlists, and logs.
+      if (!CFG.trustForwardedFor) {
+        forwardHeaders.delete('x-forwarded-for');
+      }
+      // Request-smuggling defense: strip hop-by-hop headers before origin
+      // forward. Any client-supplied Transfer-Encoding / Connection / Upgrade
+      // can desynchronize Worker ↔ origin framing (CL.TE, TE.CL, H2.TE) and
+      // smuggle a second request. Cloudflare re-frames the request, so these
+      // headers carry no legitimate meaning from the viewer.
+      for (const h of ['transfer-encoding', 'connection', 'keep-alive', 'te', 'upgrade', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'trailer']) {
+        forwardHeaders.delete(h);
+      }
+      if (CFG.originAuth && (CFG.originAuth.type === 'custom_header' || CFG.originAuth.type === 'hmac_signature')) {
+        const envName = CFG.originAuth.secret_env || '';
+        const secret = envName ? (env[envName] || '') : '';
+        if (secret) {
+          if (CFG.originAuth.type === 'hmac_signature') {
+            const prefix = CFG.originAuth.header_prefix || 'X-CDN-Auth';
+            const timestamp = String(Math.floor(Date.now() / 1000));
+            const nonce = randomOriginAuthNonce();
+            let bodyHash = '';
+            if (CFG.originAuth.include_body_hash === true) {
+              const hadBody = bodyState.body !== null;
+              // The same bytes are signed and forwarded. Temporary Request clones
+              // can let Node's GC finalizer cancel the original tee branch.
+              const bytes = await new Response(bodyState.body).arrayBuffer();
+              bodyState.body = hadBody ? bytes : null;
+              bodyHash = await sha256HexBytes(bytes);
+            }
+            const canonical = canonicalOriginAuthInput(request, url, CFG.originAuth, timestamp, nonce, bodyHash);
+            const signature = await hmacSha256Base64Url(secret, canonical, CFG.originAuth);
+            forwardHeaders.set(prefix + '-Timestamp', timestamp);
+            forwardHeaders.set(prefix + '-Nonce', nonce);
+            if (CFG.originAuth.include_body_hash === true) {
+              forwardHeaders.set(prefix + '-Body-SHA256', bodyHash);
+            }
+            forwardHeaders.set(prefix + '-Signature', signature);
+          } else {
+            const headerName = CFG.originAuth.header || 'X-Origin-Verify';
+            forwardHeaders.set(headerName, secret);
           }
-          const canonical = canonicalOriginAuthInput(request, url, CFG.originAuth, timestamp, nonce, bodyHash);
-          const signature = await hmacSha256Base64Url(secret, canonical);
-          forwardHeaders.set(prefix + '-Timestamp', timestamp);
-          forwardHeaders.set(prefix + '-Nonce', nonce);
-          if (CFG.originAuth.include_body_hash === true) {
-            forwardHeaders.set(prefix + '-Body-SHA256', bodyHash);
-          }
-          forwardHeaders.set(prefix + '-Signature', signature);
         } else {
-          const headerName = CFG.originAuth.header || 'X-Origin-Verify';
-          forwardHeaders.set(headerName, secret);
+          console.log(JSON.stringify({
+            ts: new Date().toISOString(),
+            level: 'error',
+            event: 'error',
+            block_reason: 'origin_auth_secret_missing',
+            secret_env: envName,
+            uri: ctx.uri,
+            correlation_id: ctx.correlationId,
+          }));
+          return shouldBlockAuth(503, 'Origin auth misconfigured', ctx);
         }
+      }
+      // Forward signed-URL nonce so origin can enforce single-use. The edge
+      // cannot enforce replay protection statelessly — origin must reject
+      // re-use (SET NX in KV/Redis).
+      if (signedUrlNonce) {
+        forwardHeaders.set('X-Signed-URL-Nonce', signedUrlNonce);
+      }
+
+      // Propagate correlation / trace header so origin logs can join edge logs.
+      // When the header is missing, mint one so every request has a stable ID.
+      let forwardedCorrelationId = ctx.correlationId;
+      if (CFG.obs && CFG.obs.correlationHeader) {
+        const incoming = request.headers.get(CFG.obs.correlationHeader);
+        if (!incoming) {
+          const buf = new Uint8Array(16);
+          crypto.getRandomValues(buf);
+          const id = Array.from(buf, (b: number) => b.toString(16).padStart(2, '0')).join('');
+          forwardHeaders.set(CFG.obs.correlationHeader, id);
+          forwardedCorrelationId = id;
+        }
+      }
+
+      logAllow({ ...ctx, correlationId: forwardedCorrelationId }, allowSamplingKey);
+
+      const res = await fetch(new Request(url.toString(), {
+        method: request.method,
+        headers: forwardHeaders,
+        body: bodyState.body,
+        redirect: request.redirect,
+        ...({ duplex: 'half' } as any),
+      }));
+
+      bodyState.body = null;
+      const out = new Response(res.body, res);
+      const rh = RESPONSE_CFG.headers;
+      if (rh['strict-transport-security']) out.headers.set('Strict-Transport-Security', rh['strict-transport-security']);
+      if (rh['x-content-type-options']) out.headers.set('X-Content-Type-Options', rh['x-content-type-options']);
+      if (rh['referrer-policy']) out.headers.set('Referrer-Policy', rh['referrer-policy']);
+      if (rh['permissions-policy']) out.headers.set('Permissions-Policy', rh['permissions-policy']);
+
+      // Cross-Origin isolation (issue #10). Only emitted when operator opts in.
+      if (RESPONSE_CFG.coop) out.headers.set('Cross-Origin-Opener-Policy', RESPONSE_CFG.coop);
+      if (RESPONSE_CFG.coep) out.headers.set('Cross-Origin-Embedder-Policy', RESPONSE_CFG.coep);
+      if (RESPONSE_CFG.corp) out.headers.set('Cross-Origin-Resource-Policy', RESPONSE_CFG.corp);
+      if (RESPONSE_CFG.reporting_endpoints) out.headers.set('Reporting-Endpoints', RESPONSE_CFG.reporting_endpoints);
+
+      const isAdminPath = adminMatchPrefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
+      const isAuthPath = protectedMatchPrefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
+
+      // Per-response CSP nonce (issue #11). crypto.getRandomValues is a CS-PRNG on Workers.
+      if (cspNonce) out.headers.set('X-CSP-Nonce', cspNonce);
+      const applyNonce = (csp: string): string => {
+        if (!csp || !cspNonce) return csp;
+        return csp.split("'nonce-PLACEHOLDER'").join("'nonce-" + cspNonce + "'");
+      };
+
+      if (isAdminPath) {
+        if (RESPONSE_CFG.adminCacheControl) out.headers.set('Cache-Control', RESPONSE_CFG.adminCacheControl);
+        if (RESPONSE_CFG.csp_admin) out.headers.set('Content-Security-Policy', applyNonce(RESPONSE_CFG.csp_admin));
       } else {
-        console.log(JSON.stringify({
-          ts: new Date().toISOString(),
-          level: 'error',
-          event: 'error',
-          block_reason: 'origin_auth_secret_missing',
-          secret_env: envName,
-          uri: ctx.uri,
-          correlation_id: ctx.correlationId,
-        }));
-        return shouldBlockAuth(503, 'Origin auth misconfigured', ctx);
+        if (RESPONSE_CFG.csp_public) out.headers.set('Content-Security-Policy', applyNonce(RESPONSE_CFG.csp_public));
       }
-    }
-    // Forward signed-URL nonce so origin can enforce single-use. The edge
-    // cannot enforce replay protection statelessly — origin must reject
-    // re-use (SET NX in KV/Redis).
-    if (signedUrlNonce) {
-      forwardHeaders.set('X-Signed-URL-Nonce', signedUrlNonce);
-    }
 
-    // Propagate correlation / trace header so origin logs can join edge logs.
-    // When the header is missing, mint one so every request has a stable ID.
-    let forwardedCorrelationId = ctx.correlationId;
-    if (CFG.obs && CFG.obs.correlationHeader) {
-      const incoming = request.headers.get(CFG.obs.correlationHeader);
-      if (!incoming) {
-        const buf = new Uint8Array(16);
-        crypto.getRandomValues(buf);
-        const id = Array.from(buf, (b: number) => b.toString(16).padStart(2, '0')).join('');
-        forwardHeaders.set(CFG.obs.correlationHeader, id);
-        forwardedCorrelationId = id;
+      if (RESPONSE_CFG.csp_report_only) {
+        out.headers.set('Content-Security-Policy-Report-Only', applyNonce(RESPONSE_CFG.csp_report_only));
       }
-    }
 
-    logAllow({ ...ctx, correlationId: forwardedCorrelationId }, allowSamplingKey);
+      // Force no-store + Vary on any auth-gate prefix (issue #8). Broader than adminPathPrefixes
+      // which only fires for the first admin-shaped route.
+      if (RESPONSE_CFG.forceVaryAuth && isAuthPath) {
+        out.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
+        out.headers.set('Pragma', 'no-cache');
+        appendVary(out.headers, 'Authorization');
+        appendVary(out.headers, 'Cookie');
+      }
 
-    const res = await fetch(new Request(url.toString(), {
-      method: request.method,
-      headers: forwardHeaders,
-      body: request.body,
-      redirect: request.redirect,
-      ...({ duplex: 'half' } as any),
-    }));
+      // Clear-Site-Data on configured logout paths (issue #20). Only on 2xx/3xx.
+      const status = out.status;
+      const isSuccess = status >= 200 && status < 400;
+      const hitsClearPath = (RESPONSE_CFG.clearSiteDataPaths || []).some((p: string) =>
+        url.pathname === p || url.pathname.startsWith(p + '/'),
+      );
+      if (hitsClearPath && isSuccess) {
+        const types = (RESPONSE_CFG.clearSiteDataTypes || []).map((t: string) => '"' + t + '"');
+        if (types.length > 0) out.headers.set('Clear-Site-Data', types.join(', '));
+        out.headers.set('Cache-Control', 'no-store');
+      }
 
-    const out = new Response(res.body, res);
-    const rh = RESPONSE_CFG.headers;
-    if (rh['strict-transport-security']) out.headers.set('Strict-Transport-Security', rh['strict-transport-security']);
-    if (rh['x-content-type-options']) out.headers.set('X-Content-Type-Options', rh['x-content-type-options']);
-    if (rh['referrer-policy']) out.headers.set('Referrer-Policy', rh['referrer-policy']);
-    if (rh['permissions-policy']) out.headers.set('Permissions-Policy', rh['permissions-policy']);
+      out.headers.delete('x-powered-by');
+      out.headers.delete('server');
 
-    // Cross-Origin isolation (issue #10). Only emitted when operator opts in.
-    if (RESPONSE_CFG.coop) out.headers.set('Cross-Origin-Opener-Policy', RESPONSE_CFG.coop);
-    if (RESPONSE_CFG.coep) out.headers.set('Cross-Origin-Embedder-Policy', RESPONSE_CFG.coep);
-    if (RESPONSE_CFG.corp) out.headers.set('Cross-Origin-Resource-Policy', RESPONSE_CFG.corp);
-    if (RESPONSE_CFG.reporting_endpoints) out.headers.set('Reporting-Endpoints', RESPONSE_CFG.reporting_endpoints);
+      // Cookie attribute append — multi-cookie aware via getAll/append (issue #13).
+      if (RESPONSE_CFG.cookie_attributes) {
+        const attrs: string[] = [];
+        if (RESPONSE_CFG.cookie_attributes.secure) attrs.push('Secure');
+        if (RESPONSE_CFG.cookie_attributes.http_only) attrs.push('HttpOnly');
+        if (RESPONSE_CFG.cookie_attributes.same_site) attrs.push('SameSite=' + RESPONSE_CFG.cookie_attributes.same_site);
 
-    const isAdminPath = RESPONSE_CFG.adminPathPrefixes.some((p: string) => pathMatchesPrefix(url.pathname, p));
-    const isAuthPath = (RESPONSE_CFG.authProtectedPrefixes || []).some((p: string) => pathMatchesPrefix(url.pathname, p));
-
-    // Per-response CSP nonce (issue #11). crypto.getRandomValues is a CS-PRNG on Workers.
-    if (cspNonce) out.headers.set('X-CSP-Nonce', cspNonce);
-    const applyNonce = (csp: string): string => {
-      if (!csp || !cspNonce) return csp;
-      return csp.split("'nonce-PLACEHOLDER'").join("'nonce-" + cspNonce + "'");
-    };
-
-    if (isAdminPath) {
-      if (RESPONSE_CFG.adminCacheControl) out.headers.set('Cache-Control', RESPONSE_CFG.adminCacheControl);
-      if (RESPONSE_CFG.csp_admin) out.headers.set('Content-Security-Policy', applyNonce(RESPONSE_CFG.csp_admin));
-    } else {
-      if (RESPONSE_CFG.csp_public) out.headers.set('Content-Security-Policy', applyNonce(RESPONSE_CFG.csp_public));
-    }
-
-    if (RESPONSE_CFG.csp_report_only) {
-      out.headers.set('Content-Security-Policy-Report-Only', applyNonce(RESPONSE_CFG.csp_report_only));
-    }
-
-    // Force no-store + Vary on any auth-gate prefix (issue #8). Broader than adminPathPrefixes
-    // which only fires for the first admin-shaped route.
-    if (RESPONSE_CFG.forceVaryAuth && isAuthPath) {
-      out.headers.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
-      out.headers.set('Pragma', 'no-cache');
-      appendVary(out.headers, 'Authorization');
-      appendVary(out.headers, 'Cookie');
-    }
-
-    // Clear-Site-Data on configured logout paths (issue #20). Only on 2xx/3xx.
-    const status = out.status;
-    const isSuccess = status >= 200 && status < 400;
-    const hitsClearPath = (RESPONSE_CFG.clearSiteDataPaths || []).some((p: string) =>
-      url.pathname === p || url.pathname.startsWith(p + '/'),
-    );
-    if (hitsClearPath && isSuccess) {
-      const types = (RESPONSE_CFG.clearSiteDataTypes || []).map((t: string) => '"' + t + '"');
-      if (types.length > 0) out.headers.set('Clear-Site-Data', types.join(', '));
-      out.headers.set('Cache-Control', 'no-store');
-    }
-
-    out.headers.delete('x-powered-by');
-    out.headers.delete('server');
-
-    // Cookie attribute append — multi-cookie aware via getAll/append (issue #13).
-    if (RESPONSE_CFG.cookie_attributes) {
-      const attrs: string[] = [];
-      if (RESPONSE_CFG.cookie_attributes.secure) attrs.push('Secure');
-      if (RESPONSE_CFG.cookie_attributes.http_only) attrs.push('HttpOnly');
-      if (RESPONSE_CFG.cookie_attributes.same_site) attrs.push('SameSite=' + RESPONSE_CFG.cookie_attributes.same_site);
-
-      if (attrs.length > 0) {
-        // Workers runtime exposes multiple Set-Cookie via Headers#getSetCookie()
-        // (per the Fetch standard). Fall back to get() on older runtimes.
-        type HeadersWithGetSetCookie = Headers & { getSetCookie?: () => string[] };
-        const h = out.headers as HeadersWithGetSetCookie;
-        const cookies: string[] = typeof h.getSetCookie === 'function'
-          ? h.getSetCookie()
-          : (out.headers.get('set-cookie') ? [out.headers.get('set-cookie') as string] : []);
-        if (cookies.length > 0) {
-          out.headers.delete('set-cookie');
-          const attrStr = attrs.join('; ');
-          for (const cookie of cookies) {
-            const needsSecure = RESPONSE_CFG.cookie_attributes.secure && !/(?:^|; *)Secure(?:;|$)/i.test(cookie);
-            const needsHttpOnly = RESPONSE_CFG.cookie_attributes.http_only && !/(?:^|; *)HttpOnly(?:;|$)/i.test(cookie);
-            const needsSameSite = RESPONSE_CFG.cookie_attributes.same_site && !/(?:^|; *)SameSite=/i.test(cookie);
-            if (needsSecure || needsHttpOnly || needsSameSite) {
-              const missing: string[] = [];
-              if (needsSecure) missing.push('Secure');
-              if (needsHttpOnly) missing.push('HttpOnly');
-              if (needsSameSite) missing.push('SameSite=' + RESPONSE_CFG.cookie_attributes.same_site);
-              out.headers.append('Set-Cookie', cookie + '; ' + missing.join('; '));
-            } else {
-              out.headers.append('Set-Cookie', cookie);
+        if (attrs.length > 0) {
+          // Workers runtime exposes multiple Set-Cookie via Headers#getSetCookie()
+          // (per the Fetch standard). Fall back to get() on older runtimes.
+          type HeadersWithGetSetCookie = Headers & { getSetCookie?: () => string[] };
+          const h = out.headers as HeadersWithGetSetCookie;
+          const cookies: string[] = typeof h.getSetCookie === 'function'
+            ? h.getSetCookie()
+            : (out.headers.get('set-cookie') ? [out.headers.get('set-cookie') as string] : []);
+          if (cookies.length > 0) {
+            out.headers.delete('set-cookie');
+            const attrStr = attrs.join('; ');
+            for (const cookie of cookies) {
+              const needsSecure = RESPONSE_CFG.cookie_attributes.secure && !/(?:^|; *)Secure(?:;|$)/i.test(cookie);
+              const needsHttpOnly = RESPONSE_CFG.cookie_attributes.http_only && !/(?:^|; *)HttpOnly(?:;|$)/i.test(cookie);
+              const needsSameSite = RESPONSE_CFG.cookie_attributes.same_site && !/(?:^|; *)SameSite=/i.test(cookie);
+              if (needsSecure || needsHttpOnly || needsSameSite) {
+                const missing: string[] = [];
+                if (needsSecure) missing.push('Secure');
+                if (needsHttpOnly) missing.push('HttpOnly');
+                if (needsSameSite) missing.push('SameSite=' + RESPONSE_CFG.cookie_attributes.same_site);
+                out.headers.append('Set-Cookie', cookie + '; ' + missing.join('; '));
+              } else {
+                out.headers.append('Set-Cookie', cookie);
+              }
             }
           }
         }
       }
-    }
 
-    if (RESPONSE_CFG.cors) {
-      const origin = request.headers.get('origin') || '';
-      const allowedOrigins = RESPONSE_CFG.cors.allow_origins || [];
-      const isAllowed = allowedOrigins.includes('*') || allowedOrigins.includes(origin);
+      if (RESPONSE_CFG.cors) {
+        const origin = request.headers.get('origin') || '';
+        const allowedOrigins = RESPONSE_CFG.cors.allow_origins || [];
+        const isAllowed = allowedOrigins.includes('*') || allowedOrigins.includes(origin);
 
-      if (origin && isAllowed) {
-        out.headers.set('Access-Control-Allow-Origin', origin);
-        appendVary(out.headers, 'Origin');
-        if (RESPONSE_CFG.cors.allow_credentials) out.headers.set('Access-Control-Allow-Credentials', 'true');
-        if (RESPONSE_CFG.cors.expose_headers?.length > 0) out.headers.set('Access-Control-Expose-Headers', RESPONSE_CFG.cors.expose_headers.join(', '));
+        if (origin && isAllowed) {
+          out.headers.set('Access-Control-Allow-Origin', origin);
+          appendVary(out.headers, 'Origin');
+          if (RESPONSE_CFG.cors.allow_credentials) out.headers.set('Access-Control-Allow-Credentials', 'true');
+          if (RESPONSE_CFG.cors.expose_headers?.length > 0) out.headers.set('Access-Control-Expose-Headers', RESPONSE_CFG.cors.expose_headers.join(', '));
+        }
       }
-    }
 
-    return await applyResponseDlp(out, ctx);
+      return await applyResponseDlp(out, ctx);
+    } finally {
+      // Auth/config rejection and exceptions must release the inspected upload.
+      // A successful fetch above transfers ownership and clears this state.
+      cancelForwardBody(bodyState);
+    }
   },
 };

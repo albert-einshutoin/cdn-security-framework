@@ -27,6 +27,18 @@ async function main(): Promise<void> {
       runSourceAnalysisBenchmark({ profile: 'test', controllers: 1, iterations: 0 }),
       /iterations must be a positive integer/u,
     );
+    for (const workload of ['mutable-decorators', 'namespace-decorators', 'assignment-heavy'] as const) {
+      const loaded = await runSourceAnalysisBenchmark({
+        profile: 'test', controllers: 2, iterations: 1, workload, assignmentsPerController: 3,
+      });
+      assert.strictEqual(loaded.workload, workload);
+      assert.strictEqual(loaded.assignmentsPerController, 3);
+      assert.strictEqual(loaded.expectedUnknownAuthOperations, 9);
+      assert.strictEqual(loaded.samples[0].operations, 20);
+      assert.strictEqual(loaded.samples[0].unknownAuthOperations, 9);
+    }
+    assert.throws(() => generateSourceAnalysisWorkload(root, 1, { assignmentsPerController: -1 }),
+      /assignmentsPerController must be/u);
 
     const invalidationRoot = path.join(root, 'invalidation');
     generateSourceAnalysisWorkload(invalidationRoot, 1);

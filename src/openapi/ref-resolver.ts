@@ -209,6 +209,7 @@ export function resolveOpenApiReferences(
 
   const references: OpenApiReferenceEdge[] = [];
   const seenReferenceLocations = new Set<string>();
+  const pointerResults = new Map<LoadedOpenApiSourceDocument, Map<string, ResolvedJsonPointerValue>>();
   let resolutionVisits = 0;
 
   const loadDocument = (absolutePath: string): LoadedOpenApiSourceDocument => {
@@ -261,14 +262,25 @@ export function resolveOpenApiReferences(
       });
     }
     const fragment = hash === -1 ? '#' : ref.slice(hash);
-    const currentPath = sourcePath(workspaceRoot, fromDocument.sourceUri);
+    const currentPath = loadedOpenApiDocumentMetadata(fromDocument).sourcePath;
     const targetPath = rawPath === ''
       ? currentPath
       : resolveOpenApiRefPath({
         workspaceRoot, sourcePath: currentPath, ref: refPath, fragmentSeparated: true,
       });
     const targetDocument = rawPath === '' ? fromDocument : loadDocument(targetPath);
-    const resolved = resolveJsonPointerValue(targetDocument.document, fragment, targetDocument.sourceUri);
+    let documentPointers = pointerResults.get(targetDocument);
+    if (!documentPointers) {
+      documentPointers = new Map();
+      pointerResults.set(targetDocument, documentPointers);
+    }
+    let resolved = documentPointers.get(fragment);
+    if (!resolved) {
+      resolved = resolveJsonPointerValue(targetDocument.document, fragment, targetDocument.sourceUri);
+      documentPointers.set(fragment, resolved);
+    }
+    // Only pointer lookup is shared. Context checks and every walk's depth/node
+    // accounting still apply to each reference, including repeated targets.
     if (resolved.value === null || (typeof resolved.value !== 'object'
       && !(schemaObject && options.root.version === '3.1'
         && typeof resolved.value === 'boolean'))) {

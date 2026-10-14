@@ -948,3 +948,22 @@ describe('TypeScript project loader', () => {
     expect(JSON.stringify(error.diagnostics)).not.toMatch(/export const|compilerOptions/);
   });
 });
+
+test('cached ASTs recheck logical budgets and resolve imports against the current filesystem', async () => {
+  const root = workspace(), cache = new TypeScriptAnalysisCache();
+  write(root, 'tsconfig.json', JSON.stringify({ compilerOptions: { noLib: true }, files: ['src/app.ts'] }));
+  write(root, 'src/app.ts', 'import { value } from "./dep"; export { value };');
+  write(root, 'src/dep.ts', 'export const value = 1;');
+  const first = await loadTypeScriptProject(options(root, { cache }));
+  const second = await loadTypeScriptProject(options(root, { cache }));
+  expect(second.metrics.astNodes).toBe(first.metrics.astNodes);
+  expect(second.metrics.cacheHits).toBe(1);
+  await expectFailure(loadTypeScriptProject(options(root, { cache,
+    limits: { ...DEFAULT_SOURCE_ANALYSIS_LIMITS, maxAstNodes: first.metrics.astNodes - 1 },
+  })), 'TS_PROJECT_AST_NODE_LIMIT', root);
+  fs.unlinkSync(path.join(root, 'src/dep.ts'));
+  const outside = workspace();
+  write(outside, 'dep.ts', 'export const value = 2;');
+  fs.symlinkSync(path.join(outside, 'dep.ts'), path.join(root, 'src/dep.ts'));
+  await expectFailure(loadTypeScriptProject(options(root, { cache })), 'TS_PROJECT_PATH_OUTSIDE_ROOT', root);
+});

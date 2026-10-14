@@ -288,6 +288,7 @@ function loadCloudflareWorker() {
     Request: globalThis.Request,
     Response: globalThis.Response,
     Headers: globalThis.Headers,
+    ReadableStream: globalThis.ReadableStream,
     URL: globalThis.URL,
     URLSearchParams: globalThis.URLSearchParams,
     TextEncoder: globalThis.TextEncoder,
