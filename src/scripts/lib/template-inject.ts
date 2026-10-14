@@ -41,8 +41,29 @@ function injectTemplateCode(template: string, marker: string, code: string): str
 
 const CLOUDFRONT_FUNCTION_MAX_BYTES = 10 * 1024;
 
-function optimizeCloudFrontFunction(source: string, fileName: string): string {
+function specializeWorker(source: string, features: Record<string, boolean>): string {
+  for (const [name, enabled] of Object.entries(features)) {
+    source = injectTemplateCode(source, `/* {{FEATURE_${name}}} */ true`, String(enabled));
+  }
+  const boundary = source.indexOf('\n// {{RUNTIME}}\n');
+  if (boundary < 0) throw new Error('Worker runtime boundary missing');
+  return source.slice(0, boundary) + require('esbuild').transformSync(source.slice(boundary), {
+    loader: 'ts', format: 'esm', target: 'es2022', treeShaking: true,
+    minifySyntax: true, legalComments: 'none',
+  }).code;
+}
+
+function minifyCloudFrontFunction(source: string, fileName: string, literals: Record<string, string>): string {
   const esbuild = require('esbuild');
+  if (Object.keys(literals).length > 0) {
+    const boundary = source.indexOf('\n// {{RUNTIME}}\n');
+    if (boundary < 0) throw new Error('CloudFront runtime boundary missing');
+    // Policy strings remain in the config prefix; only repository-owned runtime
+    // expressions are specialized, so arbitrary policy text stays byte-for-byte.
+    let runtime = source.slice(boundary);
+    for (const [expression, literal] of Object.entries(literals)) runtime = runtime.split(expression).join(literal);
+    source = source.slice(0, boundary) + runtime;
+  }
   const transformed = esbuild.transformSync(`${source}\nexport { handler };`, {
     loader: 'js',
     format: 'esm',
@@ -56,6 +77,16 @@ function optimizeCloudFrontFunction(source: string, fileName: string): string {
     throw new Error(`Unable to preserve the CloudFront handler export in ${fileName}`);
   }
   const optimized = `${transformed.slice(0, exportMatch.index)}function handler(event){return ${exportMatch[1]}(event)}\n`;
+  return optimized;
+}
+
+function optimizeCloudFrontFunction(source: string, fileName: string, literals: Record<string, string> = {}, arraySource?: () => string): string {
+  let optimized = minifyCloudFrontFunction(source, fileName, literals);
+  // Select one algorithm before any write. Only a measured deployment-size
+  // excess can select arrays; malformed code and all other failures propagate.
+  if (Buffer.byteLength(optimized, 'utf8') > CLOUDFRONT_FUNCTION_MAX_BYTES && arraySource) {
+    optimized = minifyCloudFrontFunction(arraySource(), fileName, literals);
+  }
   const bytes = Buffer.byteLength(optimized, 'utf8');
   if (bytes > CLOUDFRONT_FUNCTION_MAX_BYTES) {
     throw new Error(
@@ -115,4 +146,5 @@ module.exports = {
   optimizeCloudFrontFunction,
   renderConstObject,
   runtimeCode,
+  specializeWorker,
 };

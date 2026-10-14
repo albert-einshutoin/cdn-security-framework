@@ -1,3 +1,5 @@
+import { buildPathIndex, PATH_INDEX_HELPER } from './path-index';
+import type { CompilerOptions } from './compiler-entry';
 const fs = require('fs');
 const path = require('path');
 const crypto = require('node:crypto');
@@ -416,74 +418,96 @@ function build(policy: any, options: any = {}) {
     } else viewerAuthGates.push(entry);
   }
 
-  const cfgCode = renderConstObject('CFG', {
-    mode: requestBase.mode,
-    allowMethods: requestBase.allowMethods,
-    maxQueryLength: requestBase.maxQueryLength,
-    maxQueryParams: requestBase.maxQueryParams,
-    maxUriLength: requestBase.maxUriLength,
-    maxHeaderCount: requestBase.maxHeaderCount,
-    dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(requestBase.dropQueryKeysArray)})`),
-    uaDenyContains: requestBase.uaDenyContains,
-    blockPathContains: requestBase.blockPathContains,
-    blockPathRegexes: runtimeCode(regexesLiteralCode(requestBase.blockPathRegexSources)),
-    normalizePath: requestBase.normalizePath,
-    requiredHeaders: requestBase.requiredHeaders,
-    allowedHosts: requestBase.allowedHosts,
-    trustForwardedFor: requestBase.trustForwardedFor,
-    cors: requestBase.cors,
-    authGates: viewerAuthGates,
-    anomalyGuards: requestBase.anomalyGuards,
-    obs: requestBase.obs,
-  });
+  const authGateIndex = buildPathIndex(viewerAuthGates.map(gate => gate.protectedPrefixes), false);
+  function renderRequest(index: typeof authGateIndex): string {
+    const cfgCode = renderConstObject('CFG', {
+      mode: requestBase.mode,
+      allowMethods: requestBase.allowMethods,
+      maxQueryLength: requestBase.maxQueryLength,
+      maxQueryParams: requestBase.maxQueryParams,
+      maxUriLength: requestBase.maxUriLength,
+      maxHeaderCount: requestBase.maxHeaderCount,
+      dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(requestBase.dropQueryKeysArray)})`),
+      uaDenyContains: requestBase.uaDenyContains,
+      blockPathContains: requestBase.blockPathContains,
+      blockPathRegexes: runtimeCode(regexesLiteralCode(requestBase.blockPathRegexSources)),
+      normalizePath: requestBase.normalizePath,
+      requiredHeaders: requestBase.requiredHeaders,
+      allowedHosts: requestBase.allowedHosts,
+      trustForwardedFor: requestBase.trustForwardedFor,
+      cors: requestBase.cors,
+      authGates: index ? viewerAuthGates.map(({ protectedPrefixes: _prefixes, ...gate }) => gate) : viewerAuthGates,
+      ...(index ? { authGateIndex: index } : {}),
+      anomalyGuards: requestBase.anomalyGuards,
+      obs: requestBase.obs,
+    });
 
-  const templatePath = path.join(rootDir, 'templates', 'aws', 'viewer-request.js');
-  let code = fs.readFileSync(templatePath, 'utf8');
-  code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode);
-  code = injectTemplateCode(code, '/* {{FEATURE_CORS}} */ true', String(Boolean(requestBase.cors)));
-  code = injectTemplateCode(code, '/* {{FEATURE_HOST_ALLOWLIST}} */ true', String(requestBase.allowedHosts.length > 0));
-  code = injectTemplateCode(
-    code,
-    '/* {{FEATURE_VIEWER_AUTH}} */ true',
-    String(authGates.some((gate) => gate.type === 'static_token' || gate.type === 'basic_auth')),
-  );
-  code = injectTemplateCode(
-    code,
-    '/* {{FEATURE_ALLOW_SAMPLING}} */ true',
-    String(requestBase.obs.sampleRate > 0),
-  );
-  code = injectTemplateCode(code, '/* {{FEATURE_STATIC_TOKEN}} */ true', String(authGates.some((gate: any) => gate.type === 'static_token')));
-  code = injectTemplateCode(code, '/* {{FEATURE_BASIC_AUTH}} */ true', String(authGates.some((gate: any) => gate.type === 'basic_auth')));
-  assertInjectedConstDeclarations(code, ['CFG']);
+    const templatePath = path.join(rootDir, 'templates', 'aws', 'viewer-request.js');
+    let code = fs.readFileSync(templatePath, 'utf8');
+    code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode + (index ? '\n' + PATH_INDEX_HELPER : ''));
+    code = injectTemplateCode(code, '/* {{FEATURE_AUTH_INDEX}} */ true', String(Boolean(index)));
+    code = injectTemplateCode(code, '/* {{AUTH_PROTECTED_MATCH}} */ gate.protectedPrefixes.some((p) => pathMatchesPrefix(uri, p))', index ? 'true' : 'gate.protectedPrefixes.some((p) => pathMatchesPrefix(uri, p))');
+    code = injectTemplateCode(code, '/* {{FEATURE_CORS}} */ true', String(Boolean(requestBase.cors)));
+    code = injectTemplateCode(code, '/* {{FEATURE_HOST_ALLOWLIST}} */ true', String(requestBase.allowedHosts.length > 0));
+    code = injectTemplateCode(
+      code,
+      '/* {{FEATURE_VIEWER_AUTH}} */ true',
+      String(authGates.some((gate) => gate.type === 'static_token' || gate.type === 'basic_auth')),
+    );
+    code = injectTemplateCode(
+      code,
+      '/* {{FEATURE_ALLOW_SAMPLING}} */ true',
+      String(requestBase.obs.sampleRate > 0),
+    );
+    code = injectTemplateCode(code, '/* {{FEATURE_STATIC_TOKEN}} */ true', String(authGates.some((gate: any) => gate.type === 'static_token')));
+    code = injectTemplateCode(code, '/* {{FEATURE_BASIC_AUTH}} */ true', String(authGates.some((gate: any) => gate.type === 'basic_auth')));
+    assertInjectedConstDeclarations(code, ['CFG']);
+
+    return code;
+  }
 
   const responseBase = buildResponseCfgBase(policy, authGates);
-  const responseCfgCode = renderConstObject('RESPONSE_CFG', {
-    headers: responseBase.headers,
-    csp_public: responseBase.csp_public,
-    csp_admin: responseBase.csp_admin,
-    csp_report_only: responseBase.csp_report_only,
-    csp_report_uri: responseBase.csp_report_uri,
-    csp_nonce: responseBase.csp_nonce,
-    coop: responseBase.coop,
-    coep: responseBase.coep,
-    corp: responseBase.corp,
-    reporting_endpoints: responseBase.reporting_endpoints,
-    adminPathPrefixes: responseBase.adminPathPrefixes,
-    adminCacheControl: responseBase.adminCacheControl,
-    authProtectedPrefixes: responseBase.authProtectedPrefixes,
-    forceVaryAuth: responseBase.forceVaryAuth,
-    caseInsensitive: responseBase.caseInsensitive,
-    normalizePath: responseBase.normalizePath,
-    clearSiteDataPaths: responseBase.clearSiteDataPaths,
-    clearSiteDataTypes: responseBase.clearSiteDataTypes,
-    cors: responseBase.cors,
-    cookie_attributes: responseBase.cookie_attributes,
-  });
+  const adminPathIndex = buildPathIndex([responseBase.adminPathPrefixes], responseBase.caseInsensitive !== false);
+  const authPathIndex = buildPathIndex([responseBase.authProtectedPrefixes], responseBase.caseInsensitive !== false);
+  function renderResponse(useIndex: boolean): string {
+    const adminIndex = useIndex ? adminPathIndex : null;
+    const authIndex = useIndex ? authPathIndex : null;
+    const responseCfgCode = renderConstObject('RESPONSE_CFG', {
+      headers: responseBase.headers,
+      csp_public: responseBase.csp_public,
+      csp_admin: responseBase.csp_admin,
+      csp_report_only: responseBase.csp_report_only,
+      csp_report_uri: responseBase.csp_report_uri,
+      csp_nonce: responseBase.csp_nonce,
+      coop: responseBase.coop,
+      coep: responseBase.coep,
+      corp: responseBase.corp,
+      reporting_endpoints: responseBase.reporting_endpoints,
+      adminPathPrefixes: responseBase.adminPathPrefixes,
+      ...(adminIndex ? { adminPathIndex: adminIndex } : {}),
+      adminCacheControl: responseBase.adminCacheControl,
+      authProtectedPrefixes: responseBase.authProtectedPrefixes,
+      ...(authIndex ? { authPathIndex: authIndex } : {}),
+      forceVaryAuth: responseBase.forceVaryAuth,
+      caseInsensitive: responseBase.caseInsensitive,
+      normalizePath: responseBase.normalizePath,
+      clearSiteDataPaths: responseBase.clearSiteDataPaths,
+      clearSiteDataTypes: responseBase.clearSiteDataTypes,
+      cors: responseBase.cors,
+      cookie_attributes: responseBase.cookie_attributes,
+    });
 
-  const templateResponsePath = path.join(rootDir, 'templates', 'aws', 'viewer-response.js');
-  let codeResponse = fs.readFileSync(templateResponsePath, 'utf8');
-  codeResponse = injectTemplateCode(codeResponse, '// {{INJECT_RESPONSE_CONFIG}}', responseCfgCode);
-  assertInjectedConstDeclarations(codeResponse, ['RESPONSE_CFG']);
+    const templateResponsePath = path.join(rootDir, 'templates', 'aws', 'viewer-response.js');
+    let codeResponse = fs.readFileSync(templateResponsePath, 'utf8');
+    codeResponse = injectTemplateCode(codeResponse, '// {{INJECT_RESPONSE_CONFIG}}', responseCfgCode + (adminIndex || authIndex ? '\n' + PATH_INDEX_HELPER : ''));
+    codeResponse = injectTemplateCode(codeResponse, '/* {{FEATURE_CSP_NONCE}} */ true', String(Boolean(responseBase.csp_nonce)));
+    codeResponse = injectTemplateCode(codeResponse, '/* {{FEATURE_CORS}} */ true', String(Boolean(responseBase.cors)));
+    codeResponse = injectTemplateCode(codeResponse, '/* {{FEATURE_ADMIN_INDEX}} */ true', String(Boolean(adminIndex)));
+    codeResponse = injectTemplateCode(codeResponse, '/* {{FEATURE_AUTH_PATH_INDEX}} */ true', String(Boolean(authIndex)));
+    assertInjectedConstDeclarations(codeResponse, ['RESPONSE_CFG']);
+
+    return codeResponse;
+  }
 
   const rawOriginAuth = (policy.origin || {}).auth || null;
   const originAuth = rawOriginAuth
@@ -510,12 +534,26 @@ function build(policy: any, options: any = {}) {
   // 10 KiB failure cannot leave unminified secret-bearing artifacts in dist/.
   // Unit tests that inspect CFG source pass optimize: false (the default).
   const shouldOptimize = options.optimize === true;
+  // These policy literals are immutable for a generated handler. Folding them
+  // removes inactive diagnostics/guards without duplicating prefix metadata.
+  const viewerDefines = {
+    'CFG.mode': JSON.stringify(requestBase.mode),
+    'CFG.obs.logFormat': JSON.stringify(requestBase.obs.logFormat),
+    ...(requestBase.obs.correlationHeader ? {} : { 'CFG.obs.correlationHeader': '""' }),
+    'CFG.maxQueryLength': String(requestBase.maxQueryLength),
+    'CFG.maxQueryParams': String(requestBase.maxQueryParams),
+    'CFG.maxUriLength': String(requestBase.maxUriLength),
+    'CFG.maxHeaderCount': String(requestBase.maxHeaderCount),
+    'CFG.normalizePath.caseInsensitive': String(requestBase.normalizePath.caseInsensitive),
+  };
   const finalRequest = shouldOptimize
-    ? optimizeCloudFrontFunction(code, 'viewer-request.js')
-    : code;
+    ? optimizeCloudFrontFunction(renderRequest(authGateIndex), 'viewer-request.js', viewerDefines,
+      authGateIndex ? () => renderRequest(null) : undefined)
+    : renderRequest(authGateIndex);
   const finalResponse = shouldOptimize
-    ? optimizeCloudFrontFunction(codeResponse, 'viewer-response.js')
-    : codeResponse;
+    ? optimizeCloudFrontFunction(renderResponse(true), 'viewer-response.js', {},
+      adminPathIndex || authPathIndex ? () => renderResponse(false) : undefined)
+    : renderResponse(true);
 
   const distDir = path.join(outDir, 'edge');
   fs.mkdirSync(distDir, { recursive: true });
@@ -584,68 +622,25 @@ function atomicWriteFile(filePath: string, contents: string) {
   }
 }
 
+function compileAws(policy: any, options: CompilerOptions) {
+  const logger = options.logger || console;
+  const permissive = warnIfPermissive(policy, { failOnPermissive: options.failOnPermissive, logger });
+  if (permissive.failed) throw new Error('Permissive policy rejected');
+  warnSignedUrlReplay(policy, { logger });
+  if (warnWeakAwsCspNonce(policy, { logger }).failed) throw new Error('AWS CSP nonce rejected');
+  warnUnsupportedAwsResponseDlp(policy, { logger });
+  warnUnsupportedAwsChallenge(policy, { logger });
+  warnUnsupportedGraphqlGuard(policy, 'aws', { logger });
+  validateAuthGates(policy, { ...options, exitOnError: false });
+  validateOriginAuth(policy, { env: options.env, strict: options.strictOriginAuth, logger });
+  const outputs = build(policy, { ...options, rootDir: options.rootDir || repoRoot, optimize: true });
+  outputs.forEach((outPath: string) => logger.log('Build complete:', outPath));
+  if (options.allowPlaceholderToken) logger.error('[WARN] Built with --allow-placeholder-token. Generated artifacts are NOT safe for production.');
+  return outputs;
+}
+
 function main(argv: string[] = process.argv.slice(2)) {
-  const { policyPath, outDir } = parseArgs(argv, repoRoot);
-  const allowPlaceholderToken = hasAllowPlaceholderFlag(argv);
-  const failOnPermissive = hasFailOnPermissiveFlag(argv);
-  const strictOriginAuth = hasStrictOriginAuthFlag(argv);
-  let policy;
-  let policyWarnings: string[] = [];
-
-  try {
-    const parsed = loadPolicyWithWarnings(policyPath);
-    policy = parsed.policy;
-    policyWarnings = parsed.warnings;
-  } catch (e: unknown) {
-    reportPolicyLoadError(policyPath, e);
-    process.exit(1);
-  }
-  reportPolicyWarnings(policyWarnings);
-
-  // Surface permissive-profile warning before wasting build time.
-  const permissive = warnIfPermissive(policy, { failOnPermissive });
-  if (permissive.failed) {
-    process.exit(1);
-  }
-
-  // Non-fatal advisory: signed_url protecting write-like paths without nonce_param.
-  warnSignedUrlReplay(policy);
-  const awsCspNonce = warnWeakAwsCspNonce(policy);
-  if (awsCspNonce.failed) process.exit(1);
-  warnUnsupportedAwsResponseDlp(policy);
-  warnUnsupportedAwsChallenge(policy);
-  warnUnsupportedGraphqlGuard(policy, 'aws');
-
-  validateAuthGates(policy, { allowPlaceholderToken });
-
-  try {
-    validateOriginAuth(policy, { strict: strictOriginAuth });
-  } catch (_e: unknown) {
-    process.exit(1);
-  }
-
-  try {
-    // optimize:true size-checks before the final rename so failures leave no
-    // unminified secret-bearing artifacts in the output directory.
-    const outputs = build(policy, {
-      outDir,
-      rootDir: repoRoot,
-      allowPlaceholderToken,
-      optimize: true,
-    });
-    outputs.forEach((outPath) => console.log('Build complete:', outPath));
-    // Advertise placeholder usage loudly so humans notice in CI output.
-    if (allowPlaceholderToken) {
-      console.error('[WARN] Built with --allow-placeholder-token. Generated artifacts are NOT safe for production.');
-    }
-  } catch (e: unknown) {
-    if (isErrnoException(e) && e.code === 'ENOENT') {
-      console.error('Error: template not found:', e.path);
-      process.exit(1);
-    }
-    console.error('Error:', errorMessage(e));
-    process.exit(1);
-  }
+  require('./compiler-entry').runCompilerCli(compileAws, argv);
 }
 
 module.exports = {
@@ -677,5 +672,6 @@ module.exports = {
   build,
   optimizeCloudFrontFunction,
   main,
+  compileAws,
   PLACEHOLDER_TOKEN,
 };

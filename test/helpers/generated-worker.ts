@@ -17,6 +17,6 @@ export function generatedWorker(policy: Record<string, unknown>, origin: typeof 
     const module = { exports: {} as { default?: { fetch(request: Request, env: object): Promise<Response> } } };
     const logger = { log: vi.fn(), error: vi.fn() };
     Function('module', 'exports', 'fetch', 'console', 'crypto', code)(module, module.exports, origin, logger, webCrypto);
-    return { handler: module.exports.default!, logger };
+    return { handler: module.exports.default!, logger, code };
   } finally { fs.rmSync(dir, { recursive: true, force: true }); }
 }

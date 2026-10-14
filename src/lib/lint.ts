@@ -63,7 +63,7 @@ function lintPolicy(opts: LintPolicyOptions = {}): LintPolicyResult {
   return {
     ok: validated.ok,
     errors: validated.errors,
-    warnings: validated.warnings,
+    warnings: [...parsed.warnings, ...validated.warnings],
     policy: parsed.policy,
   };
 }

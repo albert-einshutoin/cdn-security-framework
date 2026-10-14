@@ -13,41 +13,16 @@ assertSupportedNode(require.main === module);
  *   - dist/infra/cloudfront-origin.tf.json (Origin timeout settings)
  */
 
+import { runCompilerCli, type CompilerOptions } from './lib/compiler-entry';
 const fs = require('fs');
 const path = require('path');
 const { buildWafRules } = require('./lib/waf-rule-builder');
-const {
-  parseArgs,
-  hasFlag,
-  loadPolicyWithWarnings,
-  reportPolicyWarnings,
-  reportPolicyLoadError,
-} = require('./lib/policy-io');
 
-const repoRoot = path.join(__dirname, '..');
-const argv = process.argv.slice(2);
-const { policyPath, outDir } = parseArgs(argv, repoRoot, { consumeOutputMode: true });
-const ruleGroupOnly = hasFlag(argv, '--rule-group-only');
-let outputMode = 'full';
-for (let i = 0; i < argv.length; i++) {
-  if (argv[i] === '--output-mode' && argv[i + 1]) { outputMode = argv[++i]; continue; }
-}
-
-if (ruleGroupOnly) outputMode = 'rule-group';
-if (!['full', 'rule-group'].includes(outputMode)) {
-  console.error('Error: invalid --output-mode. Use "full" or "rule-group".');
-  process.exit(1);
-}
-
-let policy;
-try {
-  const parsed = loadPolicyWithWarnings(policyPath);
-  reportPolicyWarnings(parsed.warnings || [], policyPath);
-  policy = parsed.policy;
-} catch (e: unknown) {
-  reportPolicyLoadError(policyPath, e);
-  process.exit(1);
-}
+export function compileInfra(policy: any, options: CompilerOptions): void {
+const outDir = options.outDir;
+const console = options.logger || globalThis.console;
+const outputMode = options.ruleGroupOnly ? 'rule-group' : (options.outputMode || 'full');
+if (!['full', 'rule-group'].includes(outputMode)) throw new Error('invalid --output-mode. Use "full" or "rule-group".');
 
 const firewall = policy.firewall || {};
 const waf = firewall.waf || {};
@@ -343,3 +318,7 @@ if (origin.timeout) {
   fs.writeFileSync(path.join(distDir, 'cloudfront-origin.tf.json'), JSON.stringify(originTfJson, null, 2), 'utf8');
   console.log('Build complete:', path.join(distDir, 'cloudfront-origin.tf.json'));
 }
+
+}
+
+if (require.main === module) runCompilerCli(compileInfra);

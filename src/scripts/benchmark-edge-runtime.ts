@@ -73,10 +73,16 @@ function worker(policy: any, request: () => Request, responseBody = 'origin-ok',
   const origin = async (input: any): Promise<Response> => {
     if (typeof input === 'string') { jwksCalls++; return new Response(JSON.stringify({ keys: [jwk] })); }
     const body = Buffer.from(await input.arrayBuffer());
-    if (policy.origin?.auth?.include_body_hash) {
+    if (policy.origin?.auth?.type === 'hmac_signature') {
       const hash = crypto.createHash('sha256').update(body).digest('hex');
-      const canonical = [input.method, '/upload', '', hash, input.headers.get('x-cdn-auth-timestamp'), input.headers.get('x-cdn-auth-nonce')].join('\n');
-      if (input.headers.get('x-cdn-auth-body-sha256') !== hash
+      const url = new URL(input.url);
+      const components = policy.origin.auth.signed_components || ['method', 'path', 'query', 'body', 'timestamp', 'nonce'];
+      const query = Array.from(url.searchParams.entries()).sort(([ak, av], [bk, bv]) => ak < bk ? -1 : ak > bk ? 1 : av < bv ? -1 : av > bv ? 1 : 0)
+        .map(([k, v]) => encodeURIComponent(k) + '=' + encodeURIComponent(v)).join('&');
+      const values: any = { method: input.method, path: url.pathname, query,
+        body: policy.origin.auth.include_body_hash ? hash : '', timestamp: input.headers.get('x-cdn-auth-timestamp'), nonce: input.headers.get('x-cdn-auth-nonce') };
+      const canonical = components.map((component: string) => values[component] || '').join('\n');
+      if ((policy.origin.auth.include_body_hash && input.headers.get('x-cdn-auth-body-sha256') !== hash)
         || input.headers.get('x-cdn-auth-signature') !== crypto.createHmac('sha256', secret).update(canonical).digest('base64url')) throw new Error('origin signature/bytes mismatch');
     }
     return new Response(responseBody, { headers: { 'content-type': 'text/plain' } });
@@ -93,6 +99,40 @@ function worker(policy: any, request: () => Request, responseBody = 'origin-ok',
 const headers = { 'user-agent': 'local-benchmark' };
 async function main(): Promise<void> {
   try {
+    for (const count of [0, 500]) await measure(`followup-cf-routes-${count}`, () => {
+      const policy = base(); policy.routes = Array.from({ length: count }, (_, i) => ({ name: `r${i}`, match: { path_prefixes: [`/private${i}`] }, auth_gate: { type: 'static_token', token_env: 'TOKEN' } }));
+      return worker(policy, () => new Request('https://edge.example/public', { headers }));
+    }, 500);
+    await measure('followup-cf-headers-64', () => {
+      const policy = base(); policy.request.limits.max_header_count = 100; policy.request.limits.max_header_size = 32768;
+      const many = { ...headers, ...Object.fromEntries(Array.from({ length: 64 }, (_, i) => ['x-header-' + i, 'value'])) };
+      return worker(policy, () => new Request('https://edge.example/public', { headers: many }));
+    }, 500);
+    const manyQuery = Array.from({ length: 100 }, (_, i) => `key${i}=value%20${i}`).join('&');
+    await measure('followup-cf-query-100', () => worker(base(), () => new Request('https://edge.example/public?' + manyQuery, { headers })), 500);
+    await measure('followup-cf-query-100-signed-without-query', () => {
+      const policy = base(); policy.origin = { auth: { type: 'hmac_signature', secret_env: 'SECRET',
+        signed_components: ['method', 'path', 'timestamp', 'nonce'] } };
+      return worker(policy, () => new Request('https://edge.example/public?' + manyQuery, { headers }), undefined, { SECRET: secret });
+    }, 300);
+    await measure('followup-cf-graphql-hash-32768', () => {
+      const policy = base(); policy.request.graphql_guard = { endpoint_paths: ['/graphql'], max_body_bytes: 65536 };
+      policy.origin = { auth: { type: 'hmac_signature', secret_env: 'SECRET', include_body_hash: true } };
+      const body = JSON.stringify({ query: '{ viewer { id } }', padding: 'x'.repeat(32768) });
+      return worker(policy, () => new Request('https://edge.example/graphql', { method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body }), undefined, { SECRET: secret });
+    }, 200);
+    await measure('followup-aws-query-100', () => {
+      const handler = Function('console', build(base(), 'aws') + '\nreturn handler;')(quiet);
+      const query = Object.fromEntries(Array.from({ length: 100 }, (_, i) => [`key${i}`, { multiValue: [{ value: 'a b' }, { value: '日本語' }] }]));
+      return { call() { const result = handler({ request: { method: 'GET', uri: '/public', headers: { 'user-agent': { value: 'local' } }, querystring: query } });
+        if (Object.keys(result.querystring).length !== 100 || result.querystring.key99.multiValue[1].value !== '日本語') throw new Error('query changed'); return result; } };
+    }, 1000);
+    for (const target of ['aws', 'cloudflare']) await measure(`followup-emitter-${target}`, () => {
+      const input = path.join(scratch, 'emitter-policy.json'); fs.writeFileSync(input, JSON.stringify(base()));
+      const { compileArtifacts } = require(path.join(root, 'emitter'));
+      return { call() { const result = compileArtifacts({ policyPath: input, outDir: path.join(scratch, 'emitter-' + target), target, pkgRoot: root, env: {} });
+        if (!result.ok) throw new Error(result.errors.join('\n')); return { ok: result.ok, edgeFiles: result.edgeFiles.length, infraFiles: result.infraFiles.length }; } };
+    }, 5, 2);
     for (const count of [0, 1, 3, 10]) await measure(`aws-routes-${count}`, () => {
       const policy = base(); policy.routes = Array.from({ length: count }, (_, i) => ({ name: `r${i}`, match: { path_prefixes: [`/PRIVATE${i}`] }, auth_gate: { type: 'static_token', token_env: 'EDGE_ADMIN_TOKEN' } }));
       const handler = Function('console', build(policy, 'aws') + '\nreturn handler;')(quiet);
