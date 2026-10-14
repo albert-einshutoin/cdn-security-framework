@@ -398,6 +398,24 @@ function build(policy: any, options: any = {}) {
   const authGates = getAuthGates(policy, { env, allowPlaceholderToken });
   const requestBase = buildRequestCfgBase(policy);
 
+  type ViewerAuthGate = { type: string; protectedPrefixes: string[]; tokenHeaderName?: string; token?: string; credentials?: string };
+  const viewerAuthGates: ViewerAuthGate[] = [];
+  for (const gate of authGates) {
+    const prefixes = gate.protectedPrefixes.map((prefix: string) =>
+      requestBase.normalizePath.caseInsensitive !== false ? prefix.toLowerCase() : prefix);
+    const entry: ViewerAuthGate = { type: gate.type, protectedPrefixes: prefixes,
+      ...(gate.type === 'static_token'
+        ? { tokenHeaderName: gate.tokenHeaderName, token: gate.token }
+        : { credentials: gate.credentials }) };
+    const previous = viewerAuthGates.at(-1);
+    // Adjacent identical checks have the same denial and authenticated marker.
+    // Different credentials/headers keep their original order and intersection.
+    if (previous && previous.type === entry.type && previous.token === entry.token
+      && previous.tokenHeaderName === entry.tokenHeaderName && previous.credentials === entry.credentials) {
+      previous.protectedPrefixes.push(...prefixes);
+    } else viewerAuthGates.push(entry);
+  }
+
   const cfgCode = renderConstObject('CFG', {
     mode: requestBase.mode,
     allowMethods: requestBase.allowMethods,
@@ -414,7 +432,7 @@ function build(policy: any, options: any = {}) {
     allowedHosts: requestBase.allowedHosts,
     trustForwardedFor: requestBase.trustForwardedFor,
     cors: requestBase.cors,
-    authGates,
+    authGates: viewerAuthGates,
     anomalyGuards: requestBase.anomalyGuards,
     obs: requestBase.obs,
   });
@@ -434,6 +452,8 @@ function build(policy: any, options: any = {}) {
     '/* {{FEATURE_ALLOW_SAMPLING}} */ true',
     String(requestBase.obs.sampleRate > 0),
   );
+  code = injectTemplateCode(code, '/* {{FEATURE_STATIC_TOKEN}} */ true', String(authGates.some((gate: any) => gate.type === 'static_token')));
+  code = injectTemplateCode(code, '/* {{FEATURE_BASIC_AUTH}} */ true', String(authGates.some((gate: any) => gate.type === 'basic_auth')));
   assertInjectedConstDeclarations(code, ['CFG']);
 
   const responseBase = buildResponseCfgBase(policy, authGates);
