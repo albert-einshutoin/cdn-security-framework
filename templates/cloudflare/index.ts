@@ -1498,9 +1498,11 @@ export default {
         // signed_url gates may opt into exact_path matching to prevent a signature
         // for /assets/ from being replayed against /assets/other-file.
         const useExact = gate.type === 'signed_url' && gate.exact_path === true;
+        // Indexed candidates already satisfy prefix matching; exact signed URLs
+        // still need the narrower check before any credential verification.
         const isProtected = useExact
           ? prefixes.some((p: string) => pathMatchesExact(matchPath, p))
-          : prefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
+          : (CFG.authGateIndex ? true : prefixes.some((p: string) => pathMatchesPrefix(matchPath, p)));
         if (!isProtected) continue;
 
         if (/* {{FEATURE_STATIC_TOKEN}} */ true && gate.type === 'static_token') {

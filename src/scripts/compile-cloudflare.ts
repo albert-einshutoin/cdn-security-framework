@@ -240,7 +240,6 @@ try {
 
 code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode + '\n' + PATH_INDEX_HELPER);
 code = injectTemplateCode(code, '// {{INJECT_RESPONSE_CFG}}', responseCfgCode);
-assertInjectedConstDeclarations(code, ['CFG', 'RESPONSE_CFG'], { loader: 'ts' });
 code = specializeWorker(code, {
   CHALLENGE: Boolean(challengeConfig), GRAPHQL: Boolean(buildGraphqlGuardConfig(policy)), DLP: responseDlp.config.enabled,
   STATIC_TOKEN: authGates.some((gate: any) => gate.type === 'static_token'),
@@ -252,6 +251,8 @@ code = specializeWorker(code, {
   ORIGIN_AUTH: Boolean(originAuth && ['custom_header', 'hmac_signature'].includes(originAuth.type)),
   ORIGIN_HMAC: originAuth?.type === 'hmac_signature',
 });
+// Inspect the smaller specialized output while keeping validation before writes.
+assertInjectedConstDeclarations(code, ['CFG', 'RESPONSE_CFG'], { loader: 'ts' });
 
 const distDir = path.join(outDir, 'edge', 'cloudflare');
 fs.mkdirSync(distDir, { recursive: true });

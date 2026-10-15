@@ -1,4 +1,6 @@
 import { createRequire } from 'node:module';
+import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { describe, expect, test } from 'vitest';
 
@@ -39,5 +41,27 @@ describe('compiler public contracts', () => {
     expect(() => {
       assertInjectedConstDeclarations('const CFG = {};\nconst CFG = {};', ['CFG']);
     }).toThrow();
+  });
+
+  test.each(['CFG', 'RESPONSE_CFG', 'runtime-boundary'])('invalid Cloudflare template %s preserves existing output', (fault) => {
+    const { compileCloudflare } = requireFromRepo('./scripts/compile-cloudflare');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-template-contract-'));
+    try {
+      const templateDir = path.join(dir, 'templates', 'cloudflare');
+      const outDir = path.join(dir, 'out');
+      const edgeDir = path.join(outDir, 'edge', 'cloudflare');
+      fs.mkdirSync(templateDir, { recursive: true });
+      fs.mkdirSync(edgeDir, { recursive: true });
+      const existing = path.join(edgeDir, 'index.ts');
+      fs.writeFileSync(existing, 'existing artifact');
+      const template = fs.readFileSync(path.join(process.cwd(), 'templates', 'cloudflare', 'index.ts'), 'utf8');
+      const invalid = fault === 'runtime-boundary' ? template.replace('// {{RUNTIME}}', '// missing boundary')
+        : template + '\nconst ' + fault + ' = {};';
+      fs.writeFileSync(path.join(templateDir, 'index.ts'), invalid);
+      expect(() => compileCloudflare({ version: 2, request: { allow_methods: ['GET'] }, response_headers: {} },
+        { rootDir: dir, outDir, logger: { log() {}, warn() {}, error() {} } })).toThrow();
+      expect(fs.readFileSync(existing, 'utf8')).toBe('existing artifact');
+      expect(fs.readdirSync(edgeDir)).toEqual(['index.ts']);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
   });
 });

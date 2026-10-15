@@ -378,7 +378,7 @@ var stdin_default = {
       const matchPath = normalizeForMatch(url.pathname), gateIds = CFG.authGateIndex ? pathCandidates(matchPath, CFG.authGateIndex) : authGateIds;
       for (const gateIndex of gateIds) {
         const gate = CFG.authGates[gateIndex], prefixes = authMatchPrefixes[gateIndex];
-        if ((gate.type === "signed_url" && gate.exact_path === !0 ? prefixes.some((p) => pathMatchesExact(matchPath, p)) : prefixes.some((p) => pathMatchesPrefix(matchPath, p))) && gate.type === "static_token") {
+        if ((gate.type === "signed_url" && gate.exact_path === !0 ? prefixes.some((p) => pathMatchesExact(matchPath, p)) : CFG.authGateIndex || prefixes.some((p) => pathMatchesPrefix(matchPath, p))) && gate.type === "static_token") {
           const tok = request.headers.get(gate.tokenHeaderName) || "", expectedToken = env[gate.tokenEnv] || "";
           if (!expectedToken)
             return console.error("[auth] static_token env missing:", gate.tokenEnv), shouldBlockAuth(503, "Auth misconfigured", ctx);

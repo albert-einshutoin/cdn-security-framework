@@ -47,6 +47,68 @@ test('many routes preserve overlapping authentication order, segment boundaries 
   expect((await call('/private990', '')).status).toBe(200);
 });
 
+test.each([31, 32, 500])('one gate with %i prefixes keeps authentication and path boundaries', async (count) => {
+  const origin = vi.fn(async () => new Response('ok'));
+  const { handler } = generatedWorker({ defaults: { mode: 'monitor' }, routes: [{ name: 'group',
+    match: { path_prefixes: Array.from({ length: count }, (_, i) => '/private' + i) },
+    auth_gate: { type: 'static_token', token_env: 'TOKEN' } }] }, origin);
+  const call = (path: string, env: object = { TOKEN: 'secret' }, token = '') => handler.fetch(
+    new Request('https://edge.example' + path, { headers: { 'user-agent': 'test', 'x-edge-token': token } }), env);
+  const last = '/private' + (count - 1);
+  expect((await call(last + '/child')).status).toBe(401);
+  expect((await call(last, {}, 'secret')).status).toBe(503);
+  expect(origin).not.toHaveBeenCalled();
+  for (const path of [last, last.toUpperCase() + '/child', last + ';v/child', '/%70rivate' + (count - 1)]) {
+    const response = await call(path, { TOKEN: 'secret' }, 'secret');
+    expect(response.status).toBe(200);
+    expect(response.headers.get('cache-control')).toContain('no-store');
+  }
+  expect((await call(last + 'suffix')).status).toBe(200);
+});
+
+test('indexed overlapping static/basic gates require both credentials in policy order', async () => {
+  const origin = vi.fn(async () => new Response('ok'));
+  const { handler } = generatedWorker({ routes: [
+    { name: 'token', match: { path_prefixes: Array.from({ length: 32 }, (_, i) => '/private' + i) },
+      auth_gate: { type: 'static_token', token_env: 'TOKEN' } },
+    { name: 'basic', match: { path_prefixes: ['/private31'] },
+      auth_gate: { type: 'basic_auth', credentials_env: 'BASIC' } },
+  ] }, origin);
+  const call = (headers: Record<string, string>, env = { TOKEN: 'first', BASIC: btoa('user:password') }) => handler.fetch(
+    new Request('https://edge.example/private31/child', { headers: { 'user-agent': 'test', ...headers } }), env);
+  expect((await call({}, { TOKEN: 'first', BASIC: '' })).status).toBe(401);
+  expect((await call({ 'x-edge-token': 'first' })).status).toBe(401);
+  expect((await call({ authorization: 'Basic ' + btoa('user:password') })).status).toBe(401);
+  expect((await call({ 'x-edge-token': 'first' }, { TOKEN: 'first', BASIC: '' })).status).toBe(503);
+  expect(origin).not.toHaveBeenCalled();
+  expect((await call({ 'x-edge-token': 'first', authorization: 'Basic ' + btoa('user:password') })).status).toBe(200);
+  expect(origin).toHaveBeenCalledTimes(1);
+});
+
+test('indexed authentication preserves case-sensitive path matching', async () => {
+  const { handler } = generatedWorker({ request: { allow_methods: ['GET'], normalize: { path: { case_insensitive: false } } },
+    routes: [{ name: 'group', match: { path_prefixes: Array.from({ length: 32 }, (_, i) => '/private' + i) },
+      auth_gate: { type: 'static_token', token_env: 'TOKEN' } }] }, async () => new Response('ok'));
+  const call = (path: string) => handler.fetch(new Request('https://edge.example' + path,
+    { headers: { 'user-agent': 'test' } }), { TOKEN: 'secret' });
+  expect((await call('/private31')).status).toBe(401);
+  expect((await call('/PRIVATE31')).status).toBe(200);
+});
+
+test.each([false, true])('indexed signed URLs retain exact_path=%s and signature verification', async (exact) => {
+  const { handler } = generatedWorker({ routes: [{ name: 'signed',
+    match: { path_prefixes: Array.from({ length: 32 }, (_, i) => '/asset' + i) },
+    auth_gate: { type: 'signed_url', secret_env: 'SECRET', exact_path: exact } }] }, async () => new Response('ok'));
+  const call = (path: string) => handler.fetch(new Request('https://edge.example' + path,
+    { headers: { 'user-agent': 'test' } }), { SECRET: 'secret' });
+  const payload = '/asset31?exp=4102444800';
+  const signature = crypto.createHmac('sha256', 'secret').update(payload).digest('base64url');
+  expect((await call(payload + '&sig=' + signature)).status).toBe(200);
+  expect((await call(payload + '&sig=invalid')).status).toBe(403);
+  expect((await call('/asset31/child')).status).toBe(exact ? 200 : 403);
+  expect((await call('/asset310')).status).toBe(200);
+});
+
 test('origin signatures omit unselected query while forwarding duplicate query values intact', async () => {
   const fetcher = vi.fn(async (input: RequestInfo | URL) => {
     const req = input as Request;
