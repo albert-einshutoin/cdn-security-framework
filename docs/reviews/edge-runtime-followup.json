@@ -1,7 +1,7 @@
 {
   "baselineHead": "53013fd3fd8fd8f9c803f09bb6db4d1c4f7dc250",
   "sourceSha256": {
-    "src/emitter/index.ts": "c626e9fef02966734bf2cc5a441cf1cef633766ba8fa681494ecfe0d4acd3207",
+    "src/emitter/index.ts": "d83132b34257bb5e5ab5520880f849e8cdc83ceb907bfb2a2b16a6ea872ee22a",
     "src/lib/lint.ts": "30a8cb37292faaea6ecc15d211332d3d77a1599fcc501ce66429a752c3381f30",
     "src/scripts/benchmark-edge-runtime.ts": "9350b88ff7d2a86a8cc727b5925a11c0913617624320b160a61d028e12ade47e",
     "src/scripts/cloudflare-runtime-tests.ts": "2d0a9119d2b98be9da9d8b1b1f4a8deeed41eba55aa16a2c9acd51e4a3cf3f5e",
@@ -19,7 +19,7 @@
     "src/scripts/lib/compiler-entry.ts": "a542560f174690a529d4feda4c2e1267696d5ccebe0546dd86bffc787cb33cfb",
     "src/scripts/lib/path-index.ts": "ac7fbe5ee956651e57c8ba1a430b557bb7096531777b1bd9706d0801bc5deddb",
     "test/edge-followup.test.ts": "4ad2fb21728e3f0bc26a0fbc38e38d98e0d12412a32ae4cf96aa3ec0dad8521d",
-    "test/emitter-followup.test.ts": "4658935dac0e453e30393adb7ff52da4b89edc415d808b7f4e308307801b3726",
+    "test/emitter-followup.test.ts": "39a63b0737d581b2a2b8dd18ac612794d5117f4861a2422c35f8c699e4ce604f",
     "test/compiler-write-safety.test.ts": "4e555b41d5871c4b230a5ebb1417478be82e83873821ce0f7f6ce076be77a0e7",
     "test/cloudfront-size-selection.test.ts": "b85c2ab52274f695769d107c0eb6ed0a38cff34bd9c6a730af42de12a688dbf7"
   },
@@ -3631,19 +3631,19 @@
     ]
   },
   "validation": {
-    "targetVitest": "44 existing target tests plus added CloudFront size-selection10/10 passed; final full suite681/681 passed",
+    "targetVitest": "diagnostics target22/22; final full suite682/682 passed",
     "cleanupRegressionsBefore": "3 failed / 2 passed after fixture correction",
     "boundaryRegressionsBefore": "2 failed / 7 passed",
     "fullCI": {
       "status": "passed",
       "exitCode": 0,
       "command": "VITEST_MAX_WORKERS=2 EDGE_ADMIN_TOKEN=synthetic-local-full-validation npm run test:ci",
-      "startedAt": "2026-10-14T18:18:36.777Z",
-      "finishedAt": "2026-10-14T18:21:21.922Z",
-      "evidence": "/tmp/csf-edge-followup-BQQ6SB/full-ci-aws-final-exit.json",
+      "startedAt": "2026-10-15T04:27:01.686Z",
+      "finishedAt": "2026-10-15T04:30:16.183Z",
+      "evidence": "/tmp/csf-edge-followup-BQQ6SB/p2-full-ci-exit.json",
       "source21Golden29AndPackageManifestMatch": true,
       "vitestFiles": 42,
-      "vitestTests": 681,
+      "vitestTests": 682,
       "npmAuditVulnerabilities": 0
     },
     "nativeRequests": 1320,
@@ -3680,11 +3680,17 @@
         "exitCode": 0,
         "reason": "Final AWS size-selection revision; review and Stop Gate complete before this full validation",
         "evidence": "/tmp/csf-edge-followup-BQQ6SB/full-ci-aws-final-exit.json"
+      },
+      {
+        "command": "VITEST_MAX_WORKERS=2 EDGE_ADMIN_TOKEN=synthetic-local-full-validation npm run test:ci",
+        "exitCode": 0,
+        "reason": "Final structured-diagnostics P2 fix; scoped specialist review and corrected Stop Gate completed first",
+        "evidence": "/tmp/csf-edge-followup-BQQ6SB/p2-full-ci-exit.json"
       }
     ],
     "golden": "29 generated edge fixtures updated; latest node scripts/check-drift.js passed",
-    "expertReview": "ALLOW; AWS size-selection final expert review ALLOW (Sol medium); typecheck and 10/10 size tests passed",
-    "companionStopGate": "ALLOW; current AWS size-selection source21/21, golden29/29, packageManifest1/1 hashes matched",
+    "expertReview": "ALLOW; diagnostics P2 scoped final review ALLOW",
+    "companionStopGate": "ALLOW; diagnostics fix and current source/output manifest accepted",
     "httpE2E": {
       "status": "pass",
       "cleanup": {
@@ -3709,20 +3715,22 @@
         "resolved": true
       },
       "awsFinalExpert": "/tmp/csf-edge-followup-BQQ6SB/aws-final-expert-review.txt",
-      "awsSizeGate": "/tmp/csf-edge-followup-BQQ6SB/aws-size-stop.log"
+      "awsSizeGate": "/tmp/csf-edge-followup-BQQ6SB/aws-size-stop.log",
+      "diagnosticsExpert": "/tmp/csf-edge-followup-BQQ6SB/p2-specialist-review.txt",
+      "diagnosticsGate": "/tmp/csf-edge-followup-BQQ6SB/p2-stop-corrected.log"
     },
     "packageSmoke": "packed install smoke passed (exit 0) after four-file registration",
     "writeSafety": "15/15 passed after adapting cleanup fault injector",
     "coverage": {
       "exitCode": 0,
       "vitestFiles": 42,
-      "vitestTests": 681,
+      "vitestTests": 682,
       "statementsPercent": 81.86,
-      "branchesPercent": 80.88,
+      "branchesPercent": 80.89,
       "functionsPercent": 82.76,
       "linesPercent": 81.86,
-      "evidence": "/tmp/csf-edge-followup-BQQ6SB/full-ci-aws-final.log",
-      "scope": "current final source manifest"
+      "evidence": "/tmp/csf-edge-followup-BQQ6SB/p2-full-ci.log",
+      "scope": "current diagnostics-fix source manifest"
     },
     "cloudfrontSizeRegression": "32/64 routes exceeded 10KiB in preceding candidate; canonical compile-time algorithm selection fixes accepted 32/64/80 policies",
     "awsIndexRegressionBefore": "Corrected regression fixture: 1 failed / 8 passed; wrong index config property caused public path denial; fixed before final tests",
@@ -3738,7 +3746,58 @@
       "linesPercent": 81.79,
       "scope": "preceding revision before final AWS size-selection change"
     },
-    "sourceChangesAfterFinalReview": false
+    "sourceChangesAfterFinalReview": false,
+    "fullCIBeforeDiagnosticsFix": {
+      "status": "passed",
+      "exitCode": 0,
+      "command": "VITEST_MAX_WORKERS=2 EDGE_ADMIN_TOKEN=synthetic-local-full-validation npm run test:ci",
+      "startedAt": "2026-10-14T18:18:36.777Z",
+      "finishedAt": "2026-10-14T18:21:21.922Z",
+      "evidence": "/tmp/csf-edge-followup-BQQ6SB/full-ci-aws-final-exit.json",
+      "source21Golden29AndPackageManifestMatch": true,
+      "vitestFiles": 42,
+      "vitestTests": 681,
+      "npmAuditVulnerabilities": 0
+    },
+    "coverageBeforeDiagnosticsFix": {
+      "exitCode": 0,
+      "vitestFiles": 42,
+      "vitestTests": 681,
+      "statementsPercent": 81.86,
+      "branchesPercent": 80.88,
+      "functionsPercent": 82.76,
+      "linesPercent": 81.86,
+      "evidence": "/tmp/csf-edge-followup-BQQ6SB/full-ci-aws-final.log",
+      "scope": "current final source manifest"
+    },
+    "diagnosticsP2": {
+      "reviewComment": "https://github.com/albert-einshutoin/cdn-security-framework/pull/1107#discussion_r4276977297",
+      "affectedHead": "8f1ed592432259533f4dbf941b19b8e26c51c807",
+      "cause": "in-process emitter dropped PolicyValidationError.validationErrors",
+      "fix": "preserve every structured route/env diagnostic; retain failure status and do not write artifacts or expose provided secrets",
+      "regressionBefore": "1 failed / 3 passed",
+      "targetAfter": "22/22 passed",
+      "apiContract": "passed",
+      "expertReview": "ALLOW; no medium/high findings",
+      "stopGate": "ALLOW; artifact manifest path clarified",
+      "fullCI": "passed; 42 files / 682 tests and coverage passed",
+      "performance": "generated runtime unchanged; success path unchanged; no new timing claim",
+      "gateHistory": [
+        {
+          "evidence": "/tmp/csf-edge-followup-BQQ6SB/p2-stop.log",
+          "verdict": "BLOCK",
+          "cause": "packageManifestSha256 was compared to package.json rather than its intended docs/api-manifest.json; manifest path now explicit",
+          "sourceAndGoldenHashesMatched": true,
+          "resolved": true
+        },
+        {
+          "verdict": "ALLOW",
+          "evidence": "/tmp/csf-edge-followup-BQQ6SB/p2-stop-corrected.log",
+          "reason": "explicit docs/api-manifest.json path and all current hashes match"
+        }
+      ],
+      "hostedCI": "pending for updated PR head"
+    }
   },
   "limits": [
     "Local laboratory measurements only; no managed Cloudflare/AWS deployment or real-user TTFB/CPU evidence",
@@ -3779,7 +3838,7 @@
   },
   "packageManifestSha256": "c84ffb62a6021c35a08cf1112740c163b9220ab994464add0e134491e48d73db",
   "evidenceFiles": {
-    "sourceManifest": "/tmp/csf-edge-followup-BQQ6SB/final-source-manifest.json",
+    "sourceManifest": "/tmp/csf-edge-followup-BQQ6SB/p2-source-manifest.json",
     "nodeRuns": [
       "/tmp/csf-edge-followup-BQQ6SB/size-final-node-A1.json",
       "/tmp/csf-edge-followup-BQQ6SB/size-final-node-B1.json",
@@ -3790,13 +3849,40 @@
     "sizeTests": "/tmp/csf-edge-followup-BQQ6SB/size-selection-final.log",
     "compileUnit": "/tmp/csf-edge-followup-BQQ6SB/size-compile-unit.log",
     "awsRuntime": "/tmp/csf-edge-followup-BQQ6SB/size-runtime-tests.log",
-    "drift": "/tmp/csf-edge-followup-BQQ6SB/size-golden-check.log"
+    "drift": "/tmp/csf-edge-followup-BQQ6SB/size-golden-check.log",
+    "diagnosticsBefore": "/tmp/csf-edge-followup-BQQ6SB/p2-diagnostics-before.log",
+    "diagnosticsTarget": "/tmp/csf-edge-followup-BQQ6SB/p2-diagnostics-target.log",
+    "diagnosticsApi": "/tmp/csf-edge-followup-BQQ6SB/p2-diagnostics-api.log",
+    "diagnosticsFullCI": "/tmp/csf-edge-followup-BQQ6SB/p2-full-ci-exit.json"
   },
   "delivery": {
     "scope": "generated edge followup pull request",
     "branch": "perf/generated-edge-followup",
     "prBaseHead": "a33a68a054aaf80500548fa3628911ae77ebef6b",
     "verifiedSourceUnchanged": true,
-    "merge": "not requested"
+    "merge": "requested conditionally after review and hosted CI"
+  },
+  "measurementSourceSha256BeforeDiagnosticsFix": {
+    "src/emitter/index.ts": "c626e9fef02966734bf2cc5a441cf1cef633766ba8fa681494ecfe0d4acd3207",
+    "src/lib/lint.ts": "30a8cb37292faaea6ecc15d211332d3d77a1599fcc501ce66429a752c3381f30",
+    "src/scripts/benchmark-edge-runtime.ts": "9350b88ff7d2a86a8cc727b5925a11c0913617624320b160a61d028e12ade47e",
+    "src/scripts/cloudflare-runtime-tests.ts": "2d0a9119d2b98be9da9d8b1b1f4a8deeed41eba55aa16a2c9acd51e4a3cf3f5e",
+    "src/scripts/compile-cloudflare-waf.ts": "8c19fabf6a23ac0e1035824cac99e3476c7fe17cafe6a0e674bedfc327978903",
+    "src/scripts/compile-cloudflare.ts": "af82189684ac2aab81d698fe933adb225b45c0ca4267697986d2b0a839526f65",
+    "src/scripts/compile-infra.ts": "903060c7e52e0f854c1f47fb0c9e5b64a126c224c20ef3c09aafc4682a19db02",
+    "src/scripts/lib/compile-core.ts": "b549f0c6fae62eec47cd372be33ec9c5d14ce0eba6cf4e9a7909434ea55fac30",
+    "src/scripts/lib/template-inject.ts": "5bf4b8b030044dc1ff9097df3582c909afd338872ab1aec840311b00a9ac4923",
+    "templates/aws/origin-request.js": "9f1fdfa1fe3fee1ed300b2bf7a73e21bea80de0fad6ceedc04a1c026993595c6",
+    "templates/aws/viewer-request.js": "3d6edc7461ce29e7cf11c96a3a8b6ee2006b50d8da7c03194ea2002bbd1e88d7",
+    "templates/aws/viewer-response.js": "ca133e01a62187dce8e5c9685488a1dd9a77488eb0ef8ab9b629d7817b18ef24",
+    "templates/cloudflare/index.ts": "20e1ae47256727c958eb0d6944162a7f5d6bcec50aa376b40311b1e45f87953b",
+    "test/helpers/generated-worker.ts": "0df8cb41f7a4447409aa501adde9bf573f44c9e9384afeb04360dc78375e81e5",
+    "src/scripts/benchmark-edge-http.ts": "58029d9ea735ba516bb711acd724f4cffceb3cecc2af9ab88c79ee09383582f5",
+    "src/scripts/lib/compiler-entry.ts": "a542560f174690a529d4feda4c2e1267696d5ccebe0546dd86bffc787cb33cfb",
+    "src/scripts/lib/path-index.ts": "ac7fbe5ee956651e57c8ba1a430b557bb7096531777b1bd9706d0801bc5deddb",
+    "test/edge-followup.test.ts": "4ad2fb21728e3f0bc26a0fbc38e38d98e0d12412a32ae4cf96aa3ec0dad8521d",
+    "test/emitter-followup.test.ts": "4658935dac0e453e30393adb7ff52da4b89edc415d808b7f4e308307801b3726",
+    "test/compiler-write-safety.test.ts": "4e555b41d5871c4b230a5ebb1417478be82e83873821ce0f7f6ce076be77a0e7",
+    "test/cloudfront-size-selection.test.ts": "b85c2ab52274f695769d107c0eb6ed0a38cff34bd9c6a730af42de12a688dbf7"
   }
 }

@@ -128,6 +128,8 @@ export function compileArtifacts(opts: CompileArtifactsOptions = {}): CompileArt
       return true;
     } catch (error: unknown) {
       errors.push(`${label} failed: ${(error as Error).message}`, ...diagnostics);
+      const details = (error as { validationErrors?: string[] }).validationErrors;
+      if (Array.isArray(details)) errors.push(...details);
       return false;
     }
   };

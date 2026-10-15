@@ -39,3 +39,23 @@ test('in-process errors preserve policy diagnostics and never terminate the host
   expect(result.errors.join('\n')).toContain('--fail-on-permissive');
   expect(fs.existsSync(path.join(dir, 'dist/edge/viewer-request.js'))).toBe(false);
 });
+
+test('missing auth secrets return every route and env diagnostic without exposing provided secrets or writing artifacts', () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-emitter-validation-')); roots.push(dir);
+  const input = path.join(dir, 'policy.json'), outDir = path.join(dir, 'dist');
+  fs.writeFileSync(input, JSON.stringify({ version: 2, request: { allow_methods: ['GET'] }, response_headers: {}, routes: [
+    { name: 'configured', match: { path_prefixes: ['/configured'] }, auth_gate: { type: 'static_token', token_env: 'PROVIDED_TOKEN' } },
+    { name: 'token-protected', match: { path_prefixes: ['/token'] }, auth_gate: { type: 'static_token', token_env: 'MISSING_TOKEN' } },
+    { name: 'basic-protected', match: { path_prefixes: ['/basic'] }, auth_gate: { type: 'basic_auth', credentials_env: 'MISSING_CREDS' } },
+  ] }));
+  const secret = 'synthetic-provided-secret-not-for-deployment';
+  const result = compileArtifacts({ policyPath: input, outDir, pkgRoot: process.cwd(), env: { PROVIDED_TOKEN: secret } });
+  expect(result.ok).toBe(false);
+  expect(result.errors).toContain('edge compile failed: Auth gate validation failed');
+  expect(result.errors.some((message: string) => message.includes('Route "token-protected": static_token requires env "MISSING_TOKEN"'))).toBe(true);
+  expect(result.errors.some((message: string) => message.includes('Route "basic-protected": basic_auth requires env "MISSING_CREDS"'))).toBe(true);
+  expect(JSON.stringify(result)).not.toContain(secret);
+  expect(result.edgeFiles).toEqual([]);
+  expect(result.infraFiles).toEqual([]);
+  expect(fs.existsSync(outDir)).toBe(false);
+});

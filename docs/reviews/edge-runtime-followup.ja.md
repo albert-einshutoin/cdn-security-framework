@@ -75,4 +75,12 @@ beforeは基準HEADを別ディレクトリへ展開し、同じ依存でbuild�
 
 現AWS修正でNode A/B/B/A全9負荷を再測定した（`size-final-node-A1/B1/B2/A2.json`）。native workerdのCF policy/生成コード/実行module/driverのSHA256は再生成した現bytesと完全一致するため、既存の1,320件のHTTP計測を維持する（`native-current-binding.json`）。current revisionのStop GateはALLOW（source21/21、golden29/29、package manifest1/1の現hash一致）。レビュー確定後、`VITEST_MAX_WORKERS=2 EDGE_ADMIN_TOKEN=synthetic-local-full-validation npm run test:ci` はexit 0。現source21件・golden29件・package manifestのSHA256が実行時と終了後で一致することも確認した。
 
-最終完全検証ではnpm auditの脆弱性0件、生成物境界・docs・policy lint・build/type・drift・決定性・security baseline・package smoke・全テスト・coverageが成功。Vitestは42ファイル681/681、coverage lines/statements81.86%、branches80.88%、functions82.76%。既存のCloudflare HTTP E2Eは46ケース・50 JWKS関連レコード成功、全cleanup成功。AWS/CF runtime/compilerの対象検証と、上記本番未計測の境界も維持する。完全検証後の新しい探索レビュー・コード変更は行っていない。このレポートはローカル検証の証拠であり、hosted CI・merge・deployの成功を示すものではない。
+P2追加指摘を確認する前の完全検証ではnpm auditの脆弱性0件、生成物境界・docs・policy lint・build/type・drift・決定性・security baseline・package smoke・全テスト・coverageが成功。Vitestは42ファイル681/681、coverage lines/statements81.86%、branches80.88%、functions82.76%。既存のCloudflare HTTP E2Eは46ケース・50 JWKS関連レコード成功、全cleanup成功。AWS/CF runtime/compilerの対象検証と、上記本番未計測の境界も維持する。完全検証後の新しい探索レビュー・コード変更は行っていない。このレポートはローカル検証の証拠であり、hosted CI・merge・deployの成功を示すものではない。
+
+## GitHubレビューP2: APIの設定エラー詳細を保持
+
+PR head `8f1ed592432259533f4dbf941b19b8e26c51c807`への[自動レビュー指摘](https://github.com/albert-einshutoin/cdn-security-framework/pull/1107#discussion_r4276977297)で、in-process emitterが`PolicyValidationError.validationErrors`を返していない回帰を確認した。上記の指摘なし・681テスト・hosted成功という結果は、この修正前のheadに対する記録であり、新しいheadの証拠とは扱わない。前回のユーザー向け「指摘なし」はGitHub上の追加指摘の確認漏れだった。
+
+CLIと同じ構造属性の詳細配列をAPIにも保持する2行の修正。既存のgeneric error、収集diagnostics、`ok:false`、artifactを生成しない契約を維持する。実policyでstatic/basicの不足envを複数ルート分返すこと、提供済みsecretの非露出、出力dir未生成を回帰テストで確認した。修正前1失敗/3成功、修正後はemitter4・compiler契約3・write-safety15の22/22成功。API契約・buildも成功し、指摘範囲の最終専門レビューはALLOW。
+
+生成runtimeのテンプレート・設定・goldenとemitter成功経路は変更していない。上記の計測raw sampleは修正前source hashと共に保持し、このエラー処理修正による新しい性能改善は主張しない。修正のStop GateはALLOW。最初のGateはartifact manifestのhash対象をroot package.jsonと取り違えてBLOCKしたため、`packageManifestPath: docs/api-manifest.json`を明示し、全hash一致で解消した（履歴をJSONに保持）。レビュー確定後の完全検証はexit 0、42ファイル682/682。coverage statements 81.86%、branches 80.89%、functions 82.76%、lines 81.86%。現source21/golden29/manifestのhash一致も確認。更新PRのhosted CIとmerge結果はPR上で別に確認する。
