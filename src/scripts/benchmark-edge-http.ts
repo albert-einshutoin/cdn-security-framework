@@ -8,7 +8,7 @@ import net from 'node:net';
 import crypto from 'node:crypto';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { performance } from 'node:perf_hooks';
+import { performance, monitorEventLoopDelay } from 'node:perf_hooks';
 import { transformSync } from 'esbuild';
 
 const arg = (name: string) => {
@@ -18,6 +18,16 @@ const arg = (name: string) => {
 };
 const root = arg('--root'), output = arg('--output');
 const hotPaths = process.argv.includes('--hot-paths');
+const compareRoot = process.argv.includes('--compare-root') ? arg('--compare-root') : undefined;
+const onlyAt = process.argv.indexOf('--only');
+const only = onlyAt < 0 ? undefined : process.argv[onlyAt + 1];
+if (onlyAt >= 0 && (!only || only.startsWith('--'))) throw new Error('--only requires a workload name');
+const patternAt = process.argv.indexOf('--path-pattern-count');
+const patternCount = patternAt < 0 ? 0 : Number(process.argv[patternAt + 1]);
+if (patternAt >= 0 && (!Number.isSafeInteger(patternCount) || patternCount < 1 || patternCount > 1024)) {
+  throw new Error('--path-pattern-count must be an integer between 1 and 1024');
+}
+if ((compareRoot || patternAt >= 0) && !hotPaths) throw new Error('--compare-root and --path-pattern-count require --hot-paths');
 const prefixAt = process.argv.indexOf('--auth-prefix-count');
 const prefixCount = prefixAt < 0 ? 0 : Number(process.argv[prefixAt + 1]);
 if (prefixAt >= 0 && (!Number.isSafeInteger(prefixCount) || prefixCount < 1 || prefixCount > 5000)) {
@@ -30,6 +40,7 @@ const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-edge-http-bench-'));
 const record: any = { environment: { node: process.version, workerd: require('workerd/package.json').version,
   platform: process.platform, arch: process.arch }, root, driverSha256: sha(fs.readFileSync(__filename)), results: [], cleanup: {} };
 const agent = new http.Agent({ keepAlive: true });
+const eventLoopDelay = monitorEventLoopDelay({ resolution: 1 });
 let runtime: ChildProcess | undefined, runtimeClosed: Promise<unknown> | undefined;
 let runtimeLog = '', originCalls = 0, originFailure: string | undefined;
 let expectedHotPath = '', expectedHotBody = '';
@@ -97,25 +108,33 @@ async function main() {
       delete policy.origin;
       policy.routes = [{ name: 'group', match: { path_prefixes: Array.from({ length: 64 }, (_, i) => '/private' + i) },
         auth_gate: { type: 'static_token', token_env: 'SECRET' } }];
+      if (patternCount) Object.assign(policy.request, { block: { path_patterns: {
+        regex: Array.from({ length: patternCount }, (_, i) => `/blocked-${i}/[a-z0-9]+$`),
+      } } });
     }
     if (prefixCount) policy.routes = [{ name: 'group',
       match: { path_prefixes: Array.from({ length: prefixCount }, (_, i) => '/private' + i) },
       auth_gate: { type: 'static_token', token_env: 'SECRET' } }];
     const input = path.join(temp, 'policy.json'); fs.writeFileSync(input, JSON.stringify(policy));
-    execFileSync(process.execPath, [path.join(root, 'scripts/compile-cloudflare.js'), '--policy', input, '--out-dir', temp], { stdio: 'pipe', timeout: 15000 });
-    const generated = fs.readFileSync(path.join(temp, 'edge/cloudflare/index.ts'), 'utf8');
-    const code = transformSync(generated, { loader: 'ts', format: 'esm', target: 'es2022' }).code;
-    fs.writeFileSync(path.join(temp, 'worker.mjs'), code);
-    const socket = net.createServer(); socket.listen(0, '127.0.0.1'); await once(socket, 'listening');
-    const port = (socket.address() as net.AddressInfo).port; await new Promise<void>(resolve => socket.close(() => resolve()));
+    const variants: Array<{ root: string; port: number; generatedSha256: string; moduleSha256: string; moduleBytes: number }> = [];
+    for (const [index, variantRoot] of (compareRoot ? [compareRoot, root] : [root]).entries()) {
+      const dir = path.join(temp, 'variant' + index);
+      execFileSync(process.execPath, [path.join(variantRoot, 'scripts/compile-cloudflare.js'), '--policy', input, '--out-dir', dir], { stdio: 'pipe', timeout: 15000 });
+      const generated = fs.readFileSync(path.join(dir, 'edge/cloudflare/index.ts'), 'utf8');
+      const code = transformSync(generated, { loader: 'ts', format: 'esm', target: 'es2022' }).code;
+      fs.writeFileSync(path.join(temp, `worker${index}.mjs`), code);
+      const socket = net.createServer(); socket.listen(0, '127.0.0.1'); await once(socket, 'listening');
+      const port = (socket.address() as net.AddressInfo).port; await new Promise<void>(resolve => socket.close(() => resolve()));
+      variants.push({ root: variantRoot, port, generatedSha256: sha(generated), moduleSha256: sha(code), moduleBytes: Buffer.byteLength(code) });
+    }
     const config = `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
  services = [
-  (name = "worker", worker = (modules = [(name = "worker.mjs", esModule = embed "worker.mjs")], compatibilityDate = "2026-07-20",
-   bindings = [(name = "SECRET", text = "${secret}")], globalOutbound = "origin")),
+  ${variants.map((_variant, i) => `(name = "worker${i}", worker = (modules = [(name = "worker${i}.mjs", esModule = embed "worker${i}.mjs")], compatibilityDate = "2026-07-20",
+   bindings = [(name = "SECRET", text = "${secret}")], globalOutbound = "origin")),`).join('\n')}
   (name = "origin", external = (address = "127.0.0.1:${originPort}", http = ())),
   (name = "internet", network = (allow = [], deny = ["0.0.0.0/0", "::/0"]))
- ], sockets = [(name = "http", address = "127.0.0.1:${port}", http = (), service = "worker")]
+ ], sockets = [${variants.map((variant, i) => `(name = "http${i}", address = "127.0.0.1:${variant.port}", http = (), service = "worker${i}")`).join(',')}]
 );`;
     fs.writeFileSync(path.join(temp, 'config.capnp'), config);
     runtime = spawn(require('workerd').default, ['serve', 'config.capnp'], { cwd: temp, stdio: ['ignore', 'pipe', 'pipe'] });
@@ -125,44 +144,72 @@ const config :Workerd.Config = (
     let ready = false;
     for (let i = 0; i < 100 && !ready; i++) {
       if (runtime.exitCode !== null) throw new Error('workerd startup failed: ' + runtimeLog);
-      ready = await new Promise<boolean>(resolve => { const client = net.connect(port, '127.0.0.1');
-        client.on('connect', () => { client.destroy(); resolve(true); }); client.on('error', () => resolve(false)); });
+      ready = (await Promise.all(variants.map(variant => new Promise<boolean>(resolve => { const client = net.connect(variant.port, '127.0.0.1');
+        client.on('connect', () => { client.destroy(); resolve(true); }); client.on('error', () => resolve(false)); })))).every(Boolean);
       if (!ready) await new Promise(resolve => setTimeout(resolve, 25));
     }
     if (!ready) throw new Error('workerd readiness deadline');
-    record.policySha256 = sha(JSON.stringify(policy)); record.generatedSha256 = sha(generated); record.moduleSha256 = sha(code);
+    record.policySha256 = sha(JSON.stringify(policy)); record.variants = variants;
+    record.generatedSha256 = variants.at(-1)!.generatedSha256; record.moduleSha256 = variants.at(-1)!.moduleSha256;
+    record.comparisonOrder = compareRoot ? 'alternating before/after then after/before per pair' : undefined;
     const query = Array.from({ length: 100 }, (_, i) => 'key' + i + '=value%20' + i).join('&');
     const field = 'longField_012345678901234567890123456789 ';
-    const workloads = prefixCount ? [
+    const prettyField = 'field_a \n              field_b \n              ';
+    const graphqlBody = (bytes: number, unit: string) =>
+      ('query Audit { ' + unit.repeat(Math.floor((bytes - 15) / unit.length))).padEnd(bytes - 1, ' ') + '}';
+    const workloads = (prefixCount ? [
       [`single-gate-prefixes-${prefixCount}`, `/private${prefixCount - 1}/child`, undefined],
+    ] as const : patternCount ? [
+      ['patterns-short', '/public/catalog/item', undefined],
+      ['patterns-2KiB', '/public/' + Array(256).fill('segment').join('/'), undefined],
+      ['patterns-8KiB', '/public/' + Array(1020).fill('segment').join('/'), undefined],
     ] as const : hotPaths ? [
       ['control-short', '/public/catalog/item', undefined],
       ['canonical-deep256', '/public/' + Array(256).fill('segment').join('/'), undefined],
       ['control-normalized', '/public//a;v/%61', undefined],
-      ...[2048, 32768, 65536].map(bytes => [`graphql-${bytes}`, '/graphql',
-        ('query Audit { ' + field.repeat(Math.floor((bytes - 15) / field.length))).padEnd(bytes - 1, ' ') + '}'] as const),
+      ...[2048, 32768, 65536].map(bytes => [`graphql-${bytes}`, '/graphql', graphqlBody(bytes, field)] as const),
+      ['graphql-65536-pretty', '/graphql', graphqlBody(65536, prettyField)],
+      ['graphql-65536-padding', '/graphql', 'query Audit { a'.padEnd(65535, ' ') + '}'],
       ['response-index-short', '/private0/item', undefined],
       ['response-index-deep256', '/private0/' + Array(256).fill('segment').join('/'), undefined],
+      ['index-8KiB-hit', '/private0/' + Array(1020).fill('segment').join('/'), undefined],
+      ['index-8KiB-miss', '/public/' + Array(1020).fill('segment').join('/'), undefined],
     ] as const : [
       ['routes-500', '/public', undefined], ['query-100', '/public?utm_source=x&' + query, undefined],
       ['graphql-hash-32768', '/graphql', JSON.stringify({ query: '{ viewer { id } }', padding: 'x'.repeat(32768) })],
-    ] as const;
+    ] as const).filter(([name]) => !only || name === only);
+    if (workloads.length === 0) throw new Error('Unknown --only workload: ' + only);
     const warmup = prefixCount || hotPaths ? 1000 : 10, count = prefixCount || hotPaths ? 1000 : 100;
+    eventLoopDelay.enable();
     for (const [name, target, body] of workloads) {
       expectedHotPath = target === '/public//a;v/%61' ? '/public/a/a' : target;
       expectedHotBody = body || '';
-      const first = performance.now();
-      if (hotPaths) await send(port, target, body);
-      const firstRequestMs = hotPaths ? performance.now() - first : undefined;
-      for (let i = 0; i < warmup; i++) await send(port, target, body);
-      const samples: number[] = [];
-      for (let i = 0; i < count; i++) { const start = performance.now(); await send(port, target, body); samples.push(performance.now() - start); }
-      record.results.push({ name, warmup, firstRequestMs, requestBodyBytes: Buffer.byteLength(body || ''), samplesMs: samples, status: 'passed' });
+      const firstRequests: number[] = [];
+      const timed = async (index: number) => { const start = performance.now(); await send(variants[index].port, target, body); return performance.now() - start; };
+      if (hotPaths) for (let index = 0; index < variants.length; index++) firstRequests.push(await timed(index));
+      // Pair adjacent requests and reverse their order to balance drift and queueing.
+      const order = (i: number) => compareRoot && i % 2 ? [1, 0] : variants.map((_variant, index) => index);
+      for (let i = 0; i < warmup; i++) for (const index of order(i)) await timed(index);
+      eventLoopDelay.reset();
+      const cpuStart = process.cpuUsage();
+      const samples = variants.map(() => [] as number[]), pairDeltasMs: number[] = [];
+      for (let i = 0; i < count; i++) {
+        const pair: number[] = [];
+        for (const index of order(i)) { const elapsed = await timed(index); samples[index].push(elapsed); pair[index] = elapsed; }
+        if (compareRoot) pairDeltasMs.push(pair[1] - pair[0]);
+      }
+      record.results.push({ name, warmup, firstRequestMs: firstRequests.at(-1), beforeFirstRequestMs: compareRoot ? firstRequests[0] : undefined,
+        requestBodyBytes: Buffer.byteLength(body || ''), requestPathBytes: Buffer.byteLength(target), samplesMs: samples.at(-1),
+        beforeSamplesMs: compareRoot ? samples[0] : undefined, pairDeltasMs: compareRoot ? pairDeltasMs : undefined,
+        clientOriginCpuMicros: process.cpuUsage(cpuStart), eventLoopDelayMs: { p95: eventLoopDelay.percentile(95) / 1e6,
+          p99: eventLoopDelay.percentile(99) / 1e6, max: eventLoopDelay.max / 1e6 }, status: 'passed' });
+      console.log(JSON.stringify({ name, status: 'passed' }));
     }
-    if (originFailure || originCalls !== workloads.length * (warmup + count + (hotPaths ? 1 : 0))) throw new Error(originFailure || 'origin arrival count mismatch');
+    if (originFailure || originCalls !== variants.length * workloads.length * (warmup + count + (hotPaths ? 1 : 0))) throw new Error(originFailure || 'origin arrival count mismatch');
     record.status = 'passed'; record.originCalls = originCalls;
   } catch (error) { record.status = 'failed'; record.error = String(error); process.exitCode = 1; }
   finally {
+    eventLoopDelay.disable();
     agent.destroy();
     if (runtime && runtimeClosed) {
       runtime.kill('SIGTERM');

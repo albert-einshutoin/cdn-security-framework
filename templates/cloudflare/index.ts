@@ -509,7 +509,12 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
       while (i < query.length && isGraphqlNameChar(query[i])) i++;
       const name = query.slice(start, i);
       let j = i;
-      while (j < query.length && /\s/.test(query[j])) j++;
+      // ASCII avoids a regex per byte; non-ASCII keeps the existing separators.
+      while (j < query.length) {
+        const ws = query.charCodeAt(j);
+        if (ws !== 32 && (ws < 9 || ws > 13) && (ws < 128 || !/\s/.test(query[j]))) break;
+        j++;
+      }
 
       if (selectionDepth > 0 && !keywords.has(name) && prevToken !== '$' && prevToken !== '@') {
         if (query[j] === ':') {
@@ -525,6 +530,7 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
         }
       }
       prevToken = name;
+      i = j;
       continue;
     }
 
@@ -1455,7 +1461,9 @@ export default {
       url.pathname = canonical;
     }
 
-    const normalizedPathBlock = blockIfPathPattern(url.pathname, ctx);
+    // Identical input already passed; monitor must retain both sets of diagnostics.
+    const normalizedPathBlock = CFG.mode !== 'monitor' && url.pathname === rawPathname
+      ? null : blockIfPathPattern(url.pathname, ctx);
     if (normalizedPathBlock) return normalizedPathBlock;
 
     for (const h of CFG.requiredHeaders) {
@@ -1498,7 +1506,9 @@ export default {
       // Collected here and attached when we build the origin-facing Request.
       let signedUrlNonce: string | null = null;
       const matchPath = normalizeForMatch(url.pathname);
-      const gateIds = CFG.authGateIndex ? pathCandidates(matchPath, CFG.authGateIndex) : authGateIds;
+      // One character beyond the longest key preserves the '/' boundary. Keep
+      // the full matchPath for exact signed URLs and the forwarded URL below.
+      const gateIds = CFG.authGateIndex ? pathCandidates(matchPath.slice(0, CFG.authGateIndexMaxLength + 1), CFG.authGateIndex) : authGateIds;
       for (const gateIndex of gateIds) {
         const gate = CFG.authGates[gateIndex];
         const prefixes = authMatchPrefixes[gateIndex];
@@ -1718,9 +1728,9 @@ export default {
       if (RESPONSE_CFG.corp) out.headers.set('Cross-Origin-Resource-Policy', RESPONSE_CFG.corp);
       if (RESPONSE_CFG.reporting_endpoints) out.headers.set('Reporting-Endpoints', RESPONSE_CFG.reporting_endpoints);
 
-      const isAdminPath = RESPONSE_CFG.adminPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.adminPathIndex)
+      const isAdminPath = RESPONSE_CFG.adminPathIndex ? pathHasMatch(matchPath.slice(0, RESPONSE_CFG.adminPathIndexMaxLength + 1), RESPONSE_CFG.adminPathIndex)
         : adminMatchPrefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
-      const isAuthPath = RESPONSE_CFG.authPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.authPathIndex)
+      const isAuthPath = RESPONSE_CFG.authPathIndex ? pathHasMatch(matchPath.slice(0, RESPONSE_CFG.authPathIndexMaxLength + 1), RESPONSE_CFG.authPathIndex)
         : protectedMatchPrefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
 
       // Per-response CSP nonce (issue #11). crypto.getRandomValues is a CS-PRNG on Workers.

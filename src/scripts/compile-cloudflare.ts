@@ -45,6 +45,10 @@ const {
   isErrnoException,
 } = require('./lib/errors') as typeof import('./lib/errors');
 
+function maxIndexKeyLength(index: Record<string, number[]> | null): number {
+  return index ? Object.keys(index).reduce((longest, key) => Math.max(longest, key.length), 0) : 0;
+}
+
 export function compileCloudflare(policy: any, options: CompilerOptions): string {
 const repoRoot = options.rootDir || path.join(__dirname, '..');
 const outDir = options.outDir;
@@ -171,6 +175,7 @@ const responseDlp = normalizeResponseDlp(policy);
 const responseBase = buildResponseCfgBase(policy, authGates);
 const adminPathIndex = buildPathIndex([responseBase.adminPathPrefixes.map((prefix: string) => prefix || '/')], responseBase.caseInsensitive !== false);
 const authPathIndex = buildPathIndex([responseBase.authProtectedPrefixes.map((prefix: string) => prefix || '/')], responseBase.caseInsensitive !== false);
+const authGateIndex = buildPathIndex(authGates.map((gate: any) => gate.protectedPrefixes.map((prefix: string) => prefix || '/')), requestBase.normalizePath.caseInsensitive !== false);
 
 const cfgCode = renderConstObject('CFG', {
   mode: requestBase.mode,
@@ -190,7 +195,8 @@ const cfgCode = renderConstObject('CFG', {
   trustForwardedFor: requestBase.trustForwardedFor,
   cors: requestBase.cors,
   authGates,
-  authGateIndex: buildPathIndex(authGates.map((gate: any) => gate.protectedPrefixes.map((prefix: string) => prefix || '/')), requestBase.normalizePath.caseInsensitive !== false),
+  authGateIndex,
+  authGateIndexMaxLength: maxIndexKeyLength(authGateIndex),
   originAuth,
   jwksStaleIfErrorSec: jwksCache.staleIfErrorSec,
   jwksNegativeCacheSec: jwksCache.negativeCacheSec,
@@ -215,9 +221,11 @@ const responseCfgCode = renderConstObject('RESPONSE_CFG', {
   reporting_endpoints: responseBase.reporting_endpoints,
   adminPathPrefixes: responseBase.adminPathPrefixes,
   adminPathIndex,
+  adminPathIndexMaxLength: maxIndexKeyLength(adminPathIndex),
   adminCacheControl: responseBase.adminCacheControl,
   authProtectedPrefixes: responseBase.authProtectedPrefixes,
   authPathIndex,
+  authPathIndexMaxLength: maxIndexKeyLength(authPathIndex),
   forceVaryAuth: responseBase.forceVaryAuth,
   caseInsensitive: responseBase.caseInsensitive,
   clearSiteDataPaths: responseBase.clearSiteDataPaths,
