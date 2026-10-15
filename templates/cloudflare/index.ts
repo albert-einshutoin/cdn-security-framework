@@ -238,10 +238,13 @@ function blockIfPathPattern(pathname: string, ctx: ReqCtx): Response | null {
       if (r) return r;
     }
   }
-  for (const re of CFG.blockPathRegexes) {
-    if (re.test(pathname)) {
-      const r = shouldBlock(400, 'Bad Request', ctx);
-      if (r) return r;
+  for (const group of CFG.blockPathRegexGroups) {
+    if (group.required && !pathname.includes(group.required)) continue;
+    for (const re of group.regexes) {
+      if (re.test(pathname)) {
+        const r = shouldBlock(400, 'Bad Request', ctx);
+        if (r) return r;
+      }
     }
   }
   return null;
@@ -438,8 +441,22 @@ function isGraphqlNameChar(ch: string): boolean {
   return code === 95 || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
 }
 
+function skipGraphqlWhitespace(query: string, start: number): number {
+  if (query.startsWith('                ', start)) {
+    // Native scanning helps long padding; short separators avoid a slice/search per field.
+    const next = query.slice(start).search(/\S/);
+    return next < 0 ? query.length : start + next;
+  }
+  while (start < query.length) {
+    const ws = query.charCodeAt(start);
+    if (ws !== 32 && (ws < 9 || ws > 13) && (ws < 128 || !/\s/.test(query[start]))) break;
+    start++;
+  }
+  return start;
+}
+
+const graphqlKeywords = new Set(['query', 'mutation', 'subscription', 'fragment', 'on', 'true', 'false', 'null']);
 function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
-  const keywords = new Set(['query', 'mutation', 'subscription', 'fragment', 'on', 'true', 'false', 'null']);
   let depth = 0;
   let maxDepth = 0;
   let aliases = 0;
@@ -450,6 +467,8 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
 
   while (i < query.length) {
     const ch = query[i];
+
+    if (ch === ' ') { i = skipGraphqlWhitespace(query, i); continue; }
 
     if (ch === '#') {
       while (i < query.length && query[i] !== '\n' && query[i] !== '\r') i++;
@@ -508,15 +527,9 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
       i++;
       while (i < query.length && isGraphqlNameChar(query[i])) i++;
       const name = query.slice(start, i);
-      let j = i;
-      // ASCII avoids a regex per byte; non-ASCII keeps the existing separators.
-      while (j < query.length) {
-        const ws = query.charCodeAt(j);
-        if (ws !== 32 && (ws < 9 || ws > 13) && (ws < 128 || !/\s/.test(query[j]))) break;
-        j++;
-      }
+      const j = skipGraphqlWhitespace(query, i);
 
-      if (selectionDepth > 0 && !keywords.has(name) && prevToken !== '$' && prevToken !== '@') {
+      if (selectionDepth > 0 && !graphqlKeywords.has(name) && prevToken !== '$' && prevToken !== '@') {
         if (query[j] === ':') {
           aliases++;
           if (aliases > guard.maxAliases) {

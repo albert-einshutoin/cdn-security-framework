@@ -16,7 +16,7 @@ const CFG = {
   dropQueryKeys: new Set(["utm_source","utm_medium","utm_campaign","utm_term","utm_content","gclid","fbclid"]),
   uaDenyContains: ["sqlmap","nikto","acunetix","masscan","python-requests"],
   blockPathContains: ["/../","../","%2e%2e"],
-  blockPathRegexes: [],
+  blockPathRegexGroups: [],
   normalizePath: {"collapseSlashes":true,"removeDotSegments":true,"caseInsensitive":true,"rejectAmbiguousEncoding":true},
   requiredHeaders: ["user-agent"],
   allowedHosts: [],
@@ -181,10 +181,13 @@ function blockIfPathPattern(pathname, ctx) {
       const r = shouldBlock(400, "Bad Request", ctx);
       if (r) return r;
     }
-  for (const re of CFG.blockPathRegexes)
-    if (re.test(pathname)) {
-      const r = shouldBlock(400, "Bad Request", ctx);
-      if (r) return r;
+  for (const group of CFG.blockPathRegexGroups)
+    if (!(group.required && !pathname.includes(group.required))) {
+      for (const re of group.regexes)
+        if (re.test(pathname)) {
+          const r = shouldBlock(400, "Bad Request", ctx);
+          if (r) return r;
+        }
     }
   return null;
 }

@@ -9,6 +9,7 @@ assertSupportedNode(require.main === module);
 
 import { runCompilerCli, type CompilerOptions } from './lib/compiler-entry';
 import { buildPathIndex, PATH_INDEX_HELPER, PATH_MATCH_HELPER } from './lib/path-index';
+import { groupPathRegexes } from './lib/path-regex';
 const fs = require('fs');
 const path = require('path');
 const {
@@ -188,7 +189,8 @@ const cfgCode = renderConstObject('CFG', {
   dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(requestBase.dropQueryKeysArray)})`),
   uaDenyContains: requestBase.uaDenyContains,
   blockPathContains: requestBase.blockPathContains,
-  blockPathRegexes: runtimeCode(regexesLiteralCode(requestBase.blockPathRegexSources)),
+  blockPathRegexGroups: runtimeCode('[' + groupPathRegexes(requestBase.blockPathRegexSources)
+    .map(group => `{required:${JSON.stringify(group.required)},regexes:${regexesLiteralCode(group.sources)}}`).join(',') + ']'),
   normalizePath: requestBase.normalizePath,
   requiredHeaders: requestBase.requiredHeaders,
   allowedHosts: requestBase.allowedHosts,

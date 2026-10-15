@@ -9,10 +9,8 @@ import net from 'node:net';
 import crypto from 'node:crypto';
 import { spawn, execFileSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { performance } from 'node:perf_hooks';
+import { performance, monitorEventLoopDelay, PerformanceObserver } from 'node:perf_hooks';
 import { transformSync } from 'esbuild';
-import { compileCloudflare } from './compile-cloudflare';
-import { validatePolicy } from '../validator';
 import type { CDNSecurityFrameworkPolicy } from '../types/policy';
 
 type Profile = { policy: CDNSecurityFrameworkPolicy };
@@ -336,7 +334,7 @@ function stats(samples: number[]) {
 async function main() {
   const args = process.argv.slice(2), options: Record<string, string> = {};
   for (let i = 0; i < args.length; i += 2) {
-    assert.ok(['--output', '--samples', '--warmup', '--concurrency', '--only'].includes(args[i]), 'Unknown argument: ' + args[i]);
+    assert.ok(['--output', '--samples', '--warmup', '--concurrency', '--only', '--compiler-root', '--diagnostics', '--agent-scope'].includes(args[i]), 'Unknown argument: ' + args[i]);
     assert.ok(args[i + 1] && !args[i + 1].startsWith('--'), args[i] + ' requires a value');
     assert.equal(options[args[i]], undefined, 'Duplicate option: ' + args[i]); options[args[i]] = args[i + 1];
   }
@@ -351,6 +349,13 @@ async function main() {
   assert.ok(matches.length > 0, 'Unknown workload selector');
   const selected = data.cases.filter(c => matches.includes(c) || matches.some(m => m.jwksTransition && c.id === m.profile + '-seed'));
   const root = path.resolve(__dirname, '..'), output = path.resolve(options['--output']);
+  const compilerRoot = path.resolve(options['--compiler-root'] || root);
+  const diagnostics = options['--diagnostics'] === 'true';
+  assert.ok(options['--diagnostics'] === undefined || ['true', 'false'].includes(options['--diagnostics']), 'Invalid --diagnostics');
+  const agentScope = options['--agent-scope'] || 'all';
+  assert.ok(['all', 'profile'].includes(agentScope), 'Invalid --agent-scope');
+  const compiler: typeof import('./compile-cloudflare') = require(path.join(compilerRoot, 'scripts/compile-cloudflare'));
+  const validator: typeof import('../validator') = require(path.join(compilerRoot, 'validator'));
   const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-security-bench-'));
   const agent = new http.Agent({ keepAlive: true, maxSockets: concurrency });
   const generated: Record<string, unknown>[] = [], results: Record<string, unknown>[] = [];
@@ -359,6 +364,12 @@ async function main() {
   const observedResponses = new Map<string, { status: number; bytes: number; bodySha256: string; rejectionBody?: string }>();
   const observedEvents = new Map<string, { event: string; reason: string }[]>();
   const expected = new Map(selected.map(c => [c.id, c]));
+  const expectedHashes = new Map(selected.map(c => [c.id, sha(c.body || '')]));
+  const originTimings = new Map<string, Array<{ readMs: number; verificationMs: number }>>();
+  const eventLoop = monitorEventLoopDelay({ resolution: 1 });
+  const gc: Array<{ at: number; duration: number }> = [];
+  const gcObserver = new PerformanceObserver(list => { for (const entry of list.getEntries()) gc.push({ at: entry.startTime, duration: entry.duration }); });
+  if (diagnostics) { eventLoop.enable(); gcObserver.observe({ entryTypes: ['gc'] }); }
   let originError: unknown, runtime: ChildProcess | undefined, closed: Promise<unknown> | undefined, runtimeLog = '', failure: unknown;
   const controller = new AbortController(), abort = () => controller.abort(new Error('Benchmark interrupted'));
   process.once('SIGTERM', abort); process.once('SIGINT', abort);
@@ -380,21 +391,24 @@ async function main() {
       }
       const id = String(req.headers['x-bench-id']), scenario = expected.get(id);
       assert.ok(scenario?.forwarded, 'Unexpected origin arrival: ' + id + ' ' + req.url);
+      const started = performance.now();
       const chunks: Buffer[] = []; let received = 0;
-      for await (const chunk of req) { received += chunk.length; assert.ok(received <= 1048576, 'Origin request budget'); chunks.push(Buffer.from(chunk)); }
-      const body = Buffer.concat(chunks);
+      for await (const chunk of req) { received += chunk.length; assert.ok(received <= 1048576, 'Origin request budget'); chunks.push(chunk); }
+      const body = chunks.length === 1 ? chunks[0] : Buffer.concat(chunks), readAt = performance.now();
+      const bodyHash = sha(body);
       assert.equal(req.url, scenario.forwardedPath || scenario.target);
       assert.equal(req.method, scenario.method || 'GET');
-      assert.equal(sha(body), sha(scenario.body || ''), 'Forwarded body changed');
+      assert.equal(bodyHash, expectedHashes.get(id), 'Forwarded body changed');
       for (const header of ['x-forwarded-for', 'x-edge-authenticated', 'te', 'proxy-authorization']) assert.equal(req.headers[header], undefined);
       if (scenario.originAuth === 'custom') assert.equal(req.headers['x-origin-verify'], secret);
       if (scenario.originAuth === 'hmac') {
         const url = new URL(req.url!, 'http://edge.example');
         const query = [...url.searchParams].sort(([a, av], [b, bv]) => a < b ? -1 : a > b ? 1 : av < bv ? -1 : av > bv ? 1 : 0)
           .map(([key, value]) => encodeURIComponent(key) + '=' + encodeURIComponent(value)).join('&');
-        assert.equal(req.headers['x-cdn-auth-body-sha256'], sha(body));
-        assert.equal(req.headers['x-cdn-auth-signature'], hmac([req.method, url.pathname, query, sha(body), req.headers['x-cdn-auth-timestamp'], req.headers['x-cdn-auth-nonce']].join('\n')));
+        assert.equal(req.headers['x-cdn-auth-body-sha256'], bodyHash);
+        assert.equal(req.headers['x-cdn-auth-signature'], hmac([req.method, url.pathname, query, bodyHash, req.headers['x-cdn-auth-timestamp'], req.headers['x-cdn-auth-nonce']].join('\n')));
       }
+      if (diagnostics) { const timings = originTimings.get(id) || []; timings.push({ readMs: readAt - started, verificationMs: performance.now() - readAt }); originTimings.set(id, timings); }
       arrivals.set(id, (arrivals.get(id) || 0) + 1);
       res.setHeader('content-type', 'text/plain'); res.setHeader('set-cookie', 'fixture=1');
       if (req.url === '/origin-error') { res.writeHead(503); res.end('synthetic-origin-failure'); }
@@ -409,11 +423,14 @@ async function main() {
     } catch (error) { originError = error; controller.abort(error); res.destroy(); }
   });
   const record: Record<string, unknown> = { schemaVersion: 1, startedAt: new Date().toISOString(), metric: 'loopback HTTP wall time through response drain; not Worker CPU',
-    samples, warmup, concurrency, results, generated, cleanup,
+    samples, warmup, concurrency, results, generated, cleanup, compilerRoot, diagnostics, agentScope,
     environment: { node: process.version, platform: process.platform, arch: process.arch, osRelease: os.release(), cpu: os.cpus()[0]?.model, cpuCount: os.cpus().length,
       workerd: require('workerd/package.json').version, compatibilityDate: '2026-07-20' },
     head: execFileSync('git', ['rev-parse', 'HEAD'], { cwd: root, encoding: 'utf8' }).trim(),
     driverSha256: sha(fs.readFileSync(__filename)), packageLockSha256: sha(fs.readFileSync(path.join(root, 'package-lock.json'))),
+    compilerSourceManifest: ['src/scripts/compile-cloudflare.ts', 'templates/cloudflare/index.ts', 'src/scripts/lib/edge-cfg.ts',
+      'src/scripts/lib/template-inject.ts', 'src/scripts/lib/path-index.ts', 'src/scripts/lib/path-regex.ts', 'policy/schema.json']
+      .map(file => ({ path: file, sha256: fs.existsSync(path.join(compilerRoot, file)) ? sha(fs.readFileSync(path.join(compilerRoot, file))) : null })),
     sourceManifest: ['src/scripts/benchmark-edge-security.ts', 'src/scripts/compile-cloudflare.ts', 'templates/cloudflare/index.ts',
       'src/scripts/lib/edge-cfg.ts', 'src/scripts/lib/template-inject.ts', 'src/scripts/lib/path-index.ts', 'policy/schema.json']
       .map(file => ({ path: file, sha256: sha(fs.readFileSync(path.join(root, file))) })),
@@ -426,10 +443,10 @@ async function main() {
     const variants = new Map<string, number>();
     for (const id of new Set(selected.map(c => c.profile))) {
       const profile = data.profiles[id], env = { TOKEN: secret, BASIC: Buffer.from('user:password').toString('base64'), SECRET: secret };
-      const validation = validatePolicy({ policy: profile.policy, pkgRoot: root, env });
+      const validation = validator.validatePolicy({ policy: profile.policy, pkgRoot: compilerRoot, env });
       assert.ok(validation.ok, id + ': ' + validation.errors.join('; '));
       const dir = path.join(temp, id);
-      const file = compileCloudflare(profile.policy, { rootDir: root, outDir: dir, logger: { log() {}, warn() {}, error() {} } });
+      const file = compiler.compileCloudflare(profile.policy, { rootDir: compilerRoot, outDir: dir, logger: { log() {}, warn() {}, error() {} } });
       const source = fs.readFileSync(file, 'utf8');
       const module = transformSync(source, { loader: 'ts', format: 'esm', target: 'es2022' }).code;
       fs.writeFileSync(path.join(temp, id + '.mjs'), module);
@@ -527,8 +544,11 @@ ${[...variants].map(([id, port]) => `(name = "${id}", address = "127.0.0.1:${por
       });
     };
     const usedServices = new Set<string>();
+    let previousProfile = '';
     for (const scenario of selected) {
       controller.signal.throwIfAborted();
+      if (agentScope === 'profile' && previousProfile !== scenario.profile) agent.destroy();
+      previousProfile = scenario.profile;
       if (scenario.jwksTransition) {
         await new Promise<void>((resolve, reject) => {
           const done = () => { controller.signal.removeEventListener('abort', interrupted); resolve(); };
@@ -550,12 +570,15 @@ ${[...variants].map(([id, port]) => `(name = "${id}", address = "127.0.0.1:${por
       const actualWarmup = scenario.firstOnly ? 0 : warmup, count = scenario.firstOnly ? 0 : samples;
       for (let i = 0; i < actualWarmup; i++) await send(scenario);
       const durations: number[] = [], cpu = process.cpuUsage(), start = performance.now();
+      eventLoop.reset();
+      const originTimingStart = originTimings.get(scenario.id)?.length || 0;
       // Closed-loop load: at most `concurrency` outstanding requests, with an exact shared request budget.
       let next = 0;
       await Promise.all(Array.from({ length: Math.min(concurrency, count) }, async () => {
         while (next++ < count) durations.push(await send(scenario));
       }));
       const batchElapsedMs = performance.now() - start;
+      if (diagnostics) await new Promise<void>(resolve => setImmediate(resolve));
       assert.equal(arrivals.get(scenario.id) || 0, before + (scenario.forwarded ? firstRequestsMs.length + actualWarmup + count : 0), scenario.id + ': origin count');
       assert.equal(originError, undefined);
       if (scenario.jwksExpected) {
@@ -576,6 +599,10 @@ ${[...variants].map(([id, port]) => `(name = "${id}", address = "127.0.0.1:${por
         warmup: actualWarmup, samplesMs: durations, summaryMs: durations.length ? stats(durations) : undefined,
         batchElapsedMs, throughputRps: count ? count * 1000 / batchElapsedMs : undefined,
         clientOriginCpuMicros: process.cpuUsage(cpu), originArrivals: (arrivals.get(scenario.id) || 0) - before,
+        diagnostic: diagnostics ? { eventLoopMs: { p95: eventLoop.percentile(95) / 1e6, max: eventLoop.max / 1e6 },
+          gc: gc.filter(entry => entry.at >= start && entry.at <= start + batchElapsedMs),
+          originTimings: originTimings.get(scenario.id)?.slice(originTimingStart),
+          freeSockets: Object.values(agent.freeSockets).reduce((sum, sockets) => sum + (sockets?.length || 0), 0) } : undefined,
         jwksFetchesBefore: jwksBefore, jwksFetchesAfter: Object.fromEntries(jwksCalls), status: 'passed' };
       results.push(item); console.log(JSON.stringify({ id: scenario.id, firstRequestMs, ...item.summaryMs, status: 'passed' }));
     }
@@ -584,6 +611,7 @@ ${[...variants].map(([id, port]) => `(name = "${id}", address = "127.0.0.1:${por
     failure = originError || error; record.status = 'failed'; record.error = String(failure); process.exitCode = 1;
   } finally {
     clearTimeout(watchdog); process.removeListener('SIGTERM', abort); process.removeListener('SIGINT', abort); agent.destroy();
+    eventLoop.disable(); gcObserver.disconnect();
     if (runtime && closed) {
       runtime.kill('SIGTERM'); const timer = setTimeout(() => runtime?.kill('SIGKILL'), 3000);
       try { await closed; } catch (error) { failure ||= error; } finally { clearTimeout(timer); }

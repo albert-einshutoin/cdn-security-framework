@@ -18,6 +18,13 @@ const arg = (name: string) => {
 };
 const root = arg('--root'), output = arg('--output');
 const hotPaths = process.argv.includes('--hot-paths');
+const originBodyHash = process.argv.includes('--origin-body-hash');
+const boundedNumber = (flag: string, fallback: number, min: number, max: number): number => {
+  const at = process.argv.indexOf(flag), value = at < 0 ? fallback : Number(process.argv[at + 1]);
+  if (!Number.isSafeInteger(value) || value < min || value > max) throw new Error(flag + ' out of bounds');
+  return value;
+};
+const concurrency = boundedNumber('--concurrency', 1, 1, 32);
 const compareRoot = process.argv.includes('--compare-root') ? arg('--compare-root') : undefined;
 const onlyAt = process.argv.indexOf('--only');
 const only = onlyAt < 0 ? undefined : process.argv[onlyAt + 1];
@@ -39,12 +46,15 @@ const secret = 'synthetic-loopback-only';
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-edge-http-bench-'));
 const record: any = { environment: { node: process.version, workerd: require('workerd/package.json').version,
   platform: process.platform, arch: process.arch }, root, driverSha256: sha(fs.readFileSync(__filename)), results: [], cleanup: {} };
-const agent = new http.Agent({ keepAlive: true });
+const agent = new http.Agent({ keepAlive: true, maxSockets: concurrency });
 const eventLoopDelay = monitorEventLoopDelay({ resolution: 1 });
 let runtime: ChildProcess | undefined, runtimeClosed: Promise<unknown> | undefined;
 let runtimeLog = '', originCalls = 0, originFailure: string | undefined;
 let expectedHotPath = '', expectedHotBody = '';
+let expectedHotHash = '', currentVariant = 0;
+const originDurations: number[][] = [[], []];
 const origin = http.createServer(async (req, res) => {
+  const began = performance.now(), variant = currentVariant;
   try {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
@@ -56,7 +66,8 @@ const origin = http.createServer(async (req, res) => {
       }
     } else if (prefixCount) {
       if (req.url !== `/private${prefixCount - 1}/child` || req.headers['x-edge-token'] !== secret) throw new Error('auth path/header mismatch');
-    } else {
+    }
+    if ((!hotPaths && !prefixCount) || originBodyHash) {
       const hash = crypto.createHash('sha256').update(body).digest('hex');
       const url = new URL(req.url!, 'http://edge.example');
       const query = Array.from(url.searchParams.entries()).sort(([ak, av], [bk, bv]) => ak < bk ? -1 : ak > bk ? 1 : av < bv ? -1 : av > bv ? 1 : 0)
@@ -64,7 +75,9 @@ const origin = http.createServer(async (req, res) => {
       const canonical = [req.method, url.pathname, query, hash, req.headers['x-cdn-auth-timestamp'], req.headers['x-cdn-auth-nonce']].join('\n');
       if (req.headers['x-cdn-auth-body-sha256'] !== hash || req.headers['x-cdn-auth-signature'] !== crypto.createHmac('sha256', secret).update(canonical).digest('base64url')) throw new Error('origin body/signature mismatch');
       if (url.searchParams.has('utm_source')) throw new Error('query filter mismatch');
+      if (hotPaths && hash !== expectedHotHash) throw new Error('origin body bytes changed');
     }
+    originDurations[variant].push(performance.now() - began);
     originCalls++;
     if (hotPaths) { res.sendDate = false; res.setHeader('Vary', 'Accept-Encoding'); res.setHeader('Cache-Control', 'public'); }
     res.end('ok');
@@ -106,6 +119,7 @@ async function main() {
       Object.assign(policy.request.limits, { max_uri_length: 8192 });
       Object.assign(policy.request, { graphql_guard: { endpoint_paths: ['/graphql'], max_body_bytes: 1048576, max_fields: 50000 } });
       delete policy.origin;
+      if (originBodyHash) policy.origin = { auth: { type: 'hmac_signature', secret_env: 'SECRET', include_body_hash: true } };
       policy.routes = [{ name: 'group', match: { path_prefixes: Array.from({ length: 64 }, (_, i) => '/private' + i) },
         auth_gate: { type: 'static_token', token_env: 'SECRET' } }];
       if (patternCount) Object.assign(policy.request, { block: { path_patterns: {
@@ -170,6 +184,10 @@ const config :Workerd.Config = (
       ...[2048, 32768, 65536].map(bytes => [`graphql-${bytes}`, '/graphql', graphqlBody(bytes, field)] as const),
       ['graphql-65536-pretty', '/graphql', graphqlBody(65536, prettyField)],
       ['graphql-65536-padding', '/graphql', 'query Audit { a'.padEnd(65535, ' ') + '}'],
+      ['graphql-65535-boundary', '/graphql', '{ a'.padEnd(65534, ' ') + '}'],
+      ['graphql-65536-boundary', '/graphql', '{ a'.padEnd(65535, ' ') + '}'],
+      ['graphql-65536-leading', '/graphql', ' '.repeat(65531) + '{ a }'],
+      ['body-forward-1048576', '/public/upload', 'x'.repeat(1048576)],
       ['response-index-short', '/private0/item', undefined],
       ['response-index-deep256', '/private0/' + Array(256).fill('segment').join('/'), undefined],
       ['index-8KiB-hit', '/private0/' + Array(1020).fill('segment').join('/'), undefined],
@@ -179,28 +197,37 @@ const config :Workerd.Config = (
       ['graphql-hash-32768', '/graphql', JSON.stringify({ query: '{ viewer { id } }', padding: 'x'.repeat(32768) })],
     ] as const).filter(([name]) => !only || name === only);
     if (workloads.length === 0) throw new Error('Unknown --only workload: ' + only);
-    const warmup = prefixCount || hotPaths ? 1000 : 10, count = prefixCount || hotPaths ? 1000 : 100;
+    const warmup = boundedNumber('--warmup', prefixCount || hotPaths ? 1000 : 10, 0, 2000);
+    const count = boundedNumber('--samples', prefixCount || hotPaths ? 1000 : 100, 1, 10000);
+    record.concurrency = concurrency;
     eventLoopDelay.enable();
     for (const [name, target, body] of workloads) {
       expectedHotPath = target === '/public//a;v/%61' ? '/public/a/a' : target;
       expectedHotBody = body || '';
+      expectedHotHash = sha(expectedHotBody);
       const firstRequests: number[] = [];
       const timed = async (index: number) => { const start = performance.now(); await send(variants[index].port, target, body); return performance.now() - start; };
       if (hotPaths) for (let index = 0; index < variants.length; index++) firstRequests.push(await timed(index));
       // Pair adjacent requests and reverse their order to balance drift and queueing.
       const order = (i: number) => compareRoot && i % 2 ? [1, 0] : variants.map((_variant, index) => index);
-      for (let i = 0; i < warmup; i++) for (const index of order(i)) await timed(index);
+      for (let i = 0; i < warmup; i++) for (const index of order(i)) { currentVariant = index; await timed(index); }
       eventLoopDelay.reset();
       const cpuStart = process.cpuUsage();
       const samples = variants.map(() => [] as number[]), pairDeltasMs: number[] = [];
-      for (let i = 0; i < count; i++) {
-        const pair: number[] = [];
-        for (const index of order(i)) { const elapsed = await timed(index); samples[index].push(elapsed); pair[index] = elapsed; }
-        if (compareRoot) pairDeltasMs.push(pair[1] - pair[0]);
+      originDurations.forEach(values => { values.length = 0; });
+      for (let i = 0; i < count; i += concurrency) {
+        const pair: number[][] = [];
+        for (const index of order(Math.floor(i / concurrency))) {
+          currentVariant = index;
+          pair[index] = await Promise.all(Array.from({ length: Math.min(concurrency, count - i) }, () => timed(index)));
+          samples[index].push(...pair[index]);
+        }
+        if (compareRoot) for (let j = 0; j < pair[0].length; j++) pairDeltasMs.push(pair[1][j] - pair[0][j]);
       }
       record.results.push({ name, warmup, firstRequestMs: firstRequests.at(-1), beforeFirstRequestMs: compareRoot ? firstRequests[0] : undefined,
         requestBodyBytes: Buffer.byteLength(body || ''), requestPathBytes: Buffer.byteLength(target), samplesMs: samples.at(-1),
         beforeSamplesMs: compareRoot ? samples[0] : undefined, pairDeltasMs: compareRoot ? pairDeltasMs : undefined,
+        originSamplesMs: originDurations.at(variants.length - 1)?.slice(), beforeOriginSamplesMs: compareRoot ? originDurations[0].slice() : undefined,
         clientOriginCpuMicros: process.cpuUsage(cpuStart), eventLoopDelayMs: { p95: eventLoopDelay.percentile(95) / 1e6,
           p99: eventLoopDelay.percentile(99) / 1e6, max: eventLoopDelay.max / 1e6 }, status: 'passed' });
       console.log(JSON.stringify({ name, status: 'passed' }));
