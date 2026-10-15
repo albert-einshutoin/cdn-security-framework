@@ -568,7 +568,7 @@ var stdin_default = {
       const matchPath = normalizeForMatch(url.pathname), gateIds = CFG.authGateIndex ? pathCandidates(matchPath, CFG.authGateIndex) : authGateIds;
       for (const gateIndex of gateIds) {
         const gate = CFG.authGates[gateIndex], prefixes = authMatchPrefixes[gateIndex];
-        if ((gate.type === "signed_url" && gate.exact_path === !0 ? prefixes.some((p) => pathMatchesExact(matchPath, p)) : prefixes.some((p) => pathMatchesPrefix(matchPath, p))) && gate.type === "jwt") {
+        if ((gate.type === "signed_url" && gate.exact_path === !0 ? prefixes.some((p) => pathMatchesExact(matchPath, p)) : CFG.authGateIndex || prefixes.some((p) => pathMatchesPrefix(matchPath, p))) && gate.type === "jwt") {
           const authHeader = request.headers.get("authorization") || "";
           if (!authHeader.startsWith("Bearer "))
             return shouldBlockAuth(401, "Missing or invalid Authorization header", ctx);

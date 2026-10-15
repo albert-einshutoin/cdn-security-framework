@@ -99,6 +99,23 @@ function worker(policy: any, request: () => Request, responseBody = 'origin-ok',
 const headers = { 'user-agent': 'local-benchmark' };
 async function main(): Promise<void> {
   try {
+    for (const count of [31, 32, 500, 5000]) await measure(`prefixes-cf-auth-${count}`, () => {
+      const policy = base(); policy.routes = [{ name: 'group',
+        match: { path_prefixes: Array.from({ length: count }, (_, i) => '/private' + i) },
+        auth_gate: { type: 'static_token', token_env: 'TOKEN' } }];
+      return worker(policy, () => new Request(`https://edge.example/private${count - 1}/child`,
+        { headers: { ...headers, 'x-edge-token': secret } }), undefined, { TOKEN: secret });
+    }, 500);
+    for (const count of [0, 500]) await measure(`prefixes-compile-${count || 'minimal'}`, () => {
+      const policy = base();
+      if (count) policy.routes = [{ name: 'group',
+        match: { path_prefixes: Array.from({ length: count }, (_, i) => '/private' + i) },
+        auth_gate: { type: 'static_token', token_env: 'TOKEN' } }];
+      const { compileCloudflare } = require(path.join(root, 'scripts/compile-cloudflare'));
+      const outDir = path.join(scratch, 'compile-' + count);
+      return { call() { const file = compileCloudflare(policy, { rootDir: root, outDir, logger: quiet });
+        return fs.readFileSync(file, 'utf8'); } };
+    }, 5, 3);
     for (const count of [0, 500]) await measure(`followup-cf-routes-${count}`, () => {
       const policy = base(); policy.routes = Array.from({ length: count }, (_, i) => ({ name: `r${i}`, match: { path_prefixes: [`/private${i}`] }, auth_gate: { type: 'static_token', token_env: 'TOKEN' } }));
       return worker(policy, () => new Request('https://edge.example/public', { headers }));

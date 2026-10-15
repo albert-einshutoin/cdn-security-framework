@@ -43,7 +43,7 @@ response_dlp:
   body: { max_bytes: 1024, content_types: [application/json] }
 routes:
   - name: admin
-    match: { path_prefixes: [/admin] }
+    match: { path_prefixes: [/admin, ${Array.from({ length: 31 }, (_, i) => '/unused-admin' + i).join(', ')}] }
     auth_gate: { type: static_token, header: x-edge-token, token_env: EDGE_ADMIN_TOKEN }
     response: { cache_control: no-store }
 ${['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'].map(endpoint => `  - name: jwt-${endpoint}

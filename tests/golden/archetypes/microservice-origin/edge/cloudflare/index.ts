@@ -410,7 +410,7 @@ var stdin_default = {
       const matchPath = normalizeForMatch(url.pathname), gateIds = CFG.authGateIndex ? pathCandidates(matchPath, CFG.authGateIndex) : authGateIds;
       for (const gateIndex of gateIds) {
         const gate = CFG.authGates[gateIndex], prefixes = authMatchPrefixes[gateIndex];
-        gate.type === "signed_url" && gate.exact_path === !0 ? prefixes.some((p) => pathMatchesExact(matchPath, p)) : prefixes.some((p) => pathMatchesPrefix(matchPath, p));
+        gate.type === "signed_url" && gate.exact_path === !0 ? prefixes.some((p) => pathMatchesExact(matchPath, p)) : CFG.authGateIndex || prefixes.some((p) => pathMatchesPrefix(matchPath, p));
       }
       const forwardHeaders = new Headers(request.headers);
       forwardHeaders.delete("x-edge-authenticated"), forwardHeaders.delete("x-csp-nonce");
