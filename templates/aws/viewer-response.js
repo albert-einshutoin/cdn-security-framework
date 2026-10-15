@@ -112,10 +112,10 @@ function handler(event) {
   const uri = canonicalizeResponsePath(req.uri || '/');
   if (uri === null) throw new Error('Invalid response request path');
   const matchPath = RESPONSE_CFG.caseInsensitive !== false ? uri.toLowerCase() : uri;
-  const isAdminPath = /* {{FEATURE_ADMIN_INDEX}} */ true && RESPONSE_CFG.adminPathIndex ? pathCandidates(matchPath, RESPONSE_CFG.adminPathIndex).length > 0
+  const isAdminPath = /* {{FEATURE_ADMIN_INDEX}} */ true && RESPONSE_CFG.adminPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.adminPathIndex)
     : adminMatchPrefixes.some(function (p) { return pathMatchesPrefix(matchPath, p); });
   // Union of auth-gate prefixes — broader than admin-only; catches jwt/basic/signed_url too.
-  const isAuthPath = /* {{FEATURE_AUTH_PATH_INDEX}} */ true && RESPONSE_CFG.authPathIndex ? pathCandidates(matchPath, RESPONSE_CFG.authPathIndex).length > 0 : authMatchPrefixes.some(function (p) {
+  const isAuthPath = /* {{FEATURE_AUTH_PATH_INDEX}} */ true && RESPONSE_CFG.authPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.authPathIndex) : authMatchPrefixes.some(function (p) {
     return pathMatchesPrefix(matchPath, p);
   });
 

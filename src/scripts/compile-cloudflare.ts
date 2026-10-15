@@ -8,7 +8,7 @@ assertSupportedNode(require.main === module);
  */
 
 import { runCompilerCli, type CompilerOptions } from './lib/compiler-entry';
-import { buildPathIndex, PATH_INDEX_HELPER } from './lib/path-index';
+import { buildPathIndex, PATH_INDEX_HELPER, PATH_MATCH_HELPER } from './lib/path-index';
 const fs = require('fs');
 const path = require('path');
 const {
@@ -169,6 +169,8 @@ const geoAllowCountries = Array.isArray(fwGeo.allow_countries)
 const challengeConfig = buildChallengeConfig(policy);
 const responseDlp = normalizeResponseDlp(policy);
 const responseBase = buildResponseCfgBase(policy, authGates);
+const adminPathIndex = buildPathIndex([responseBase.adminPathPrefixes.map((prefix: string) => prefix || '/')], responseBase.caseInsensitive !== false);
+const authPathIndex = buildPathIndex([responseBase.authProtectedPrefixes.map((prefix: string) => prefix || '/')], responseBase.caseInsensitive !== false);
 
 const cfgCode = renderConstObject('CFG', {
   mode: requestBase.mode,
@@ -212,10 +214,10 @@ const responseCfgCode = renderConstObject('RESPONSE_CFG', {
   corp: responseBase.corp,
   reporting_endpoints: responseBase.reporting_endpoints,
   adminPathPrefixes: responseBase.adminPathPrefixes,
-  adminPathIndex: buildPathIndex([responseBase.adminPathPrefixes.map((prefix: string) => prefix || '/')], responseBase.caseInsensitive !== false),
+  adminPathIndex,
   adminCacheControl: responseBase.adminCacheControl,
   authProtectedPrefixes: responseBase.authProtectedPrefixes,
-  authPathIndex: buildPathIndex([responseBase.authProtectedPrefixes.map((prefix: string) => prefix || '/')], responseBase.caseInsensitive !== false),
+  authPathIndex,
   forceVaryAuth: responseBase.forceVaryAuth,
   caseInsensitive: responseBase.caseInsensitive,
   clearSiteDataPaths: responseBase.clearSiteDataPaths,
@@ -238,7 +240,8 @@ try {
   throw e;
 }
 
-code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode + '\n' + PATH_INDEX_HELPER);
+code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode + '\n' + PATH_INDEX_HELPER
+  + (adminPathIndex || authPathIndex ? '\n' + PATH_MATCH_HELPER : ''));
 code = injectTemplateCode(code, '// {{INJECT_RESPONSE_CFG}}', responseCfgCode);
 code = specializeWorker(code, {
   CHALLENGE: Boolean(challengeConfig), GRAPHQL: Boolean(buildGraphqlGuardConfig(policy)), DLP: responseDlp.config.enabled,

@@ -33,14 +33,15 @@ function base(): any {
   return { version: 2, defaults: { mode: 'enforce' }, request: { allow_methods: ['GET', 'POST'],
     limits: { max_query_params: 200, max_query_length: 32768 } }, response_headers: {}, observability: { sample_rate: 0 } };
 }
-function build(policy: any, target: 'aws' | 'cf'): string {
+function build(policy: any, target: 'aws' | 'aws-response' | 'cf'): string {
   const folder = path.join(scratch, `generated-${generation++}`); fs.mkdirSync(folder);
   if (target === 'cf') {
     const input = path.join(folder, 'policy.json'); fs.writeFileSync(input, JSON.stringify(policy));
     execFileSync(process.execPath, [path.join(root, 'scripts/compile-cloudflare.js'), '--policy', input, '--out-dir', folder], { stdio: 'pipe' });
   } else require(path.join(root, 'scripts/lib/compile-core')).build(policy,
     { rootDir: root, outDir: folder, optimize: true, env: { EDGE_ADMIN_TOKEN: secret } });
-  const source = fs.readFileSync(path.join(folder, target === 'cf' ? 'edge/cloudflare/index.ts' : 'edge/viewer-request.js'), 'utf8');
+  const source = fs.readFileSync(path.join(folder, target === 'cf' ? 'edge/cloudflare/index.ts'
+    : target === 'aws-response' ? 'edge/viewer-response.js' : 'edge/viewer-request.js'), 'utf8');
   generated.push({ target, policySha256: sha(JSON.stringify(policy)), sourceSha256: sha(source), bytes: Buffer.byteLength(source) });
   return source;
 }
@@ -99,6 +100,25 @@ function worker(policy: any, request: () => Request, responseBody = 'origin-ok',
 const headers = { 'user-agent': 'local-benchmark' };
 async function main(): Promise<void> {
   try {
+    for (const [name, uri, protectedPath] of [
+      ['short', '/private0/item', true],
+      ['deep240', '/private0/' + Array(240).fill('segment').join('/'), true],
+      ['miss-deep240', '/public/' + Array(240).fill('segment').join('/'), false],
+    ] as const) await measure(`hotpath-aws-response-${name}`, () => {
+      const policy = base(); policy.routes = [{ name: 'group',
+        match: { path_prefixes: Array.from({ length: 64 }, (_, i) => '/private' + i) },
+        auth_gate: { type: 'static_token', token_env: 'EDGE_ADMIN_TOKEN' } }];
+      const handler = Function('console', build(policy, 'aws-response') + '\nreturn handler;')(quiet);
+      return { call() {
+        const result = handler({ request: { uri, headers: {} }, response: { statusCode: 200,
+          headers: { vary: { value: 'Accept-Encoding' }, 'cache-control': { value: 'public' } } } });
+        if (result.headers.vary.value !== (protectedPath ? 'Accept-Encoding, Authorization, Cookie' : 'Accept-Encoding')
+          || result.headers['cache-control'].value !== (protectedPath ? 'no-store, no-cache, must-revalidate, private' : 'public')) {
+          throw new Error('AWS response cache/Vary mismatch');
+        }
+        return result;
+      } };
+    }, 5000, 1000);
     for (const count of [31, 32, 500, 5000]) await measure(`prefixes-cf-auth-${count}`, () => {
       const policy = base(); policy.routes = [{ name: 'group',
         match: { path_prefixes: Array.from({ length: count }, (_, i) => '/private' + i) },

@@ -27,3 +27,13 @@ function pathCandidates(uri, index) {
   add(uri);
   return found.sort(function(a, b) { return a - b; });
 }`;
+
+// Response indexes only need membership; buildPathIndex never emits empty ID lists.
+// Keep the ordered candidate collector above for authentication's AND checks.
+export const PATH_MATCH_HELPER = `
+function pathHasMatch(uri, index) {
+  for (var i = uri.indexOf('/'); i !== -1; i = uri.indexOf('/', i + 1)) {
+    if (Object.prototype.hasOwnProperty.call(index, uri.slice(0, i))) return true;
+  }
+  return Object.prototype.hasOwnProperty.call(index, uri);
+}`;
