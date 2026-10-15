@@ -59,6 +59,22 @@ test('indexed overlapping gates preserve AND evaluation and policy denial order'
   expect(output.request(request('/public')).uri).toBe('/public');
 });
 
+test.each([true, false])('response indexes preserve case=%s, trailing slashes and cache headers', insensitive => {
+  const p = policy();
+  p.request.normalize.path = { case_insensitive: insensitive, collapse_slashes: false };
+  p.routes = [{ name: 'private', match: { path_prefixes: ['/trail/', '/case', '/', '/__proto__', '/constructor',
+    ...Array.from({ length: 27 }, (_, i) => '/other' + i)] }, auth_gate: { type: 'static_token', token_env: 'TOKEN' } }];
+  const output = generate(p);
+  for (const [uri, protectedPath] of [['/', true], ['/public', false], ['/trail/', true], ['/trail//child', true],
+    ['/trail/child', false], ['/case/child', true], ['/caseSuffix', false], ['/CASE/child', insensitive],
+    ['/__proto__/a', true], ['/constructor/a', true]] as const) {
+    const response = output.response({ ...request(uri), response: { statusCode: 200,
+      headers: { vary: { value: 'Accept-Encoding' }, 'cache-control': { value: 'public' } } } });
+    expect(response.headers['cache-control'].value).toBe(protectedPath ? 'no-store, no-cache, must-revalidate, private' : 'public');
+    expect(response.headers.vary.value).toBe(protectedPath ? 'Accept-Encoding, Authorization, Cookie' : 'Accept-Encoding');
+  }
+});
+
 test('response-only large prefix configuration selects arrays and preserves admin cache boundaries', () => {
   const p = policy(), prefix = '/' + 'long'.repeat(6);
   p.routes = [{ name: 'admin', match: { path_prefixes: Array.from({ length: 100 }, (_, i) => prefix + i) },

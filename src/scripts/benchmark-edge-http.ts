@@ -17,11 +17,13 @@ const arg = (name: string) => {
   return path.resolve(process.argv[at + 1]);
 };
 const root = arg('--root'), output = arg('--output');
+const hotPaths = process.argv.includes('--hot-paths');
 const prefixAt = process.argv.indexOf('--auth-prefix-count');
 const prefixCount = prefixAt < 0 ? 0 : Number(process.argv[prefixAt + 1]);
 if (prefixAt >= 0 && (!Number.isSafeInteger(prefixCount) || prefixCount < 1 || prefixCount > 5000)) {
   throw new Error('--auth-prefix-count must be an integer between 1 and 5000');
 }
+if (hotPaths && prefixAt >= 0) throw new Error('--hot-paths and --auth-prefix-count are separate workloads');
 const sha = (value: string | Buffer) => crypto.createHash('sha256').update(value).digest('hex');
 const secret = 'synthetic-loopback-only';
 const temp = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-edge-http-bench-'));
@@ -30,12 +32,18 @@ const record: any = { environment: { node: process.version, workerd: require('wo
 const agent = new http.Agent({ keepAlive: true });
 let runtime: ChildProcess | undefined, runtimeClosed: Promise<unknown> | undefined;
 let runtimeLog = '', originCalls = 0, originFailure: string | undefined;
+let expectedHotPath = '', expectedHotBody = '';
 const origin = http.createServer(async (req, res) => {
   try {
     const chunks: Buffer[] = [];
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const body = Buffer.concat(chunks);
-    if (prefixCount) {
+    if (hotPaths) {
+      if (req.url !== expectedHotPath || body.toString('utf8') !== expectedHotBody
+        || req.headers['x-edge-token'] !== secret || req.headers['x-edge-authenticated'] !== undefined) {
+        throw new Error('hot-path origin URI/body/header mismatch');
+      }
+    } else if (prefixCount) {
       if (req.url !== `/private${prefixCount - 1}/child` || req.headers['x-edge-token'] !== secret) throw new Error('auth path/header mismatch');
     } else {
       const hash = crypto.createHash('sha256').update(body).digest('hex');
@@ -46,16 +54,28 @@ const origin = http.createServer(async (req, res) => {
       if (req.headers['x-cdn-auth-body-sha256'] !== hash || req.headers['x-cdn-auth-signature'] !== crypto.createHmac('sha256', secret).update(canonical).digest('base64url')) throw new Error('origin body/signature mismatch');
       if (url.searchParams.has('utm_source')) throw new Error('query filter mismatch');
     }
-    originCalls++; res.end('ok');
+    originCalls++;
+    if (hotPaths) { res.sendDate = false; res.setHeader('Vary', 'Accept-Encoding'); res.setHeader('Cache-Control', 'public'); }
+    res.end('ok');
   } catch (error) { originFailure = String(error); res.writeHead(500).end('origin validation failed'); }
 });
 async function send(port: number, target: string, body?: string): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     const req = http.request({ hostname: '127.0.0.1', port, path: target, method: body === undefined ? 'GET' : 'POST', agent,
-      headers: { 'user-agent': 'local-benchmark', 'content-type': 'application/json',
-        ...(prefixCount ? { 'x-edge-token': secret } : {}) }, timeout: 5000 }, res => {
+      headers: { 'user-agent': 'local-benchmark', 'content-type': hotPaths ? 'application/graphql' : 'application/json',
+        ...(prefixCount || hotPaths ? { 'x-edge-token': secret } : {}) }, timeout: 5000 }, res => {
       res.resume(); res.on('error', reject);
-      res.on('end', () => res.statusCode === 200 ? resolve() : reject(new Error('HTTP ' + res.statusCode + ': ' + runtimeLog)));
+      res.on('end', () => {
+        if (res.statusCode !== 200) return reject(new Error('HTTP ' + res.statusCode + ': ' + runtimeLog));
+        if (hotPaths) {
+          const protectedPath = target.startsWith('/private0/');
+          if (res.headers.vary !== (protectedPath ? 'Accept-Encoding, Authorization, Cookie' : 'Accept-Encoding')
+            || res.headers['cache-control'] !== (protectedPath ? 'no-store, no-cache, must-revalidate, private' : 'public')) {
+            return reject(new Error('hot-path response cache/Vary mismatch'));
+          }
+        }
+        resolve();
+      });
     });
     req.on('timeout', () => req.destroy(new Error('HTTP deadline'))); req.on('error', reject); req.end(body);
   });
@@ -71,6 +91,13 @@ async function main() {
         auth_gate: { type: 'static_token', token_env: 'SECRET' } })),
       ...(prefixCount ? {} : { origin: { auth: { type: 'hmac_signature', secret_env: 'SECRET', include_body_hash: true } } }),
       observability: { sample_rate: 0 } };
+    if (hotPaths) {
+      Object.assign(policy.request.limits, { max_uri_length: 8192 });
+      Object.assign(policy.request, { graphql_guard: { endpoint_paths: ['/graphql'], max_body_bytes: 1048576, max_fields: 50000 } });
+      delete policy.origin;
+      policy.routes = [{ name: 'group', match: { path_prefixes: Array.from({ length: 64 }, (_, i) => '/private' + i) },
+        auth_gate: { type: 'static_token', token_env: 'SECRET' } }];
+    }
     if (prefixCount) policy.routes = [{ name: 'group',
       match: { path_prefixes: Array.from({ length: prefixCount }, (_, i) => '/private' + i) },
       auth_gate: { type: 'static_token', token_env: 'SECRET' } }];
@@ -105,20 +132,34 @@ const config :Workerd.Config = (
     if (!ready) throw new Error('workerd readiness deadline');
     record.policySha256 = sha(JSON.stringify(policy)); record.generatedSha256 = sha(generated); record.moduleSha256 = sha(code);
     const query = Array.from({ length: 100 }, (_, i) => 'key' + i + '=value%20' + i).join('&');
+    const field = 'longField_012345678901234567890123456789 ';
     const workloads = prefixCount ? [
       [`single-gate-prefixes-${prefixCount}`, `/private${prefixCount - 1}/child`, undefined],
+    ] as const : hotPaths ? [
+      ['control-short', '/public/catalog/item', undefined],
+      ['canonical-deep256', '/public/' + Array(256).fill('segment').join('/'), undefined],
+      ['control-normalized', '/public//a;v/%61', undefined],
+      ...[2048, 32768, 65536].map(bytes => [`graphql-${bytes}`, '/graphql',
+        ('query Audit { ' + field.repeat(Math.floor((bytes - 15) / field.length))).padEnd(bytes - 1, ' ') + '}'] as const),
+      ['response-index-short', '/private0/item', undefined],
+      ['response-index-deep256', '/private0/' + Array(256).fill('segment').join('/'), undefined],
     ] as const : [
       ['routes-500', '/public', undefined], ['query-100', '/public?utm_source=x&' + query, undefined],
       ['graphql-hash-32768', '/graphql', JSON.stringify({ query: '{ viewer { id } }', padding: 'x'.repeat(32768) })],
     ] as const;
-    const warmup = prefixCount ? 1000 : 10, count = prefixCount ? 1000 : 100;
+    const warmup = prefixCount || hotPaths ? 1000 : 10, count = prefixCount || hotPaths ? 1000 : 100;
     for (const [name, target, body] of workloads) {
+      expectedHotPath = target === '/public//a;v/%61' ? '/public/a/a' : target;
+      expectedHotBody = body || '';
+      const first = performance.now();
+      if (hotPaths) await send(port, target, body);
+      const firstRequestMs = hotPaths ? performance.now() - first : undefined;
       for (let i = 0; i < warmup; i++) await send(port, target, body);
       const samples: number[] = [];
       for (let i = 0; i < count; i++) { const start = performance.now(); await send(port, target, body); samples.push(performance.now() - start); }
-      record.results.push({ name, warmup, samplesMs: samples, status: 'passed' });
+      record.results.push({ name, warmup, firstRequestMs, requestBodyBytes: Buffer.byteLength(body || ''), samplesMs: samples, status: 'passed' });
     }
-    if (originFailure || originCalls !== workloads.length * (warmup + count)) throw new Error(originFailure || 'origin arrival count mismatch');
+    if (originFailure || originCalls !== workloads.length * (warmup + count + (hotPaths ? 1 : 0))) throw new Error(originFailure || 'origin arrival count mismatch');
     record.status = 'passed'; record.originCalls = originCalls;
   } catch (error) { record.status = 'failed'; record.error = String(error); process.exitCode = 1; }
   finally {

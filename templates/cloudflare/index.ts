@@ -152,7 +152,10 @@ function hasAmbiguousPathEncoding(uri: string): boolean {
 /** Canonicalize for auth/response matching and request rewrite. null = malformed. */
 function canonicalizePath(pathname: string): string | null {
   const opts = (CFG.normalizePath || {}) as any;
-  let p = String(pathname || '/').replace(/;[^/]*/g, '');
+  const raw = String(pathname || '/');
+  // Only bypass rewriting when every normalization option would leave it intact.
+  if (raw[0] === '/' && !/[;%]|\/\/|(?:^|\/)\.{1,2}(?:\/|$)/.test(raw)) return raw;
+  let p = raw.replace(/;[^/]*/g, '');
   // Decode up to 3 times so double-encoded unreserved bytes (%2561 → %61 → a)
   // cannot slip past auth matching while still looking different from the prefix.
   for (let round = 0; round < 3; round++) {
@@ -424,11 +427,15 @@ function extractGraphqlQuery(bodyText: string, contentType: string): { ok: boole
 }
 
 function isGraphqlNameStart(ch: string): boolean {
-  return typeof ch === 'string' && ch.length === 1 && /[A-Za-z_]/.test(ch);
+  if (typeof ch !== 'string' || ch.length !== 1) return false;
+  const code = ch.charCodeAt(0);
+  return code === 95 || (code >= 65 && code <= 90) || (code >= 97 && code <= 122);
 }
 
 function isGraphqlNameChar(ch: string): boolean {
-  return typeof ch === 'string' && ch.length === 1 && /[A-Za-z0-9_]/.test(ch);
+  if (typeof ch !== 'string' || ch.length !== 1) return false;
+  const code = ch.charCodeAt(0);
+  return code === 95 || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
 }
 
 function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
@@ -1711,9 +1718,9 @@ export default {
       if (RESPONSE_CFG.corp) out.headers.set('Cross-Origin-Resource-Policy', RESPONSE_CFG.corp);
       if (RESPONSE_CFG.reporting_endpoints) out.headers.set('Reporting-Endpoints', RESPONSE_CFG.reporting_endpoints);
 
-      const isAdminPath = RESPONSE_CFG.adminPathIndex ? pathCandidates(matchPath, RESPONSE_CFG.adminPathIndex).length > 0
+      const isAdminPath = RESPONSE_CFG.adminPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.adminPathIndex)
         : adminMatchPrefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
-      const isAuthPath = RESPONSE_CFG.authPathIndex ? pathCandidates(matchPath, RESPONSE_CFG.authPathIndex).length > 0
+      const isAuthPath = RESPONSE_CFG.authPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.authPathIndex)
         : protectedMatchPrefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
 
       // Per-response CSP nonce (issue #11). crypto.getRandomValues is a CS-PRNG on Workers.

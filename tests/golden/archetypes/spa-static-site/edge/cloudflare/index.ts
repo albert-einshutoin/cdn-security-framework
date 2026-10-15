@@ -118,8 +118,9 @@ function hasAmbiguousPathEncoding(uri) {
   return s.includes("%2f") || s.includes("%5c") || s.includes("%252f") || s.includes("%255c") || s.includes("%252e");
 }
 function canonicalizePath(pathname) {
-  const opts = CFG.normalizePath || {};
-  let p = String(pathname || "/").replace(/;[^/]*/g, "");
+  const opts = CFG.normalizePath || {}, raw = String(pathname || "/");
+  if (raw[0] === "/" && !/[;%]|\/\/|(?:^|\/)\.{1,2}(?:\/|$)/.test(raw)) return raw;
+  let p = raw.replace(/;[^/]*/g, "");
   for (let round = 0; round < 3 && /%[0-9A-Fa-f]{2}/.test(p); round++)
     try {
       const next = decodeURIComponent(p);
@@ -383,7 +384,7 @@ var stdin_default = {
       bodyState.body = null;
       const out = new Response(res.body, res), rh = RESPONSE_CFG.headers;
       rh["strict-transport-security"] && out.headers.set("Strict-Transport-Security", rh["strict-transport-security"]), rh["x-content-type-options"] && out.headers.set("X-Content-Type-Options", rh["x-content-type-options"]), rh["referrer-policy"] && out.headers.set("Referrer-Policy", rh["referrer-policy"]), rh["permissions-policy"] && out.headers.set("Permissions-Policy", rh["permissions-policy"]), RESPONSE_CFG.coop && out.headers.set("Cross-Origin-Opener-Policy", RESPONSE_CFG.coop), RESPONSE_CFG.coep && out.headers.set("Cross-Origin-Embedder-Policy", RESPONSE_CFG.coep), RESPONSE_CFG.corp && out.headers.set("Cross-Origin-Resource-Policy", RESPONSE_CFG.corp), RESPONSE_CFG.reporting_endpoints && out.headers.set("Reporting-Endpoints", RESPONSE_CFG.reporting_endpoints);
-      const isAdminPath = RESPONSE_CFG.adminPathIndex ? pathCandidates(matchPath, RESPONSE_CFG.adminPathIndex).length > 0 : adminMatchPrefixes.some((p) => pathMatchesPrefix(matchPath, p)), isAuthPath = RESPONSE_CFG.authPathIndex ? pathCandidates(matchPath, RESPONSE_CFG.authPathIndex).length > 0 : protectedMatchPrefixes.some((p) => pathMatchesPrefix(matchPath, p));
+      const isAdminPath = RESPONSE_CFG.adminPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.adminPathIndex) : adminMatchPrefixes.some((p) => pathMatchesPrefix(matchPath, p)), isAuthPath = RESPONSE_CFG.authPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.authPathIndex) : protectedMatchPrefixes.some((p) => pathMatchesPrefix(matchPath, p));
       cspNonce && out.headers.set("X-CSP-Nonce", cspNonce);
       const applyNonce = (csp) => !csp || !cspNonce ? csp : csp.split("'nonce-PLACEHOLDER'").join("'nonce-" + cspNonce + "'");
       isAdminPath ? (RESPONSE_CFG.adminCacheControl && out.headers.set("Cache-Control", RESPONSE_CFG.adminCacheControl), RESPONSE_CFG.csp_admin && out.headers.set("Content-Security-Policy", applyNonce(RESPONSE_CFG.csp_admin))) : RESPONSE_CFG.csp_public && out.headers.set("Content-Security-Policy", applyNonce(RESPONSE_CFG.csp_public)), RESPONSE_CFG.csp_report_only && out.headers.set("Content-Security-Policy-Report-Only", applyNonce(RESPONSE_CFG.csp_report_only)), RESPONSE_CFG.forceVaryAuth && isAuthPath && (out.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, private"), out.headers.set("Pragma", "no-cache"), appendVary(out.headers, "Authorization"), appendVary(out.headers, "Cookie"));

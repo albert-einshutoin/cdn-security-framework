@@ -1,4 +1,4 @@
-import { buildPathIndex, PATH_INDEX_HELPER } from './path-index';
+import { buildPathIndex, PATH_INDEX_HELPER, PATH_MATCH_HELPER } from './path-index';
 import type { CompilerOptions } from './compiler-entry';
 const fs = require('fs');
 const path = require('path');
@@ -499,7 +499,7 @@ function build(policy: any, options: any = {}) {
 
     const templateResponsePath = path.join(rootDir, 'templates', 'aws', 'viewer-response.js');
     let codeResponse = fs.readFileSync(templateResponsePath, 'utf8');
-    codeResponse = injectTemplateCode(codeResponse, '// {{INJECT_RESPONSE_CONFIG}}', responseCfgCode + (adminIndex || authIndex ? '\n' + PATH_INDEX_HELPER : ''));
+    codeResponse = injectTemplateCode(codeResponse, '// {{INJECT_RESPONSE_CONFIG}}', responseCfgCode + (adminIndex || authIndex ? '\n' + PATH_MATCH_HELPER : ''));
     codeResponse = injectTemplateCode(codeResponse, '/* {{FEATURE_CSP_NONCE}} */ true', String(Boolean(responseBase.csp_nonce)));
     codeResponse = injectTemplateCode(codeResponse, '/* {{FEATURE_CORS}} */ true', String(Boolean(responseBase.cors)));
     codeResponse = injectTemplateCode(codeResponse, '/* {{FEATURE_ADMIN_INDEX}} */ true', String(Boolean(adminIndex)));
