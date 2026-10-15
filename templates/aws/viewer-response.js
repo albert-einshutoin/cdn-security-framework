@@ -38,6 +38,8 @@ const authMatchPrefixes = (RESPONSE_CFG.authProtectedPrefixes || []).map(functio
   return RESPONSE_CFG.caseInsensitive !== false ? prefix.toLowerCase() : prefix;
 });
 
+const clearSiteDataValue = (RESPONSE_CFG.clearSiteDataTypes || []).map(function (t) { return '"' + t + '"'; }).join(', ');
+
 // Non-cryptographic CSP nonce. CloudFront Functions do not expose crypto.
 function weakNonce() {
   var chars = 'abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789';
@@ -110,15 +112,16 @@ function handler(event) {
   const uri = canonicalizeResponsePath(req.uri || '/');
   if (uri === null) throw new Error('Invalid response request path');
   const matchPath = RESPONSE_CFG.caseInsensitive !== false ? uri.toLowerCase() : uri;
-  const isAdminPath = adminMatchPrefixes.some(function (p) { return pathMatchesPrefix(matchPath, p); });
+  const isAdminPath = /* {{FEATURE_ADMIN_INDEX}} */ true && RESPONSE_CFG.adminPathIndex ? pathCandidates(matchPath, RESPONSE_CFG.adminPathIndex).length > 0
+    : adminMatchPrefixes.some(function (p) { return pathMatchesPrefix(matchPath, p); });
   // Union of auth-gate prefixes — broader than admin-only; catches jwt/basic/signed_url too.
-  const isAuthPath = authMatchPrefixes.some(function (p) {
+  const isAuthPath = /* {{FEATURE_AUTH_PATH_INDEX}} */ true && RESPONSE_CFG.authPathIndex ? pathCandidates(matchPath, RESPONSE_CFG.authPathIndex).length > 0 : authMatchPrefixes.some(function (p) {
     return pathMatchesPrefix(matchPath, p);
   });
 
   // CSP: substitute per-response nonce into any `'nonce-PLACEHOLDER'` in policy strings.
   var nonce = '';
-  if (RESPONSE_CFG.csp_nonce) {
+  if (/* {{FEATURE_CSP_NONCE}} */ true && RESPONSE_CFG.csp_nonce) {
     nonce = weakNonce();
     set(h, "X-CSP-Nonce", nonce);
   }
@@ -164,8 +167,7 @@ function handler(event) {
     return uri === p || uri.startsWith(p + "/");
   });
   if (hitsClearPath && isSuccess) {
-    var types = (RESPONSE_CFG.clearSiteDataTypes || []).map(function (t) { return '"' + t + '"'; });
-    if (types.length > 0) set(h, "Clear-Site-Data", types.join(', '));
+    if (clearSiteDataValue) set(h, "Clear-Site-Data", clearSiteDataValue);
     set(h, "Cache-Control", "no-store");
   }
 
@@ -193,7 +195,7 @@ function handler(event) {
   }
 
   // CORS headers
-  if (RESPONSE_CFG.cors) {
+  if (/* {{FEATURE_CORS}} */ true && RESPONSE_CFG.cors) {
     const origin = req.headers['origin']?.value || '';
     const allowedOrigins = RESPONSE_CFG.cors.allow_origins || [];
     const isAllowed = allowedOrigins.includes('*') || allowedOrigins.includes(origin);

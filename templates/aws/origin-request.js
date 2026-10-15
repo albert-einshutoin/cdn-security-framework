@@ -104,12 +104,13 @@ function canonicalOriginAuthInput(request, auth, timestamp, nonce, bodyHash) {
   const values = {
     method: String((request && request.method) || '').toUpperCase(),
     path: (request && request.uri) || '/',
-    query: canonicalOriginAuthQuery((request && request.querystring) || ''),
+    query: '',
     body: bodyHash || '',
     timestamp,
     nonce,
   };
-  return originAuthSignedComponents(auth).map((component) => values[component] || '').join('\n');
+  return originAuthSignedComponents(auth).map((component) => component === 'query'
+    ? canonicalOriginAuthQuery((request && request.querystring) || '') : values[component] || '').join('\n');
 }
 
 function setOriginAuthHeader(request, headerName, value) {

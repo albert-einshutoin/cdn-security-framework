@@ -3,11 +3,10 @@ assertSupportedNode(require.main === module);
 
 const fs = require('fs');
 const path = require('path');
-const { spawnSync } = require('child_process');
 
 const { lintPolicy } = require('../lib/lint');
 
-import type { SpawnSyncReturns } from 'child_process';
+import type { CompilerOptions } from '../scripts/lib/compiler-entry';
 
 const DEFAULT_PKG_ROOT = path.join(__dirname, '..');
 
@@ -56,21 +55,6 @@ export function listInfraArtifacts(outDir: string, sinceMs = 0): string[] {
     .filter((name: string) => name.endsWith('.tf.json'))
     .map((name: string) => path.join(infraDir, name))
     .filter((filePath: string) => sinceMs <= 0 || fs.statSync(filePath).mtimeMs >= sinceMs);
-}
-
-function collectStderrWarnings(result: SpawnSyncReturns<string>, warnings: string[]): void {
-  if (result.stderr) {
-    warnings.push(...result.stderr.trim().split('\n').filter(Boolean));
-  }
-}
-
-function collectFailedSpawn(
-  label: string,
-  result: SpawnSyncReturns<string>,
-  errors: string[],
-): void {
-  errors.push(`${label} failed (status ${result.status})`);
-  if (result.stderr) errors.push(result.stderr.trim());
 }
 
 export function compileArtifacts(opts: CompileArtifactsOptions = {}): CompileArtifactsResult {
@@ -133,85 +117,32 @@ export function compileArtifacts(opts: CompileArtifactsOptions = {}): CompileArt
     catch (error: unknown) { errors.push((error as Error).message); return { ok: false, errors, warnings, ...baseResult }; }
   }
 
-  const permissiveFlag = opts.failOnPermissive ? ['--fail-on-permissive'] : [];
-  const placeholderFlag = opts.allowPlaceholderToken ? ['--allow-placeholder-token'] : [];
-
+  const compilerOptions: CompilerOptions = { ...opts, rootDir: pkgRoot, outDir, env };
+  const run = (file: string, name: string, label: string): boolean => {
+    const diagnostics: string[] = [];
+    const logger = { log() {}, error: (...args: unknown[]) => diagnostics.push(args.join(' ')),
+      warn: (...args: unknown[]) => diagnostics.push(args.join(' ')) };
+    try {
+      require(path.join(pkgRoot, 'scripts', file))[name](lint.policy, { ...compilerOptions, logger });
+      warnings.push(...diagnostics);
+      return true;
+    } catch (error: unknown) {
+      errors.push(`${label} failed: ${(error as Error).message}`, ...diagnostics);
+      const details = (error as { validationErrors?: string[] }).validationErrors;
+      if (Array.isArray(details)) errors.push(...details);
+      return false;
+    }
+  };
   if (target === 'aws') {
-    const compilePath = path.join(pkgRoot, 'scripts', 'compile.js');
-    const compileResult = spawnSync(
-      process.execPath,
-      [
-        compilePath,
-        '--policy', policyPath,
-        '--out-dir', outDir,
-        ...permissiveFlag,
-        ...placeholderFlag,
-      ],
-      { cwd, encoding: 'utf8', env },
-    );
-    if (compileResult.status !== 0) {
-      collectFailedSpawn('edge compile', compileResult, errors);
-      return { ok: false, errors, warnings, ...baseResult };
-    }
-    collectStderrWarnings(compileResult, warnings);
+    if (!run('lib/compile-core', 'compileAws', 'edge compile')) return { ok: false, errors, warnings, ...baseResult };
     baseResult.edgeFiles = AWS_EDGE_FILES.map((f) => path.join(outDir, 'edge', f));
-
-    const infraPath = path.join(pkgRoot, 'scripts', 'compile-infra.js');
-    const infraResult = spawnSync(
-      process.execPath,
-      [
-        infraPath,
-        '--policy', policyPath,
-        '--out-dir', outDir,
-        '--output-mode', opts.outputMode || 'full',
-        ...(opts.ruleGroupOnly ? ['--rule-group-only'] : []),
-      ],
-      { cwd, encoding: 'utf8', env },
-    );
-    if (infraResult.status !== 0) {
-      collectFailedSpawn('infra compile', infraResult, errors);
-      return { ok: false, errors, warnings, ...baseResult };
-    }
-    collectStderrWarnings(infraResult, warnings);
-    baseResult.infraFiles = listInfraArtifacts(outDir, compileStartedAt);
+    if (!run('compile-infra', 'compileInfra', 'infra compile')) return { ok: false, errors, warnings, ...baseResult };
   } else {
-    const compileCfPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare.js');
-    const cfResult = spawnSync(
-      process.execPath,
-      [
-        compileCfPath,
-        '--policy', policyPath,
-        '--out-dir', outDir,
-        ...permissiveFlag,
-        ...placeholderFlag,
-      ],
-      { cwd, encoding: 'utf8', env },
-    );
-    if (cfResult.status !== 0) {
-      collectFailedSpawn('cloudflare edge compile', cfResult, errors);
-      return { ok: false, errors, warnings, ...baseResult };
-    }
-    collectStderrWarnings(cfResult, warnings);
+    if (!run('compile-cloudflare', 'compileCloudflare', 'cloudflare edge compile')) return { ok: false, errors, warnings, ...baseResult };
     baseResult.edgeFiles = CF_EDGE_FILES.map((f) => path.join(outDir, 'edge', f));
-
-    const cfWafPath = path.join(pkgRoot, 'scripts', 'compile-cloudflare-waf.js');
-    const cfWafResult = spawnSync(
-      process.execPath,
-      [
-        cfWafPath,
-        '--policy', policyPath,
-        '--out-dir', outDir,
-        ...(opts.failOnWafApproximation === false ? ['--allow-waf-approximation'] : []),
-      ],
-      { cwd, encoding: 'utf8', env },
-    );
-    if (cfWafResult.status !== 0) {
-      collectFailedSpawn('cloudflare waf compile', cfWafResult, errors);
-      return { ok: false, errors, warnings, ...baseResult };
-    }
-    collectStderrWarnings(cfWafResult, warnings);
-    baseResult.infraFiles = listInfraArtifacts(outDir, compileStartedAt);
+    if (!run('compile-cloudflare-waf', 'compileCloudflareWaf', 'cloudflare waf compile')) return { ok: false, errors, warnings, ...baseResult };
   }
+  baseResult.infraFiles = listInfraArtifacts(outDir, compileStartedAt);
 
   return { ok: true, errors, warnings, ...baseResult };
 }

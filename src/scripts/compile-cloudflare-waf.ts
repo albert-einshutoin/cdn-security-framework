@@ -18,26 +18,18 @@ assertSupportedNode(require.main === module);
  * Usage: node scripts/compile-cloudflare-waf.js [--policy path] [--out-dir dir]
  */
 
+import { runCompilerCli, type CompilerOptions } from './lib/compiler-entry';
 const fs = require('fs');
 const path = require('path');
 const { numberOr } = require('./lib/value-normalize');
-const {
-  parseArgs,
-  hasFlag,
-  loadPolicyWithWarnings,
-  reportPolicyWarnings,
-  reportPolicyLoadError,
-} = require('./lib/policy-io');
 
 const parity = require('./lib/cloudflare-waf-parity');
 const { buildCloudflareRateRules } = require('./lib/cloudflare-rate-limit');
 
-const repoRoot = path.join(__dirname, '..');
-const argv = process.argv.slice(2);
-const { policyPath, outDir } = parseArgs(argv, repoRoot);
-// Secure default: approximate/unsupported WAF mappings fail the build.
-// Opt out with --allow-waf-approximation for explorative local compiles.
-const failOnApproximation = !hasFlag(argv, '--allow-waf-approximation');
+export function compileCloudflareWaf(policy: any, options: CompilerOptions): void {
+const outDir = options.outDir;
+const console = options.logger || globalThis.console;
+const failOnApproximation = options.failOnWafApproximation !== false;
 
 // Parity warnings collected during emission — surfaced once at the end so
 // the order is stable (managed rules first, then scope-down notes).
@@ -50,24 +42,13 @@ function recordParity(entry: any) {
   sawApproximationOrUnsupported = true;
 }
 
-let policy;
-try {
-  const parsed = loadPolicyWithWarnings(policyPath);
-  reportPolicyWarnings(parsed.warnings || [], policyPath);
-  policy = parsed.policy;
-} catch (e: unknown) {
-  reportPolicyLoadError(policyPath, e);
-  process.exit(1);
-}
-
 const firewall = policy.firewall || {};
 const waf = firewall.waf || {};
 const geo = firewall.geo || {};
 const ip = firewall.ip || {};
 const projectName = (policy.project || 'cdn-security').replace(/[^a-z0-9-]/gi, '-').toLowerCase();
 let rateRules: any[];
-try { rateRules = buildCloudflareRateRules(waf); }
-catch (error: unknown) { console.error((error as Error).message); process.exit(1); }
+rateRules = buildCloudflareRateRules(waf);
 if (rateRules!.length) console.error('Cloudflare rate-limit profile: ' + waf.cloudflare_rate_limit_plan + '; local configuration only, account entitlement and remaining rule slots are unverified.');
 
 const distDir = path.join(outDir, 'infra');
@@ -326,5 +307,9 @@ for (const msg of parityWarnings) {
 
 if (failOnApproximation && sawApproximationOrUnsupported) {
   console.error('[cloudflare-waf-parity] approximate or unsupported Cloudflare WAF mappings detected (default fail-closed). Pass --allow-waf-approximation to warn-only.');
-  process.exit(1);
+  throw new Error('Cloudflare WAF parity rejected');
 }
+
+}
+
+if (require.main === module) runCompilerCli(compileCloudflareWaf);

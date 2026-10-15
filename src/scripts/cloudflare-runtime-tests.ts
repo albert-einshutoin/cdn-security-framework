@@ -199,8 +199,8 @@ test('cloudflare template contains auth enforcement logic', () => {
 
   assert.ok(template.includes('async function verifyJwt'));
   assert.ok(template.includes('async function verifySignedUrl'));
-  assert.ok(template.includes('if (gate.type === \'jwt\')'));
-  assert.ok(template.includes('if (gate.type === \'signed_url\')'));
+  assert.match(template, /gate.type === 'jwt'/);
+  assert.match(template, /gate.type === 'signed_url'/);
   assert.ok(template.includes('CFG.originAuth'));
   assert.ok(template.includes('forwardHeaders.set(headerName, secret)'));
   assert.ok(template.includes('async function handleChallenge'), 'challenge handler missing');
@@ -1130,7 +1130,7 @@ response_dlp:
 
   assert.doesNotMatch(generated, /await clone\.text\(\)/);
   assert.match(generated, /getReader\(\)/);
-  assert.match(generated, /reader\.cancel\(\)/);
+  assert.match(generated, /reader\.cancel\(reason\)/);
 });
 
 test('cloudflare response DLP preserves whitespace-padded match lists for compatibility', () => {

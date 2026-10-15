@@ -9,6 +9,8 @@
 
 // {{INJECT_RESPONSE_CFG}}
 
+// {{RUNTIME}}
+
 type WorkerEnv = Record<string, string | undefined>;
 
 type JwksCacheEntry = {
@@ -58,10 +60,10 @@ function readCorrelation(req: Request | null): string {
   return req.headers.get(CFG.obs.correlationHeader) || '';
 }
 
-function reqCtx(req: Request | null): ReqCtx {
+function reqCtx(req: Request | null, pathname?: string): ReqCtx {
   if (!req) return { method: '', uri: '/', correlationId: '' };
   let uri = '/';
-  try { uri = new URL(req.url).pathname; } catch (_e) { /* ignore */ }
+  try { uri = pathname === undefined ? new URL(req.url).pathname : pathname; } catch (_e) { /* ignore */ }
   return { method: req.method, uri, correlationId: readCorrelation(req) };
 }
 
@@ -195,8 +197,10 @@ function pathMatchesPrefix(uri: string, prefix: string): boolean {
 }
 
 const authMatchPrefixes = CFG.authGates.map((gate: any) => gate.protectedPrefixes.map(normalizeForMatch));
+const authGateIds = CFG.authGates.map((_gate: any, index: number) => index);
 const adminMatchPrefixes = RESPONSE_CFG.adminPathPrefixes.map(normalizeForMatch);
 const protectedMatchPrefixes = (RESPONSE_CFG.authProtectedPrefixes || []).map(normalizeForMatch);
+const clearSiteDataValue = (RESPONSE_CFG.clearSiteDataTypes || []).map((t: string) => '"' + t + '"').join(', ');
 const dlpGlobalRegexes: RegExp[] = (RESPONSE_CFG.responseDlpCustomRegexes || []).map((re: RegExp) =>
   new RegExp(re.source, re.flags.includes('g') ? re.flags : re.flags + 'g'));
 
@@ -346,9 +350,10 @@ type ForwardBody = { body: BodyInit | null };
 function cancelForwardBody(state: ForwardBody): void {
   const body = state.body;
   state.body = null;
-  if (body instanceof ReadableStream) {
-    void body.cancel().catch(() => console.error('[body-inspection] cancellation failed'));
-  }
+  if (body instanceof ReadableStream) discardBody(body);
+}
+function discardBody(body: ReadableStream | null): void {
+  if (body) void body.cancel().catch(() => console.error('[body-inspection] cancellation failed'));
 }
 type InspectedBody = { body: Uint8Array | ReadableStream<Uint8Array>; bytes?: Uint8Array };
 
@@ -733,7 +738,10 @@ async function fetchJwks(
         // attacker who briefly controls the JWKS host cannot redirect us to a
         // cloud-metadata endpoint or a different tenant's IdP.
         const res = await fetch(jwksUrl, { method: 'GET', redirect: 'manual', signal: controller.signal });
-        if (!res.ok) throw new Error('Failed to fetch JWKS: ' + res.status);
+        if (!res.ok) {
+          discardBody(res.body);
+          throw new Error('Failed to fetch JWKS: ' + res.status);
+        }
         const bodyText = await readLimitedResponseText(res, JWKS_MAX_BODY_BYTES);
         const keys = validateJwksKeys(JSON.parse(bodyText));
         jwksCache.set(jwksUrl, { fetchedAt: Date.now(), keys });
@@ -927,15 +935,16 @@ function canonicalOriginAuthInput(request: Request, url: URL, auth: any, timesta
   const values: Record<string, string> = {
     method: String(request.method || '').toUpperCase(),
     path: url.pathname || '/',
-    query: canonicalOriginAuthQuery(url.searchParams),
+    query: '',
     body: bodyHash || '',
     timestamp,
     nonce,
   };
-  return originAuthSignedComponents(auth).map((component) => values[component] || '').join('\n');
+  return originAuthSignedComponents(auth).map((component) => component === 'query'
+    ? canonicalOriginAuthQuery(url.searchParams) : values[component] || '').join('\n');
 }
 
-async function sha256HexBytes(input: ArrayBuffer): Promise<string> {
+async function sha256HexBytes(input: BufferSource): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', input);
   const bytes = new Uint8Array(digest);
   let hex = '';
@@ -1300,6 +1309,7 @@ async function applyResponseDlp(out: Response, ctx: ReqCtx): Promise<Response> {
       responseDlpLog(action, scan.detectors, ctx, 'header:' + name, blockStatus);
       out.headers.set('X-Edge-DLP', action);
       if (action === 'block') {
+        discardBody(out.body);
         return new Response(dlp.blockBody || 'Response blocked by edge DLP', {
           status: blockStatus,
           headers: { 'Cache-Control': 'no-store', 'X-Edge-DLP': 'block' },
@@ -1340,12 +1350,12 @@ export default {
   async fetch(request: Request, env: WorkerEnv): Promise<Response> {
     const url = new URL(request.url);
     const rawPathname = rawPathnameFromRequestUrl(request.url);
-    const ctx = reqCtx(request);
+    const ctx = reqCtx(request, url.pathname);
     // This key intentionally precedes correlation-ID minting so random IDs do
     // not make repeated requests enter different sample buckets.
-    const allowSamplingKey = allowSampleKey(ctx);
+    const allowSamplingKey = /* {{FEATURE_ALLOW_SAMPLING_KEY}} */ true ? allowSampleKey(ctx) : '';
 
-    const preflight = handleCorsPreflight(request);
+    const preflight = /* {{FEATURE_CORS_REQUEST}} */ true ? handleCorsPreflight(request) : null;
     if (preflight) return preflight;
 
     // Host allowlist — reject requests whose Host does not match before running
@@ -1387,9 +1397,11 @@ export default {
 
     // Header count cap (issue #9). Applied before path normalization because
     // origins that parse header maps don't care about URI shape.
+    let headerCount = 0, headerSize = 0;
+    if (CFG.maxHeaderCount > 0 || CFG.maxHeaderSize > 0) {
+      request.headers.forEach((value, key) => { headerCount++; headerSize += key.length + value.length; });
+    }
     if (CFG.maxHeaderCount && CFG.maxHeaderCount > 0) {
-      let headerCount = 0;
-      request.headers.forEach(() => { headerCount++; });
       if (headerCount > CFG.maxHeaderCount) {
         const r = shouldBlock(431, 'Request Header Fields Too Large', ctx);
         if (r) return r;
@@ -1397,11 +1409,7 @@ export default {
     }
 
     if (CFG.maxHeaderSize > 0) {
-      let totalSize = 0;
-      request.headers.forEach((value, key) => {
-        totalSize += key.length + value.length;
-      });
-      if (totalSize > CFG.maxHeaderSize) {
+      if (headerSize > CFG.maxHeaderSize) {
         const r = shouldBlock(431, 'Request Header Fields Too Large', ctx);
         if (r) return r;
       }
@@ -1412,8 +1420,9 @@ export default {
       const r = shouldBlock(414, 'URI Too Long', ctx);
       if (r) return r;
     }
-    const parts = qs ? qs.split('&') : [];
-    if (parts.length > CFG.maxQueryParams) {
+    let queryCount = qs ? 1 : 0;
+    for (let i = qs.indexOf('&'); i !== -1; i = qs.indexOf('&', i + 1)) queryCount++;
+    if (queryCount > CFG.maxQueryParams) {
       const r = shouldBlock(400, 'Too many query params', ctx);
       if (r) return r;
     }
@@ -1456,7 +1465,7 @@ export default {
       if (r) return r;
     }
     const uaLower = ua.toLowerCase();
-    const challenge = await handleChallenge(request, url, env, ua, uaLower, ctx);
+    const challenge = /* {{FEATURE_CHALLENGE}} */ true ? await handleChallenge(request, url, env, ua, uaLower, ctx) : null;
     if (challenge) return challenge;
 
     for (const s of CFG.uaDenyContains) {
@@ -1466,18 +1475,24 @@ export default {
       }
     }
 
-    for (const k of CFG.dropQueryKeys) url.searchParams.delete(k);
+    // Preserve delete()'s serialization behavior when configured keys are absent.
+    if (CFG.dropQueryKeys.size > 0) {
+      const params = url.searchParams;
+      for (const key of CFG.dropQueryKeys) if (params.has(key)) params.delete(key);
+      url.search = params.toString();
+    }
 
     const bodyState: ForwardBody = { body: request.body };
     try {
-      const graphqlGuardResponse = await enforceGraphqlGuard(request, bodyState, url.pathname, ctx);
+      const graphqlGuardResponse = /* {{FEATURE_GRAPHQL}} */ true ? await enforceGraphqlGuard(request, bodyState, url.pathname, ctx) : null;
       if (graphqlGuardResponse) return graphqlGuardResponse;
 
       // Nonce to forward to origin after a successful signed_url verification.
       // Collected here and attached when we build the origin-facing Request.
       let signedUrlNonce: string | null = null;
       const matchPath = normalizeForMatch(url.pathname);
-      for (let gateIndex = 0; gateIndex < CFG.authGates.length; gateIndex++) {
+      const gateIds = CFG.authGateIndex ? pathCandidates(matchPath, CFG.authGateIndex) : authGateIds;
+      for (const gateIndex of gateIds) {
         const gate = CFG.authGates[gateIndex];
         const prefixes = authMatchPrefixes[gateIndex];
         // signed_url gates may opt into exact_path matching to prevent a signature
@@ -1488,7 +1503,7 @@ export default {
           : prefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
         if (!isProtected) continue;
 
-        if (gate.type === 'static_token') {
+        if (/* {{FEATURE_STATIC_TOKEN}} */ true && gate.type === 'static_token') {
           const tok = request.headers.get(gate.tokenHeaderName) || '';
           const expectedToken = env[gate.tokenEnv] || '';
           if (!expectedToken) {
@@ -1498,7 +1513,7 @@ export default {
           if (!timingSafeEqual(tok, expectedToken)) {
             return shouldBlockAuth(401, 'Unauthorized', ctx);
           }
-        } else if (gate.type === 'basic_auth') {
+        } else if (/* {{FEATURE_BASIC_AUTH}} */ true && gate.type === 'basic_auth') {
           const authHeader = request.headers.get('authorization') || '';
           const expectedCreds = env[gate.credentialsEnv] || '';
           if (!expectedCreds) {
@@ -1533,7 +1548,7 @@ export default {
               });
             }
           }
-        } else if (gate.type === 'jwt') {
+        } else if (/* {{FEATURE_JWT}} */ true && gate.type === 'jwt') {
           const authHeader = request.headers.get('authorization') || '';
           if (!authHeader.startsWith('Bearer ')) {
             return shouldBlockAuth(401, 'Missing or invalid Authorization header', ctx);
@@ -1555,7 +1570,7 @@ export default {
               correlation_id: ctx.correlationId,
             });
           }
-        } else if (gate.type === 'signed_url') {
+        } else if (/* {{FEATURE_SIGNED_URL}} */ true && gate.type === 'signed_url') {
           const verified = await verifySignedUrl(gate, url, env);
           if (!verified.valid) {
             return shouldBlockAuth(403, verified.error || 'Invalid signature', ctx);
@@ -1585,7 +1600,7 @@ export default {
       // origin can apply the same nonce to the HTML it returns.
       forwardHeaders.delete('x-csp-nonce');
       let cspNonce = '';
-      if (RESPONSE_CFG.csp_nonce) {
+      if (/* {{FEATURE_CSP_NONCE}} */ true && RESPONSE_CFG.csp_nonce) {
         const nonceBytes = new Uint8Array(16);
         crypto.getRandomValues(nonceBytes);
         cspNonce = btoa(String.fromCharCode(...nonceBytes)).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
@@ -1605,11 +1620,11 @@ export default {
       for (const h of ['transfer-encoding', 'connection', 'keep-alive', 'te', 'upgrade', 'proxy-connection', 'proxy-authenticate', 'proxy-authorization', 'trailer']) {
         forwardHeaders.delete(h);
       }
-      if (CFG.originAuth && (CFG.originAuth.type === 'custom_header' || CFG.originAuth.type === 'hmac_signature')) {
+      if (/* {{FEATURE_ORIGIN_AUTH}} */ true && CFG.originAuth && (CFG.originAuth.type === 'custom_header' || CFG.originAuth.type === 'hmac_signature')) {
         const envName = CFG.originAuth.secret_env || '';
         const secret = envName ? (env[envName] || '') : '';
         if (secret) {
-          if (CFG.originAuth.type === 'hmac_signature') {
+          if (/* {{FEATURE_ORIGIN_HMAC}} */ true && CFG.originAuth.type === 'hmac_signature') {
             const prefix = CFG.originAuth.header_prefix || 'X-CDN-Auth';
             const timestamp = String(Math.floor(Date.now() / 1000));
             const nonce = randomOriginAuthNonce();
@@ -1618,7 +1633,9 @@ export default {
               const hadBody = bodyState.body !== null;
               // The same bytes are signed and forwarded. Temporary Request clones
               // can let Node's GC finalizer cancel the original tee branch.
-              const bytes = await new Response(bodyState.body).arrayBuffer();
+              const buffered = bodyState.body;
+              const bytes = buffered instanceof ArrayBuffer || ArrayBuffer.isView(buffered)
+                ? buffered : await new Response(buffered).arrayBuffer();
               bodyState.body = hadBody ? bytes : null;
               bodyHash = await sha256HexBytes(bytes);
             }
@@ -1668,7 +1685,7 @@ export default {
         }
       }
 
-      logAllow({ ...ctx, correlationId: forwardedCorrelationId }, allowSamplingKey);
+      if (/* {{FEATURE_ALLOW_SAMPLING}} */ true) logAllow({ ...ctx, correlationId: forwardedCorrelationId }, allowSamplingKey);
 
       const res = await fetch(new Request(url.toString(), {
         method: request.method,
@@ -1692,8 +1709,10 @@ export default {
       if (RESPONSE_CFG.corp) out.headers.set('Cross-Origin-Resource-Policy', RESPONSE_CFG.corp);
       if (RESPONSE_CFG.reporting_endpoints) out.headers.set('Reporting-Endpoints', RESPONSE_CFG.reporting_endpoints);
 
-      const isAdminPath = adminMatchPrefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
-      const isAuthPath = protectedMatchPrefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
+      const isAdminPath = RESPONSE_CFG.adminPathIndex ? pathCandidates(matchPath, RESPONSE_CFG.adminPathIndex).length > 0
+        : adminMatchPrefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
+      const isAuthPath = RESPONSE_CFG.authPathIndex ? pathCandidates(matchPath, RESPONSE_CFG.authPathIndex).length > 0
+        : protectedMatchPrefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
 
       // Per-response CSP nonce (issue #11). crypto.getRandomValues is a CS-PRNG on Workers.
       if (cspNonce) out.headers.set('X-CSP-Nonce', cspNonce);
@@ -1729,8 +1748,7 @@ export default {
         url.pathname === p || url.pathname.startsWith(p + '/'),
       );
       if (hitsClearPath && isSuccess) {
-        const types = (RESPONSE_CFG.clearSiteDataTypes || []).map((t: string) => '"' + t + '"');
-        if (types.length > 0) out.headers.set('Clear-Site-Data', types.join(', '));
+        if (clearSiteDataValue) out.headers.set('Clear-Site-Data', clearSiteDataValue);
         out.headers.set('Cache-Control', 'no-store');
       }
 
@@ -1754,7 +1772,6 @@ export default {
             : (out.headers.get('set-cookie') ? [out.headers.get('set-cookie') as string] : []);
           if (cookies.length > 0) {
             out.headers.delete('set-cookie');
-            const attrStr = attrs.join('; ');
             for (const cookie of cookies) {
               const needsSecure = RESPONSE_CFG.cookie_attributes.secure && !/(?:^|; *)Secure(?:;|$)/i.test(cookie);
               const needsHttpOnly = RESPONSE_CFG.cookie_attributes.http_only && !/(?:^|; *)HttpOnly(?:;|$)/i.test(cookie);
@@ -1773,7 +1790,7 @@ export default {
         }
       }
 
-      if (RESPONSE_CFG.cors) {
+      if (/* {{FEATURE_CORS_RESPONSE}} */ true && RESPONSE_CFG.cors) {
         const origin = request.headers.get('origin') || '';
         const allowedOrigins = RESPONSE_CFG.cors.allow_origins || [];
         const isAllowed = allowedOrigins.includes('*') || allowedOrigins.includes(origin);
@@ -1786,7 +1803,7 @@ export default {
         }
       }
 
-      return await applyResponseDlp(out, ctx);
+      return /* {{FEATURE_DLP}} */ true ? await applyResponseDlp(out, ctx) : out;
     } finally {
       // Auth/config rejection and exceptions must release the inspected upload.
       // A successful fetch above transfers ownership and clears this state.

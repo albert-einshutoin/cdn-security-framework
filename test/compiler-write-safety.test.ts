@@ -133,11 +133,16 @@ for (const target of ['viewer-request.js', 'origin-request.js']) test(`CLI/API a
   expect(cli.status).not.toBe(0); expect(cli.stdout.includes('SUCCESS')).toBe(false); expect(safe(cli.stdout + cli.stderr)).toBe(true);
   expect(cli.stderr.includes('cleanup=removed')).toBe(true); expect(temps(f.edge)).toEqual([]);
 });
-test('programmatic child reports cleanup failure safely and never calls it residue-free', () => {
+test('programmatic API reports cleanup failure safely and never calls it residue-free', () => {
   const f = setup(); fs.mkdirSync(path.join(f.edge, 'viewer-request.js'));
-  const hook = path.join(f.dir, 'cleanup-fault.cjs');
-  fs.writeFileSync(hook, `const fs=require('node:fs');const path=require('node:path');const unlink=fs.unlinkSync;fs.unlinkSync=function(p){if(path.basename(p).startsWith('.viewer-request.')&&String(p).endsWith('.tmp'))throw Object.assign(new Error(${JSON.stringify(env.EDGE_ADMIN_TOKEN)}),{code:'EPERM'});return unlink(p);};`);
-  const result = compile({ policyPath: f.policyPath, outDir: f.outDir, target: 'aws', env: { ...process.env, ...env, NODE_OPTIONS: '--require=' + hook } });
+  const unlink = fs.unlinkSync;
+  vi.spyOn(fs, 'unlinkSync').mockImplementation((p: fs.PathLike) => {
+    if (path.basename(String(p)).startsWith('.viewer-request.') && String(p).endsWith('.tmp')) {
+      throw Object.assign(new Error(env.EDGE_ADMIN_TOKEN), { code: 'EPERM' });
+    }
+    return unlink(p);
+  });
+  const result = compile({ policyPath: f.policyPath, outDir: f.outDir, target: 'aws', env: { ...process.env, ...env } });
   expect(result.ok).toBe(false); expect(result.edgeFiles).toEqual([]); expect(safe(JSON.stringify(result))).toBe(true);
   expect(result.errors.join().includes('cleanup=failed')).toBe(true); expect(temps(f.edge).length).toBe(1);
   expect(fs.statSync(path.join(f.edge, temps(f.edge)[0])).mode & 0o777).toBe(0o600);

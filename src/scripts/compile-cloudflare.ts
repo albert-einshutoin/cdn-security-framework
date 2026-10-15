@@ -7,13 +7,13 @@ assertSupportedNode(require.main === module);
  * Usage: node scripts/compile-cloudflare.js [path/to/security.yml] [--policy path] [--out-dir dir]
  */
 
+import { runCompilerCli, type CompilerOptions } from './lib/compiler-entry';
+import { buildPathIndex, PATH_INDEX_HELPER } from './lib/path-index';
 const fs = require('fs');
 const path = require('path');
 const {
   regexesLiteralCode,
   validateAuthGates,
-  hasAllowPlaceholderFlag,
-  hasFailOnPermissiveFlag,
   hasCatastrophicBacktrackShape,
   compileRegexOrThrow,
   warnIfPermissive,
@@ -34,6 +34,7 @@ const {
   injectTemplateCode,
   renderConstObject,
   runtimeCode,
+  specializeWorker,
 } = require('./lib/template-inject');
 const {
   clampNumber,
@@ -41,46 +42,29 @@ const {
   numberOr,
 } = require('./lib/value-normalize');
 const {
-  parseArgs,
-  loadPolicyWithWarnings,
-  reportPolicyWarnings,
-  reportPolicyLoadError,
-} = require('./lib/policy-io');
-const {
   isErrnoException,
 } = require('./lib/errors') as typeof import('./lib/errors');
 
-const repoRoot = path.join(__dirname, '..');
-const argv = process.argv.slice(2);
-const { policyPath, outDir } = parseArgs(argv, repoRoot);
-const allowPlaceholderToken = hasAllowPlaceholderFlag(argv);
-const failOnPermissive = hasFailOnPermissiveFlag(argv);
+export function compileCloudflare(policy: any, options: CompilerOptions): string {
+const repoRoot = options.rootDir || path.join(__dirname, '..');
+const outDir = options.outDir;
+const console = options.logger || globalThis.console;
+const failOnPermissive = options.failOnPermissive;
 
-let policy;
-try {
-  const parsed = loadPolicyWithWarnings(policyPath);
-  reportPolicyWarnings(parsed.warnings || [], policyPath);
-  policy = parsed.policy;
-} catch (e: unknown) {
-  reportPolicyLoadError(policyPath, e);
-  process.exit(1);
-}
+require('./lib/cloudflare-rate-limit').buildCloudflareRateRules(policy.firewall?.waf || {});
 
-try { require('./lib/cloudflare-rate-limit').buildCloudflareRateRules(policy.firewall?.waf || {}); }
-catch (error: unknown) { console.error((error as Error).message); process.exit(1); }
-
-const permissive = warnIfPermissive(policy, { failOnPermissive });
+const permissive = warnIfPermissive(policy, { failOnPermissive, logger: console });
 if (permissive.failed) {
-  process.exit(1);
+  throw new Error('Cloudflare compilation rejected');
 }
 
 // Non-fatal advisory: signed_url protecting write-like paths without nonce_param.
-warnSignedUrlReplay(policy);
+warnSignedUrlReplay(policy, { logger: console });
 
 // Cloudflare Workers reads env at runtime for static_token/basic_auth, so build
 // does not require the actual token value. Only structural gate fields matter.
 // We still validate jwt/signed_url required fields via the shared helper.
-validateAuthGates(policy, { allowPlaceholderToken: true, requireJwksAllowedHosts: true });
+validateAuthGates(policy, { allowPlaceholderToken: true, requireJwksAllowedHosts: true, exitOnError: false });
 
 const routes = policy.routes || [];
 
@@ -204,6 +188,7 @@ const cfgCode = renderConstObject('CFG', {
   trustForwardedFor: requestBase.trustForwardedFor,
   cors: requestBase.cors,
   authGates,
+  authGateIndex: buildPathIndex(authGates.map((gate: any) => gate.protectedPrefixes.map((prefix: string) => prefix || '/')), requestBase.normalizePath.caseInsensitive !== false),
   originAuth,
   jwksStaleIfErrorSec: jwksCache.staleIfErrorSec,
   jwksNegativeCacheSec: jwksCache.negativeCacheSec,
@@ -227,8 +212,10 @@ const responseCfgCode = renderConstObject('RESPONSE_CFG', {
   corp: responseBase.corp,
   reporting_endpoints: responseBase.reporting_endpoints,
   adminPathPrefixes: responseBase.adminPathPrefixes,
+  adminPathIndex: buildPathIndex([responseBase.adminPathPrefixes.map((prefix: string) => prefix || '/')], responseBase.caseInsensitive !== false),
   adminCacheControl: responseBase.adminCacheControl,
   authProtectedPrefixes: responseBase.authProtectedPrefixes,
+  authPathIndex: buildPathIndex([responseBase.authProtectedPrefixes.map((prefix: string) => prefix || '/')], responseBase.caseInsensitive !== false),
   forceVaryAuth: responseBase.forceVaryAuth,
   caseInsensitive: responseBase.caseInsensitive,
   clearSiteDataPaths: responseBase.clearSiteDataPaths,
@@ -246,14 +233,25 @@ try {
 } catch (e: unknown) {
   if (isErrnoException(e) && e.code === 'ENOENT') {
     console.error('Error: template not found:', templatePath);
-    process.exit(1);
+    throw new Error('Cloudflare compilation rejected');
   }
   throw e;
 }
 
-code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode);
+code = injectTemplateCode(code, '// {{INJECT_CONFIG}}', cfgCode + '\n' + PATH_INDEX_HELPER);
 code = injectTemplateCode(code, '// {{INJECT_RESPONSE_CFG}}', responseCfgCode);
 assertInjectedConstDeclarations(code, ['CFG', 'RESPONSE_CFG'], { loader: 'ts' });
+code = specializeWorker(code, {
+  CHALLENGE: Boolean(challengeConfig), GRAPHQL: Boolean(buildGraphqlGuardConfig(policy)), DLP: responseDlp.config.enabled,
+  STATIC_TOKEN: authGates.some((gate: any) => gate.type === 'static_token'),
+  BASIC_AUTH: authGates.some((gate: any) => gate.type === 'basic_auth'),
+  JWT: authGates.some((gate: any) => gate.type === 'jwt'),
+  SIGNED_URL: authGates.some((gate: any) => gate.type === 'signed_url'),
+  CSP_NONCE: Boolean(responseBase.csp_nonce), CORS_REQUEST: Boolean(requestBase.cors), CORS_RESPONSE: Boolean(responseBase.cors),
+  ALLOW_SAMPLING: requestBase.obs.sampleRate > 0, ALLOW_SAMPLING_KEY: requestBase.obs.sampleRate > 0,
+  ORIGIN_AUTH: Boolean(originAuth && ['custom_header', 'hmac_signature'].includes(originAuth.type)),
+  ORIGIN_HMAC: originAuth?.type === 'hmac_signature',
+});
 
 const distDir = path.join(outDir, 'edge', 'cloudflare');
 fs.mkdirSync(distDir, { recursive: true });
@@ -261,3 +259,8 @@ const outPath = path.join(distDir, 'index.ts');
 fs.writeFileSync(outPath, code, 'utf8');
 
 console.log('Build complete:', outPath);
+
+return outPath;
+}
+
+if (require.main === module) runCompilerCli(compileCloudflare);
