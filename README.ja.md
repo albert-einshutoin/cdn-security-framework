@@ -107,6 +107,16 @@ candidate と provider capability finding は適用前にレビューしてく�
 
 ---
 
+## 生成Edgeの性能：Cloudflareでの予備計測
+
+**2026-10-16のCloudflare Workers Freeでの予備計測**では、通常転送、正規表現256件・約8KiBパス、GraphQL 64KiB、HMAC本文署名1MiB、RS256/JWKS認証の5ケースで、CPU p95のログ集計表示が **1〜5ms** でした。クライアント要求を8,809件開始し、完了した測定区間6,500件の応答時間を保存しました。
+
+CPUの値は起動・ウォームアップ等を含むpilot全体の集計で、有効CPUサンプル数と元データの分解能は未確認です。クライアント応答時間のサンプルとは母集団が異なります。no-opの1MiB本文処理で**検証用gateway**がFreeのCPU上限に達して停止し、予定した3周は未完了です。資格判定は **INCONCLUSIVE**、本番SLO・回帰判定閾値は未確定です。
+
+詳細は[結果・測定条件・正式ベンチマークに必要な条件](docs/benchmarks/cloudflare-edge-pilot.ja.md)と[集計データ](docs/benchmarks/cloudflare-edge-pilot.json)を参照してください。特定バージョンでの観測であり、全ポリシー・全要求・全Edge環境の速度保証は行いません。
+
+---
+
 ## リポジトリ構成
 
 ```
