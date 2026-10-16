@@ -9,6 +9,7 @@ assertSupportedNode(require.main === module);
 
 import { runCompilerCli, type CompilerOptions } from './lib/compiler-entry';
 import { buildPathIndex, PATH_INDEX_HELPER, PATH_MATCH_HELPER } from './lib/path-index';
+import { groupPathRegexes } from './lib/path-regex';
 const fs = require('fs');
 const path = require('path');
 const {
@@ -44,6 +45,10 @@ const {
 const {
   isErrnoException,
 } = require('./lib/errors') as typeof import('./lib/errors');
+
+function maxIndexKeyLength(index: Record<string, number[]> | null): number {
+  return index ? Object.keys(index).reduce((longest, key) => Math.max(longest, key.length), 0) : 0;
+}
 
 export function compileCloudflare(policy: any, options: CompilerOptions): string {
 const repoRoot = options.rootDir || path.join(__dirname, '..');
@@ -171,6 +176,7 @@ const responseDlp = normalizeResponseDlp(policy);
 const responseBase = buildResponseCfgBase(policy, authGates);
 const adminPathIndex = buildPathIndex([responseBase.adminPathPrefixes.map((prefix: string) => prefix || '/')], responseBase.caseInsensitive !== false);
 const authPathIndex = buildPathIndex([responseBase.authProtectedPrefixes.map((prefix: string) => prefix || '/')], responseBase.caseInsensitive !== false);
+const authGateIndex = buildPathIndex(authGates.map((gate: any) => gate.protectedPrefixes.map((prefix: string) => prefix || '/')), requestBase.normalizePath.caseInsensitive !== false);
 
 const cfgCode = renderConstObject('CFG', {
   mode: requestBase.mode,
@@ -183,14 +189,16 @@ const cfgCode = renderConstObject('CFG', {
   dropQueryKeys: runtimeCode(`new Set(${JSON.stringify(requestBase.dropQueryKeysArray)})`),
   uaDenyContains: requestBase.uaDenyContains,
   blockPathContains: requestBase.blockPathContains,
-  blockPathRegexes: runtimeCode(regexesLiteralCode(requestBase.blockPathRegexSources)),
+  blockPathRegexGroups: runtimeCode('[' + groupPathRegexes(requestBase.blockPathRegexSources)
+    .map(group => `{required:${JSON.stringify(group.required)},regexes:${regexesLiteralCode(group.sources)}}`).join(',') + ']'),
   normalizePath: requestBase.normalizePath,
   requiredHeaders: requestBase.requiredHeaders,
   allowedHosts: requestBase.allowedHosts,
   trustForwardedFor: requestBase.trustForwardedFor,
   cors: requestBase.cors,
   authGates,
-  authGateIndex: buildPathIndex(authGates.map((gate: any) => gate.protectedPrefixes.map((prefix: string) => prefix || '/')), requestBase.normalizePath.caseInsensitive !== false),
+  authGateIndex,
+  authGateIndexMaxLength: maxIndexKeyLength(authGateIndex),
   originAuth,
   jwksStaleIfErrorSec: jwksCache.staleIfErrorSec,
   jwksNegativeCacheSec: jwksCache.negativeCacheSec,
@@ -215,9 +223,11 @@ const responseCfgCode = renderConstObject('RESPONSE_CFG', {
   reporting_endpoints: responseBase.reporting_endpoints,
   adminPathPrefixes: responseBase.adminPathPrefixes,
   adminPathIndex,
+  adminPathIndexMaxLength: maxIndexKeyLength(adminPathIndex),
   adminCacheControl: responseBase.adminCacheControl,
   authProtectedPrefixes: responseBase.authProtectedPrefixes,
   authPathIndex,
+  authPathIndexMaxLength: maxIndexKeyLength(authPathIndex),
   forceVaryAuth: responseBase.forceVaryAuth,
   caseInsensitive: responseBase.caseInsensitive,
   clearSiteDataPaths: responseBase.clearSiteDataPaths,

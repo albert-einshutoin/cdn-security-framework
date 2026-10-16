@@ -238,10 +238,13 @@ function blockIfPathPattern(pathname: string, ctx: ReqCtx): Response | null {
       if (r) return r;
     }
   }
-  for (const re of CFG.blockPathRegexes) {
-    if (re.test(pathname)) {
-      const r = shouldBlock(400, 'Bad Request', ctx);
-      if (r) return r;
+  for (const group of CFG.blockPathRegexGroups) {
+    if (group.required && !pathname.includes(group.required)) continue;
+    for (const re of group.regexes) {
+      if (re.test(pathname)) {
+        const r = shouldBlock(400, 'Bad Request', ctx);
+        if (r) return r;
+      }
     }
   }
   return null;
@@ -438,8 +441,22 @@ function isGraphqlNameChar(ch: string): boolean {
   return code === 95 || (code >= 65 && code <= 90) || (code >= 97 && code <= 122) || (code >= 48 && code <= 57);
 }
 
+function skipGraphqlWhitespace(query: string, start: number): number {
+  if (query.startsWith('                ', start)) {
+    // Native scanning helps long padding; short separators avoid a slice/search per field.
+    const next = query.slice(start).search(/\S/);
+    return next < 0 ? query.length : start + next;
+  }
+  while (start < query.length) {
+    const ws = query.charCodeAt(start);
+    if (ws !== 32 && (ws < 9 || ws > 13) && (ws < 128 || !/\s/.test(query[start]))) break;
+    start++;
+  }
+  return start;
+}
+
+const graphqlKeywords = new Set(['query', 'mutation', 'subscription', 'fragment', 'on', 'true', 'false', 'null']);
 function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
-  const keywords = new Set(['query', 'mutation', 'subscription', 'fragment', 'on', 'true', 'false', 'null']);
   let depth = 0;
   let maxDepth = 0;
   let aliases = 0;
@@ -450,6 +467,8 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
 
   while (i < query.length) {
     const ch = query[i];
+
+    if (ch === ' ') { i = skipGraphqlWhitespace(query, i); continue; }
 
     if (ch === '#') {
       while (i < query.length && query[i] !== '\n' && query[i] !== '\r') i++;
@@ -508,10 +527,9 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
       i++;
       while (i < query.length && isGraphqlNameChar(query[i])) i++;
       const name = query.slice(start, i);
-      let j = i;
-      while (j < query.length && /\s/.test(query[j])) j++;
+      const j = skipGraphqlWhitespace(query, i);
 
-      if (selectionDepth > 0 && !keywords.has(name) && prevToken !== '$' && prevToken !== '@') {
+      if (selectionDepth > 0 && !graphqlKeywords.has(name) && prevToken !== '$' && prevToken !== '@') {
         if (query[j] === ':') {
           aliases++;
           if (aliases > guard.maxAliases) {
@@ -525,6 +543,7 @@ function scanGraphqlQuery(query: string, guard: any): GraphqlScanResult {
         }
       }
       prevToken = name;
+      i = j;
       continue;
     }
 
@@ -1455,7 +1474,9 @@ export default {
       url.pathname = canonical;
     }
 
-    const normalizedPathBlock = blockIfPathPattern(url.pathname, ctx);
+    // Identical input already passed; monitor must retain both sets of diagnostics.
+    const normalizedPathBlock = CFG.mode !== 'monitor' && url.pathname === rawPathname
+      ? null : blockIfPathPattern(url.pathname, ctx);
     if (normalizedPathBlock) return normalizedPathBlock;
 
     for (const h of CFG.requiredHeaders) {
@@ -1498,7 +1519,9 @@ export default {
       // Collected here and attached when we build the origin-facing Request.
       let signedUrlNonce: string | null = null;
       const matchPath = normalizeForMatch(url.pathname);
-      const gateIds = CFG.authGateIndex ? pathCandidates(matchPath, CFG.authGateIndex) : authGateIds;
+      // One character beyond the longest key preserves the '/' boundary. Keep
+      // the full matchPath for exact signed URLs and the forwarded URL below.
+      const gateIds = CFG.authGateIndex ? pathCandidates(matchPath.slice(0, CFG.authGateIndexMaxLength + 1), CFG.authGateIndex) : authGateIds;
       for (const gateIndex of gateIds) {
         const gate = CFG.authGates[gateIndex];
         const prefixes = authMatchPrefixes[gateIndex];
@@ -1718,9 +1741,9 @@ export default {
       if (RESPONSE_CFG.corp) out.headers.set('Cross-Origin-Resource-Policy', RESPONSE_CFG.corp);
       if (RESPONSE_CFG.reporting_endpoints) out.headers.set('Reporting-Endpoints', RESPONSE_CFG.reporting_endpoints);
 
-      const isAdminPath = RESPONSE_CFG.adminPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.adminPathIndex)
+      const isAdminPath = RESPONSE_CFG.adminPathIndex ? pathHasMatch(matchPath.slice(0, RESPONSE_CFG.adminPathIndexMaxLength + 1), RESPONSE_CFG.adminPathIndex)
         : adminMatchPrefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
-      const isAuthPath = RESPONSE_CFG.authPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.authPathIndex)
+      const isAuthPath = RESPONSE_CFG.authPathIndex ? pathHasMatch(matchPath.slice(0, RESPONSE_CFG.authPathIndexMaxLength + 1), RESPONSE_CFG.authPathIndex)
         : protectedMatchPrefixes.some((p: string) => pathMatchesPrefix(matchPath, p));
 
       // Per-response CSP nonce (issue #11). crypto.getRandomValues is a CS-PRNG on Workers.

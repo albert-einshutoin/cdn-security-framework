@@ -16,7 +16,7 @@ const CFG = {
   dropQueryKeys: new Set(["utm_source","utm_medium","utm_campaign","utm_term","utm_content","gclid","fbclid"]),
   uaDenyContains: ["sqlmap","nikto","acunetix","masscan"],
   blockPathContains: ["/../","%2e%2e"],
-  blockPathRegexes: [],
+  blockPathRegexGroups: [],
   normalizePath: {"collapseSlashes":true,"removeDotSegments":true,"caseInsensitive":true,"rejectAmbiguousEncoding":true},
   requiredHeaders: ["user-agent"],
   allowedHosts: [],
@@ -24,6 +24,7 @@ const CFG = {
   cors: {"allow_origins":["https://app.example.com"],"allow_methods":["GET","POST","PUT","PATCH","DELETE","OPTIONS"],"allow_headers":["authorization","content-type","x-request-id"],"allow_credentials":true,"max_age":600},
   authGates: [{"name":"api","protectedPrefixes":["/api"],"type":"jwt","algorithm":"RS256","allowed_algorithms":["RS256"],"clock_skew_sec":30,"jwks_url":"https://auth.example.com/.well-known/jwks.json","issuer":"https://auth.example.com/","audience":"api.example.com","secret_env":"","cache_ttl_sec":3600}],
   authGateIndex: null,
+  authGateIndexMaxLength: 0,
   originAuth: null,
   jwksStaleIfErrorSec: 120,
   jwksNegativeCacheSec: 30,
@@ -61,9 +62,11 @@ const RESPONSE_CFG = {
   reporting_endpoints: "",
   adminPathPrefixes: ["/api"],
   adminPathIndex: null,
+  adminPathIndexMaxLength: 0,
   adminCacheControl: "no-store",
   authProtectedPrefixes: ["/api"],
   authPathIndex: null,
+  authPathIndexMaxLength: 0,
   forceVaryAuth: true,
   caseInsensitive: true,
   clearSiteDataPaths: [],
@@ -186,10 +189,13 @@ function blockIfPathPattern(pathname, ctx) {
       const r = shouldBlock(400, "Bad Request", ctx);
       if (r) return r;
     }
-  for (const re of CFG.blockPathRegexes)
-    if (re.test(pathname)) {
-      const r = shouldBlock(400, "Bad Request", ctx);
-      if (r) return r;
+  for (const group of CFG.blockPathRegexGroups)
+    if (!(group.required && !pathname.includes(group.required))) {
+      for (const re of group.regexes)
+        if (re.test(pathname)) {
+          const r = shouldBlock(400, "Bad Request", ctx);
+          if (r) return r;
+        }
     }
   return null;
 }
@@ -539,7 +545,7 @@ var stdin_default = {
       if (r) return r;
     } else
       url.pathname = canonical;
-    const normalizedPathBlock = blockIfPathPattern(url.pathname, ctx);
+    const normalizedPathBlock = CFG.mode !== "monitor" && url.pathname === rawPathname ? null : blockIfPathPattern(url.pathname, ctx);
     if (normalizedPathBlock) return normalizedPathBlock;
     for (const h of CFG.requiredHeaders)
       if (!request.headers.get(h)) {
@@ -566,7 +572,7 @@ var stdin_default = {
     const bodyState = { body: request.body };
     try {
       let signedUrlNonce = null;
-      const matchPath = normalizeForMatch(url.pathname), gateIds = CFG.authGateIndex ? pathCandidates(matchPath, CFG.authGateIndex) : authGateIds;
+      const matchPath = normalizeForMatch(url.pathname), gateIds = CFG.authGateIndex ? pathCandidates(matchPath.slice(0, CFG.authGateIndexMaxLength + 1), CFG.authGateIndex) : authGateIds;
       for (const gateIndex of gateIds) {
         const gate = CFG.authGates[gateIndex], prefixes = authMatchPrefixes[gateIndex];
         if ((gate.type === "signed_url" && gate.exact_path === !0 ? prefixes.some((p) => pathMatchesExact(matchPath, p)) : CFG.authGateIndex || prefixes.some((p) => pathMatchesPrefix(matchPath, p))) && gate.type === "jwt") {
@@ -614,7 +620,7 @@ var stdin_default = {
       bodyState.body = null;
       const out = new Response(res.body, res), rh = RESPONSE_CFG.headers;
       rh["strict-transport-security"] && out.headers.set("Strict-Transport-Security", rh["strict-transport-security"]), rh["x-content-type-options"] && out.headers.set("X-Content-Type-Options", rh["x-content-type-options"]), rh["referrer-policy"] && out.headers.set("Referrer-Policy", rh["referrer-policy"]), rh["permissions-policy"] && out.headers.set("Permissions-Policy", rh["permissions-policy"]), RESPONSE_CFG.coop && out.headers.set("Cross-Origin-Opener-Policy", RESPONSE_CFG.coop), RESPONSE_CFG.coep && out.headers.set("Cross-Origin-Embedder-Policy", RESPONSE_CFG.coep), RESPONSE_CFG.corp && out.headers.set("Cross-Origin-Resource-Policy", RESPONSE_CFG.corp), RESPONSE_CFG.reporting_endpoints && out.headers.set("Reporting-Endpoints", RESPONSE_CFG.reporting_endpoints);
-      const isAdminPath = RESPONSE_CFG.adminPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.adminPathIndex) : adminMatchPrefixes.some((p) => pathMatchesPrefix(matchPath, p)), isAuthPath = RESPONSE_CFG.authPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.authPathIndex) : protectedMatchPrefixes.some((p) => pathMatchesPrefix(matchPath, p));
+      const isAdminPath = RESPONSE_CFG.adminPathIndex ? pathHasMatch(matchPath.slice(0, RESPONSE_CFG.adminPathIndexMaxLength + 1), RESPONSE_CFG.adminPathIndex) : adminMatchPrefixes.some((p) => pathMatchesPrefix(matchPath, p)), isAuthPath = RESPONSE_CFG.authPathIndex ? pathHasMatch(matchPath.slice(0, RESPONSE_CFG.authPathIndexMaxLength + 1), RESPONSE_CFG.authPathIndex) : protectedMatchPrefixes.some((p) => pathMatchesPrefix(matchPath, p));
       cspNonce && out.headers.set("X-CSP-Nonce", cspNonce);
       const applyNonce = (csp) => !csp || !cspNonce ? csp : csp.split("'nonce-PLACEHOLDER'").join("'nonce-" + cspNonce + "'");
       isAdminPath ? (RESPONSE_CFG.adminCacheControl && out.headers.set("Cache-Control", RESPONSE_CFG.adminCacheControl), RESPONSE_CFG.csp_admin && out.headers.set("Content-Security-Policy", applyNonce(RESPONSE_CFG.csp_admin))) : RESPONSE_CFG.csp_public && out.headers.set("Content-Security-Policy", applyNonce(RESPONSE_CFG.csp_public)), RESPONSE_CFG.csp_report_only && out.headers.set("Content-Security-Policy-Report-Only", applyNonce(RESPONSE_CFG.csp_report_only)), RESPONSE_CFG.forceVaryAuth && isAuthPath && (out.headers.set("Cache-Control", "no-store, no-cache, must-revalidate, private"), out.headers.set("Pragma", "no-cache"), appendVary(out.headers, "Authorization"), appendVary(out.headers, "Cookie"));
