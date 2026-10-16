@@ -171,6 +171,12 @@
     "resourceLocks": ["build-output"]
   },
   {
+    "id": "cloudflare-http-e2e",
+    "category": "e2e",
+    "command": "node",
+    "args": ["scripts/cloudflare-http-e2e-tests.js"]
+  },
+  {
     "id": "package-smoke",
     "category": "smoke",
     "command": "node",

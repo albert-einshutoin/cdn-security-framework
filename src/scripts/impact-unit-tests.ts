@@ -249,6 +249,35 @@ function testRepositoryConfiguration(): void {
   }
 }
 
+function testNativeHttpE2eCoverage(): void {
+  const scripts = JSON.parse(readFileSync('package.json', 'utf8')).scripts;
+  assert.match(scripts['test:all'], /(?:^| && )npm run test:cloudflare-http-e2e(?: && |$)/u,
+    'complete validation must run the native HTTP/JWKS suite');
+
+  const config = loadImpactConfig(process.cwd());
+  const target = config.commands.find(command => command.id === 'cloudflare-http-e2e');
+  assert.ok(target, 'native HTTP/JWKS must have an executable impact target');
+  assert.equal(target.category, 'e2e');
+  assert.equal(target.command, 'node');
+  assert.deepEqual(target.args, ['scripts/cloudflare-http-e2e-tests.js']);
+  for (const changedPath of [
+    'src/scripts/compile-cloudflare.ts',
+    'src/scripts/cloudflare-runtime-tests.ts',
+    'src/scripts/cloudflare-http-e2e-tests.ts',
+  ]) {
+    const targets = selectMappedTargets([changedPath], selectAffectedModules([changedPath], config), config);
+    assert.ok(targets.includes('cloudflare-http-e2e'), `${changedPath} must select native HTTP/JWKS`);
+  }
+  for (const changedPath of [
+    'src/scripts/lib/auth-gate-validation.ts',
+    'templates/cloudflare/index.ts',
+    'policy/base.yml',
+  ]) {
+    assert.equal(classifyRisk([{ status: 'modified', path: changedPath, exists: true }], config).fallback,
+      true, `${changedPath} must retain complete validation`);
+  }
+}
+
 function git(cwd: string, args: string[]): string {
   return execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
 }
@@ -391,6 +420,7 @@ testReverseDependencySelection();
 testConservativeStrategy();
 testComparisonRunsWhenShadowFullFails();
 testRepositoryConfiguration();
+testNativeHttpE2eCoverage();
 testGitChangeCollection();
 testMappedAndRelatedTestSelection();
 testPythonAdapterSelection();
