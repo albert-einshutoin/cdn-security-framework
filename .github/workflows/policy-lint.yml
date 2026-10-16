@@ -211,6 +211,15 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Upload native HTTP E2E report
+        if: always() && hashFiles('reports/cloudflare-http-e2e.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cloudflare-http-e2e-selective
+          path: reports/cloudflare-http-e2e.json
+          if-no-files-found: error
+          retention-days: 30
+
   # For the first 14+ days this remains a required comparison job. Graduation
   # is a reviewed workflow/config change after full-only failures stay at zero.
   pr-shadow-full:
@@ -280,6 +289,15 @@ jobs:
           name: shadow-full-impact-report
           path: reports/impact/
           if-no-files-found: warn
+          retention-days: 30
+
+      - name: Upload native HTTP E2E report
+        if: always() && hashFiles('reports/cloudflare-http-e2e.json') != ''
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: cloudflare-http-e2e-shadow-full
+          path: reports/cloudflare-http-e2e.json
+          if-no-files-found: error
           retention-days: 30
 
   pr-impact-comparison:

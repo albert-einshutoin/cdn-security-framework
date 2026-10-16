@@ -28,6 +28,23 @@ global outbound fetch is a native `ExternalServer` service fixed to the local
 origin address. This changes transport routing, without changing Worker code or
 fabricating a fetch response. See the upstream [configuration contract](https://github.com/cloudflare/workerd/blob/main/src/workerd/server/workerd.capnp).
 
+## CI integration
+
+`npm run test:ci` includes this suite through `test:coverage` → `test:all`.
+It runs on main/release pushes, scheduled and manual full validation, PR shadow
+full validation, and PR changes promoted to full validation. Selective PR plans
+also select the same native harness for the Cloudflare module. Authentication,
+shared compiler, runtime templates and policy changes retain full validation.
+Documentation-only selective plans do not add a native run.
+
+The harness uses disposable loopback services and synthetic credentials only.
+A missing native runtime, assertion failure or cleanup failure exits nonzero and
+fails its CI target. PR jobs upload `cloudflare-http-e2e-selective` or
+`cloudflare-http-e2e-shadow-full` when the report exists; non-PR full validation
+includes it in `full-validation-report-*`. Impact reports keep their original
+artifact layout for the comparison job. These are correctness checks; elapsed
+HTTP times in the report are observations, not a Worker CPU or latency budget.
+
 The harness uses the installed repository CLI `init --platform cloudflare` to
 obtain the current generated `wrangler.toml` compatibility date and flags, then
 `build --target cloudflare` with a disposable schema-2 policy. It transpiles the

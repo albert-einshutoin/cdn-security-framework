@@ -6,6 +6,7 @@ TypeScript under `src/` is authoritative; do not edit generated JavaScript.
 |---|---|
 | TypeScript build / types | `npm run build:ts` / `npm run typecheck` |
 | Complete validation, independent of impact planner | `npm run test:ci` |
+| Native Cloudflare HTTP / JWKS E2E, also included in complete validation | `npm run test:cloudflare-http-e2e` |
 | PR impact plan / execution | `npm run impact:analyze -- --base <base> --head <head> --output <analysis>` / `npm run impact:run -- --analysis <analysis> --output <report>` |
 | Package artifact gate tests | `node scripts/single-pack-unit-tests.js` after build |
 | Release approval, workflow permissions and artifact binding checks | `node scripts/release-binding-unit-tests.js` after build; does not publish |

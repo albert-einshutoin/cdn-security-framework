@@ -107,7 +107,7 @@
     "test:coverage": "c8 --reporter=text --reporter=lcov --include='scripts/**/*.js' --include='lib/**/*.js' --include='parser/**/*.js' --include='validator/**/*.js' --include='emitter/**/*.js' --exclude='scripts/**/*-tests.js' --lines 80 --functions 75 --branches 70 npm run test:all",
     "test:ci": "npm audit --audit-level=high && npm run build:ts && CDN_SECURITY_TS_READY=1 npm run test:ci:rest",
     "test:ci:rest": "npm run test:generated-boundary && npm run test:docs && npm run lint:policy:ci && npm run build && node scripts/compile-cloudflare.js && node scripts/compile-cloudflare-waf.js --policy policy/base.yml --out-dir dist --fail-on-waf-approximation && npm run test:dist-exists && node bin/cli.js doctor --no-report && npm run test:drift && npm run test:determinism && npm run test:security-baseline && npm run test:package && npm run test:coverage",
-    "test:all": "npm run build:test-fixtures && npm run test:types && npm run typecheck && npm run test:api-contract && npm run test:vitest && npm run test:unit && npm run benchmark:openapi:ci && npm run benchmark:source-analysis:ci && npm run test:impact && npm run test:runtime && npm run test:fuzz && npm run test:cloudflare-integration && npm run test:edge-container",
+    "test:all": "npm run build:test-fixtures && npm run test:types && npm run typecheck && npm run test:api-contract && npm run test:vitest && npm run test:unit && npm run benchmark:openapi:ci && npm run benchmark:source-analysis:ci && npm run test:impact && npm run test:runtime && npm run test:fuzz && npm run test:cloudflare-integration && npm run test:edge-container && npm run test:cloudflare-http-e2e",
     "fingerprints:candidates": "npm run build:ts && node scripts/fingerprint-candidates.js"
   },
   "keywords": [
