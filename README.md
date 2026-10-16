@@ -107,6 +107,16 @@ This framework addresses these with **"policy-driven" + "runtime separation"**.
 
 ---
 
+## Generated-edge performance: preliminary Cloudflare pilot
+
+In a **2026-10-16 Cloudflare Workers Free pilot**, provider CPU p95 log-display values were **1–5 ms** across five selected workloads: normal forwarding, 256 regex rules with an approximately 8 KiB path, 64 KiB GraphQL, 1 MiB HMAC body signing, and RS256/JWKS authentication. The run started 8,809 client requests and retained 6,500 samples from completed measurement intervals.
+
+These CPU values aggregate the whole pilot, including startup and warmup; their effective CPU sample counts and underlying precision are unverified. They are separate from the client timing samples. The run stopped when the **test gateway** hit its Free CPU limit on the no-op 1 MiB path, so the planned three runs did not complete. Qualification remains **INCONCLUSIVE**, with no production SLO or regression threshold established.
+
+See the [pilot results, conditions, and benchmark qualification plan](docs/benchmarks/cloudflare-edge-pilot.md) and [aggregate data](docs/benchmarks/cloudflare-edge-pilot.json). This is a version-pinned observation, not a speed guarantee for all policies, requests, or Edge platforms.
+
+---
+
 ## Repository Structure
 
 ```

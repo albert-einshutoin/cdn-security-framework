@@ -1,0 +1,411 @@
+{
+  "measurementDate": "2026-10-16",
+  "status": "FAILED_PARTIAL_MEASUREMENT",
+  "qualification": "INCONCLUSIVE",
+  "compiler": {
+    "commit": "7f1e1c4a1d2d5e02565b71c728566d7eff2bf048",
+    "tree": "45198d20e9138dfe7ec93e5a4c73a2d9f83053c9",
+    "equivalentMainMerge": "597335d5e3a97eedc74a1adf31e30cb0f01bf47d"
+  },
+  "environment": {
+    "runtime": "cloudflare-workers",
+    "plan": "Workers Free",
+    "compatibilityDate": "2026-10-12",
+    "compatibilityFlags": [
+      "global_fetch_strictly_public"
+    ],
+    "cpuLimitSettingMs": 10,
+    "workerCpuRollupAttribution": "UNKNOWN",
+    "gatewayColos": [
+      "KIX",
+      "PDX"
+    ]
+  },
+  "load": {
+    "model": "capped closed loop with global start pacing",
+    "maxClientConcurrency": 4,
+    "maxClientStartsPerSecond": 50,
+    "plannedRuns": 3,
+    "plannedWarmupRequestsPerCaseVariantRun": 100,
+    "plannedMeasuredRequestsPerCaseVariantRun": 500,
+    "clientRequestsStarted": 8809,
+    "completedMeasuredRequests": 6500,
+    "retainedSeriesAndSmokeRows": 8314,
+    "partialSeriesRequestsWithoutIndividualRecords": 495,
+    "cleanupConfirmedElapsedMs": 364727
+  },
+  "inputs": {
+    "normal": {
+      "method": "GET",
+      "path": "/public"
+    },
+    "regex": {
+      "method": "GET",
+      "pathBytes": 8192,
+      "pathShape": "/public/ followed by 8184 ASCII a characters",
+      "configuredPathPatterns": 256
+    },
+    "graphql": {
+      "method": "POST",
+      "bodyBytes": 65536,
+      "bodyShape": "Small query { a } padded with ASCII spaces"
+    },
+    "hmac": {
+      "method": "POST",
+      "bodyBytes": 1048576,
+      "bodyShape": "Repeated ASCII x"
+    },
+    "rs256": {
+      "method": "GET",
+      "syntheticJwt": true,
+      "jwksState": "Initial acquisition and subsequent requests mixed; complete cache-hit state not proven"
+    }
+  },
+  "wholePilotCpuLogDisplay": {
+    "unit": "ms",
+    "population": "All pilot phases, including startup, smoke, warmup, and complete/partial measurement",
+    "effectiveCpuSampleCount": null,
+    "underlyingPrecision": "UNKNOWN",
+    "querySampling": "UNKNOWN",
+    "percentileEstimatorAccuracy": "UNKNOWN",
+    "rawIndividualCpuPublished": false,
+    "rows": [
+      {
+        "workload": "hmac",
+        "p50": 3,
+        "p95": 5,
+        "p99": 15
+      },
+      {
+        "workload": "basic",
+        "p50": 1,
+        "p95": 1,
+        "p99": 2
+      },
+      {
+        "workload": "rs256",
+        "p50": 1,
+        "p95": 4,
+        "p99": 7
+      },
+      {
+        "workload": "graphql",
+        "p50": 1,
+        "p95": 3,
+        "p99": 6
+      },
+      {
+        "workload": "regex",
+        "p50": 1,
+        "p95": 2,
+        "p99": 5
+      }
+    ]
+  },
+  "clientResponseIntervals": {
+    "unit": "ms",
+    "population": "Completed measured intervals only, with mixed gateway PoPs; no pooling across runs",
+    "quantileMethod": "nearest-rank",
+    "rows": [
+      {
+        "workload": "basic",
+        "variant": "bare",
+        "run": 0,
+        "count": 500,
+        "wallMs": {
+          "p50": 22.751,
+          "p95": 131.785,
+          "p99": 140.127
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 441
+          },
+          "PDX": {
+            "count": 59
+          }
+        }
+      },
+      {
+        "workload": "basic",
+        "variant": "generated",
+        "run": 0,
+        "count": 500,
+        "wallMs": {
+          "p50": 23.606,
+          "p95": 131.429,
+          "p99": 133.865
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 455
+          },
+          "PDX": {
+            "count": 45
+          }
+        }
+      },
+      {
+        "workload": "regex",
+        "variant": "bare",
+        "run": 0,
+        "count": 500,
+        "wallMs": {
+          "p50": 22.436,
+          "p95": 38.248,
+          "p99": 134.674
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 477
+          },
+          "PDX": {
+            "count": 23
+          }
+        }
+      },
+      {
+        "workload": "regex",
+        "variant": "generated",
+        "run": 0,
+        "count": 500,
+        "wallMs": {
+          "p50": 25.877,
+          "p95": 131.805,
+          "p99": 134.027
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 452
+          },
+          "PDX": {
+            "count": 48
+          }
+        }
+      },
+      {
+        "workload": "graphql",
+        "variant": "bare",
+        "run": 0,
+        "count": 500,
+        "wallMs": {
+          "p50": 32.826,
+          "p95": 137.534,
+          "p99": 157.774
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 416
+          },
+          "PDX": {
+            "count": 84
+          }
+        }
+      },
+      {
+        "workload": "graphql",
+        "variant": "generated",
+        "run": 0,
+        "count": 500,
+        "wallMs": {
+          "p50": 39.758,
+          "p95": 143.144,
+          "p99": 155.617
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 384
+          },
+          "PDX": {
+            "count": 116
+          }
+        }
+      },
+      {
+        "workload": "hmac",
+        "variant": "bare",
+        "run": 0,
+        "count": 500,
+        "wallMs": {
+          "p50": 124.535,
+          "p95": 187.969,
+          "p99": 203.523
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 318
+          },
+          "PDX": {
+            "count": 182
+          }
+        }
+      },
+      {
+        "workload": "hmac",
+        "variant": "generated",
+        "run": 0,
+        "count": 500,
+        "wallMs": {
+          "p50": 123.405,
+          "p95": 190.694,
+          "p99": 201.849
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 316
+          },
+          "PDX": {
+            "count": 184
+          }
+        }
+      },
+      {
+        "workload": "rs256",
+        "variant": "bare",
+        "run": 0,
+        "count": 500,
+        "wallMs": {
+          "p50": 26.485,
+          "p95": 131.179,
+          "p99": 135.254
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 468
+          },
+          "PDX": {
+            "count": 32
+          }
+        }
+      },
+      {
+        "workload": "rs256",
+        "variant": "generated",
+        "run": 0,
+        "count": 500,
+        "wallMs": {
+          "p50": 24.325,
+          "p95": 132.163,
+          "p99": 138.255
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 462
+          },
+          "PDX": {
+            "count": 38
+          }
+        }
+      },
+      {
+        "workload": "rs256",
+        "variant": "generated",
+        "run": 1,
+        "count": 500,
+        "wallMs": {
+          "p50": 42.5,
+          "p95": 135.88,
+          "p99": 140.449
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 367
+          },
+          "PDX": {
+            "count": 133
+          }
+        }
+      },
+      {
+        "workload": "rs256",
+        "variant": "bare",
+        "run": 1,
+        "count": 500,
+        "wallMs": {
+          "p50": 35.501,
+          "p95": 134.345,
+          "p99": 138.556
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 389
+          },
+          "PDX": {
+            "count": 111
+          }
+        }
+      },
+      {
+        "workload": "hmac",
+        "variant": "generated",
+        "run": 1,
+        "count": 500,
+        "wallMs": {
+          "p50": 154.218,
+          "p95": 192.657,
+          "p99": 238.33
+        },
+        "gatewayColos": {
+          "KIX": {
+            "count": 305
+          },
+          "PDX": {
+            "count": 195
+          }
+        }
+      }
+    ]
+  },
+  "isolatedCpuAnalytics": {
+    "unit": "ms",
+    "status": "UNQUALIFIED_ESTIMATE",
+    "availableInterval": {
+      "workload": "basic",
+      "variant": "generated",
+      "run": 0,
+      "clientRequests": 500,
+      "requestsEstimated": 520,
+      "averageSampleInterval": 4.193548387096774,
+      "cpuMs": {
+        "p50": 0.941,
+        "p95": 1.369,
+        "p99": 2.028
+      }
+    },
+    "quantileReservoirSize": null,
+    "intervalsAttempted": 17,
+    "intervalsWithMissingTargetWorker": 16,
+    "lifetimeQueryComplete": false,
+    "collectorEndedBy": "API rate limit after a single delayed retry"
+  },
+  "failure": {
+    "workload": "hmac",
+    "variant": "bare",
+    "component": "test-gateway",
+    "httpStatus": 503,
+    "providerMessage": "Worker exceeded CPU time limit.",
+    "cpuTimeMsDisplayed": 10,
+    "wallTimeMsDisplayed": 34,
+    "generatedHmacOnPath": false,
+    "completeThreeRuns": false,
+    "allDisposableWorkersDeleted": true,
+    "priorAttempt": {
+      "reason": "host reboot during deployment before client load",
+      "deletedWithinFifteenMinutes": false,
+      "allDisposableWorkerNamesAbsentBeforeRetry": true
+    }
+  },
+  "provenance": {
+    "availability": "Selected aggregates only. Full retained local evidence and cloud runner/fixtures are not published; not an independently reproducible benchmark package.",
+    "retainedLocalArtifactSha256": {
+      "cloud-receipt.json": "e8e7cfc8d52aad2d9565f6b19c897fbe15917beaa9d60fdb089def238cf143e5",
+      "cloud-metrics.json": "5966a55e1808c0ed5bcde3216d0a56eb8466c55213ded88b90ebea36c615c322",
+      "partial-summary.json": "372cb818c4b6728239de7782dbc5619e7f7e16daee112ea39b17798857c13364",
+      "ui-cpu-aggregate.json": "e8beb2d4b79f3bb8b7dd4901bb4a87c2d965fd1d2bc5e3cedef0dc9173038c70",
+      "gateway-cpu-limit.json": "58c717b3561a1c82faf8b70451c5ed54ef4539b6126ebe49c6b73bd8c0e50867",
+      "local-verification.json": "b9a84f11863e944ba6a02b38f494924a759a8dcfbdb5acdba20fdbe4883cd3ce",
+      "analysis-review-receipt.json": "f3446b537c024dfae938d6de94fe1cee0da6e1336c87e567da369855dc2e91a7",
+      "stop-gate-result.txt": "883ef8c256f13b06a5f4fb5ca287a58c01304402016fe05bbcf9ef8fc16ebed5"
+    }
+  }
+}
