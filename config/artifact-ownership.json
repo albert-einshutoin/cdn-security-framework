@@ -31,6 +31,17 @@
     {
       "category": "fixture-example",
       "files": [
+        "benchmarks/edge/k6.js"
+      ],
+      "sourceOfTruth": [
+        "benchmarks/edge/k6.js"
+      ],
+      "reason": "Authored k6 ES module executed by k6, not TypeScript compiler output or a packaged runtime dependency.",
+      "removalCondition": "Remove together with the explicit Edge benchmark harness."
+    },
+    {
+      "category": "fixture-example",
+      "files": [
         "examples/nestjs-contract/run-analysis.cjs",
         "examples/nestjs-contract/stubs/nestjs-common/index.js",
         "examples/nestjs-contract/stubs/nestjs-common/index.d.ts"
