@@ -14,13 +14,18 @@ async function main() {
   assert.equal(remainingLoadMs(now, now + 5000), 385000, 'Guardian delay must not move the absolute cutoff');
   assert.equal(remainingLoadMs(now, now + 390001), 0);
   const read = fs.readFileSync, realpath = fs.realpathSync, write = fs.writeFileSync;
-  const approval = { authorizationId: diagnosticAuthorizationId, issue: 1026, accountSha256: sha(account), maxWindows: 1, clientCap: 300,
+  const approval = { authorizationId: diagnosticAuthorizationId, issue: 1026, accountSha256: sha(account), maxWindows: 1, clientCap: 26,
     plannedClientCap: 26, invocationCap: 52, maxRps: 1, concurrency: 1, workerCap: 5, windowMs: 600000, additionalUSD: 0 };
   let consumed = false;
   try {
     (fs as any).readFileSync = () => JSON.stringify(approval); (fs as any).realpathSync = () => diagnosticApproval;
     (fs as any).writeFileSync = (file: string, _data: string, options: any) => { assert.equal(file, diagnosticMarker); assert.equal(options.flag, 'wx'); if (consumed) throw new Error('EEXIST'); consumed = true; };
     assert.throws(() => consumeDiagnosticApproval(diagnosticApproval + '.other', account, 'synthetic'), /Canonical/);
+    const currentId = approval.authorizationId;
+    approval.authorizationId = 'issue-1026-zero-cost-20261018'; approval.clientCap = 300;
+    assert.throws(() => consumeDiagnosticApproval(diagnosticApproval, account, 'prior-grant'), /binding mismatch/);
+    assert.equal(consumed, false, 'The spent grant must not consume the newly approved window');
+    approval.authorizationId = currentId; approval.clientCap = 26;
     consumeDiagnosticApproval(diagnosticApproval, account, 'synthetic');
     assert.throws(() => consumeDiagnosticApproval(diagnosticApproval, account, 'synthetic-2'), /EEXIST/);
     assert.throws(() => consumeDiagnosticApproval(diagnosticApproval, 'b'.repeat(32), 'synthetic'), /binding mismatch/);

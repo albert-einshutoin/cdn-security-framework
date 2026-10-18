@@ -17,7 +17,7 @@ type State = { prefix: string; owner: string; startedAt: number; deadline: numbe
 const root = path.resolve(__dirname, '..');
 // ponytail: This single approved #1026 window is fixed. A future window needs a
 // new reviewed authorization; selecting another receipt must never restart it.
-export const diagnosticAuthorizationId = 'issue-1026-zero-cost-20261018';
+export const diagnosticAuthorizationId = 'issue-1026-zero-cost-20261018-followup1';
 export const diagnosticApproval = path.join(root, 'reports', diagnosticAuthorizationId, 'cloud-approval.json');
 export const diagnosticMarker = path.join(root, 'reports', diagnosticAuthorizationId, 'cloud-window-started.json');
 const ownedBy = (settings: any, owner: string) => Array.isArray(settings?.tags)
@@ -28,7 +28,7 @@ export function consumeDiagnosticApproval(file: string, account: string, prefix:
   assert.equal(fs.realpathSync(file), diagnosticApproval, 'Approval alias refused');
   const approval = JSON.parse(fs.readFileSync(file, 'utf8'));
   assert.ok(approval.authorizationId === diagnosticAuthorizationId && approval.issue === 1026 && approval.accountSha256 === sha(account)
-    && approval.maxWindows === 1 && approval.clientCap === 300 && approval.plannedClientCap === 26 && approval.invocationCap === 52
+    && approval.maxWindows === 1 && approval.clientCap === 26 && approval.plannedClientCap === 26 && approval.invocationCap === 52
     && approval.maxRps === 1 && approval.concurrency === 1 && approval.workerCap === 5 && approval.windowMs === 600000
     && approval.additionalUSD === 0, 'Diagnostic approval binding mismatch');
   fs.writeFileSync(diagnosticMarker, JSON.stringify({ authorizationId: diagnosticAuthorizationId, prefix, at: Date.now() }), { mode: 0o600, flag: 'wx' });

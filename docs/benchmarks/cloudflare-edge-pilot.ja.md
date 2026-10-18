@@ -236,3 +236,16 @@ client要求・CPU標本は0件です。作成した4件を所有tagの照合後
 修正前に「5回不在の後で同じ設定が読める」回帰チェックの失敗を確認し、修正後は有限回での成功・上限到達時の停止・他のエラーを再試行しないことを確認しました。Cloud実行時のsource/実行JavaScriptは `reports/issue-1026-zero-cost-20261018/cloud-executed-snapshot/mapping.json`、実行結果は同directoryの `cloud-closure.json` に対応します。この読戻し修正はローカル検証であり、今回のCloud実行で受入済みとは扱いません。
 
 Cloud実行は固定account・今回の承認receipt・排他的な開始markerへ拘束し、出力directoryやreceipt名を変えて2回目を開始できません。独立guardianは親の切断時にも同じ所有・削除receiptを使って後片付けし、結果不明のDELETEを再送しません。初回枠は使用済みで、新しいCloud枠は未承認です。CPU全件取得・実HTTP readinessは未達、判定と正式資格は **INCONCLUSIVE**、Goalは未完了で、PRはDraftのままです。ローカル再現は前節のcommandと `node scripts/edge-benchmark-cloud-unit-tests.js` で行い、unit検証から実Cloudへは接続しません。
+
+
+## 承認された追加1回の結果 — 2026-10-18 22:00 JST
+
+同じaccount・追加費用見積もり$0・最大26 client要求・1RPS・同時1・最大5 Workers・配備から削除確認まで10分の追加1回が明示承認されました。実行sourceの承認IDと上限をこの追加枠へ固定し、使用済みの旧承認は拒否する回帰チェックを追加しました。新旧の排他的markerと証拠は分離しています。同じaccountのWorkers Observability Editだけ・21:45–22:45 JSTの短期トークンを用意し、OAuthはscopeを変えず更新しました。直前のFree画面は当日要求1,778/100,000、ログ15/200,000、期間内billable usage $0.00でした。
+
+5 Workersすべてがupload後の設定・所有tag・version/etag・100% deployment・workers.devの読戻しを通過しました。実HTTPのreadiness5件とHMAC本文拒否3件（400/400/413）も成功し、basicの両armでwarmup各1件・測定各2件がoracle一致、invalid/drop 0でした。合計14 client要求です。今回の配備読戻しと実HTTP確認は成立しましたが、過去の10007の根本原因は確定しません。
+
+最初のbasic bare測定の保存CPU照会はCOMPLETED・ABR=1・sampleInterval=1で1件を返し、期待2 IDのうち1 IDが欠落しました。取得した1件はKIX・正しいWorker/version・outcome okで、providerのCPU値は0ms、wall値は6msでした。欠落を0msへ補完していません。判定はUNKNOWNで、basic生成側のCPU照会とGraphQL/HMAC負荷へ進まず停止しました。後続の読み取り専用画面でも、今回のbare Workerは1時間の範囲で4要求に対し保存イベント3件でした。狭い照会区間だけでは欠落を説明できず、保存・取得経路の根本原因はUNKNOWNのままです。推測による時間拡張・retry・経路合成をcollectorへ追加していません。
+
+所有を確認した5 Workersを各1回のDELETEで削除し、全5件で最終settings GET 404/code10007を確認しました。guardian停止、枠全体82.601秒、最初の配備操作から終了確認82.525秒、平文収集トークンファイル削除を確認しました。新しい記録と実行bytesのsnapshotは `reports/issue-1026-zero-cost-20261018-followup1/` に保存しています。実行前に同じsource bytesの専門レビューALLOWと `VITEST_MAX_WORKERS=2 npm run test:ci` 成功を確認しました。
+
+追加枠は使用済みです。追加費用は$0の見積もりで、最終請求は未確認です。CPU全6母集団の完全取得は未達、正式資格は **INCONCLUSIVE**、Goalは未完了、PRはDraftを維持し、merge呼び出しは0回です。
