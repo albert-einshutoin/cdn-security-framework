@@ -249,3 +249,5 @@ Cloud実行は固定account・今回の承認receipt・排他的な開始marker�
 所有を確認した5 Workersを各1回のDELETEで削除し、全5件で最終settings GET 404/code10007を確認しました。guardian停止、枠全体82.601秒、最初の配備操作から終了確認82.525秒、平文収集トークンファイル削除を確認しました。新しい記録と実行bytesのsnapshotは `reports/issue-1026-zero-cost-20261018-followup1/` に保存しています。実行前に同じsource bytesの専門レビューALLOWと `VITEST_MAX_WORKERS=2 npm run test:ci` 成功を確認しました。
 
 追加枠は使用済みです。追加費用は$0の見積もりで、最終請求は未確認です。CPU全6母集団の完全取得は未達、正式資格は **INCONCLUSIVE**、Goalは未完了、PRはDraftを維持し、merge呼び出しは0回です。
+
+2026-10-19の[CPU欠落診断](cloudflare-cpu-diagnosis-20261019.ja.md)で、保存証拠・実行bytesの再照合、公式仕様、3仮説とローカル失敗注入15項目の結果を整理しました。挙動欠陥は再現せず、runtimeの推測修正はありません。次は新規client要求・invocation・Workerをすべて0とする既存ログ4条件の照会案です。追加承認前のCloud操作は0件で、正式資格はINCONCLUSIVEを維持します。
