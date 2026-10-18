@@ -16,6 +16,7 @@ export const benchmarkCases: BenchmarkCase[] = [
 type Service = { fetch(request: Request): Promise<Response> };
 export type FixtureEnv = {
   PROBE_KEY: string; EXPIRES: string; ORIGIN: string; RS_JWT: string; PUBLIC_JWKS: string;
+  CSF_VERSION_METADATA?: { id: string };
   BASIC: Service; REGEX: Service; GRAPHQL: Service; HMAC: Service; RS256: Service; BARE: Service;
 };
 const hex = (bytes: ArrayBuffer) => Array.from(new Uint8Array(bytes), b => b.toString(16).padStart(2, '0')).join('');
@@ -76,6 +77,7 @@ async function routeFixture(request: Request, env: FixtureEnv, direct?: { profil
   const result = new Response(response.body, response);
   result.headers.set('x-csf-ingress-colo', colo(request));
   result.headers.set('x-csf-id', id);
+  if (env.CSF_VERSION_METADATA) result.headers.set('x-csf-version', env.CSF_VERSION_METADATA.id);
   return result;
 }
 
@@ -90,7 +92,9 @@ export function createDirectTarget(target: DirectTarget, profile: string): Direc
 export const origin = { async fetch(request: Request, env: FixtureEnv): Promise<Response> {
   if (!live(env)) return new Response('Expired', { status: 410 });
   const url = new URL(request.url);
-  if (url.pathname === '/jwks' && request.method === 'GET') return Response.json(JSON.parse(env.PUBLIC_JWKS), { headers: { 'cache-control': 'no-store' } });
+  if (url.pathname === '/jwks' && request.method === 'GET') return Response.json(JSON.parse(env.PUBLIC_JWKS), { headers: {
+    'cache-control': 'no-store', ...(env.CSF_VERSION_METADATA ? { 'x-csf-version': env.CSF_VERSION_METADATA.id } : {}),
+  } });
   if (!authorized(request, env)) return new Response('Denied', { status: 403 });
   const spec = benchmarkCases.find(test => test.id === request.headers.get('x-csf-case'));
   const variant = request.headers.get('x-csf-variant');
@@ -109,5 +113,5 @@ export const origin = { async fetch(request: Request, env: FixtureEnv): Promise<
   }
   return Response.json({ id: request.headers.get('x-csf-id'), case: spec.id, variant,
     pathHash: await digest(new TextEncoder().encode(url.pathname)), bodyHash, bodyBytes: bytes.byteLength, signatureVerified, originColo: colo(request) },
-  { headers: { 'cache-control': 'no-store', 'x-csf-origin': 'synthetic' } });
+  { headers: { 'cache-control': 'no-store', 'x-csf-origin': 'synthetic', ...(env.CSF_VERSION_METADATA ? { 'x-csf-version': env.CSF_VERSION_METADATA.id } : {}) } });
 } };

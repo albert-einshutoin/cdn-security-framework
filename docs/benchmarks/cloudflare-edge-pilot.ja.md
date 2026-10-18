@@ -221,3 +221,18 @@ node scripts/benchmark-edge-k6.js --output reports/edge-local-diagnostic \
 実クラウドの最小案は3ケース×2arm×（warmup1＋測定2）＝18要求、readiness最大5・本文拒否最大3を加えて26 client要求、target/origin最大52 invocationです。同時1・最大1RPS・Worker最大5・配備から削除確認まで10分を維持し、cleanup時間を予約します。upload HTTP200だけでは開始せず、Worker/version readbackと実HTTP readinessを照合する必要があります。原因不明の作成結果は同名の有界readbackだけで確認し、再uploadしません。各caseの測定全IDを同じ保存経路で照合し、欠落・sampling・CPU上限・通信失敗があれば次caseへ進みません。これは準備案であり、配備経路の修正・実Edgeでの受入は未完了です。
 
 続行には同じaccountだけの短時間有効なWorkers Observability Edit認証が必要です。権限拡大・有料化は行わず、秘密値をチャットやPRへ記載しません。新しい記録は `reports/issue-1026-zero-cost-20261018/` に保存しています。CPU全件取得は未達、正式資格は **INCONCLUSIVE**、Goalは未完了です。Draft PRの静的受入やローカル検証でこれらを置き換えません。
+
+
+## 費用ゼロ診断の実行と読戻し修正 — 2026-10-18 19:07 JST
+
+上記18:04 JST時点の認証阻害は、同じaccountだけ・Workers Observability Editだけの今回用トークン（19:30 JST失効）で解消し、既存OAuthは同じscopeのまま更新しました。開始直前のFree画面は当日要求1,056/100,000、ログ6/200,000、期間内billable usage $0.00でした。認証値は公開せず、収集トークンの平文ファイルは今回枠の終了時に削除しました。
+
+許可されたCloud枠を1回使用しました。4 Workerへ各1回だけuploadし、origin/bare/basicの3件は設定・version/etag・100% deployment・workers.dev状態の読戻しを通過しました。GraphQLはupload HTTP200の直後の設定GETが404/code10007になり、HTTP readinessへ進む前に停止しました。同じGraphQLの設定GETは9.245秒後のcleanupでは200でした。これは今回の設定読戻しの一時的不在という観測であり、過去のCLI障害の根本原因やHTTP到達性を確定しません。根本原因はUNKNOWNです。
+
+client要求・CPU標本は0件です。作成した4件を所有tagの照合後に削除し、未作成のhmacを含む対象5件すべての設定GETで404/code10007を確認しました。枠全体は32.228秒、最初の配備操作から最終不在確認までは32.172秒でした。guardian停止・残存Worker 0件・10分以内の終了を確認しています。追加費用は$0の見積もりで、最終請求は未確認です。
+
+この観測から、成功したuploadと同じ名前の設定読戻しだけを、正確な404/code10007に限り最大6回・再試行間隔2秒で確認する修正を加えました。各APIの5秒上限、開始時刻基準390秒の負荷cutoff、600秒の削除期限は維持します。最終404、未知の404、403、通信失敗、所有tag・version・etag・sampling・deployment不一致はErrorで止めます。uploadやDELETEの再送、別名への切替え、CLI更新、別経路へのfallbackはありません。cleanupも同じ有界readerを使い、upload試行済み・DELETE未試行の対象が不在のままならUNKNOWNとし、削除済みとは判定しません。cleanup全体は共有80秒と600秒期限の1秒前のうち早い方までに制限し、各APIを始める前に最大6秒（pace1秒＋I/O5秒）を予約します。DELETE前には後続の不在確認を含む12秒を確保し、再試行待機も同じ予算に含めます。guardianが残した不完全receiptは親が1回だけ同じ経路で再確認し、UNKNOWNを成功へ補完しません。
+
+修正前に「5回不在の後で同じ設定が読める」回帰チェックの失敗を確認し、修正後は有限回での成功・上限到達時の停止・他のエラーを再試行しないことを確認しました。Cloud実行時のsource/実行JavaScriptは `reports/issue-1026-zero-cost-20261018/cloud-executed-snapshot/mapping.json`、実行結果は同directoryの `cloud-closure.json` に対応します。この読戻し修正はローカル検証であり、今回のCloud実行で受入済みとは扱いません。
+
+Cloud実行は固定account・今回の承認receipt・排他的な開始markerへ拘束し、出力directoryやreceipt名を変えて2回目を開始できません。独立guardianは親の切断時にも同じ所有・削除receiptを使って後片付けし、結果不明のDELETEを再送しません。初回枠は使用済みで、新しいCloud枠は未承認です。CPU全件取得・実HTTP readinessは未達、判定と正式資格は **INCONCLUSIVE**、Goalは未完了で、PRはDraftのままです。ローカル再現は前節のcommandと `node scripts/edge-benchmark-cloud-unit-tests.js` で行い、unit検証から実Cloudへは接続しません。

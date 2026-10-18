@@ -6,7 +6,7 @@ import path from 'node:path';
 import { spawnSync } from 'node:child_process';
 import vm from 'node:vm';
 import { transformSync } from 'esbuild';
-import { gateway, createDirectTarget, readFixtureBody, type FixtureEnv, benchmarkCases } from './edge-benchmark-fixture';
+import { gateway, origin, createDirectTarget, readFixtureBody, type FixtureEnv, benchmarkCases } from './edge-benchmark-fixture';
 import { joinProviderCpu, checkBudget, quantileInterval, assessAaRepeatability } from './edge-benchmark-cpu';
 import { runK6Series, prepareBenchmark } from './benchmark-edge-k6';
 import { collectCpuEvents, joinProviderCapture, clientPopulation, bindCpuSeries } from './collect-edge-benchmark-cpu';
@@ -62,6 +62,9 @@ async function main() {
   const directResponse = await direct.fetch(ingress, env);
   assert.equal(await directResponse.text(), full, 'Direct path must preserve the 1 MiB body');
   assert.equal(directResponse.headers.get('x-csf-ingress-colo'), 'KIX', 'PoP must come from the public invocation');
+  assert.equal((await direct.fetch(request(full, '/hmac/generated'), { ...env, CSF_VERSION_METADATA: { id: 'provider-version' } })).headers.get('x-csf-version'), 'provider-version');
+  const jwks = await origin.fetch(new Request('https://origin.example/jwks'), { ...env, PUBLIC_JWKS: '{"keys":[]}', CSF_VERSION_METADATA: { id: 'origin-version' } });
+  assert.equal(jwks.headers.get('x-csf-version'), 'origin-version');
   const directBefore = forwarded;
   assert.equal((await direct.fetch(request(full, '/hmac/bare'), env)).status, 404);
   assert.equal((await direct.fetch(request(full, '/hmac/generated', { 'x-csf-key': 'wrong' }), env)).status, 403);
