@@ -221,6 +221,17 @@
       ],
       "reason": "Tracked escape fixture verifies rejection outside the OpenAPI fixture root; inspect only its Git index metadata, never follow it.",
       "removalCondition": "Remove together with the fixture-root symlink escape regression test."
+    },
+    {
+      "category": "fixture-example",
+      "files": [
+        "test/fixtures/auth-cache/reproduce.cjs"
+      ],
+      "sourceOfTruth": [
+        "test/fixtures/auth-cache/reproduce.cjs"
+      ],
+      "reason": "Authored local auth-cache model reproduction runner, not compiler output.",
+      "removalCondition": "Remove when the auth-cache reproduction fixture is retired."
     }
   ]
 }
