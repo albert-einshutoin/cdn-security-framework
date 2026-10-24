@@ -169,3 +169,79 @@ deployは手動のままにします。
 関連資料: [Policy Candidate Mapping](openapi-policy-candidates.ja.md)、
 [Threat Model](openapi-threat-model.ja.md)、[Finding Reference](finding-reference.ja.md)、
 [Benchmark](benchmarks/openapi-analysis.ja.md)。
+
+## 内部の認証 × キャッシュ検証MVP（#1119）
+
+このローカル試作は `src/contract/verification/` の内部モジュールです。
+package entrypoint、CLI、Policy schema、配備association、自動Applyは追加しません。
+v2.0/v2.1のEntry/Release条件を増やさず、#533全体完成とも扱いません。
+Source/OpenAPIの認証メタデータは要求の宣言であり、runtime認証証拠ではありません。
+
+判定器は検証済みconstructorが発行し再帰的に凍結したProjectionだけを受け付けます。直列化・差替え・改変したProjectionは受け付けず、再現時は元入力から再作成します。入力は既存Security IR、schema検証済みPolicyから投影したAllowed Surface、明示的な
+CloudFront実行モデルです。静的IR Method/Path × 列挙Host × 抽象資格状態（なし/有効）
+の全組合せを扱い、選んだ成功HTTPテストを全称証明へ置き換えません。Hostは正規化済み
+合成 `.test` 名、Pathは正規化済みASCIIのリテラル（rootを含む）です。テンプレート・
+符号化等の未対応PathはUNKNOWNです。既存のequal-or-prefix-plus-slashを維持し、prefix `/` は `/` だけに一致します。global Host/Methodの対象外もUNKNOWNとし、
+迂回を推測しません。他の認証以外のrequest検証は対象リクエストを受理し、保護対象の
+内容を生成しないという前提です。資格状態は抽象条件であり、秘密情報・暗号検証・
+アプリケーション認可の証明は含みません。
+
+Rは認証必須と宣言された受理対象リクエストと到達可能経路、Eはsupportedなblocking
+認証ゲートを実行する部分集合です。両資格状態についてR ⊆ Eを検証します。有効資格の
+HITでもゲートを省略すれば、この認証適用の不変条件には違反します。匿名データ漏えいの
+反例とは条件を区別します。ゲートは有効資格を通し、資格なしを拒否し、書換え・例外・
+副作用を持たないと仮定します。phaseはPolicy rule indexに対応する明示associationで、
+Policyだけから配備状態を推定しません。
+
+[Viewer Requestはcache lookup前、Origin Requestはoriginへ転送する場合に実行されます](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-cloudfront-trigger-events.html)。
+[HITには同じkeyと有効なresident objectが必要です](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/understanding-the-cache-key.html)。
+このモデルの実効keyはdistribution namespace、リテラルPath、GET/HEAD共通組
+（OPTIONSは別）、明示したviewer Host/資格状態のpartitionです。それ以外のquery/
+header/cookie key次元は対象外です。cacheable・TTLは実効値の入力であり、Policyの
+応答headerから推測しません。fill配列は履歴ではなくresident snapshotで、同じ実効key/locationに複数あれば矛盾Errorです。先行fillは入力時刻より前に生成可能で、同じkey/location、
+`nowMs - storedAtMs < ttlMs` を満たす必要があります。fillと参照のauth associationは
+同じです。eviction、revalidation、origin failover、任意関数はモデル化しません。
+判定器は現在時刻へ依存しません。
+
+- **VIOLATED**：R所属・E不在の具体的なHTTP条件、資格状態、先行fill、key/TTL/location、
+  保護内容へ至る実行経路を反例として示します。
+- **VERIFIED（モデル内）**：全cellを認証が覆います。Viewer Requestはlookup前なので
+  HIT/MISSを覆い、Origin RequestだけでもMISSしか到達できなければ覆えます。
+- **UNKNOWN**：key/cacheability/TTL/residency/association/order不足、テンプレート、
+  不完全IR、応答phaseの認証、範囲を明示したredirect/custom-error/bypass等です。
+  lookupより前のViewer認証が証明できれば、その後のcache情報不足では覆しません。
+  例外範囲の宣言自体がなければ証明しません。成立する反例が全体判定をVIOLATEDにしても、
+  別cellのUNKNOWNは保持します。
+- **Error**：不正・矛盾JSON/Policy/model、association重複、未来fill、認証で拒否される
+  fill、資源超過、不正反例です。cache無効、TTLゼロ/失効、異なるkeyは有効なMISS設定で、
+  不可能なHITを明示要求する反例を独立checkerが拒否します。
+
+上限はJSON 1MiB・50,000 nodes・depth64・string16KiB、operation/rule/fill/effect各128、
+Host16、投影auth prefix256・合計64KiB、protected cell最大4,096です。ErrorをUNKNOWNや
+成功へ変換しません。verdictとFindingのseverity/confidence、process終了状態は別物です。
+既存のredacted Finding builderを再利用しますが、findingゼロでVERIFIEDにはしません。
+CLI終了code対応や自動修正はありません。
+
+依存を導入したcheckoutでの再現手順です。
+
+```sh
+npm run build:ts
+npx --no-install vitest run test/contract/auth-cache.test.ts
+node test/fixtures/auth-cache/reproduce.cjs
+```
+
+`reports/issue-1119/reproduction/` に、Origin HITのVIOLATED、Viewer HIT/MISSと
+Origin-only MISSのVERIFIED、key不足のUNKNOWN、時刻不正のErrorを保存します。
+独立した具体リプレイはR所属・E不在・key各要素・fill到達性・TTL・イベント順序を検査し、
+判定器やそのroute/key/reachability helperを呼びません。HTTP条件・trace・fill・時刻/
+key/phaseを変えた反例、不可能なHIT/MISSを拒否するテストを含みます。生成時刻メタデータは
+semantic digestから分離します。実際に消費した正規化IR・Allowed Surface・実行モデルと、投影のため実際にparseしたcanonical Policy JSONを
+埋め込みhashを保持します。Policy provenanceはmaterializeした同じfile/digestを参照し、消費したPolicy validation schemaのdigestも別途保持し、実行receiptはfixture・lockfile・Node版・実際にloadしたrepo module
+へ結合します。未使用の生成物・未観測Cloud状態を証拠にしません。これはモデル内の証拠で、
+実AWS/Cloudflareの動作保証・性能資格・統合・release・Epic完成ではありません。
+
+`request.block.header_present` のenforceはglobalな認証前header受理条件です。
+このMVPにはheader存在の入力次元がないため、影響するcellを
+`UNKNOWN`（`HEADER_ADMISSION_UNMODELED`）にし、独立checkerも反例を拒否します。
+monitorのpresence ruleは拒否しないため認証適用判定を変えません。Next.jsや配備済み
+header状態の推定、headerモデルや公開機能の追加は行いません。

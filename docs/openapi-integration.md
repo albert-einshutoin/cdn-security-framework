@@ -181,3 +181,88 @@ store review evidence if useful, but keep adoption and deployment manual.
 Related references: [policy candidate mapping](openapi-policy-candidates.md),
 [threat model](openapi-threat-model.md), [Finding reference](finding-reference.md),
 and [benchmark](benchmarks/openapi-analysis.md).
+
+## Internal auth × cache verification MVP (#1119)
+
+This local prototype is internal (`src/contract/verification/`), with no package
+entrypoint, CLI, Policy schema, deployment association, or automatic Apply.
+It does not add an Entry/Release requirement to v2.0/v2.1 or complete #533.
+Source/OpenAPI authentication metadata declares an obligation, not runtime proof.
+
+The verifier accepts only constructor-issued, recursively frozen projection snapshots; serialized/replaced/mutated projections are not accepted. Recreate a projection from its raw inputs to replay it. The input is existing Security IR, schema-valid Policy projected through Allowed
+Surface, and an explicit CloudFront execution model. The model enumerates every
+static IR Method/Path × listed Host × abstract credential state (absent/valid),
+not a sample of successful HTTP tests. Hosts are canonical synthetic `.test`
+names; paths are canonical ASCII literal paths (root allowed; templates, encoded
+or other paths remain UNKNOWN). Existing equal-or-prefix-plus-slash matching is preserved: prefix `/` covers only `/`. Global host/method exclusions remain UNKNOWN;
+they do not become invented bypasses. Other non-auth request checks are assumed
+to admit the request and never generate protected content. Credentials are
+abstract states, with no secrets or cryptographic/application authorization proof.
+
+R is the set of declared protected, admitted requests and their reachable paths;
+E is the subset whose execution evaluates a supported blocking auth gate.
+The obligation is R ⊆ E, for both credential states. A valid-credential HIT that
+skips a gate violates this application invariant too; it is not reported as an
+anonymous data leak. Viewer gates accept valid credentials/reject absent ones,
+without rewriting, exceptions, or side effects. Phases are explicit associations
+to projected Policy rule indexes; Policy alone cannot establish deployment.
+
+[Viewer Request runs before cache lookup; Origin Request runs on forwarding to
+the origin](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-cloudfront-trigger-events.html).
+[HIT needs the same key and a valid resident object](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/understanding-the-cache-key.html).
+The effective key here contains the distribution namespace, literal path,
+GET/HEAD group (OPTIONS separate), and explicit viewer-Host/credential partitions.
+Other query/header/cookie key dimensions are outside this model. `cacheable`
+and TTL are effective inputs, never inferred from Policy response headers.
+The fill array is a resident snapshot, with at most one entry per effective key/location; conflicting entries are Error, not a history to select from. A resident fill must precede the input time, have a reachable generation path,
+match key/location, and satisfy `nowMs - storedAtMs < ttlMs`. Fill and read use
+the same auth associations. Eviction, revalidation, origin failover, and arbitrary
+functions are not modeled. Current wall time is not used by the verifier.
+
+- **VIOLATED**: a concrete R\E witness explains Method/Host/Path, credentials,
+  preceding fill, key/TTL/location constraints, and the path to protected content.
+- **VERIFIED (model only)**: every cell is covered. A Viewer Request gate covers
+  HIT/MISS before lookup. Origin-only auth can cover an exclusively reachable MISS.
+- **UNKNOWN**: missing key/cacheability/TTL/residency/association/order, templates,
+  incomplete IR, unsupported response-phase auth, or scoped redirect/custom-error/
+  bypass effects. Unknown suffix cache facts do not negate an earlier proven
+  Viewer gate. Missing effect coverage prevents proof. A known counterexample
+  dominates the aggregate verdict while unrelated UNKNOWN cells remain visible.
+- **Error**: invalid/contradictory JSON/Policy/model, duplicate association, future
+  fill, impossible unauthenticated fill, resource overflow, or invalid witness.
+  Disabled cache, zero/expired TTL and different keys are valid MISS settings;
+  explicitly demanding an impossible HIT is rejected by the independent checker.
+
+Bounds: 1 MiB JSON, 50,000 nodes, depth 64, 16 KiB strings, 128 operations/rules/
+fills/effects, 16 hosts, 256 projected auth prefixes/64 KiB total prefix text.
+The maximum protected cell count is 4,096. Errors are thrown, never converted into
+UNKNOWN or successful exit. Verdict is separate from Finding severity/confidence
+and process exit. Findings use the existing redacted Finding builder; zero
+findings does not imply VERIFIED. There is no CLI exit mapping or auto-fix.
+
+Reproduce locally from the checkout, with dependencies installed:
+
+```sh
+npm run build:ts
+npx --no-install vitest run test/contract/auth-cache.test.ts
+node test/fixtures/auth-cache/reproduce.cjs
+```
+
+The fixture reproducer writes `reports/issue-1119/reproduction/`: origin HIT
+VIOLATED, viewer HIT/MISS VERIFIED, origin-only MISS VERIFIED, missing key UNKNOWN,
+and invalid time Error. The independent concrete replay checks membership in R,
+absence from E, matching key components, fill reachability, TTL, and event order;
+it never calls the verifier or its route/key/reachability helpers. Mutated
+requests, traces, fills, time/key/phase settings and impossible HIT/MISS witnesses
+are rejected. Generated metadata is separate from the semantic digest. Evidence
+embeds and hashes the actually consumed normalized IR, Allowed Surface, execution model, and the canonical Policy JSON actually parsed for projection. Policy provenance resolves to that exact materialized file/digest. The consumed Policy validation schema digest is retained separately. The execution receipt pins the fixture, lockfile, Node version,
+and repository modules actually loaded; no unused compiled/deployed artifact or
+unobserved cloud state is claimed. Evidence is model-only, not an AWS/Cloudflare
+runtime guarantee, performance qualification, integration, release, or Epic proof.
+
+An enforced `request.block.header_present` is projected as a global pre-auth
+header admission condition. This MVP has no header-presence dimension, so affected
+cells remain `UNKNOWN` (`HEADER_ADMISSION_UNMODELED`) and the independent checker
+rejects their witnesses. Monitor-only presence rules do not reject requests and
+therefore do not change auth coverage. This does not infer Next.js or deployed
+header state, and adds no header model or public feature.
