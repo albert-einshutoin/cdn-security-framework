@@ -1,0 +1,129 @@
+{
+  "contract": {
+    "source": "openapi",
+    "capabilities": {
+      "routes": "complete",
+      "parameters": "complete",
+      "requestBodies": "complete",
+      "authentication": "complete"
+    },
+    "operations": [
+      {
+        "method": "GET",
+        "path": "/api/admin/users",
+        "exposure": "authenticated",
+        "auth": {
+          "mode": "alternatives",
+          "alternatives": [
+            {
+              "anonymous": false,
+              "schemes": [
+                {
+                  "name": "basic",
+                  "kind": "basic",
+                  "scopes": [],
+                  "capability": "supported"
+                }
+              ]
+            }
+          ]
+        },
+        "request": {
+          "contentTypes": [],
+          "requiredHeaders": [],
+          "queryParameters": [],
+          "pathParameters": [],
+          "headerParameters": [],
+          "cookieParameters": []
+        },
+        "provenance": [
+          {
+            "source": "openapi",
+            "uri": "fixture/openapi.json",
+            "digest": "sha256:synthetic-declaration",
+            "analyzer": "fixture@1",
+            "capability": "routes",
+            "complete": true
+          }
+        ]
+      }
+    ]
+  },
+  "policy": {
+    "version": 2,
+    "defaults": {
+      "mode": "enforce"
+    },
+    "request": {
+      "allow_methods": [
+        "GET",
+        "HEAD"
+      ],
+      "allowed_hosts": [
+        "admin.example.test"
+      ],
+      "normalize": {
+        "path": {
+          "case_insensitive": false
+        }
+      },
+      "block": {
+        "header_missing": []
+      }
+    },
+    "routes": [
+      {
+        "name": "admin",
+        "match": {
+          "path_prefixes": [
+            "/api/admin"
+          ]
+        },
+        "auth_gate": {
+          "type": "basic_auth",
+          "credentials_env": "MVP_BASIC"
+        }
+      }
+    ],
+    "response_headers": {}
+  },
+  "model": {
+    "version": 1,
+    "hosts": [
+      "admin.example.test"
+    ],
+    "distribution": "distribution.example.test",
+    "location": "edge-1",
+    "nowMs": 2000,
+    "flow": "standard",
+    "originResponds": true,
+    "effects": [],
+    "associations": [
+      {
+        "rule": 0,
+        "phase": "origin-request"
+      }
+    ],
+    "cache": {
+      "enabled": true,
+      "cacheable": true,
+      "ttlMs": 5000,
+      "key": {
+        "host": "distribution",
+        "credential": "shared"
+      },
+      "fills": [
+        {
+          "request": {
+            "method": "GET",
+            "host": "admin.example.test",
+            "path": "/api/admin/users",
+            "credential": "valid"
+          },
+          "storedAtMs": 1000,
+          "location": "edge-1"
+        }
+      ]
+    }
+  }
+}
