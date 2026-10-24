@@ -137,6 +137,7 @@
     "README.md", "README.ja.md", "LICENSE", "docs/api-manifest.json", "docs/quickstart.md", "docs/quickstart.ja.md",
     "docs/openapi-integration.md", "docs/openapi-integration.ja.md", "docs/programmatic-api.md", "docs/programmatic-api.ja.md",
     "examples/openapi/openapi.yaml", "examples/nestjs-contract/run-analysis.cjs", "examples/github-actions/contract-diff.yml",
+    "examples/github-actions/advisory-check.yml",
     "types/policy.d.ts"
   ],
   "internalPaths": [
@@ -161,6 +162,7 @@
       "examples/cloudflare/policy/profiles/balanced.yml",
       "examples/cloudflare/policy/security.yml",
       "examples/github-actions/contract-diff.yml",
+      "examples/github-actions/advisory-check.yml",
       "examples/github-actions/fixtures/openapi.yaml",
       "examples/github-actions/fixtures/policy.yml",
       "examples/nestjs-contract/README.ja.md",
@@ -237,6 +239,8 @@
       "lib/migration-v1-schema.js",
       "openapi/analysis-error.js",
       "openapi/analysis-limits.js",
+      "openapi/application-advisories.js",
+      "openapi/application-dependencies.js",
       "openapi/document-graph.js",
       "openapi/index.js",
       "openapi/inspect.js",
@@ -327,6 +331,8 @@
       "lib/migration-v1-schema.d.ts",
       "openapi/analysis-error.d.ts",
       "openapi/analysis-limits.d.ts",
+      "openapi/application-advisories.d.ts",
+      "openapi/application-dependencies.d.ts",
       "openapi/document-graph.d.ts",
       "openapi/index.d.ts",
       "openapi/inspect.d.ts",

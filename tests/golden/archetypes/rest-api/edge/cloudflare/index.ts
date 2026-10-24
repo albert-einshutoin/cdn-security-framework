@@ -19,6 +19,7 @@ const CFG = {
   blockPathRegexGroups: [],
   normalizePath: {"collapseSlashes":true,"removeDotSegments":true,"caseInsensitive":true,"rejectAmbiguousEncoding":true},
   requiredHeaders: ["user-agent"],
+  blockedHeaders: [],
   allowedHosts: [],
   trustForwardedFor: false,
   cors: {"allow_origins":["https://app.example.com"],"allow_methods":["GET","POST","PUT","PATCH","DELETE","OPTIONS"],"allow_headers":["authorization","content-type","x-request-id"],"allow_credentials":true,"max_age":600},
@@ -483,7 +484,13 @@ function handleCorsPreflight(request) {
 }
 var stdin_default = {
   async fetch(request, env) {
-    const url = new URL(request.url), rawPathname = rawPathnameFromRequestUrl(request.url), ctx = reqCtx(request, url.pathname), allowSamplingKey = "", preflight = handleCorsPreflight(request);
+    const url = new URL(request.url), rawPathname = rawPathnameFromRequestUrl(request.url), ctx = reqCtx(request, url.pathname), allowSamplingKey = "";
+    for (const header of CFG.blockedHeaders)
+      if (request.headers.has(header)) {
+        const blocked = shouldBlock(403, "Forbidden Header", ctx);
+        if (blocked) return blocked;
+      }
+    const preflight = handleCorsPreflight(request);
     if (preflight) return preflight;
     if (!isHostAllowed(request.headers.get("host") || url.hostname)) {
       const r = shouldBlock(400, "Host Not Allowed", ctx);

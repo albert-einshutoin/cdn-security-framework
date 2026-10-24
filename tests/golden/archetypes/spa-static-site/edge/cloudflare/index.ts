@@ -19,6 +19,7 @@ const CFG = {
   blockPathRegexGroups: [],
   normalizePath: {"collapseSlashes":true,"removeDotSegments":true,"caseInsensitive":true,"rejectAmbiguousEncoding":true},
   requiredHeaders: ["user-agent"],
+  blockedHeaders: [],
   allowedHosts: [],
   trustForwardedFor: false,
   cors: null,
@@ -272,7 +273,13 @@ function appendVary(headers, token) {
 }
 var stdin_default = {
   async fetch(request, env) {
-    const url = new URL(request.url), rawPathname = rawPathnameFromRequestUrl(request.url), ctx = reqCtx(request, url.pathname), allowSamplingKey = "", preflight = null;
+    const url = new URL(request.url), rawPathname = rawPathnameFromRequestUrl(request.url), ctx = reqCtx(request, url.pathname), allowSamplingKey = "";
+    for (const header of CFG.blockedHeaders)
+      if (request.headers.has(header)) {
+        const blocked = shouldBlock(403, "Forbidden Header", ctx);
+        if (blocked) return blocked;
+      }
+    const preflight = null;
     if (preflight) return preflight;
     if (!isHostAllowed(request.headers.get("host") || url.hostname)) {
       const r = shouldBlock(400, "Host Not Allowed", ctx);

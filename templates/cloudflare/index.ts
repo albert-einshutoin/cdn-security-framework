@@ -1381,6 +1381,14 @@ export default {
     // not make repeated requests enter different sample buckets.
     const allowSamplingKey = /* {{FEATURE_ALLOW_SAMPLING_KEY}} */ true ? allowSampleKey(ctx) : '';
 
+    // Also guard framework routes and preflight; empty header values count.
+    for (const header of CFG.blockedHeaders) {
+      if (request.headers.has(header)) {
+        const blocked = shouldBlock(403, 'Forbidden Header', ctx);
+        if (blocked) return blocked;
+      }
+    }
+
     const preflight = /* {{FEATURE_CORS_REQUEST}} */ true ? handleCorsPreflight(request) : null;
     if (preflight) return preflight;
 

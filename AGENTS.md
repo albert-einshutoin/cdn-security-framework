@@ -9,6 +9,7 @@ TypeScript under `src/` is authoritative; do not edit generated JavaScript.
 | Native Cloudflare HTTP / JWKS E2E, also included in complete validation | `npm run test:cloudflare-http-e2e` |
 | PR impact plan / execution | `npm run impact:analyze -- --base <base> --head <head> --output <analysis>` / `npm run impact:run -- --analysis <analysis> --output <report>` |
 | Package artifact gate tests | `node scripts/single-pack-unit-tests.js` after build |
+| Next.js advisory check (local or scheduled consumer CI) | `node bin/cli.js advisory check --package-json package.json --package-lock package-lock.json --deployment self-hosted --workspace-root .` after build; requires a matching direct production Next.js dependency and HTTPS to GitHub |
 | Release approval, workflow permissions and artifact binding checks | `node scripts/release-binding-unit-tests.js` after build; does not publish |
 | Single-pack producer / consumer / aggregate | `node scripts/single-pack.js produce <artifact-dir>` / `consume <artifact-dir> <row> <result>` / `aggregate <artifact-dir> <results-dir> <summary>` |
 

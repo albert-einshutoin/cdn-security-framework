@@ -433,6 +433,7 @@ function build(policy: any, options: any = {}) {
       blockPathRegexes: runtimeCode(regexesLiteralCode(requestBase.blockPathRegexSources)),
       normalizePath: requestBase.normalizePath,
       requiredHeaders: requestBase.requiredHeaders,
+      blockedHeaders: requestBase.blockedHeaders,
       allowedHosts: requestBase.allowedHosts,
       trustForwardedFor: requestBase.trustForwardedFor,
       cors: requestBase.cors,

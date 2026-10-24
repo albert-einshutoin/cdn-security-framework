@@ -102,6 +102,12 @@ export interface CDNSecurityFrameworkPolicy {
           };
       ua_contains?: string[];
       header_missing?: string[];
+      /**
+       * Block requests containing any named header, including an empty value. Case-insensitive; evaluated before CORS preflight. Monitor mode only logs.
+       *
+       * @maxItems 64
+       */
+      header_present?: string[];
     };
     normalize?: {
       drop_query_keys?: string[];

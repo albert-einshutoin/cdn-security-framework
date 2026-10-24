@@ -2,6 +2,8 @@
 
 Copy [`examples/github-actions/contract-diff.yml`](../examples/github-actions/contract-diff.yml) to `.github/workflows/contract-diff.yml`, then replace the example `--openapi` and `--policy` paths with repository-owned files. Keep `cdn-security-framework` in `package.json` and use `npm ci`; the example invokes `./node_modules/.bin/cdn-security` directly so a missing dependency fails instead of downloading an unreviewed package version.
 
+For recurring Next.js checks, copy [`examples/github-actions/advisory-check.yml`](../examples/github-actions/advisory-check.yml) into the consumer. Use `--deployment self-hosted` only for a self-hosted origin, and set the package/lock paths to the intended app. The schedule checks public GitHub-reviewed advisories; it does not auto-apply mitigations or attest real CDN enforcement. Exit `2` means action is needed and `1` means the result is unknown; either fails the job.
+
 The workflow is safe for fork pull requests: it uses `pull_request`, reads no secrets, has only `contents: read`, does not post comments, cancels obsolete runs, and pins actions to commits. It writes a bounded summary to `$GITHUB_STEP_SUMMARY` and uploads `contract-diff.json`, `cdn-security.sarif`, and `github-summary.md`. The summary excludes messages, evidence, query strings, and request bodies.
 
 ## Gate and required check

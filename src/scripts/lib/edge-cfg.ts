@@ -376,6 +376,7 @@ export function buildRequestCfgBase(policy: {
     blockPathRegexSources,
     normalizePath: buildPathNormalizationCfg(pathNormalize),
     requiredHeaders,
+    blockedHeaders: normalizeStringList(block.header_present, 'lower'),
     allowedHosts,
     trustForwardedFor,
     cors: corsConfig,

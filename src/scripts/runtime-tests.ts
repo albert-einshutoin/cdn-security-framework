@@ -309,6 +309,7 @@ if (b1ReportIndex >= 0) {
     '  blockPathRegexes: [],',
     '  normalizePath: { collapseSlashes: false, removeDotSegments: false },',
     '  requiredHeaders: [],',
+    '  blockedHeaders: [],',
     '  allowedHosts: ["api.example.com", "*.cdn.example.com"],',
     '  trustForwardedFor: false,',
     '  cors: null,',
@@ -358,6 +359,7 @@ if (b1ReportIndex >= 0) {
     '  blockPathRegexes: [],',
     '  normalizePath: { collapseSlashes: false, removeDotSegments: false },',
     '  requiredHeaders: [],',
+    '  blockedHeaders: [],',
     '  allowedHosts: [],',
     '  trustForwardedFor: false,',
     '  cors: null,',
@@ -461,6 +463,7 @@ function runViewerMonitorTests() {
     '  blockPathRegexes: [],',
     '  normalizePath: { collapseSlashes: true, removeDotSegments: true },',
     '  requiredHeaders: ["user-agent"],',
+    '  blockedHeaders: ["x-middleware-subrequest"],',
     '  cors: null,',
     '  authGates: [{',
     '    name: "admin",',
@@ -477,6 +480,9 @@ function runViewerMonitorTests() {
   if (!monitorHandler) return { failed: 1, total: 1 };
 
   const monitorCases = [
+    ['viewer-monitor: forbidden header is logged without blocking',
+      buildEvent('GET', '/', { 'user-agent': 'Mozilla', 'x-middleware-subrequest': '' }),
+      'allow'],
     // In monitor mode, blocked method should pass through
     ['viewer-monitor: POST blocked method passes through',
       buildEvent('POST', '/', { 'user-agent': 'Mozilla' }),

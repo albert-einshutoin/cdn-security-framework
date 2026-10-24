@@ -43,14 +43,14 @@ test.each([32, 64, 80])('%i routes still fit CloudFront and protect the last rou
   expect(output.responseCode).toContain('authPathIndex');
 });
 
-test('indexed overlapping gates preserve AND evaluation and policy denial order', () => {
+test('overlapping gates preserve AND evaluation and policy denial order with the selected algorithm', () => {
   const p = policy();
   p.request.anomaly_guards.enabled = false;
   p.routes = [{ name: 'first', match: { path_prefixes: Array.from({ length: 32 }, (_, i) => '/p' + i) },
     auth_gate: { type: 'static_token', token_env: 'TOKEN' } },
   { name: 'second', match: { path_prefixes: ['/p31/deep'] }, auth_gate: { type: 'basic_auth', credentials_env: 'BASIC_AUTH_CREDS' } }];
   const output = generate(p);
-  expect(output.requestCode).toContain('authGateIndex');
+  expect(Buffer.byteLength(output.requestCode)).toBeLessThanOrEqual(10240);
   expect(output.request(request('/p31/deep')).headers['www-authenticate']).toBeUndefined();
   expect(output.request(request('/p31/deep', env.TOKEN)).headers['www-authenticate'].value).toContain('Basic');
   const authorized = request('/p31/deep', env.TOKEN);
