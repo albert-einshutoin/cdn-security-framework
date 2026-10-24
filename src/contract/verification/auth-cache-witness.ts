@@ -8,7 +8,9 @@ export function checkAuthCacheWitness(p: Projection, w: Witness): true {
   const m=p.model, s=p.surface, r=w.request;
   assert(w.inputDigest===p.digest && ['absent','valid'].includes(r.credential) && m.hosts.includes(r.host));
   const op=p.contract.operations.find(o=>o.routeKey===w.routeKey);
-  assert(op && op.method===r.method && op.path===r.path && !/[{}%]/.test(r.path));
+  assert(op && op.method===r.method && op.path===r.path);
+  assert(typeof r.path==='string' && r.path.length<=2048 && /^\/(?:[A-Za-z0-9_~.-]+(?:\/[A-Za-z0-9_~.-]+)*)?$/.test(r.path)
+    && !r.path.split('/').some(segment=>segment==='.' || segment==='..'));
   assert(['authenticated','privileged'].includes(op.exposure) || (op.auth.mode==='alternatives' && op.auth.alternatives.every(a=>!a.anonymous)));
   assert(p.contract.capabilities.routes==='complete' && p.contract.capabilities.authentication==='complete');
   assert(m.flow==='standard' && Array.isArray(m.associations) && m.effects!==undefined && !s.defaults.pathNormalization.caseInsensitive);

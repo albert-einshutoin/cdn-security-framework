@@ -285,3 +285,26 @@ test.each(['origin-request','viewer-request'] as const)('monitor-only blocked he
   const r=verifyAuthCache(projectAuthCache(contract,pol,{...model,associations:[{rule:0,phase}]}));
   expect(r.semantic.verdict).toBe(phase==='origin-request'?'VIOLATED':'VERIFIED');
 });
+
+test.each([
+  ['Unicode', '/api/café', false],
+  ['nonliteral punctuation', '/api/user+id', false],
+  ['overlong', '/'+'a'.repeat(2048), false],
+  ['root', '/', true],
+  ['ASCII segments', '/api/Users_~.-/user-1', true],
+  ['maximum length', '/'+'a'.repeat(2047), true],
+] as const)('independent replay enforces the literal-path domain: %s', (_name,path,supported)=>{
+  const c=structuredClone(contract);c.operations[0].path=path;
+  const pol=structuredClone(policy);pol.routes![0].match.path_prefixes=['/unrelated'];
+  const p=projectAuthCache(c,pol,{...model,associations:[],cache:{enabled:false}});
+  const report=verifyAuthCache(p),op=p.contract.operations[0];
+  const w={inputDigest:p.digest,routeKey:op.routeKey,request:{method:op.method,host:'admin.example.test',path:op.path,credential:'absent' as const},cache:'MISS' as const,trace:['viewer-request','cache-lookup','MISS','origin-request','protected-response']};
+  if(supported){
+    expect(report.semantic.verdict).toBe('VIOLATED');
+    expect(checkAuthCacheWitness(p,w)).toBe(true);
+  } else {
+    expect(report.semantic.cells.every(c=>c.reason==='PATH_DOMAIN_UNSUPPORTED')).toBe(true);
+    expect(report.semantic.verdict).toBe('UNKNOWN');
+    expect(()=>checkAuthCacheWitness(p,w)).toThrow('INVALID_AUTH_CACHE_WITNESS');
+  }
+});
