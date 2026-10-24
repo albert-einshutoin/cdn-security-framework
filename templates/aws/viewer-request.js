@@ -613,6 +613,15 @@
       }
     }
 
+    // Presence, rather than value, implements vendor virtual patches even for
+    // empty headers and must precede preflight's early return.
+    for (const header of CFG.blockedHeaders) {
+      if (Object.prototype.hasOwnProperty.call(req.headers, header)) {
+        const blocked = shouldBlock(resp(403, 'Forbidden Header'), req);
+        if (blocked) return blocked;
+      }
+    }
+
     // 0b) CORS preflight handling
     if (/* {{FEATURE_CORS}} */ true) {
       const preflight = handleCorsPreflight(req);

@@ -27,6 +27,7 @@ npx cdn-security <subcommand> [options]
 | `migrate` | v1→v2をpreview、または原本backup付きで明示保存。 |
 | `openapi inspect` | Policyやbuild出力を変更せず、ローカルOpenAPIのSecurity Contractを決定的なText/JSONで確認。 |
 | `openapi generate-policy` | 非破壊・review専用Policy Candidateとmeta sidecarを生成。 |
+| `advisory check` | 確定したNext.js版についてGitHub審査済みadvisoryを照会し、対応要否をJSONで報告。 |
 | `contract diff` | OpenAPI宣言と有効Policyを比較し、Security Findingを出力。 |
 
 ---
@@ -92,6 +93,11 @@ JSON出力は[`openapi-inspection-v1.schema.json`](../schemas/openapi-inspection
 
 ## `openapi generate-policy`
 
+任意の`--package-json`と`--package-lock`は必ず対で指定します。
+`--deployment self-hosted|static-export|unknown`はNext.js originの実行方式
+（既定`unknown`）です。初期対応はCVE-2025-29927だけで、版や実行方式が
+確定しなければ生成を止めます。[バージョン別Candidate](openapi-policy-candidates.ja.md#nextjsのバージョンに応じた仮想パッチ)を参照してください。
+
 ```bash
 npx cdn-security openapi generate-policy \
   --input openapi.yaml \
@@ -109,6 +115,27 @@ npx cdn-security openapi generate-policy \
 
 runnable example、limit、review workflow、troubleshootingは
 [OpenAPI導入ガイド](openapi-integration.ja.md)を参照してください。
+
+## `advisory check`
+
+```bash
+npx cdn-security advisory check \
+  --package-json package.json --package-lock package-lock.json \
+  --deployment self-hosted --workspace-root .
+```
+
+直接の本番用`next`をnpm lockfile v2/v3から確定し、GitHubの公開・審査済みnpm
+advisoryをその版で照会します。JSONには照会時刻、入力digest、版、GHSA/CVE ID、
+`mitigation-candidate-available` / `unassessed` / `not-applicable`を記録します。
+候補は配備済みの証明ではありません。終了コード`0`はこの限定した照会で対応対象なし、
+`2`は対応が必要、`1`は入力・実行方式・feedを確定できない失敗です。直接の本番用
+`next`宣言がない場合も`not-declared`のJSONと終了コード`1`になります。
+
+GitHubへのHTTPS照会だけを行い、package script、install、生成・適用はしません。
+`feedDigest`は受け取った応答bytesのSHA-256で、後日の同一応答照合に使えます。
+応答が不完全・不正・取得不能なら終了コード`1`にし、脆弱性なしとは報告しません。
+本コマンドは全依存の脆弱性監査ではありません。適用範囲と恒久対応は
+[Next.js Candidate](openapi-policy-candidates.ja.md#継続advisory確認)を参照してください。
 
 ---
 

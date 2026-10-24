@@ -113,7 +113,8 @@ export function compareRequestContractsInContext(
     if (!recommendation) continue;
     const corsPreflight = input.allowed.defaults.corsPreflight;
     const preflightBypassesValidation = operation.method === 'OPTIONS'
-      && corsPreflight.bypassScope === 'all-request-validation-including-host-and-auth'
+      && (corsPreflight.bypassScope === 'all-request-validation-including-host-and-auth'
+        || corsPreflight.bypassScope === 'remaining-validation-including-host-and-auth')
       && (corsPreflight.origins.kind === 'any'
         || (corsPreflight.origins.kind === 'allowlist'
           && corsPreflight.origins.values.some((origin) => origin.length > 0)));

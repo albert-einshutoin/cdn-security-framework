@@ -27,6 +27,7 @@ npx cdn-security <subcommand> [options]
 | `migrate` | Preview or explicitly save a validated v1→v2 migration with an original-policy backup. |
 | `openapi inspect` | Inspect local OpenAPI security contracts as deterministic text or JSON without changing policy or build output. |
 | `openapi generate-policy` | Generate a non-destructive, review-only policy candidate and metadata sidecar. |
+| `advisory check` | Query GitHub-reviewed advisories for an exact Next.js version and report action needed as JSON. |
 | `contract diff` | Compare OpenAPI declarations with the effective policy and emit security findings. |
 
 ---
@@ -107,9 +108,39 @@ npx cdn-security openapi generate-policy \
   `.meta.json` sidecar. It never merges with the active policy or deploys it.
 - Authentication details and unsupported controls are reported as omitted,
   never guessed or approximated.
+- Optional `--package-json` and `--package-lock` must be supplied together.
+  `--deployment self-hosted|static-export|unknown` describes the Next.js origin
+  (default `unknown`). Initial coverage is CVE-2025-29927 only; uncertain version
+  or deployment analysis stops generation. See [version-aware candidates](openapi-policy-candidates.md#version-aware-nextjs-virtual-patch).
 
 See the [OpenAPI integration guide](openapi-integration.md) for the runnable
 example, limits, review workflow, and troubleshooting.
+
+## `advisory check`
+
+```bash
+npx cdn-security advisory check \
+  --package-json package.json --package-lock package-lock.json \
+  --deployment self-hosted --workspace-root .
+```
+
+The command resolves a direct production `next` version from npm lockfile v2/v3,
+then queries public GitHub-reviewed npm advisories for that version. JSON records
+the check time, input digests, version, GHSA/CVE IDs, and
+`mitigation-candidate-available`, `unassessed`, or `not-applicable`. A candidate
+does not prove deployment. Exit `0` means no actionable advisory within this
+limited check, `2` means action is needed, and `1` means input, deployment, or
+feed coverage could not be established. No direct production `next` declaration
+returns `not-declared` JSON with exit `1`.
+
+It makes only an HTTPS request to GitHub. `feedDigest` is the SHA-256 of the
+received response bytes for later comparison. It runs no package scripts or installs,
+and generates or applies no policy. An incomplete, invalid, or unavailable feed
+exits `1`, never a clean result. This is not an all-dependency vulnerability audit.
+See [Next.js candidate coverage](openapi-policy-candidates.md#continuous-advisory-check)
+for scope and permanent remediation.
+
+---
 
 ---
 

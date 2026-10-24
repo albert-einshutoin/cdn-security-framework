@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import type { SecurityContractV1 } from '../contract/security-ir';
 import { securityContractSemanticDigest } from '../contract/semantic-digest';
 import { recommendRequestLimits, type RecommendationCandidate } from '../recommendation';
+import { analyzeApplicationDependencies, ApplicationDependencyError, type ApplicationDependencyInput, type ApplicationDependencyAnalysis } from './application-dependencies';
 
 export const POLICY_CANDIDATE_GENERATOR_VERSION = 1 as const;
 export const POLICY_CANDIDATE_PROFILES = ['strict', 'balanced', 'permissive'] as const;
@@ -36,12 +37,14 @@ export interface PolicyCandidateMetadataV1 {
   appliedRecommendations: AppliedPolicyRecommendation[];
   omittedRecommendations: OmittedPolicyRecommendation[];
   capabilityFindings: unknown[];
+  application?: ApplicationDependencyAnalysis;
 }
 
 export interface GeneratePolicyCandidateOptions {
   profile: PolicyCandidateProfile;
   profilePolicy: PolicyObject;
   sourceDigest: string;
+  application?: ApplicationDependencyInput;
   evaluateCapabilities?: (policy: PolicyObject) => { findings: unknown[] };
 }
 
@@ -158,6 +161,11 @@ export function generatePolicyCandidate(
   if (!/^sha256:[a-f0-9]{64}$/.test(options.sourceDigest)) throw new Error('invalid source digest');
 
   if (options.profilePolicy.version !== 2) throw new Error('policy schema 2 is required');
+  const application = options.application === undefined ? undefined : analyzeApplicationDependencies(options.application);
+  if (application?.findings.some(({ status }) => status === 'unknown')) {
+    throw new ApplicationDependencyError('APPLICATION_ANALYSIS_UNKNOWN',
+      `Application analysis is unknown: ${application.findings.filter(({ status }) => status === 'unknown').map(({ reason }) => reason).join(', ')}. No candidate was generated.`);
+  }
   const policy = structuredClone(options.profilePolicy);
   const request = objectValue(policy.request);
   const limits = objectValue(request.limits);
@@ -169,7 +177,7 @@ export function generatePolicyCandidate(
 
   delete policy.routes;
 
-  if (contract.capabilities.routes === 'complete') {
+  if (!application && contract.capabilities.routes === 'complete') {
     const methods = uniqueSorted(contract.operations.map(({ method }) => method));
     request.allow_methods = methods;
     applied.push({
@@ -179,14 +187,15 @@ export function generatePolicyCandidate(
       value: methods,
     });
   } else {
-    omitted.push({ id: 'global-allowed-methods', reason: 'route-capability-is-not-complete', basis: [] });
+    omitted.push({ id: 'global-allowed-methods', reason: application
+      ? 'openapi-does-not-cover-application-routes' : 'route-capability-is-not-complete', basis: [] });
   }
 
   const headers = commonRequiredHeaders(contract);
   const baselineHeaders = Array.isArray(block.header_missing)
     ? block.header_missing.filter((header): header is string => typeof header === 'string')
     : [];
-  if (headers.length > 0) {
+  if (headers.length > 0 && !application) {
     const requiredHeaders = uniqueSorted([...baselineHeaders, ...headers]);
     block.header_missing = requiredHeaders;
     applied.push({
@@ -196,6 +205,10 @@ export function generatePolicyCandidate(
       value: requiredHeaders,
     });
   }
+  if (headers.length > 0 && application) omitted.push({
+    id: 'global-required-headers', reason: 'openapi-does-not-cover-application-routes',
+    basis: recommendationBasis(operationRecommendations.map(({ requiredHeaders }) => requiredHeaders)),
+  });
   const routeSpecificHeaders = uniqueSorted(contract.operations.flatMap(({ request: operationRequest }) => (
     operationRequest.requiredHeaders.filter((header) => !headers.includes(header))
   )));
@@ -205,12 +218,24 @@ export function generatePolicyCandidate(
     basis: recommendationBasis(operationRecommendations.map(({ requiredHeaders }) => requiredHeaders)),
   });
 
-  applyNumericLimit(limits, 'max_query_params',
-    operationRecommendations.map(({ maxQueryParams }) => maxQueryParams), applied, omitted);
-  applyNumericLimit(limits, 'max_query_length',
-    operationRecommendations.map(({ maxQueryLength }) => maxQueryLength), applied, omitted);
-  applyNumericLimit(limits, 'max_uri_length',
-    operationRecommendations.map(({ maxUriLength }) => maxUriLength), applied, omitted);
+  if (application) {
+    for (const id of Object.keys(POLICY_LIMITS)) omitted.push({
+      id, reason: 'openapi-does-not-cover-application-routes', basis: [],
+    });
+    if (application.findings.some(({ status }) => status === 'mitigation-generated')) {
+      const existing = Array.isArray(block.header_present) ? block.header_present as string[] : [];
+      block.header_present = uniqueSorted([...existing, 'x-middleware-subrequest']);
+      applied.push({ id: 'CVE-2025-29927', policyPath: 'request.block.header_present',
+        basis: [application.findings[0].source], value: block.header_present });
+    }
+  } else {
+    applyNumericLimit(limits, 'max_query_params',
+      operationRecommendations.map(({ maxQueryParams }) => maxQueryParams), applied, omitted);
+    applyNumericLimit(limits, 'max_query_length',
+      operationRecommendations.map(({ maxQueryLength }) => maxQueryLength), applied, omitted);
+    applyNumericLimit(limits, 'max_uri_length',
+      operationRecommendations.map(({ maxUriLength }) => maxUriLength), applied, omitted);
+  }
   request.limits = limits;
   request.block = block;
   policy.request = request;
@@ -264,6 +289,7 @@ export function generatePolicyCandidate(
       appliedRecommendations: applied,
       omittedRecommendations: omitted,
       capabilityFindings,
+      ...(application ? { application } : {}),
     },
   };
 }

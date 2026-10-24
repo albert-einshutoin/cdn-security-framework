@@ -2,6 +2,8 @@
 
 [`examples/github-actions/contract-diff.yml`](../examples/github-actions/contract-diff.yml)を`.github/workflows/contract-diff.yml`へコピーし、例の`--openapi`と`--policy`をリポジトリ内のファイルへ変更します。`cdn-security-framework`は`package.json`で固定し、`npm ci`を使ってください。例は`./node_modules/.bin/cdn-security`を直接実行するため、依存が欠落しても未レビューのpackage versionを取得せず失敗します。
 
+Next.jsの継続確認には[`examples/github-actions/advisory-check.yml`](../examples/github-actions/advisory-check.yml)をconsumerへコピーできます。`--deployment self-hosted`は実際にself-hostedの場合だけ使い、package/lockのpathを対象アプリへ合わせてください。scheduleはGitHub公開・審査済みadvisoryの確認であり、緩和策の自動適用や実CDNの防御証明ではありません。終了コード`2`は対応が必要、`1`は判断不能で、どちらもjobを失敗させます。
+
 workflowはfork PRでも安全です。`pull_request`を使い、secretを読まず、権限は`contents: read`だけで、コメントを投稿せず、古いrunをcancelし、actionをcommit SHAで固定します。`$GITHUB_STEP_SUMMARY`には件数と上位findingだけを出し、`contract-diff.json`、`cdn-security.sarif`、`github-summary.md`をartifactにします。summaryへmessage、evidence、query string、request bodyは出しません。
 
 ## Gateとrequired check

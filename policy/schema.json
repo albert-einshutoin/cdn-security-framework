@@ -146,7 +146,14 @@
               ]
             },
             "ua_contains": { "type": "array", "items": { "type": "string" } },
-            "header_missing": { "type": "array", "items": { "type": "string" } }
+            "header_missing": { "type": "array", "items": { "type": "string" } },
+            "header_present": {
+              "description": "Block requests containing any named header, including an empty value. Case-insensitive; evaluated before CORS preflight. Monitor mode only logs.",
+              "type": "array",
+              "maxItems": 64,
+              "uniqueItems": true,
+              "items": { "type": "string", "minLength": 1, "maxLength": 256, "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$" }
+            }
           }
         },
         "normalize": {

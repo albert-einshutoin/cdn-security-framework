@@ -16,6 +16,8 @@ import {
   type PolicyObject,
 } from '../../openapi';
 import { inspectOpenApiForCli } from '../../openapi/inspect';
+import { ApplicationDependencyError, MAX_APPLICATION_INPUT_BYTES, type ApplicationDependencyInput, type ApplicationDeployment } from '../../openapi/application-dependencies';
+import { AdvisoryCheckError, checkNextAdvisories } from '../../openapi/application-advisories';
 
 interface OpenApiInspectCliOptions {
   input: string;
@@ -31,6 +33,16 @@ interface OpenApiPolicyCandidateCliOptions {
   profile: string;
   out: string;
   force?: boolean;
+  packageJson?: string;
+  packageLock?: string;
+  deployment?: string;
+}
+
+interface ApplicationInputCliOptions {
+  workspaceRoot: string;
+  packageJson?: string;
+  packageLock?: string;
+  deployment?: string;
 }
 
 interface OpenApiCommandDependencies {
@@ -462,12 +474,14 @@ function runPolicyCandidate(
     inputPath: options.input,
     workspaceRoot: options.workspaceRoot,
   });
+  const application = readApplicationInputs(options);
   const profilePath = path.join(dependencies.pkgRoot, 'policy', 'profiles', `${profile}.yml`);
   const profilePolicy = yaml.load(fs.readFileSync(profilePath, 'utf8')) as PolicyObject;
   const generated = generatePolicyCandidate(inspection.report.contract, {
     profile,
     profilePolicy,
     sourceDigest: inspection.report.analyzer.sourceDigest,
+    ...(application ? { application: application.input } : {}),
     evaluateCapabilities: (policy) => dependencies.evaluatePolicyCapabilities(policy, 'candidate', 'all'),
   });
   const validation = dependencies.validatePolicy({ policy: generated.policy, pkgRoot: dependencies.pkgRoot });
@@ -477,7 +491,7 @@ function runPolicyCandidate(
       'Generated policy candidate did not pass the current policy validator.',
     );
   }
-  const outputs = candidateOutputPair(options, inspection.sourcePaths);
+  const outputs = candidateOutputPair(options, [...inspection.sourcePaths, ...(application?.sourcePaths ?? [])]);
   const candidate = yaml.dump(generated.policy, {
     lineWidth: -1,
     noRefs: true,
@@ -485,6 +499,59 @@ function runPolicyCandidate(
   const metadata = `${JSON.stringify(generated.metadata, null, 2)}\n`;
   writeCandidatePair(outputs, candidate, metadata);
   process.stdout.write('[SUCCESS] Created policy candidate and metadata sidecar.\n');
+}
+
+function readApplicationInputs(options: ApplicationInputCliOptions): {
+  input: ApplicationDependencyInput;
+  sourcePaths: string[];
+} | undefined {
+  if (options.packageJson === undefined && options.packageLock === undefined && options.deployment === undefined) return;
+  if (!options.packageJson || !options.packageLock
+    || !['self-hosted', 'static-export', 'unknown'].includes(options.deployment ?? 'unknown')) {
+    throw new ApplicationDependencyError('APPLICATION_INPUT_INVALID',
+      'Use --package-json and --package-lock together; --deployment must be self-hosted, static-export, or unknown.');
+  }
+  const sourcePaths: string[] = [];
+  const read = (requested: string): string => {
+    let descriptor: number | undefined;
+    try {
+      const root = fs.realpathSync(options.workspaceRoot);
+      const requestedRoot = path.resolve(options.workspaceRoot);
+      const lexical = path.resolve(requestedRoot, requested);
+      if (!isPathWithinWorkspace(root, lexical) && !isPathWithinWorkspace(requestedRoot, lexical)) throw new Error('outside root');
+      const real = fs.realpathSync(lexical);
+      if (!isPathWithinWorkspace(root, real)) throw new Error('outside root');
+      const before = fs.statSync(real);
+      if (!before.isFile() || before.size > MAX_APPLICATION_INPUT_BYTES) throw new Error('invalid input');
+      descriptor = fs.openSync(real, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK | (fs.constants.O_NOFOLLOW ?? 0));
+      const opened = fs.fstatSync(descriptor);
+      if (!sameFile(opened, { device: before.dev, inode: before.ino }) || !opened.isFile()) throw new Error('changed input');
+      const bytes = Buffer.alloc(MAX_APPLICATION_INPUT_BYTES + 1);
+      let length = 0;
+      while (length < bytes.length) {
+        const count = fs.readSync(descriptor, bytes, length, bytes.length - length, null);
+        if (count === 0) break;
+        length += count;
+      }
+      const after = fs.fstatSync(descriptor);
+      if (length > MAX_APPLICATION_INPUT_BYTES || length !== after.size
+        || before.size !== after.size || before.mtimeMs !== after.mtimeMs
+        || fs.realpathSync(lexical) !== real) throw new Error('changed input');
+      const content = bytes.subarray(0, length);
+      new TextDecoder('utf-8', { fatal: true }).decode(content);
+      sourcePaths.push(real);
+      return content.toString('utf8');
+    } catch {
+      throw new ApplicationDependencyError('APPLICATION_INPUT_INVALID',
+        'Application inputs must be stable regular UTF-8 files inside the workspace, at most 8 MiB each.');
+    } finally {
+      if (descriptor !== undefined) fs.closeSync(descriptor);
+    }
+  };
+  return { input: {
+    packageJson: read(options.packageJson), packageLock: read(options.packageLock),
+    deployment: (options.deployment ?? 'unknown') as ApplicationDeployment,
+  }, sourcePaths };
 }
 
 export function registerOpenApiInspectCommand(
@@ -523,16 +590,47 @@ export function registerOpenApiInspectCommand(
     .requiredOption('--profile <name>', 'Built-in profile: strict | balanced | permissive')
     .requiredOption('--out <path>', 'Write a new .yml or .yaml policy candidate inside the workspace')
     .option('--workspace-root <path>', 'Workspace boundary for input, local refs, and output', '.')
+    .option('--package-json <path>', 'Application package.json (requires --package-lock)')
+    .option('--package-lock <path>', 'Application npm lockfile v2 or v3 (requires --package-json)')
+    .option('--deployment <type>', 'Next.js origin: self-hosted | static-export | unknown')
     .option('--force', 'Overwrite existing regular candidate and metadata files')
     .action((options: OpenApiPolicyCandidateCliOptions) => {
       try {
         runPolicyCandidate(options, dependencies);
       } catch (error: unknown) {
         if (error instanceof OpenApiAnalysisError
+          || error instanceof ApplicationDependencyError
           || error instanceof OpenApiPolicyCandidateCliError) {
           console.error(`[ERROR] ${error.code}: ${error.message}`);
         } else {
           console.error('[ERROR] OPENAPI_CANDIDATE_FAILED: Policy candidate generation failed.');
+        }
+        process.exitCode = 1;
+      }
+    });
+
+  program
+    .command('advisory')
+    .description('Check reviewed Next.js advisories for an exact installed version')
+    .command('check')
+    .requiredOption('--package-json <path>', 'Application package.json')
+    .requiredOption('--package-lock <path>', 'Application npm lockfile v2 or v3')
+    .option('--deployment <type>', 'Next.js origin: self-hosted | static-export | unknown', 'unknown')
+    .option('--workspace-root <path>', 'Workspace boundary for dependency inputs', '.')
+    .action(async (options: ApplicationInputCliOptions) => {
+      try {
+        const application = readApplicationInputs(options);
+        if (!application) throw new ApplicationDependencyError('APPLICATION_INPUT_INVALID',
+          'Use --package-json and --package-lock together.');
+        const report = await checkNextAdvisories(application.input);
+        process.stdout.write(`${JSON.stringify(report, null, 2)}\n`);
+        if (report.status === 'action-required') process.exitCode = 2;
+        if (report.status === 'not-declared') process.exitCode = 1;
+      } catch (error: unknown) {
+        if (error instanceof ApplicationDependencyError || error instanceof AdvisoryCheckError) {
+          console.error(`[ERROR] ${error.code}: ${error.message}`);
+        } else {
+          console.error('[ERROR] ADVISORY_CHECK_FAILED: Advisory check failed.');
         }
         process.exitCode = 1;
       }

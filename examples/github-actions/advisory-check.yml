@@ -1,0 +1,50 @@
+name: Next.js Advisory Check
+
+on:
+  push:
+    branches: [main]
+  schedule:
+    - cron: '31 5 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: next-advisory-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  advisory-check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24.22.1'
+          cache: npm
+      - name: Install locked dependencies without package scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Check reviewed Next.js advisories
+        shell: bash
+        run: |
+          check_exit=0
+          ./node_modules/.bin/cdn-security advisory check \
+            --package-json package.json --package-lock package-lock.json \
+            --deployment self-hosted --workspace-root . > next-advisory-report.json || check_exit=$?
+          if [ -s next-advisory-report.json ]; then
+            cat next-advisory-report.json
+          else
+            rm -f next-advisory-report.json
+          fi
+          exit "$check_exit"
+      - name: Keep the bounded advisory report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: next-advisory-${{ github.run_id }}-${{ github.run_attempt }}
+          path: next-advisory-report.json
+          if-no-files-found: warn
+          retention-days: 30

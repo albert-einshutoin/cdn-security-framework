@@ -193,6 +193,7 @@ const cfgCode = renderConstObject('CFG', {
     .map(group => `{required:${JSON.stringify(group.required)},regexes:${regexesLiteralCode(group.sources)}}`).join(',') + ']'),
   normalizePath: requestBase.normalizePath,
   requiredHeaders: requestBase.requiredHeaders,
+  blockedHeaders: requestBase.blockedHeaders,
   allowedHosts: requestBase.allowedHosts,
   trustForwardedFor: requestBase.trustForwardedFor,
   cors: requestBase.cors,

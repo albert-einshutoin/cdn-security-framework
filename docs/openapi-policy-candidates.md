@@ -49,6 +49,92 @@ npx cdn-security build --policy policy/openapi.candidate.yml --out-dir dist/cand
 Building the candidate only generates local artifacts. It does not apply or
 deploy the policy.
 
+## Version-aware Next.js virtual patch
+
+Provide both the application's manifest and npm lockfile to add reviewed,
+version-specific controls to the same candidate:
+
+```bash
+npx cdn-security openapi generate-policy \
+  --input openapi.yaml --profile balanced \
+  --package-json package.json --package-lock package-lock.json \
+  --deployment self-hosted --out policy/next.candidate.yml
+npx cdn-security build --policy policy/next.candidate.yml --target aws --out-dir dist/next-aws
+```
+
+Initial catalog `nextjs-middleware-v1` covers **CVE-2025-29927 only**. It is not
+a complete dependency audit or a live advisory feed. It checks direct production
+`next` declarations against npm lockfile v2/v3, including matching root identity
+and dependency declarations. Only stable exact versions resolved from the public
+npm `next` tarball are supported. Aliases, local/workspace links, private registries,
+prereleases, missing resolutions, and development-only Next installations remain
+unknown. Inputs must be regular UTF-8 files inside the workspace, at most 8 MiB
+each. No package scripts, installs, network lookups, or module traversal run.
+
+`--deployment` describes the **origin**, independently of the edge provider:
+
+| Origin | Result for an affected Next.js version |
+| --- | --- |
+| `self-hosted` (`next start` or standalone) | Generate `request.block.header_present: [x-middleware-subrequest]`. |
+| `static-export` | Report this CVE as not applicable; no middleware runtime exists. |
+| `unknown` (default) | Refuse generation with `APPLICATION_ANALYSIS_UNKNOWN`; no files are written. |
+
+The [vendor advisory](https://github.com/vercel/next.js/security/advisories/GHSA-f82v-jwr5-mffw)
+lists affected versions `>=11.1.4 <12.3.5`, `>=13.0.0 <13.5.9`,
+`>=14.0.0 <14.2.25`, and `>=15.0.0 <15.2.3`. Versions outside these ranges
+receive no patch for **this CVE**; that does not establish general safety.
+Managed hosting is not inferred. Choose `unknown` for unsupported deployment
+contexts rather than guessing that a host is unaffected.
+
+Both AWS CloudFront Functions and Cloudflare Workers reject any occurrence of
+the header, including an empty value, before CORS preflight or origin forwarding.
+The rule applies to every path, including framework routes absent from OpenAPI.
+With application inputs, OpenAPI-derived global methods, required headers and
+numeric limits are omitted and the selected profile baseline is retained because
+an API specification does not describe all application traffic. Other OpenAPI
+recommendations remain visible for review. Review profile limits and CSP against
+your pages, assets and authentication before adoption.
+
+The sidecar's `application` field records both raw input digests, the supplied
+deployment, catalog coverage, resolved version, decision and advisory source.
+Invalid input or manifest/lock mismatch is `APPLICATION_INPUT_INVALID`; unresolved
+analysis stops generation. Source digests bind supplied files, not installed code
+or a running deployment. Upgrade Next.js as the permanent fix. The virtual patch
+depends on enforcing the edge rule on every external route and preventing direct
+origin access; monitor mode only logs.
+
+For a self-hosted origin behind Cloudflare, review `capabilityFindings` first.
+The balanced profile contains AWS managed-WAF mappings that Cloudflare cannot
+represent exactly, so a full `build --target cloudflare` can refuse those
+mappings. Review and edit that candidate's WAF settings for the provider before
+building; do not treat this header control as proof of WAF parity or account
+entitlement.
+
+Programmatic callers of `generatePolicyCandidate` can supply the same offline
+inputs as `application: { packageJson: manifestText, packageLock: lockText,
+deployment: 'self-hosted' }` in its options. Omit `application` to retain the
+existing OpenAPI-only mapping. Unknown analysis throws an error with code
+`APPLICATION_ANALYSIS_UNKNOWN`; invalid inputs use `APPLICATION_INPUT_INVALID`.
+The API parses the supplied strings and does not read files.
+
+## Continuous advisory check
+
+`cdn-security advisory check --package-json package.json --package-lock
+package-lock.json --deployment self-hosted` queries public GitHub-reviewed npm
+advisories for an exact direct production Next.js version. Its JSON separates
+`mitigation-candidate-available` (supported by this catalog), `unassessed`
+(no catalog mitigation), and `not-applicable` (only this CVE and deployment
+combination). A candidate does not prove that a policy is active at the CDN.
+
+The GitHub API endpoint is fixed. The check is bounded to 100 entries, 4 MiB,
+and 10 seconds; a next page, unavailable or invalid response, or unknown version
+or deployment never produces a clean result. Exit `0` means no actionable result
+within this scope, `2` means action is needed, and `1` means the check is unknown
+or input is invalid. Coverage is limited to direct production `next` and public
+GitHub-reviewed advisories. The check time and input digests do not attest the
+running deployment or CDN attachment. Upgrading Next.js according to the vendor
+advisory is the permanent remedy.
+
 ## Determinism and metadata
 
 The YAML and JSON sidecar contain no timestamp or absolute path. Repeating the

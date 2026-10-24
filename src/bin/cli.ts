@@ -1765,7 +1765,7 @@ const CAPABILITY_MATRIX: CapabilityEntry[] = [
     id: 'request.required_headers',
     category: 'Request hygiene',
     label: 'Required headers and scanner UA blocklist',
-    policyPaths: ['request.block.header_missing', 'request.block.ua_contains'],
+    policyPaths: ['request.block.header_missing', 'request.block.header_present', 'request.block.ua_contains'],
     support: {
       cloudfront_functions: 'supported',
       lambda_edge: 'unsupported',
@@ -1773,7 +1773,7 @@ const CAPABILITY_MATRIX: CapabilityEntry[] = [
       terraform_waf: 'unsupported',
     },
     deploySupport: { aws: 'supported', cloudflare: 'supported' },
-    notes: 'General required-header checks and User-Agent substring blocking are request-entry controls.',
+    notes: 'Required-header checks, forbidden-header presence checks (before preflight), and User-Agent substring blocking are request-entry controls.',
   },
   {
     id: 'request.graphql_guard',

@@ -60,7 +60,7 @@ export interface AllowedDefaultsV1 {
   corsOptionsBypass: boolean;
   corsPreflight: {
     method: 'OPTIONS';
-    allowedOriginDecision: 'early-204-before-request-validation' | 'not-configured';
+    allowedOriginDecision: 'early-204-before-request-validation' | 'early-204-after-forbidden-header-check' | 'not-configured';
     allowedOriginResponseCacheControl: 'no-store' | 'not-configured';
     origins: {
       kind: 'not-configured' | 'none' | 'any' | 'allowlist';
@@ -69,7 +69,7 @@ export interface AllowedDefaultsV1 {
       wildcard: 'asterisk-matches-any-origin';
     };
     nonMatchingOriginDecision: 'continue';
-    bypassScope: 'all-request-validation-including-host-and-auth' | 'none';
+    bypassScope: 'all-request-validation-including-host-and-auth' | 'remaining-validation-including-host-and-auth' | 'none';
   };
   hosts: {
     kind: 'any' | 'allowlist';
@@ -91,6 +91,10 @@ export interface AllowedDefaultsV1 {
   requiredHeaders?: {
     values: string[];
     source: 'configured' | 'runtime-default';
+  };
+  blockedHeaders?: {
+    values: string[];
+    phase: 'before-cors-preflight';
   };
   pathNormalization: {
     collapseSlashes: boolean;
@@ -340,7 +344,7 @@ export function projectPolicyToAllowedSurface(
       corsPreflight: {
         method: 'OPTIONS',
         allowedOriginDecision: corsOptionsBypass
-          ? 'early-204-before-request-validation'
+          ? request.blockedHeaders.length > 0 ? 'early-204-after-forbidden-header-check' : 'early-204-before-request-validation'
           : 'not-configured',
         allowedOriginResponseCacheControl: corsOptionsBypass ? 'no-store' : 'not-configured',
         origins: {
@@ -352,7 +356,8 @@ export function projectPolicyToAllowedSurface(
           wildcard: 'asterisk-matches-any-origin',
         },
         nonMatchingOriginDecision: 'continue',
-        bypassScope: corsOptionsBypass ? 'all-request-validation-including-host-and-auth' : 'none',
+        bypassScope: !corsOptionsBypass ? 'none' : request.blockedHeaders.length > 0
+          ? 'remaining-validation-including-host-and-auth' : 'all-request-validation-including-host-and-auth',
       },
       hosts: {
         kind: configuredHosts.length === 0 ? 'any' : 'allowlist',
@@ -381,6 +386,9 @@ export function projectPolicyToAllowedSurface(
         values: stablePrefixes(effectiveRequiredHeaders.map((header) => header.toLowerCase())),
         source: policy.request.block?.header_missing === undefined ? 'runtime-default' : 'configured',
       },
+      ...(request.blockedHeaders.length > 0 ? { blockedHeaders: {
+        values: request.blockedHeaders, phase: 'before-cors-preflight' as const,
+      } } : {}),
       pathNormalization: {
         ...request.normalizePath,
         routeMatchPhase: 'normalized-path',
