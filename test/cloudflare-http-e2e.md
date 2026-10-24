@@ -5,6 +5,8 @@ separate loopback Node HTTP origin → client**. It adds no cloud charges, requi
 no Cloudflare account, credentials, deployment, remote bindings or paid services.
 The origin is a separate listener in the harness process; the Worker runs in its
 own native workerd process. Neither the Worker handler nor its fetch is mocked.
+The Artifact Verification negative service shares that process and origin, but
+executes its separately generated module on a second loopback socket.
 
 ## Run
 
@@ -67,7 +69,7 @@ native runtime output, and cleanup proof. These are synthetic fixtures only.
 | Representative controls | Encoded admin/raw matrix/double-slash aliases, encoded slash, dot segments, method, URI length, required header, UA deny list; spoofed XFF/edge marker removed; security response headers verified |
 | Origin failures | Origin's 503/body remains 503/body; closed origin listener yields native 5xx or the explicit ECONNRESET transport error, never a successful response or a timeout accepted as success |
 | HTTP parser boundary | Raw NUL header returns HTTP 400 with zero origin arrivals and no Worker event for that request ID |
-| Cleanup | Child exit, both listening ports closed, origin closed and owned temporary directory removed |
+| Cleanup | Child exit, both Worker listening ports and the origin port closed, origin closed and owned temporary directory removed |
 
 `http.request({ path: ... })` sends the literal target without URL-client
 normalization. workerd's Request URL can still remove dot segments before Worker
@@ -179,3 +181,66 @@ validation context is preserved, rather than rewriting its digest to fit this
 annotation. Binding and the section-only delta are in
 `reports/cloudflare-http-e2e-validation-binding.json`. The final Gate verdict is
 written separately, so recording its result does not mutate a reviewed file.
+
+## Local Artifact Verification MVP (#1123)
+
+The current harness also evaluates the generated artifact against a fixed,
+independent HTTP contract. Its Policy and literal cases live in
+`src/scripts/fixtures/cloudflare-http-cases.ts`; the internal pure matcher is
+`src/contract/verification/artifact-http.ts`. The contract is frozen before the
+CLI compiles anything. Existing expected statuses and literal destinations have
+one source of truth. Neither compiler output, a handler nor the path normalizer
+computes the expected answer. Existing Path/JWKS/parser/origin-failure regression
+checks remain, with three additional ordinary `/admin/child` credential cases.
+
+This verification covers only static-token admission, protected `no-store` and
+`Vary: Authorization`, public-route noninterference, and the corresponding HTTP
+status, decision event and origin method/path/body receipt. It does not model
+distributed cache HIT/MISS. A matching status without the event/receipt evidence,
+an empty observation set or zero findings is insufficient for VERIFIED.
+
+`artifactVerification.normal` and `.negative` are separate report entries. The
+normal generated TS and executed ESM remain unmodified. The negative Policy
+deliberately omits the admin static-token gate, and the same compiler produces a
+different, honestly identified TS/ESM pair. Four HTTP requests on its separate
+native service detect the bypass without running the JWKS suite again. The
+expected contract digest stays fixed; expected-Policy and actual compiler-input
+Policy digests are recorded separately. For example, anonymous `/admin` must be
+401/block/zero origin arrivals; observing 200/allow/one origin receipt is a
+VIOLATED counterexample. A test that detects this negative successfully does not
+make that artifact VERIFIED.
+
+The matcher returns VERIFIED only for a nonempty, complete declared
+`local-artifact-fixture`; a sufficiently observed mismatch is VIOLATED even when
+other required cases are missing. Missing identity/events/cases or stale/mixed
+evidence stays scoped UNKNOWN. Bad digests, duplicate or invalid case joins,
+native runtime, transport and cleanup failures are Error and fail the harness.
+Security verdict, Finding severity/confidence and test exit status remain separate.
+
+Compiler instrumentation records actual file reads and loaded repository CJS
+modules, including the input Policy. The harness compares those recorded hashes
+to the bytes it consumes. It also checks source/execution modules, actual TS/ESM,
+lockfile, workerd binary/version, generated compatibility settings and the exact
+runtime config before/after execution. The current two-service config retains
+deny-all internet and the fixed loopback origin. Timestamp, duration, PID,
+temporary location, ports and original raw identity digests are metadata;
+credential values become abstract states in the replay bundle. The owned native
+process is drained and cleanup completes before the security result is accepted.
+
+Run the same commands in the Run section. The output prints separate normal and
+negative bundle digests, and the JSON contains redacted replay bundles. Internal
+`replayHttpArtifact(contract, bundle, trustedDigest)` recomputes the same semantic
+result without making HTTP requests. Supply the captured digest from a separately
+trusted capture/manifest or verified CI artifact; do not recompute a new trusted
+digest from an edited bundle. An absent trust root gives UNKNOWN; a changed bundle
+under the captured root is Error. Replay attests the recorded snapshot, not a new
+native execution. The fixed contract must still come from the checked-out fixture,
+not `expectedStatus` fields in a measured report.
+
+The existing `--fail-after-start --fail-cleanup` injection covers the shared
+process, origin, both Worker ports and owned temporary directory. Its expected
+Error/exit 1 is kept apart from the normal test and the VIOLATED negative artifact.
+This internal development facility adds no public API/CLI/schema or release gate.
+Historical validation records above are not evidence for the current change.
+
+[日本語の範囲・再現・判定契約](cloudflare-http-e2e.ja.md)

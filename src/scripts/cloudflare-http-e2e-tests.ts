@@ -8,8 +8,10 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
+import { HTTP_FIXTURE_CASES, HTTP_FIXTURE_POLICY, HTTP_FIXTURE_HEADERS } from './fixtures/cloudflare-http-cases';
+import { createHttpArtifactContract, captureHttpArtifactSnapshot, captureHttpArtifactObservation, verifyHttpArtifact, createHttpArtifactBundle, replayHttpArtifact, type HttpArtifactCase, type HttpArtifactSnapshot, type HttpArtifactRawObservation } from '../contract/verification/artifact-http';
 
-const repo = path.resolve(__dirname, '..');
+const repo = fs.realpathSync(path.resolve(__dirname, '..'));
 const argv = process.argv.slice(2);
 const reportIndex = argv.indexOf('--report');
 for (let i = 0; i < argv.length; i++) {
@@ -17,66 +19,30 @@ for (let i = 0; i < argv.length; i++) {
   else assert.ok(['--fail-after-start', '--fail-cleanup', '--jwks-before'].includes(argv[i]), 'Unknown argument');
 }
 const reportPath = path.resolve(reportIndex < 0 ? 'reports/cloudflare-http-e2e.json' : argv[reportIndex + 1]);
-const workerdPath: string = require('workerd').default;
+const workerdPath: string = fs.realpathSync(require('workerd').default);
 const digest = (bytes: string | Buffer) => crypto.createHash('sha256').update(bytes).digest('hex');
 const timeoutMs = 5000;
 const token = 'http-e2e-synthetic-admin';
-const policy = `version: 2
-project: http-e2e
-defaults: { mode: enforce }
-request:
-  allow_methods: [GET, POST]
-  limits: { max_uri_length: 200 }
-  block:
-    header_missing: [x-required]
-    ua_contains: [sqlmap]
-    path_patterns: { contains: ['/../'] }
-  normalize:
-    drop_query_keys: [utm_source]
-  graphql_guard:
-    endpoint_paths: [/graphql]
-    max_body_bytes: 1024
-    mode: report
-response_dlp:
-  enabled: true
-  action: mask
-  body: { max_bytes: 1024, content_types: [application/json] }
-routes:
-  - name: admin
-    match: { path_prefixes: [/admin, ${Array.from({ length: 31 }, (_, i) => '/unused-admin' + i).join(', ')}] }
-    auth_gate: { type: static_token, header: x-edge-token, token_env: EDGE_ADMIN_TOKEN }
-    response: { cache_control: no-store }
-${['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i'].map(endpoint => `  - name: jwt-${endpoint}
-    match: { path_prefixes: [/jwt-${endpoint}] }
-    auth_gate: { type: jwt, algorithm: RS256, jwks_url: 'https://jwks.example.com/jwks/${endpoint}', issuer: synthetic, audience: synthetic, cache_ttl_sec: ${['c', 'd'].includes(endpoint) ? 1 : endpoint === 'h' ? 3 : 3600} }
-    response: { cache_control: no-store }`).join('\n')}
-  - name: jwt-short
-    match: { path_prefixes: [/jwt-short] }
-    auth_gate: { type: jwt, algorithm: RS256, jwks_url: 'https://jwks.example.com/jwks/h', issuer: synthetic, audience: synthetic, cache_ttl_sec: 1 }
-firewall:
-  jwks: { allowed_hosts: [jwks.example.com], negative_cache_sec: 1, stale_if_error_sec: 2 }
-response_headers:
-  hsts: max-age=100
-  x_content_type_options: nosniff
-  referrer_policy: same-origin
-observability: { log_format: json, correlation_id_header: x-e2e-id, sample_rate: 1 }
-`;
+const policy = HTTP_FIXTURE_POLICY;
+const expectedContract = createHttpArtifactContract(policy, HTTP_FIXTURE_CASES.filter(test => test.artifact));
 
 type Receipt = { url: string; method: string; headers: http.IncomingHttpHeaders; body: string };
-type HttpResult = { status: number; headers: http.IncomingHttpHeaders; body: string };
-type Case = { id: string; target: string; method?: string; headers?: Record<string, string | undefined>; body?: string; status: number; forwarded?: string; reason?: string; protectedResponse?: boolean; publicResponse?: boolean };
+type HttpResult = { status: number; headers: http.IncomingHttpHeaders; body: string; request: HttpArtifactRawObservation['request'] };
+type Case = HttpArtifactCase;
 
 // `path`, unlike a URL/fetch client, sends the supplied request-target verbatim.
 function request(port: number, test: Case, signal: AbortSignal): Promise<HttpResult> {
   return new Promise((resolve, reject) => {
-    const headers = { 'user-agent': 'http-e2e', 'x-required': 'present', 'x-e2e-id': test.id, ...test.headers };
+    const headers:Record<string,string|undefined> = { ...HTTP_FIXTURE_HEADERS, 'x-e2e-id': test.id, ...(test.credential==='valid'?{'x-edge-token':token}:test.credential==='wrong'?{'x-edge-token':'wrong-synthetic'}:{}), ...test.headers };
     Object.keys(headers).forEach(key => { if (headers[key as keyof typeof headers] === undefined) delete headers[key as keyof typeof headers]; });
     const req = http.request({ hostname: '127.0.0.1', port, path: test.target, method: test.method || 'GET', headers, agent: false, signal }, res => {
+      const destinationHost=res.socket.remoteAddress,destinationPort=res.socket.remotePort;
+      if(destinationHost!=='127.0.0.1'||typeof destinationPort!=='number'||destinationPort!==port){reject(new Error('HTTP destination binding mismatch'));res.destroy();return;}
       let body = '';
       res.setTimeout(timeoutMs, () => res.destroy(new Error('HTTP response deadline')));
       res.on('data', chunk => { body += chunk; if (body.length > 65536) res.destroy(new Error('HTTP response too large')); });
       res.on('error', reject);
-      res.on('end', () => resolve({ status: res.statusCode!, headers: res.headers, body }));
+      res.on('end', () => resolve({ status: res.statusCode!, headers: res.headers, body, request:{target:test.target,method:test.method??'GET',body:test.body??'',headers:{...headers},destination:{host:destinationHost,port:destinationPort}} }));
     });
     const timer = setTimeout(() => req.destroy(new Error('HTTP request deadline')), timeoutMs);
     req.once('close', () => clearTimeout(timer));
@@ -112,7 +78,7 @@ async function deadline<T>(promise: Promise<T>, milliseconds: number, label: str
 }
 
 async function main() {
-  const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'csf-http-e2e-'));
+  const tmp = fs.realpathSync(fs.mkdtempSync(path.join(os.tmpdir(), 'csf-http-e2e-')));
   const controller = new AbortController();
   const abort = () => controller.abort(new Error('HTTP E2E interrupted'));
   process.once('SIGINT', abort); process.once('SIGTERM', abort);
@@ -138,7 +104,12 @@ async function main() {
   const parseEvents = () => runtimeLog.split('\n').flatMap(line => {
     try { return [JSON.parse(line.slice(line.indexOf('{')))]; } catch { return []; }
   });
-  let workerPort = 0;
+  let workerPort = 0, negativePort = 0;
+  const runStartedAt = Date.now();
+  const artifactInputs:Array<{variant:'normal'|'weakened-policy';caseId:string;correlationId:string;recordedAtMs:number;response:HttpResult;origins:HttpArtifactRawObservation['origins']}>=[];
+  let normalSnapshot:HttpArtifactSnapshot|undefined, negativeSnapshot:HttpArtifactSnapshot|undefined;
+  const caseErrors:unknown[]=[];
+  let artifactVerification:Record<string,unknown> = {state:'Error',code:'EXECUTION_INCOMPLETE'};
   let originPort = 0;
   let failure: unknown;
   let identity: Record<string, unknown> = {};
@@ -176,13 +147,29 @@ async function main() {
     }
   });
   origin.requestTimeout = timeoutMs;
-  const cleanup = { runtimeExited: false, originClosed: false, tempRemoved: false, workerPortClosed: false, originPortClosed: false };
+  const cleanup = { runtimeExited: false, originClosed: false, tempRemoved: false, workerPortClosed: false, originPortClosed: false, negativePortClosed:false };
   try {
     originPort = await listen(origin, controller.signal);
     const reservation = net.createServer();
     workerPort = await listen(reservation, controller.signal);
     await new Promise<void>((resolve, reject) => reservation.close(error => error ? reject(error) : resolve()));
+    const negativeReservation=net.createServer();
+    negativePort=await listen(negativeReservation,controller.signal);
+    await new Promise<void>((resolve,reject)=>negativeReservation.close(error=>error?reject(error):resolve()));
     const childEnv = { PATH: process.env.PATH, TMPDIR: tmp };
+    // Observe the actual compiler reads and CJS modules; do not scan unrelated repo modules.
+    const preloadPath=path.join(tmp,'compiler-receipt.cjs');
+    const preload=`const fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const read=fs.readFileSync,root=${JSON.stringify(repo)},fixture=${JSON.stringify(tmp)},files=new Map();
+const sha=b=>crypto.createHash('sha256').update(b).digest('hex');
+function observe(name,bytes){if(typeof name!=='string')return;const absolute=path.resolve(name);let logical;
+if(absolute.startsWith(root+path.sep)&&!absolute.includes(path.sep+'node_modules'+path.sep))logical='repo/'+path.relative(root,absolute);
+else if(absolute===path.resolve(process.env.CSF_ACTUAL_POLICY))logical='fixture/'+path.relative(fixture,absolute);else return;
+const digest=sha(bytes);if(files.has(logical)&&files.get(logical).sha256!==digest)throw Error('COMPILER_INPUT_CHANGED');files.set(logical,{name:logical,sha256:digest,bytes:Buffer.byteLength(bytes)});}
+fs.readFileSync=function(name,...args){const bytes=read.call(fs,name,...args);observe(name,bytes);return bytes;};
+process.on('exit',()=>{for(const name of Object.keys(require.cache))if(name.startsWith(root+path.sep)&&!name.includes(path.sep+'node_modules'+path.sep))observe(name,read.call(fs,name));
+fs.writeFileSync(process.env.CSF_COMPILER_RECEIPT,JSON.stringify({entry:'repo/'+path.relative(root,process.argv[1]),files:[...files.values()].sort((a,b)=>a.name.localeCompare(b.name,'en'))}));});`;
+    fs.writeFileSync(preloadPath,preload,{mode:0o600});
     const cli = path.join(repo, 'bin/cli.js');
     execFileSync(process.execPath, [cli, 'init', '--platform', 'cloudflare', '--profile', 'balanced'], { cwd: tmp, env: childEnv, timeout: 15000, stdio: 'pipe' });
     const wrangler = fs.readFileSync(path.join(tmp, 'wrangler.toml'), 'utf8');
@@ -193,22 +180,41 @@ async function main() {
     const flags: string[] = flagsLine ? JSON.parse(flagsLine[1]) : [];
     assert.ok(Array.isArray(flags) && flags.every(f => typeof f === 'string'));
     fs.writeFileSync(path.join(tmp, 'policy/security.yml'), policy, { mode: 0o600 });
-    execFileSync(process.execPath, [cli, 'build', '--policy', 'policy/security.yml', '--target', 'cloudflare', '--out-dir', 'dist'], { cwd: tmp, env: childEnv, timeout: 15000, stdio: 'pipe' });
+    function compile(policyFile:string,outDir:string,variant:string) {
+      const receipt=path.join(tmp,variant+'-compiler.json');
+      execFileSync(process.execPath,['--require',preloadPath,cli,'build','--policy',policyFile,'--target','cloudflare','--out-dir',outDir],{cwd:tmp,env:{...childEnv,CSF_COMPILER_RECEIPT:receipt,CSF_ACTUAL_POLICY:path.join(tmp,policyFile)},timeout:15000,stdio:'pipe'});
+      const recorded=JSON.parse(fs.readFileSync(receipt,'utf8')) as {entry:string;files:Array<{name:string;sha256:string;bytes:number}>};
+      assert.equal(recorded.entry,'repo/bin/cli.js');assert.ok(recorded.files.length>0&&recorded.files.length<=200);
+      assert.ok(recorded.files.some(f=>f.name==='fixture/'+policyFile&&f.sha256===digest(fs.readFileSync(path.join(tmp,policyFile)))),'Compiler must actually read its declared Policy');
+      return recorded.files;
+    }
+    const compilerFiles=compile('policy/security.yml','dist','normal');
+    const authLine='    auth_gate: { type: static_token, header: x-edge-token, token_env: EDGE_ADMIN_TOKEN }';
+    assert.equal(policy.split(authLine).length,2);
+    const weakPolicy=policy.replace(authLine,'    # Verification negative: admin auth gate deliberately omitted');
+    fs.writeFileSync(path.join(tmp,'policy/weak-security.yml'),weakPolicy,{mode:0o600});
+    const negativeCompilerFiles=compile('policy/weak-security.yml','weak-dist','negative');
     const generatedPath = path.join(tmp, 'dist/edge/cloudflare/index.ts');
     const generated = fs.readFileSync(generatedPath);
     // Same type erasure as deployment tooling; no replacement of fetch or Worker code.
     const { code } = require('esbuild').transformSync(generated.toString(), { loader: 'ts', format: 'esm', target: 'es2022' });
     fs.writeFileSync(path.join(tmp, 'worker.mjs'), code);
+    const negativeGeneratedPath=path.join(tmp,'weak-dist/edge/cloudflare/index.ts'),negativeGenerated=fs.readFileSync(negativeGeneratedPath);
+    const negativeCode=require('esbuild').transformSync(negativeGenerated.toString(),{loader:'ts',format:'esm',target:'es2022'}).code as string;
+    fs.writeFileSync(path.join(tmp,'weak-worker.mjs'),negativeCode);
     const config = `using Workerd = import "/workerd/workerd.capnp";
 const config :Workerd.Config = (
   services = [
     (name = "worker", worker = (modules = [(name = "worker.mjs", esModule = embed "worker.mjs")],
       compatibilityDate = ${JSON.stringify(date)}, compatibilityFlags = ${JSON.stringify(flags)},
       bindings = [(name = "EDGE_ADMIN_TOKEN", text = ${JSON.stringify(token)})], globalOutbound = "origin")),
+    (name = "weak-worker", worker = (modules = [(name = "weak-worker.mjs", esModule = embed "weak-worker.mjs")],
+      compatibilityDate = ${JSON.stringify(date)}, compatibilityFlags = ${JSON.stringify(flags)},
+      bindings = [(name = "EDGE_ADMIN_TOKEN", text = ${JSON.stringify(token)})], globalOutbound = "origin")),
     (name = "origin", external = (address = "127.0.0.1:${originPort}", http = ())),
     (name = "internet", network = (allow = [], deny = ["0.0.0.0/0", "::/0"]))
   ],
-  sockets = [(name = "http", address = "127.0.0.1:${workerPort}", http = (), service = "worker")]
+  sockets = [(name = "http", address = "127.0.0.1:${workerPort}", http = (), service = "worker"), (name = "negative-http", address = "127.0.0.1:${negativePort}", http = (), service = "weak-worker")]
 );`;
     fs.writeFileSync(path.join(tmp, 'config.capnp'), config, { mode: 0o600 });
     identity = {
@@ -222,6 +228,12 @@ const config :Workerd.Config = (
       configSha256: digest(config), compilerSha256: digest(fs.readFileSync(path.join(repo, 'scripts/compile-cloudflare.js'))),
       outbound: `127.0.0.1:${originPort}`, internet: 'deny-all', cfMetadataAutoFetch: false,
     };
+    const sourcePaths=[
+      ...Object.keys(require.cache).filter(p=>p.startsWith(repo+path.sep)&&!p.includes(path.sep+'node_modules'+path.sep)).map(absolute=>({name:path.relative(repo,absolute),absolute})),
+      ...['src/scripts/cloudflare-http-e2e-tests.ts','src/scripts/fixtures/cloudflare-http-cases.ts','src/contract/verification/artifact-http.ts'].map(name=>({name,absolute:path.join(repo,name)})),
+      {name:'dependencies/esbuild-main.js',absolute:require.resolve('esbuild')},
+      {name:'dependencies/workerd-wrapper.js',absolute:require.resolve('workerd')},
+    ].map(p=>({...p,sha256:digest(fs.readFileSync(p.absolute))}));
     runtime = spawn(workerdPath, ['serve', 'config.capnp'], { cwd: tmp, env: childEnv, stdio: ['ignore', 'pipe', 'pipe'] });
     closed = new Promise(resolve => runtime!.once('close', resolve));
     let spawnError: Error | undefined;
@@ -236,6 +248,7 @@ const config :Workerd.Config = (
       assert.ok(Date.now() - started < 10000, 'workerd readiness deadline: ' + runtimeLog);
       await new Promise(resolve => setTimeout(resolve, 25));
     }
+    assert.equal(await connects(negativePort),true,'Negative service must share the native runtime');
     if (argv.includes('--fail-after-start')) throw new Error('Injected cleanup check after workerd startup');
 
     const wait = async (milliseconds: number) => {
@@ -338,69 +351,26 @@ const config :Workerd.Config = (
     await wait(1100);
     await jwtGroup('connection-recovery', 'e', [jwt('key-a')], 200, false, 1);
 
-    const tests: Case[] = [
-      { id: 'public', target: '/public?keep=1&utm_source=discard', status: 200, forwarded: '/public?keep=1' },
-      { id: 'post', target: '/echo', method: 'POST', body: '{"synthetic":true}', headers: { 'content-type': 'application/json', 'x-forwarded-for': 'spoofed', 'x-edge-authenticated': 'spoofed' }, status: 200, forwarded: '/echo' },
-      { id: 'graphql-oversized-report', target: '/graphql', method: 'POST', body: JSON.stringify({ query: '{ viewer { id } }', padding: 'x'.repeat(2048) }), headers: { 'content-type': 'application/json' }, status: 200, forwarded: '/graphql' },
-      { id: 'dlp-oversized-pass-through', target: '/echo', method: 'POST', body: JSON.stringify({ value: 'sk-live-abcdefghijklmnop', padding: 'x'.repeat(2048) }), headers: { 'content-type': 'application/json' }, status: 200, forwarded: '/echo' },
-      { id: 'admin-missing', target: '/admin', status: 401, reason: 'Unauthorized' },
-      { id: 'admin-wrong', target: '/admin', headers: { 'x-edge-token': 'wrong-synthetic' }, status: 401, reason: 'Unauthorized' },
-      { id: 'admin-valid', target: '/admin', headers: { 'x-edge-token': token }, status: 200, forwarded: '/admin' },
-      { id: 'encoded-admin', target: '/%61dmin', status: 401, reason: 'Unauthorized' },
-      { id: 'matrix-admin', target: '/admin;x=1', status: 401, reason: 'Unauthorized' },
-      { id: 'slashes-admin', target: '//admin', status: 401, reason: 'Unauthorized' },
-      { id: 'encoded-slash', target: '/admin%2fchild', status: 400, reason: 'Bad Request' },
-      // workerd's Request URL removes dot segments before the Worker sees them.
-      // The canonical protected destination must still reject unauthenticated access.
-      { id: 'dot-admin', target: '/public/../admin', status: 401, reason: 'Unauthorized' },
-      { id: 'method', target: '/public', method: 'DELETE', status: 405, reason: 'Method Not Allowed' },
-      { id: 'uri-length', target: '/' + 'a'.repeat(210), status: 414, reason: 'URI Too Long' },
-      { id: 'missing-header', target: '/public', headers: { 'x-required': undefined }, status: 400, reason: 'Missing x-required' },
-      { id: 'user-agent', target: '/public', headers: { 'user-agent': 'sqlmap' }, status: 403, reason: 'Forbidden' },
-      { id: 'origin-error', target: '/origin-error', status: 503, forwarded: '/origin-error' },
-    ];
-    // Literal destinations are the contract, not a copy of the normalizer.
-    const matrixPaths = [
-      ['raw-root', '/admin;x=1', '/admin'],
-      ['encoded-root', '/admin%3bx=1', '/admin'],
-      ['double-root', '/admin%253bx=1', '/admin'],
-      ['raw-child', '/admin;x=1/child;y=2', '/admin/child'],
-      ['encoded-child', '/admin%3bx=1/child%3by=2', '/admin/child'],
-      ['double-child', '/admin%253bx=1/child%253by=2', '/admin/child'],
-      ['triple-root', '/admin%25253bx=1', '/admin'],
-    ];
-    for (const [name, target, destination] of matrixPaths) {
-      for (const auth of ['missing', 'wrong', 'valid']) {
-        tests.push({ id: 'matrix-' + name + '-' + auth, target,
-          headers: auth === 'missing' ? {} : { 'x-edge-token': auth === 'valid' ? token : 'wrong-synthetic' },
-          status: auth === 'valid' ? 200 : 401,
-          ...(auth === 'valid' ? { forwarded: destination, protectedResponse: true } : { reason: 'Unauthorized' }),
-        });
-      }
-    }
-    tests.push(
-      { id: 'matrix-query-post', target: '/admin%253bx=1/child%253by=2?keep=1&utm_source=discard', method: 'POST', body: '{"synthetic":true}', headers: { 'content-type': 'application/json', 'x-edge-token': token }, status: 200, forwarded: '/admin/child?keep=1', protectedResponse: true },
-      { id: 'prefix-boundary', target: '/administrator', status: 200, forwarded: '/administrator', publicResponse: true },
-      { id: 'matrix-prefix-boundary', target: '/administrator%3bx=1', status: 200, forwarded: '/administrator', publicResponse: true },
-      { id: 'matrix-invalid-encoding', target: '/admin%3bx=%ZZ', status: 400, reason: 'Bad Request' },
-      { id: 'matrix-decode-overflow', target: '/admin%2525253bx=1', status: 400, reason: 'Bad Request' },
-      { id: 'matrix-ambiguous-encoding', target: '/admin%3bx=1%2fchild', status: 400, reason: 'Bad Request' },
-    );
-    const caseErrors: unknown[] = [];
+    const tests = HTTP_FIXTURE_CASES;
     for (const test of tests) {
       const before = receipts.length;
       const startedAt = performance.now();
       const result = await request(workerPort, test, controller.signal);
       const elapsedMs = performance.now() - startedAt;
       const observed = receipts.slice(before);
+      if(test.artifact)artifactInputs.push({variant:'normal',caseId:test.id,correlationId:test.id,recordedAtMs:Date.now(),response:result,origins:observed.map((receipt,i)=>({arrival:before+i,receipt}))});
       cases.push({ id: test.id, requestTarget: test.target, method: test.method || 'GET', elapsedMs, response: result, origin: observed, expectedStatus: test.status });
       try {
+      if(!test.artifact){
       assert.equal(result.status, test.status, test.id + ': status');
       assert.equal(observed.length, test.forwarded ? 1 : 0, test.id + ': origin arrivals');
       if (test.forwarded) {
         assert.equal(observed[0].url, test.forwarded, test.id + ': forwarded URL');
         assert.equal(observed[0].method, test.method || 'GET');
         assert.equal(observed[0].body, test.body || '');
+      }
+      }
+      if(test.forwarded&&observed.length===1){
         assert.equal(result.headers['strict-transport-security'], 'max-age=100');
         assert.equal(result.headers['x-content-type-options'], 'nosniff');
         assert.equal(result.headers['referrer-policy'], 'same-origin');
@@ -409,27 +379,29 @@ const config :Workerd.Config = (
           assert.equal(observed[0].headers['x-forwarded-for'], undefined);
           assert.equal(observed[0].headers['x-edge-authenticated'], undefined);
         }
-        if (test.id === 'origin-error') assert.equal(result.body, 'synthetic-origin-failure');
-        else assert.deepEqual(JSON.parse(result.body), observed[0]);
-        if (test.id === 'admin-valid' || test.protectedResponse) {
-          assert.ok(String(result.headers['cache-control']).split(/,\s*/).includes('no-store'), test.id + ': no-store');
-          assert.ok(String(result.headers.vary).toLowerCase().includes('authorization'), test.id + ': Vary Authorization');
+        if(!test.artifact){
+          if (test.id === 'origin-error') assert.equal(result.body, 'synthetic-origin-failure');
+          else assert.deepEqual(JSON.parse(result.body), observed[0]);
         }
-        if (test.publicResponse) assert.equal(result.headers['cache-control'], undefined, test.id + ': public path must not acquire auth cache protection');
       }
-      console.log('OK:', test.id);
+      console.log(test.artifact?'OBSERVED:':'OK:', test.id);
       } catch (error) { caseErrors.push(error); console.error('FAIL:', test.id, String(error)); }
     }
-    if (caseErrors.length) throw new AggregateError(caseErrors, 'HTTP case expectations failed');
     // Prove policy rejection from the Worker's own log, not only an HTTP status.
     const logDeadline = Date.now() + timeoutMs;
-    while (!tests.filter(t => !t.forwarded).every(t => parseEvents().some(e => e.correlation_id === t.id && e.event === 'block'))) {
+    while (!tests.filter(t => !t.forwarded&&!t.artifact).every(t => parseEvents().some(e => e.correlation_id === t.id && e.event === 'block'))) {
       controller.signal.throwIfAborted();
       assert.ok(Date.now() < logDeadline, 'Worker rejection log deadline');
       await new Promise(resolve => setTimeout(resolve, 10));
     }
+    const negativeTests=['admin-missing','admin-wrong','admin-valid','prefix-boundary'].map(id=>tests.find(t=>t.id===id)!);
+    for(const test of negativeTests){
+      const before=receipts.length,correlationId='negative-'+test.id;
+      const response=await request(negativePort,{...test,id:correlationId},controller.signal);
+      artifactInputs.push({variant:'weakened-policy',caseId:test.id,correlationId,recordedAtMs:Date.now(),response,origins:receipts.slice(before).map((receipt,i)=>({arrival:before+i,receipt}))});
+    }
     const events = parseEvents();
-    for (const test of tests.filter(t => !t.forwarded)) {
+    for (const test of tests.filter(t => !t.forwarded&&!t.artifact)) {
       const event = events.find(e => e.correlation_id === test.id && e.event === 'block');
       assert.ok(event, test.id + ': missing Worker policy rejection event');
       assert.ok(String(event.block_reason).includes(test.reason!), test.id + ': block reason ' + event.block_reason);
@@ -480,6 +452,51 @@ const config :Workerd.Config = (
     assert.equal(receipts.length, beforeFailure);
     cases.push({ id: 'origin-unreachable', requestTarget: '/unreachable', ...upstreamFailure, originArrivals: 0, layer: 'workerd-upstream-error' });
     assert.equal(digest(fs.readFileSync(generatedPath)), identity.generatedWorkerSha256, 'Generated Worker was modified');
+    const runtimeBinary=fs.readFileSync(workerdPath),finishedAtMs=Date.now();
+    const file=(role:string,name:string,bytes:Buffer,expectedSha256:string)=>({role,name,bytes,expectedSha256});
+    const common=[
+      file('lock','package-lock.json',fs.readFileSync(path.join(repo,'package-lock.json')),String(identity.packageLockSha256)),
+      file('runtime-binary','workerd',runtimeBinary,String(identity.runtimeSha256)),
+      file('runtime-config','config.capnp',fs.readFileSync(path.join(tmp,'config.capnp')),String(identity.configSha256)),
+      file('source-module','generated/wrangler.toml',fs.readFileSync(path.join(tmp,'wrangler.toml')),digest(wrangler)),
+      file('source-module','compiler-receipt.cjs',fs.readFileSync(preloadPath),digest(preload)),
+      ...sourcePaths.map(p=>file('source-module',p.name,fs.readFileSync(p.absolute),p.sha256)),
+    ];
+    function snapshot(variant:'normal'|'weakened-policy') {
+      const negative=variant==='weakened-policy';
+      const actualPolicy=negative?'policy/weak-security.yml':'policy/security.yml';
+      const compiler=(negative?negativeCompilerFiles:compilerFiles).map(f=>{
+        const absolute=f.name.startsWith('repo/')?path.join(repo,f.name.slice(5)):path.join(tmp,f.name.slice(8));
+        return file('compiler-module',f.name,fs.readFileSync(absolute),f.sha256);
+      });
+      return captureHttpArtifactSnapshot(expectedContract,{
+        variant,
+        files:[
+          ...common,
+          file('policy',actualPolicy,fs.readFileSync(path.join(tmp,actualPolicy)),digest(negative?weakPolicy:policy)),
+          file('generated-ts','worker.ts',fs.readFileSync(negative?negativeGeneratedPath:generatedPath),digest(negative?negativeGenerated:generated)),
+          file('module','worker.mjs',fs.readFileSync(path.join(tmp,negative?'weak-worker.mjs':'worker.mjs')),digest(negative?negativeCode:code)),
+          ...compiler,
+        ],
+        runtime:{
+          version:String(identity.runtimeVersion),packageVersion:String(identity.workerd),
+          compatibilityDate:date,compatibilityFlags:flags,network:'deny-all-loopback-origin',
+        },
+        metadata:{
+          runId:variant+'-'+digest(config).slice(0,16),sourceCommit:String(identity.source),
+          startedAtMs:runStartedAt,finishedAtMs,originPort,workerPort:negative?negativePort:workerPort,
+          service:negative?'weak-worker':'worker',esbuildVersion:require('esbuild').version,
+          policyDerivation:negative
+            ? {operation:'remove-admin-static-token-gate',parentPolicySha256:digest(policy),actualPolicySha256:digest(weakPolicy)}
+            : {operation:'unchanged-policy',actualPolicySha256:digest(policy)},
+          workingTree:execFileSync('git',['status','--porcelain=v2','--untracked-files=all'],{cwd:repo,encoding:'utf8'}),
+        },
+        credentials:{valid:token,wrong:'wrong-synthetic'},
+      });
+    }
+    assert.equal(runtime.spawnfile,workerdPath);assert.deepEqual(runtime.spawnargs,[workerdPath,'serve','config.capnp']);
+    identity.nativeProcess={executablePathSha256:digest(workerdPath),executableSha256:digest(runtimeBinary),arguments:['serve','config.capnp'],configSha256:identity.configSha256};
+    normalSnapshot=snapshot('normal');negativeSnapshot=snapshot('weakened-policy');
   } catch (error) { failure = error; }
   finally {
     clearTimeout(watchdog); process.off('SIGINT', abort); process.off('SIGTERM', abort);
@@ -505,6 +522,7 @@ const config :Workerd.Config = (
     await attempt(async () => {
       cleanup.workerPortClosed = !workerPort || !await connects(workerPort);
     });
+    await attempt(async () => {cleanup.negativePortClosed=!negativePort||!await connects(negativePort);});
     await attempt(async () => {
       cleanup.originPortClosed = !originPort || !await connects(originPort);
     });
@@ -518,8 +536,25 @@ const config :Workerd.Config = (
       assert.ok(!parseEvents().some(e => e.correlation_id === 'parser-invalid'), 'Parser request reached the Worker');
     });
     if (cleanupErrors.length) failure = new AggregateError([failure, ...cleanupErrors].filter(Boolean), 'HTTP E2E or cleanup failed');
+    try {
+      if(failure||!normalSnapshot||!negativeSnapshot)throw new Error('HTTP_EXECUTION_FAILED: '+String(failure??'snapshot missing'));
+      const evaluate=(variant:'normal'|'weakened-policy',snapshot:HttpArtifactSnapshot)=>{
+        const observed=artifactInputs.filter(i=>i.variant===variant).map(i=>captureHttpArtifactObservation(snapshot,{caseId:i.caseId,correlationId:i.correlationId,recordedAtMs:i.recordedAtMs,request:i.response.request,response:i.response,origins:i.origins,events:parseEvents().filter(e=>e.correlation_id===i.correlationId)}));
+        const result=verifyHttpArtifact(expectedContract,snapshot,observed),bundle=createHttpArtifactBundle(expectedContract,snapshot,observed);
+        assert.equal(replayHttpArtifact(expectedContract,JSON.parse(JSON.stringify(bundle)),bundle.digest).semanticDigest,result.semanticDigest);
+        return {result,bundle,trustedBundleDigest:bundle.digest};
+      };
+      const normal=evaluate('normal',normalSnapshot),negative=evaluate('weakened-policy',negativeSnapshot);
+      artifactVerification={state:'complete',normal,negative};
+      assert.equal(normal.result.semantic.verdict,'VERIFIED','Normal generated artifact must meet the entire fixed fixture');
+      assert.equal(negative.result.semantic.verdict,'VIOLATED','Weakened artifact must be detected without weakening the oracle');
+      console.log('OK: fixed artifact fixture VERIFIED; weakened artifact VIOLATED');
+      console.log('Artifact bundle digests:',JSON.stringify({normal:normal.bundle.digest,negative:negative.bundle.digest}));
+      if(caseErrors.length)throw new AggregateError(caseErrors,'Existing HTTP regression expectations failed');
+    } catch(error){if(artifactVerification.state!=='complete')artifactVerification={state:'Error',code:'HTTP_EXECUTION_FAILED',error:String(error)};failure=failure??error;}
+    identity.runtimeLogSha256=digest(runtimeLog);
     fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-    fs.writeFileSync(reportPath, JSON.stringify({ status: failure ? 'fail' : 'pass', identity, jwksCases, jwksReceipts, cases, receipts, cleanup, workerPid: runtime?.pid, tempDirectory: tmp, runtimeLog, error: failure ? String(failure) : null }, null, 2));
+    fs.writeFileSync(reportPath, JSON.stringify({ status: failure ? 'fail' : 'pass', artifactVerification, identity, jwksCases, jwksReceipts, cases, receipts, cleanup, workerPid: runtime?.pid, tempDirectory: tmp, runtimeLog, error: failure ? String(failure) : null }, (_key,value)=>typeof value==='string'?value.replaceAll(token,'[credential:valid]').replaceAll('wrong-synthetic','[credential:wrong]'):value, 2));
   }
   if (failure) throw failure;
   console.log('Cloudflare HTTP E2E passed; report:', reportPath);

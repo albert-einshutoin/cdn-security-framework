@@ -29,6 +29,8 @@ docs/SELF-REVIEW.md
 /source/
 /scripts/*.js
 /scripts/*.d.ts
+/scripts/fixtures/cloudflare-http-cases.js
+/scripts/fixtures/cloudflare-http-cases.d.ts
 /scripts/lib/
 /scripts/impact/
 /lib/
