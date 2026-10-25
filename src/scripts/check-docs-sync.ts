@@ -3,6 +3,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 
+// Later version labels remain in the historical mapping, not as adopted releases.
 const RELEASE_VERSIONS = ['v2.0.0', 'v2.1.0', 'v2.2.0', 'v2.3.0', 'v2.4.0', 'v3.0.0', 'v3.1.0'];
 const VERSION_PATTERN = /\bv\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?\b/gu;
 const CAPABILITY_ROWS = [
@@ -11,9 +12,11 @@ const CAPABILITY_ROWS = [
   ['OpenAPI↔Policy drift', 'Implemented', 'CLI/JSON/SARIF/GHA', 'no source needed'],
   ['NestJS Source Analyzer core', 'Experimental/Implemented core', 'Programmatic', 'no app execution; metadata is not enforcement proof'],
   ['Source-aware contract diff CLI', 'Planned v2.1', '—', '—'],
-  ['Runtime Evidence v1', 'Planned v2.3', '—', '—'],
-  ['Policy Composition', 'Planned v2.4', '—', '—'],
-  ['LSP/VS Code', 'Planned v3.1', '—', '—'],
+  ['Auth/cache model verification (#1119)', 'Implemented bounded core', 'Internal harness', 'model-only; no deployed authentication proof'],
+  ['Cloudflare artifact HTTP verification (#1123)', 'Implemented local MVP', 'Internal native HTTP harness', 'bound artifact/runtime; no live Cloud or AWS cache proof'],
+  ['Runtime / Deployment Evidence (#534)', 'Planned beyond the local MVP', '—', 'Phase B; release version not adopted'],
+  ['Policy Composition / Regression Guard (#536)', 'Planned', '—', 'Phase D; release version not adopted'],
+  ['LSP/VS Code (#539)', 'Optional after GA', '—', 'release version not adopted'],
 ] as const;
 const ROADMAP_EN_HEADINGS = [
   '## 1. Product thesis',
@@ -153,7 +156,7 @@ export function checkDocsSync(repoRoot: string): void {
     assertIncludes(roadmap, '| v2.0 release preparation | Operational hardening / not RC GO |', `${label} release status`);
     assertIncludes(roadmap, 'Decision A', `${label} accepted major decision`);
     assertIncludes(roadmap, '| Policy schema 2 / migration | Implemented on main / unpublished |', `${label} schema2 status`);
-    for (const issue of [529, 531, 533, 534, 536, 537, 539, 541, 542, 895, 571, 545, 1013]) {
+    for (const issue of [529, 531, 533, 534, 536, 537, 539, 541, 542, 895, 571, 545, 1013, 1118, 1119, 1123]) {
       assertIncludes(roadmap, `https://github.com/albert-einshutoin/cdn-security-framework/issues/${issue})`, `${label} canonical issue`);
     }
   }

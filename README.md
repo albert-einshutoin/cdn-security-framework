@@ -30,7 +30,7 @@ deterministic wherever the input is supported, and an omitted or unsupported
 comparison is reported rather than guessed. OpenAPI, source analysis, policy,
 and runtime evidence are separate truths; none is proof of the others.
 
-Published: 1.4.0. On 2026-09-22 main implements and validates schema2 and explicit migration; 2.0.0 remains unpublished and before RC GO. [Evidence](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249).
+Published: **1.4.0 / Policy schema 1**. The technical baseline checked on 2026-10-26 at main `31975ebcf9862ba040905c1a693fe17714b5a5fd` is **unpublished 2.0.0-rc.0 / Policy schema 2**, with explicit migration. [Candidate evidence](https://github.com/albert-einshutoin/cdn-security-framework/issues/1024). H01 EN/JA is not performed; RC GO and publication remain pending.
 
 ### Capability status
 
@@ -41,9 +41,13 @@ Published: 1.4.0. On 2026-09-22 main implements and validates schema2 and explic
 | OpenAPI↔Policy drift | Implemented | CLI/JSON/SARIF/GHA | no source needed |
 | NestJS Source Analyzer core | Experimental/Implemented core | Programmatic | no app execution; metadata is not enforcement proof |
 | Source-aware contract diff CLI | Planned v2.1 | — | — |
-| Runtime Evidence v1 | Planned v2.3 | — | — |
-| Policy Composition | Planned v2.4 | — | — |
-| LSP/VS Code | Planned v3.1 | — | — |
+| Auth/cache model verification (#1119) | Implemented bounded core | Internal harness | model-only; no deployed authentication proof |
+| Cloudflare artifact HTTP verification (#1123) | Implemented local MVP | Internal native HTTP harness | bound artifact/runtime; no live Cloud or AWS cache proof |
+| Runtime / Deployment Evidence (#534) | Planned beyond the local MVP | — | Phase B; release version not adopted |
+| Policy Composition / Regression Guard (#536) | Planned | — | Phase D; release version not adopted |
+| LSP/VS Code (#539) | Optional after GA | — | release version not adopted |
+
+The bounded verifier implementations are on main and remain unpublished; they do not complete their parent phase Epics. Source-aware integration in `dev/2.1-source-aware` is separate from the standard main CLI. See [#1119](https://github.com/albert-einshutoin/cdn-security-framework/issues/1119), [#1123](https://github.com/albert-einshutoin/cdn-security-framework/issues/1123), and the [adoption order](docs/ROADMAP.md#4-version-release-train).
 
 For the runnable paths, see the [OpenAPI integration guide](docs/openapi-integration.md),
 [NestJS source analysis guide](docs/source-analysis-nestjs.md),
