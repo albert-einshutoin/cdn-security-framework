@@ -42,6 +42,41 @@ response_headers: {}
 }
 
 describe('Contract Diff Report v1', () => {
+  test.each(['aws', 'cloudflare'] as const)('%s CLI and API agree on Policy path case settings', (target) => {
+    const fixture = workspace();
+    try {
+      fs.writeFileSync(fixture.openapiPath, JSON.stringify({
+        openapi: '3.1.0', info: { title: 'Case contract', version: '1.0.0' },
+        components: { securitySchemes: { edge: { type: 'apiKey', in: 'header', name: 'X-Edge-Token' } } },
+        paths: { '/Admin': { get: { security: [{ edge: [] }],
+          parameters: [{ in: 'header', name: 'X-Edge-Token', required: true, schema: { type: 'string' } }],
+          responses: { '200': { description: 'OK' } } } } },
+      }));
+      for (const caseInsensitive of [true, false]) {
+        fs.writeFileSync(fixture.policyPath, JSON.stringify({
+          version: 2, defaults: { mode: 'enforce' }, response_headers: {},
+          request: { allow_methods: ['GET'], block: { header_missing: [] },
+            normalize: { path: { case_insensitive: caseInsensitive } } },
+          routes: [{ name: 'admin', match: { path_prefixes: ['/admin'] },
+            auth_gate: { type: 'static_token', header: 'X-Edge-Token', token_env: 'SYNTHETIC_TOKEN' } }],
+        }));
+        const api = diffSecurityContracts({ ...fixture, target, workspaceRoot: fixture.root });
+        const cli = spawnSync(process.execPath, [path.join(process.cwd(), 'bin/cli.js'), 'contract', 'diff',
+          '--openapi', fixture.openapiPath, '--policy', fixture.policyPath, '--target', target,
+          '--workspace-root', fixture.root, '--format', 'json', '--fail-on', 'never'],
+        { cwd: process.cwd(), encoding: 'utf8' });
+        expect(cli.status, cli.stderr).toBe(0);
+        expect(JSON.parse(cli.stdout)).toEqual(api);
+        for (const ruleId of ['SC-AUTHN-001', 'SC-REQUEST-001']) {
+          expect(api.findings.some((finding) => finding.ruleId === ruleId)).toBe(!caseInsensitive);
+        }
+        expect(api.findings.some(({ ruleId }) => ruleId === 'SC-EXPOSURE-003')).toBe(true);
+      }
+    } finally {
+      fs.rmSync(fixture.root, { recursive: true, force: true });
+    }
+  });
+
   test('runs the existing analyzers as a deterministic read-only pipeline', () => {
     const fixture = workspace();
     const before = [fixture.openapiPath, fixture.policyPath].map((file) => fs.readFileSync(file));

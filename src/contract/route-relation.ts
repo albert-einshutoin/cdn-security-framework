@@ -37,6 +37,7 @@ export interface RouteRelationOptions {
   phase: 'normalized-path';
   collapseSlashes: boolean;
   removeDotSegments: boolean;
+  caseInsensitive: boolean;
 }
 
 export interface RouteRelationResult {
@@ -78,7 +79,7 @@ function normalizePath(
     && normalized.split('/').some((segment) => segment === '.' || segment === '..')) {
     return undefined;
   }
-  return normalized;
+  return options.caseInsensitive ? normalized.toLowerCase() : normalized;
 }
 
 function segments(value: string): string[] {
@@ -174,6 +175,7 @@ export function relatePath(
   policy: PolicyPathMatcher,
   options: RouteRelationOptions,
 ): RouteRelation {
+  if (typeof options?.caseInsensitive !== 'boolean') throw new Error('invalid route relation options');
   const rawTemplate = source.kind === 'template' ? templateParts(source.value) : undefined;
   if (source.kind === 'template' && (!rawTemplate
     || rawTemplate.parts.some((part) => part === '.' || part === '..'))) return 'unknown';

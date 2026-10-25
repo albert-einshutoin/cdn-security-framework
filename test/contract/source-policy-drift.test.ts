@@ -95,6 +95,25 @@ const sourceBearerAuth = {
 };
 
 describe('Source AST and Policy drift', () => {
+  test.each(['aws', 'cloudflare'] as const)('%s matches explicit public Source routes using Policy case settings', (target) => {
+    const publicOperation = operation('GET', '/Admin', {
+      exposure: 'public', auth: { mode: 'none', alternatives: [], analysis: {
+        guards: [], explicitPublic: true, roles: [], enforcementConfidence: 'high', capabilityReasons: [],
+      } },
+    });
+    for (const caseInsensitive of [true, false]) {
+      const comparison = input(source([publicOperation]), policy({
+        request: { allow_methods: ['GET'], block: { header_missing: [] },
+          normalize: { path: { case_insensitive: caseInsensitive } } },
+        routes: [{ name: 'admin', match: { path_prefixes: ['/admin'] }, auth_gate: { type: 'basic_auth' } }],
+      }), target);
+      expect(compareSourcePolicyContracts(comparison).some(({ ruleId }) => ruleId === 'SC-AUTHN-006'))
+        .toBe(caseInsensitive);
+      Object.assign(comparison.allowed.defaults.pathNormalization, { caseInsensitive: undefined });
+      expect(() => compareSourcePolicyContracts(comparison)).toThrow('invalid contract drift input');
+    }
+  });
+
   test('reports implemented operations blocked by the effective method set', () => {
     const enforce = compareSourcePolicyContracts(input(
       source([operation('POST', '/users')]),

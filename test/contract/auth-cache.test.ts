@@ -3,6 +3,19 @@ import { projectAuthCache, verifyAuthCache } from '../../src/contract/verificati
 import { checkAuthCacheWitness } from '../../src/contract/verification/auth-cache-witness';
 import { contract, policy, model } from '../fixtures/auth-cache/input';
 describe('auth x cache model', () => {
+  test('case-insensitive normalization remains UNKNOWN and cannot replay a case-sensitive witness', () => {
+    const pol = structuredClone(policy);
+    pol.request!.normalize = { ...pol.request!.normalize,
+      path: { ...pol.request!.normalize?.path, case_insensitive: true } };
+    const projection = projectAuthCache(contract, pol, model);
+    const report = verifyAuthCache(projection);
+    expect(report.semantic.verdict).toBe('UNKNOWN');
+    expect(report.semantic.cells.every(cell => cell.reason === 'PATH_CASE_NORMALIZATION_UNSUPPORTED')).toBe(true);
+    const old = verifyAuthCache(projectAuthCache(contract, policy, model)).semantic.cells[0].witness!;
+    expect(() => checkAuthCacheWitness(projection, { ...old, inputDigest: projection.digest }))
+      .toThrow('INVALID_AUTH_CACHE_WITNESS');
+  });
+
   test('origin-only gate is bypassed by a resident shared HIT', () => {
     const p = projectAuthCache(contract, policy, model);
     const result = verifyAuthCache(p);
