@@ -474,6 +474,8 @@ function build(policy: any, options: any = {}) {
     const adminIndex = useIndex ? adminPathIndex : null;
     const authIndex = useIndex ? authPathIndex : null;
     const responseCfgCode = renderConstObject('RESPONSE_CFG', {
+      mode: requestBase.mode,
+      logFormat: requestBase.obs.logFormat,
       headers: responseBase.headers,
       csp_public: responseBase.csp_public,
       csp_admin: responseBase.csp_admin,

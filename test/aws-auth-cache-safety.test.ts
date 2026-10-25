@@ -149,3 +149,101 @@ test.each([
     if (platform === 'aws') expect(result.stderr).toMatch(/cache/i);
   }
 });
+
+function compiledAwsResponse({ mode, format, entry = 'api', caseInsensitive = true, protectRoutes = true }: {
+  mode: 'monitor' | 'enforce'; format: 'json' | 'text'; entry?: 'api' | 'cli';
+  caseInsensitive?: boolean; protectRoutes?: boolean;
+}) {
+  const f = fixture({ type: 'static_token', token_env: 'TEST_AUTH_SECRET' }, mode);
+  f.policy.routes![0].name = 'admin';
+  if (!protectRoutes) f.policy.routes = [];
+  f.policy.request!.normalize = { path: { case_insensitive: caseInsensitive } };
+  f.policy.response_headers = {
+    hsts: 'max-age=777', csp_public: "default-src 'self'", csp_admin: "default-src 'none'",
+    clear_site_data_paths: ['/private'], force_vary_auth: false,
+  };
+  f.policy.observability = { log_format: format };
+  fs.writeFileSync(f.policyPath, JSON.stringify(f.policy));
+  const env = { ...process.env, TEST_AUTH_SECRET: 'synthetic-monitor-token' };
+  if (entry === 'cli') {
+    const result = spawnSync(process.execPath, [path.join(root, 'bin/cli.js'), 'build',
+      '--policy', f.policyPath, '--target', 'aws', '--out-dir', f.outDir],
+    { cwd: f.dir, encoding: 'utf8', env });
+    expect(result.status, result.stderr).toBe(0);
+  } else {
+    expect(compile({ ...f, target: 'aws', env }).ok).toBe(true);
+  }
+  const logs: unknown[][] = [];
+  const requestCode = fs.readFileSync(path.join(f.outDir, 'edge/viewer-request.js'), 'utf8');
+  const responseCode = fs.readFileSync(path.join(f.outDir, 'edge/viewer-response.js'), 'utf8');
+  expect(Buffer.byteLength(responseCode)).toBeLessThanOrEqual(10 * 1024);
+  return {
+    request: Function('console', `${requestCode}\nreturn handler;`)({ log() {} }),
+    response: Function('console', `${responseCode}\nreturn handler;`)({ log: (...args: unknown[]) => logs.push(args) }),
+    logs,
+  };
+}
+
+test.each([
+  ['api', 'json'], ['api', 'text'], ['cli', 'json'], ['cli', 'text'],
+] as const)('%s AWS monitor preserves unresolved-path responses with bounded %s diagnostics', (entry, format) => {
+  const pair = compiledAwsResponse({ mode: 'monitor', format, entry, protectRoutes: false });
+  for (const uri of ['/public%25252561', '/%E0%A4']) {
+    pair.logs.length = 0;
+    const request = { method: 'GET', uri, querystring: {}, headers: { 'user-agent': { value: 'synthetic' } } };
+    const forwarded = pair.request({ request });
+    expect(forwarded.uri).toBe(uri);
+    expect(forwarded.statusCode).toBeUndefined();
+    const origin = { statusCode: 201, body: 'synthetic-origin-body', headers: {
+      'cache-control': { value: 'public, max-age=300' },
+      vary: { value: 'Accept-Encoding' },
+    } };
+    const response = pair.response({ request: forwarded, response: origin });
+    expect(response.statusCode).toBe(201);
+    expect(response.body).toBe('synthetic-origin-body');
+    expect(response.headers['strict-transport-security'].value).toBe('max-age=777');
+    expect(response.headers['content-security-policy'].value).toBe("default-src 'self'");
+    expect(response.headers['cache-control'].value).toContain('no-store');
+    expect(response.headers.pragma.value).toBe('no-cache');
+    expect(response.headers.vary.value.split(/,\s*/)).toEqual(expect.arrayContaining([
+      'Accept-Encoding', 'Authorization', 'Cookie',
+    ]));
+    expect(response.headers['clear-site-data']).toBeUndefined();
+    expect(pair.logs).toHaveLength(1);
+    const diagnostic = JSON.stringify(pair.logs);
+    expect(diagnostic).toContain('response_path_unknown');
+    expect(diagnostic).not.toContain(uri);
+    expect(diagnostic).not.toContain('synthetic-origin-body');
+    expect(diagnostic).not.toContain('synthetic-monitor-token');
+    if (format === 'json') expect(JSON.parse(String(pair.logs[0][0]))).toMatchObject({
+      event: 'monitor', block_reason: 'response_path_unknown', phase: 'viewer-response',
+    });
+    else expect(pair.logs[0][0]).toBe('[monitor]');
+  }
+  const normalized = pair.request({ request: { method: 'GET', uri: '/public%2fchild',
+    querystring: {}, headers: { 'user-agent': { value: 'synthetic' } } } });
+  expect(normalized.uri).toBe('/public/child');
+});
+
+test.each([
+  ['monitor', true], ['enforce', true], ['enforce', false],
+] as const)('AWS %s retains unresolved response errors with protectRoutes=%s', (mode, protectRoutes) => {
+  const pair = compiledAwsResponse({ mode, format: 'json', protectRoutes });
+  expect(() => pair.response({ request: { uri: '/public%25252561', headers: {} },
+    response: { statusCode: 200, headers: {} } })).toThrow('Invalid response request path');
+  expect(pair.logs).toEqual([]);
+  const denied = pair.request({ request: { method: 'GET', uri: '/private%2fchild',
+    querystring: {}, headers: { 'user-agent': { value: 'synthetic' } } } });
+  expect(Number(denied.statusCode)).toBeGreaterThanOrEqual(400);
+});
+
+test.each([true, false])('AWS normal response route matching keeps case_insensitive=%s', (caseInsensitive) => {
+  const pair = compiledAwsResponse({ mode: 'monitor', format: 'json', caseInsensitive });
+  const response = pair.response({ request: { uri: '/Private', headers: {} },
+    response: { statusCode: 200, headers: { 'cache-control': { value: 'public, max-age=300' } } } });
+  expect(response.headers['content-security-policy'].value).toBe(caseInsensitive
+    ? "default-src 'none'" : "default-src 'self'");
+  if (caseInsensitive) expect(response.headers['cache-control'].value).toContain('no-store');
+  else expect(response.headers['cache-control'].value).toBe('public, max-age=300');
+  expect(pair.logs).toEqual([]);
+});
