@@ -123,7 +123,7 @@ function main(): void {
     errors.push('  - firewall.waf.fingerprint_action must be "block" or "count"');
   }
 
-  // Non-fatal warnings for production-grade WAF hygiene (AWS scopes only).
+  // Non-fatal Policy managed-list and explicit CloudFront logging reminders.
   const warnings: string[] = collectWafHygieneWarnings(policy);
 
   // origin.auth.custom_header env-var presence check (best-effort; env may be CI-only)

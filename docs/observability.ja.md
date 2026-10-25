@@ -163,7 +163,7 @@ REGIONAL スコープでは ALB アクセスログで代替可能なケースが
 
 ### マネージドルール網羅 Lint
 
-同じ Lint パスで、enforce モードなのに BotControl / ATP / IPReputationList / AnonymousIpList が一つも無い設定には警告を出す。この 4 つは「WAF でなぜ止められなかった？」の原因になりやすい群。警告のみでビルドは止めない。
+同じLintパスで、明示enforceモードのWAFセクションにBotControl / ATP / IPReputationList / AnonymousIpListが一つも無い場合、`scope`省略時も警告します。Policyのmanaged-rule配列だけを検査し、providerは推定しません。AWS出力の既存REGIONAL既定は維持し、上記logging警告は明示CLOUDFRONTだけに適用します。警告でビルドを失敗させたりルールを追加したりしません。採用前に対象targetの対応・等価性・料金を確認してください。実WAF動作やコンプライアンス適合の証明ではありません。
 
 ### カスタムブロックレスポンス
 

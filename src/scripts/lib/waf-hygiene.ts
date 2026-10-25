@@ -1,6 +1,7 @@
 /**
  * Shared WAF hygiene warnings used by policy-lint and the programmatic validator.
- * AWS-scoped checks are skipped when `firewall.waf.scope` is absent (Cloudflare).
+ * Managed-list posture is a Policy check; omitted scope does not identify a provider.
+ * Only the CloudFront logging reminder depends on explicit CLOUDFRONT scope.
  */
 
 function collectWafHygieneWarnings(policy: any): string[] {
@@ -11,9 +12,6 @@ function collectWafHygieneWarnings(policy: any): string[] {
   if (!isEnforce || !waf) return warnings;
 
   const scope = waf.scope;
-  const isAwsScope = scope === 'CLOUDFRONT' || scope === 'REGIONAL';
-  if (!isAwsScope) return warnings;
-
   const managed = Array.isArray(waf.managed_rules) ? waf.managed_rules : [];
   const hasCoreSignal = managed.some((r: string) =>
     r === 'AWSManagedRulesBotControlRuleSet' ||
