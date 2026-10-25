@@ -311,7 +311,7 @@ runtime route reachability, middleware/Guard enforcement, or authentication.
 | Text | Safe prefix in the bounded preview | Bounded Finding preview |
 | JSON | Safe prefix and routing/contract digests in the internal preview | Bounded Finding preview |
 | SARIF | Safe prefix and digests in internal tool properties; assumed routes on Source-derived results | Full result within reporter limits |
-| Summary | Safe prefix label | Top Findings only |
+| Summary | Safe prefix label | Top Finding details and complete state counts |
 
 The dev CI record stores the safe prefix and digests separately from the original
 Source project/auth digests. The Node 24 installed-package consumer checks
@@ -322,7 +322,11 @@ the package acceptance gate rejects missing evidence.
 
 Text and JSON are bounded previews; JSON is not a stable complete public
 Source-aware schema. SARIF covers the complete result within existing reporter
-limits. Summary shows up to 10 Findings and 32 KiB. Findings and omissions may
+limits. Summary shows up to 10 Finding details and 32 KiB. Category and severity
+tables cover the complete finalized active, suppressed, and governance groups,
+with comparison overlap counted once. Top rows include confidence and distinct
+evidence source kinds, without evidence URIs or contents; coverage still follows
+the stage and comparison status. Findings and omissions may
 therefore appear differently in each display. The exit status is `0` when the
 requested processing succeeds below the Finding threshold, `1` when it succeeds
 at the threshold, `2` for input/configuration or bounded-input failure, and `3`

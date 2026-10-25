@@ -281,7 +281,7 @@ middleware/Guardの強制、認証の証明にもなりません。
 | Text | 件数制限付きpreviewに安全なprefix | 件数制限付きpreview |
 | JSON | 内部previewに安全なprefixとrouting/contract digest | 件数制限付きpreview |
 | SARIF | 内部tool propertiesに安全なprefix/digest、Source由来結果に前提route | reporter上限内の全結果 |
-| Summary | 安全なprefix表示 | 上位Findingのみ |
+| Summary | 安全なprefix表示 | 上位Finding詳細とstate別の全体件数 |
 
 dev CI記録には、安全なprefixとdigestを元のSource project/認証digestと分けて
 保存します。Node 24のinstalled-package consumerは、同じtgzでprefixあり・
@@ -291,7 +291,11 @@ dev CI記録には、安全なprefixとdigestを元のSource project/認証diges
 拒否します。
 
 Text/JSONは件数上限のあるpreviewです。JSONは完全な安定公開schemaではありません。
-SARIFは既存reporter制限内の完全結果、Summaryは最大10件/32KiBの表示です。
+SARIFは既存reporter制限内の完全結果、Summaryは最大10件の詳細/32KiBの表示です。
+category/severity表はfinalizedのactive・suppressed・governance全件を対象とし、
+comparisonの重複を一度だけ数えます。Top行にはconfidenceと重複を除いたevidence
+source種類を表示し、evidence URIや本文は出しません。解析範囲は引き続きstageと
+comparisonのstatusに従います。
 形式によって省略表示は異なります。exit `0`は処理成立・Finding閾値未到達、
 `1`は処理成立・閾値到達、`2`は入力/configuration/bounded-input失敗、
 `3`は内部/reporter/出力失敗です。入力stageが失敗しても、独立比較のFindingを

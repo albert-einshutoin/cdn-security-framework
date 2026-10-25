@@ -83,6 +83,37 @@ function expectOfficialSchema(value: unknown): void {
 }
 
 describe('Source-aware internal output adapters', () => {
+  test.each([0, 1000])('shows complete group counts beyond the Top preview (%i Findings)', (count) => {
+    const findings = Array.from({ length: count }, (_, i) => createFinding({
+      ...findingInput, route: { method: 'GET', path: `/users/${i}` },
+    }));
+    const bundle = finalizeSourceAwareOutput(synthetic(findings), options);
+    const output = renderSourceAwareSummary(bundle);
+    expect(output).toContain(`| warning | ${count} | 0 | 0 |`);
+    expect(output).toContain(`| authentication | ${count} | 0 | 0 |`);
+    expect(output).toContain(`Top findings omitted: ${Math.max(0, count - 10)}.`);
+    expect(Buffer.byteLength(output, 'utf8')).toBeLessThanOrEqual(32_768);
+    const bounded = renderSourceAwareSummary(bundle, { top: 100, maxOutputBytes: 8192 });
+    expect(Buffer.byteLength(bounded, 'utf8')).toBeLessThanOrEqual(8192);
+    expect(bounded).toContain(`| warning | ${count} | 0 | 0 |`);
+    if (count === 1000) expect(Number(/Top findings omitted: (\d+)/.exec(bounded)?.[1])).toBeGreaterThan(900);
+  });
+
+  test('shows confidence and every unique evidence kind without raw evidence details', () => {
+    const kinds = ['runtime', 'openapi', 'policy', 'source-ast', 'generated-artifact', 'openapi'] as const;
+    const evidence = kinds.map((source, i) => ({ ...findingInput.evidence[0], source,
+      uri: `evidence-detail-${i}.json` }));
+    const finding = createFinding({ ...findingInput, confidence: 'heuristic', evidence });
+    const output = renderSourceAwareSummary(finalizeSourceAwareOutput(synthetic([finding]), options));
+    expect(output).toContain('| State | Severity | Confidence | Rule | Instance | Route | Title | Comparisons | Evidence source kinds |');
+    const row = output.split('\n').find((line) => line.includes(finding.instanceId));
+    expect(row).toContain('| warning | heuristic |');
+    expect(row).toContain('| openapi, source-ast, policy, runtime, generated-artifact |');
+    expect(output).not.toContain('evidence-detail-');
+    const reordered = createFinding({ ...findingInput, confidence: 'heuristic', evidence: [...evidence].reverse() });
+    expect(renderSourceAwareSummary(finalizeSourceAwareOutput(synthetic([reordered]), options))).toBe(output);
+  });
+
   test('same real workspace result yields Text, JSON, full SARIF and bounded Summary without changing inputs', async () => {
     const root = fixture();
     const input = { workspaceRoot: root, openapiPath: 'openapi.yaml', policyPath: 'policy.yml', target: 'aws' as const, source: { tsconfigPath: 'tsconfig.json' } };
@@ -179,8 +210,12 @@ describe('Source-aware internal output adapters', () => {
       summary: bundle.finalized?.summary, threshold: { reached: false }, internalExitCode: 0,
     });
     expect(renderSourceAwareSummary(bundle)).toContain('| Suppressed | 1 |');
+    expect(renderSourceAwareSummary(bundle)).toContain('| warning | 0 | 1 | 0 |');
+    expect(renderSourceAwareSummary(bundle)).toContain('| authentication | 0 | 1 | 0 |');
     const expired = finalizeSourceAwareOutput(workspace, { ...options, failOn: 'warning', exceptions: exception(id, '2026-01-01') });
     expect(expired.finalized?.summary).toMatchObject({ active: 1, governance: 1 });
+    expect(renderSourceAwareSummary(expired)).toContain('| error | 0 | 0 | 1 |');
+    expect(renderSourceAwareSummary(expired)).toContain('| governance | 0 | 0 | 1 |');
     const expiredSarif = renderSourceAwareSarif(expired);
     expectOfficialSchema(expiredSarif);
     expect(expiredSarif.runs[0].results.map(({ ruleId }) => ruleId)).toContain('SC-GOV-001');
@@ -253,6 +288,8 @@ describe('Source-aware internal output adapters', () => {
     const bundle = finalizeSourceAwareOutput(workspace, options);
     expect(bundle.finalized).toBeUndefined();
     expect(bundle.finalizationError?.code).toBe('SOURCE_FINDING_IDENTITY_CONFLICT');
+    expect(renderSourceAwareSummary(bundle)).toContain('| error | not evaluated | not evaluated | not evaluated |');
+    expect(renderSourceAwareSummary(bundle)).toContain('| governance | not evaluated | not evaluated | not evaluated |');
     expectOfficialSchema(renderSourceAwareSarif(bundle));
     expect(renderSourceAwareSarif(bundle).runs[0]).toMatchObject({
       results: [], invocations: [{ executionSuccessful: false }],
