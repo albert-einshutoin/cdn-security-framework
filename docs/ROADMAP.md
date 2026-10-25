@@ -1,6 +1,6 @@
 # Roadmap
 
-This roadmap is the canonical summary of the version release train. The
+This roadmap is the canonical summary of release and product adoption order. The
 implementation source of truth is the code, tests, package, and linked Issues;
 this document does not replace their acceptance criteria.
 
@@ -32,9 +32,9 @@ and an absent guard is not proof of public access.
 
 ## 3. Current release and main status
 
-Current package distinction (checked 2026-10-13 at main `27211fa91127b8cf978f7233ced7deb91c5053f7`): published **1.4.0 / Policy schema 1**, unpublished **2.0.0-rc.0 / Policy schema 2**, and future stable **2.0.0** are separate states. See [main-artifact handoff verification](quickstart.md#1-install-the-unpublished-schema2-candidate-in-an-empty-consumer). Bundled docs do not pin their own final tgz hash; the maintainer stores the final main run/attempt/source/harness/tree/tgz/lock identity outside the package.
+The technical baseline checked on 2026-10-26 is main `31975ebcf9862ba040905c1a693fe17714b5a5fd`. Published **1.4.0 / Policy schema 1**, unpublished **2.0.0-rc.0 / Policy schema 2**, and future stable **2.0.0** are separate states. Use [main-artifact handoff verification](quickstart.md#1-install-the-unpublished-schema2-candidate-in-an-empty-consumer); the maintainer pins final source/harness/tree/run/attempt/tgz/lock identity outside the package in [#1024](https://github.com/albert-einshutoin/cdn-security-framework/issues/1024). Bundled docs do not pin their own final tgz hash.
 
-Historical implementation evidence below was checked **2026-09-22** at main `111f995bd35d3b24bdd1ee7dd72c35bce19f9170`: [Main validation](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249). Those dated links remain historical, not validation of the final current candidate. Schema2 remains implemented on main and unpublished; no RC GO, H01 result or publication is implied.
+The links below to 2026-09-22/main111f995 are historical foundation evidence. The bounded model and local artifact additions have their own accepted scope in #1119/#1123. They do not establish completion of their phases, live Cloud verification, H01, RC GO or publication.
 
 | Area | Status | Evidence / boundary |
 | --- | --- | --- |
@@ -45,34 +45,41 @@ Historical implementation evidence below was checked **2026-09-22** at main `111
 | NestJS Source Analyzer core (#294–#300) | Implemented / Experimental | [Source guide](./source-analysis-nestjs.md); programmatic/static only |
 | Source-aware standard CLI | Planned v2.1.0 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) |
 | Policy schema 2 / migration | Implemented on main / unpublished | [#1023](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023) / [PR #1033](https://github.com/albert-einshutoin/cdn-security-framework/pull/1033) |
+| Auth/cache verification model | Implemented bounded/internal core on main; unpublished | [#1119](https://github.com/albert-einshutoin/cdn-security-framework/issues/1119) / [PR #1122](https://github.com/albert-einshutoin/cdn-security-framework/pull/1122); model-only verdict and independent witness, no deployed auth proof |
+| Cloudflare artifact HTTP verification | Implemented bounded/local MVP on main; unpublished | [#1123](https://github.com/albert-einshutoin/cdn-security-framework/issues/1123) / [PR #1124](https://github.com/albert-einshutoin/cdn-security-framework/pull/1124); bound artifact/runtime and independent local HTTP oracle, no live Cloud or AWS cache proof |
+| Next.js dependency-aware guard / diagnostics | Implemented on main; unpublished | [PR #1121](https://github.com/albert-einshutoin/cdn-security-framework/pull/1121) / [#1125](https://github.com/albert-einshutoin/cdn-security-framework/issues/1125); only CVE-2025-29927 generates a guard, five additional advisories are diagnostic only; adoption remains [#1120](https://github.com/albert-einshutoin/cdn-security-framework/issues/1120) |
 | v2.0 release preparation | Operational hardening / not RC GO | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) / [#895](https://github.com/albert-einshutoin/cdn-security-framework/issues/895) |
 
 ## 4. Version release train
 
-| Version | Release epic | Outcome / must-have | Entry condition | Non-goals | Status |
-| --- | --- | --- | --- | --- | --- |
-| v2.0.0 | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) | Contract Foundation / schema 2 / safe migration | [#541](https://github.com/albert-einshutoin/cdn-security-framework/issues/541) / [#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) Decision A | Source CLI / Runtime / Composition / Editor | Operational hardening |
-| v2.1.0 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) | Source-aware Contract Diff MVP | [#545](https://github.com/albert-einshutoin/cdn-security-framework/issues/545) | Runtime / Composition / Editor | Planned |
-| v2.2.0 | [#533](https://github.com/albert-einshutoin/cdn-security-framework/issues/533) | Accuracy / onboarding / monorepo hardening | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) post-release review | New analyzers/providers | Planned |
-| v2.3.0 | [#534](https://github.com/albert-einshutoin/cdn-security-framework/issues/534) | Runtime Evidence Preview | [#533](https://github.com/albert-einshutoin/cdn-security-framework/issues/533) post-release review | Automatic enforcement | Planned |
-| v2.4.0 | [#536](https://github.com/albert-einshutoin/cdn-security-framework/issues/536) | Policy Governance Preview | [#534](https://github.com/albert-einshutoin/cdn-security-framework/issues/534) post-release review | Silent baseline weakening | Planned |
-| v3.0.0 | [#537](https://github.com/albert-einshutoin/cdn-security-framework/issues/537) | GA public contract | [#536](https://github.com/albert-einshutoin/cdn-security-framework/issues/536) post-release review | Editor extension | Planned |
-| v3.1.0 | [#539](https://github.com/albert-einshutoin/cdn-security-framework/issues/539) | Editor integration | [#537](https://github.com/albert-einshutoin/cdn-security-framework/issues/537) post-release review | Automatic apply/deploy | Planned |
+Phases are not release versions. Versions and dates after v2.1 are not adopted and cannot be inferred from old milestone names. [#270](https://github.com/albert-einshutoin/cdn-security-framework/issues/270) and [#872](https://github.com/albert-einshutoin/cdn-security-framework/issues/872) own product Entry, compatibility, pilot/cost and Midpoint/RC decisions.
 
-No delivery dates are promised. Each epic owns scope and acceptance. Old V150 identifiers remain historical references.
+| Release / phase | Canonical owner | Outcome | Entry / status |
+| --- | --- | --- | --- |
+| v2.0.0 | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) | Contract Foundation / schema 2 / safe migration | Operational hardening; H01 / #1024 / #542 / #895 / #571 gates remain |
+| v2.1.0 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) | Source-aware Contract Diff MVP | Planned product; #545 Entry, pilot and release gates remain. [PR #1090](https://github.com/albert-einshutoin/cdn-security-framework/pull/1090) is merged into dev/2.1-source-aware, not main |
+| A | [#533](https://github.com/albert-einshutoin/cdn-security-framework/issues/533) | Verification Core / accuracy and onboarding hardening | Bounded #1119 core implemented; product adoption and remaining hardening planned after #531 post-release review |
+| B | [#534](https://github.com/albert-einshutoin/cdn-security-framework/issues/534) | Runtime / Artifact & Deployment Verification | Bounded #1123 local artifact MVP implemented; remaining event/deployment scope planned; A contract and adoption Entry |
+| C | [#1118](https://github.com/albert-einshutoin/cdn-security-framework/issues/1118) | Security Equivalence, common AWS/Cloudflare subset | Planned; adopted A/B model and evidence contracts; equivalence is not safety |
+| D | [#536](https://github.com/albert-einshutoin/cdn-security-framework/issues/536) | CI Regression Guard / composition and governance | Planned; adopted A → B → C; no silent weakening or automatic apply |
+| GA | [#537](https://github.com/albert-einshutoin/cdn-security-framework/issues/537) | Public Contract / Provider maturity | Planned after A → B → C → D; version not adopted |
+| Optional after GA | [#539](https://github.com/albert-einshutoin/cdn-security-framework/issues/539) | Editor / LSP / VS Code | Not adopted; real demand and GA Entry; not a GA prerequisite |
+
+#1119/#1123 are technical deliverables accepted on main within explicit bounded scopes. They do not waive product adoption order, H01 or publication gates, or complete #533/#534 pilot, accuracy/onboarding, event/deployment and other remaining AC. Independent prototypes may proceed within explicitly authorized scopes; verifier completion is not a new release prerequisite for #529/#531.
 
 ## 5. Version dependency graph
 
 ```mermaid
 flowchart LR
-  CF["2.0 Contract Foundation"] --> SA["2.1 Source-aware MVP"]
-  SA --> ACC["2.2 Accuracy / Onboarding"]
-  ACC --> RT["2.3 Runtime Evidence"]
-  RT --> GOV["2.4 Policy Governance"]
-  GOV --> GA["3.0 GA public contract"]
-  GA --> ED["3.1 Editor"]
-  REF["#176 Enabling refactor"] -. enables .-> SA
-  REF -. enables .-> GA
+  CF["#529 Contract Foundation"] --> PUB["#571 Publication"]
+  PUB --> POST["#545 Post-release"]
+  POST --> SA["#531 Source-aware MVP / post-release"]
+  SA --> A["#533 A: Verification Core"]
+  A --> B["#534 B: Artifact / Deployment"]
+  B --> C["#1118 C: Equivalence"]
+  C --> D["#536 D: Regression / Governance"]
+  D --> GA["#537 GA"]
+  GA --> ED["#539 Optional Editor"]
 ```
 
 ## 6. Review cadence and release gates
@@ -88,10 +95,10 @@ flowchart LR
 
 ## 7. Status definitions
 
-- **Implemented**: acceptance criteria and code/test/package evidence are present.
+- **Implemented**: acceptance criteria and code/test/package evidence exist for the stated scope. A bounded/internal implementation does not complete its parent phase or establish publication.
 - **Operational hardening**: core behavior exists, but release/package/docs or pilot evidence is incomplete.
 - **Experimental**: reachable interface with deliberately limited compatibility guarantees.
-- **Planned**: owned by an Issue/spec but not released.
+- **Planned**: implementation of the stated scope is incomplete; distinct from implemented but unpublished.
 - **Research**: feasibility or adoption is not decided.
 
 Closing an Issue alone never changes its status.
@@ -102,12 +109,22 @@ Closing an Issue alone never changes its status.
 | --- | --- |
 | Cloudflare/auth and compiler test tracks | Current implemented foundation and operational hardening |
 | Issue-to-docs alignment | Current docs/status governance |
-| Monitor/observability and multi-CDN parity | v2.2 accuracy and v2.3 Runtime Evidence |
-| Overlay/inheritance and governance helpers | v2.4 Policy Governance |
-| Stable API/provider direction | v3.0 GA |
+| Monitor/observability and multi-CDN parity | A hardening and B Runtime Evidence |
+| Overlay/inheritance and governance helpers | D Policy Governance |
+| Stable API/provider direction | GA; version not adopted |
 | Rust/WASM and additional CDN research | Research backlog |
 
 The old Track A–G layout is historical context, not a second release plan.
+
+Historical labels do not adopt future release versions. Each Epic retains its uncompleted acceptance criteria.
+
+| Historical version label | Current responsibility |
+| --- | --- |
+| v2.2.0 | #533 A and remaining accuracy/onboarding hardening |
+| v2.3.0 | #534 B |
+| v2.4.0 | #536 D |
+| v3.0.0 | #537 GA |
+| v3.1.0 | #539 optional |
 
 ## 9. Common release contract
 
@@ -123,7 +140,7 @@ Release evidence must show:
 
 ## 10. Status update rules
 
-The Issue tracker is the implementation source of truth. Update this roadmap
+Code, tests and package evidence with their linked Issues establish implementation status. Update this roadmap
 only after the corresponding Issue/PR/test/package evidence exists. Keep the
 English and Japanese files semantically equivalent, link every release gate to
 its owner, and never promote a future or experimental feature to Released.

@@ -1,6 +1,6 @@
 # ロードマップ
 
-このロードマップは Version Release Train の正本サマリーです。実装の
+このロードマップはreleaseと製品採用順の正本サマリーです。実装の
 source of truth は code・test・package とリンクされた Issue であり、個別の
 Acceptance Criteria を置き換えません。
 
@@ -31,9 +31,9 @@ finding として返します。Runtime に観測がないことは route 削除
 
 ## 3. 現行リリースと main の状態
 
-現行packageの区別（2026-10-13、main `27211fa91127b8cf978f7233ced7deb91c5053f7`で確認）: 公開済み **1.4.0 / Policy schema 1**、未公開 **2.0.0-rc.0 / Policy schema 2**、将来の正式 **2.0.0**は別状態です。[main artifactの独立照合](quickstart.ja.md#1-未公開schema2候補を空のconsumerへ導入)を使います。同梱docsへ最終tgz自身のhashを固定せず、担当者が最終mainのrun/attempt/source/harness/tree/tgz/lockをpackage外へ保存します。
+2026-10-26に照合した技術基準はmain `31975ebcf9862ba040905c1a693fe17714b5a5fd`です。公開済み **1.4.0 / Policy schema 1**、未公開 **2.0.0-rc.0 / Policy schema 2**、将来の正式 **2.0.0**は別状態です。[main artifactの独立照合](quickstart.ja.md#1-未公開schema2候補を空のconsumerへ導入)を使い、最終source/harness/tree/run/attempt/tgz/lockをpackage外の[#1024](https://github.com/albert-einshutoin/cdn-security-framework/issues/1024)へ固定します。同梱docsへ最終tgz自身のhashを固定しません。
 
-下表の実装証拠は過去の **2026-09-22**、main `111f995bd35d3b24bdd1ee7dd72c35bce19f9170`での確認です。[main検証](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249)。日付付きlinkは過去の証拠として保持し、最終現候補の検証とは扱いません。schema2はmain実装済み・未公開で、RC GO・H01結果・公開を意味しません。
+下表の2026-09-22/main111f995へのlinkは過去の基盤実装の証拠です。追加した有界modelとlocal artifact検証は、それぞれ#1119/#1123の受入記録に範囲を固定しています。Phase全体の完了・実Cloud・H01・RC GO・公開へ拡大しません。
 
 | Area | Status | Evidence / boundary |
 | --- | --- | --- |
@@ -44,34 +44,41 @@ finding として返します。Runtime に観測がないことは route 削除
 | NestJS Source Analyzer core (#294–#300) | Implemented / Experimental | [Source guide](./source-analysis-nestjs.ja.md); programmatic/static only |
 | Source-aware standard CLI | Planned v2.1.0 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) |
 | Policy schema 2 / migration | Implemented on main / unpublished | [#1023](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023) / [PR #1033](https://github.com/albert-einshutoin/cdn-security-framework/pull/1033) |
+| Auth/cache verification model | Implemented bounded/internal core on main; unpublished | [#1119](https://github.com/albert-einshutoin/cdn-security-framework/issues/1119) / [PR #1122](https://github.com/albert-einshutoin/cdn-security-framework/pull/1122); model-only verdict and independent witness, no deployed auth proof |
+| Cloudflare artifact HTTP verification | Implemented bounded/local MVP on main; unpublished | [#1123](https://github.com/albert-einshutoin/cdn-security-framework/issues/1123) / [PR #1124](https://github.com/albert-einshutoin/cdn-security-framework/pull/1124); bound artifact/runtime and independent local HTTP oracle, no live Cloud or AWS cache proof |
+| Next.js dependency-aware guard / diagnostics | Implemented on main; unpublished | [PR #1121](https://github.com/albert-einshutoin/cdn-security-framework/pull/1121) / [#1125](https://github.com/albert-einshutoin/cdn-security-framework/issues/1125); only CVE-2025-29927 generates a guard, five additional advisories are diagnostic only; adoption remains [#1120](https://github.com/albert-einshutoin/cdn-security-framework/issues/1120) |
 | v2.0 release preparation | Operational hardening / not RC GO | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) / [#895](https://github.com/albert-einshutoin/cdn-security-framework/issues/895) |
 
 ## 4. Version Release Train
 
-| Version | Release epic | Outcome / must-have | Entry condition | Non-goals | Status |
-| --- | --- | --- | --- | --- | --- |
-| v2.0.0 | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) | Contract Foundation / schema 2 / 安全なmigration | [#541](https://github.com/albert-einshutoin/cdn-security-framework/issues/541) / [#1013](https://github.com/albert-einshutoin/cdn-security-framework/issues/1013) Decision A | Source CLI / Runtime / Composition / Editor | Operational hardening |
-| v2.1.0 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) | Source-aware Contract Diff MVP | [#545](https://github.com/albert-einshutoin/cdn-security-framework/issues/545) | Runtime / Composition / Editor | Planned |
-| v2.2.0 | [#533](https://github.com/albert-einshutoin/cdn-security-framework/issues/533) | 精度 / onboarding / monorepo改善 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) 公開後評価 | New analyzers/providers | Planned |
-| v2.3.0 | [#534](https://github.com/albert-einshutoin/cdn-security-framework/issues/534) | Runtime Evidence Preview | [#533](https://github.com/albert-einshutoin/cdn-security-framework/issues/533) 公開後評価 | Automatic enforcement | Planned |
-| v2.4.0 | [#536](https://github.com/albert-einshutoin/cdn-security-framework/issues/536) | Policy Governance Preview | [#534](https://github.com/albert-einshutoin/cdn-security-framework/issues/534) 公開後評価 | Silent baseline weakening | Planned |
-| v3.0.0 | [#537](https://github.com/albert-einshutoin/cdn-security-framework/issues/537) | GA public contract | [#536](https://github.com/albert-einshutoin/cdn-security-framework/issues/536) 公開後評価 | Editor extension | Planned |
-| v3.1.0 | [#539](https://github.com/albert-einshutoin/cdn-security-framework/issues/539) | Editor連携 | [#537](https://github.com/albert-einshutoin/cdn-security-framework/issues/537) 公開後評価 | Automatic apply/deploy | Planned |
+Phaseはrelease版ではありません。v2.1後の版と日付は未採用で、旧milestone名から推測しません。製品採用のEntry・互換性・pilot・費用・Midpoint/RC判断は[#270](https://github.com/albert-einshutoin/cdn-security-framework/issues/270)と[#872](https://github.com/albert-einshutoin/cdn-security-framework/issues/872)が正本です。
 
-公開日を約束しません。各Epicがscope・受入条件の正本です。旧V150等のIDは履歴のまま残します。
+| Release / phase | Canonical owner | Outcome | Entry / status |
+| --- | --- | --- | --- |
+| v2.0.0 | [#529](https://github.com/albert-einshutoin/cdn-security-framework/issues/529) | Contract Foundation / schema 2 / safe migration | Operational hardening; H01 / #1024 / #542 / #895 / #571 gates remain |
+| v2.1.0 | [#531](https://github.com/albert-einshutoin/cdn-security-framework/issues/531) | Source-aware Contract Diff MVP | Planned product; #545 Entry, pilot and release gates remain. [PR #1090](https://github.com/albert-einshutoin/cdn-security-framework/pull/1090) is merged into dev/2.1-source-aware, not main |
+| A | [#533](https://github.com/albert-einshutoin/cdn-security-framework/issues/533) | Verification Core / accuracy and onboarding hardening | Bounded #1119 core implemented; product adoption and remaining hardening planned after #531 post-release review |
+| B | [#534](https://github.com/albert-einshutoin/cdn-security-framework/issues/534) | Runtime / Artifact & Deployment Verification | Bounded #1123 local artifact MVP implemented; remaining event/deployment scope planned; A contract and adoption Entry |
+| C | [#1118](https://github.com/albert-einshutoin/cdn-security-framework/issues/1118) | Security Equivalence, common AWS/Cloudflare subset | Planned; adopted A/B model and evidence contracts; equivalence is not safety |
+| D | [#536](https://github.com/albert-einshutoin/cdn-security-framework/issues/536) | CI Regression Guard / composition and governance | Planned; adopted A → B → C; no silent weakening or automatic apply |
+| GA | [#537](https://github.com/albert-einshutoin/cdn-security-framework/issues/537) | Public Contract / Provider maturity | Planned after A → B → C → D; version not adopted |
+| Optional after GA | [#539](https://github.com/albert-einshutoin/cdn-security-framework/issues/539) | Editor / LSP / VS Code | Not adopted; real demand and GA Entry; not a GA prerequisite |
+
+#1119/#1123は明示された有界scopeでmain受入済みの技術成果です。製品採用順やH01・公開Gateを免除せず、#533/#534のpilot、精度/導入、event/deployment等の残るACを完了にしません。独立した試作は明示scopeで進められますが、Verifierを#529/#531の新しい公開前提にはしません。
 
 ## 5. Version dependency graph
 
 ```mermaid
 flowchart LR
-  CF["2.0 Contract Foundation"] --> SA["2.1 Source-aware MVP"]
-  SA --> ACC["2.2 Accuracy / Onboarding"]
-  ACC --> RT["2.3 Runtime Evidence"]
-  RT --> GOV["2.4 Policy Governance"]
-  GOV --> GA["3.0 GA public contract"]
-  GA --> ED["3.1 Editor"]
-  REF["#176 Enabling refactor"] -. enables .-> SA
-  REF -. enables .-> GA
+  CF["#529 Contract Foundation"] --> PUB["#571 Publication"]
+  PUB --> POST["#545 Post-release"]
+  POST --> SA["#531 Source-aware MVP / post-release"]
+  SA --> A["#533 A: Verification Core"]
+  A --> B["#534 B: Artifact / Deployment"]
+  B --> C["#1118 C: Equivalence"]
+  C --> D["#536 D: Regression / Governance"]
+  D --> GA["#537 GA"]
+  GA --> ED["#539 Optional Editor"]
 ```
 
 ## 6. Review cadence と release gate
@@ -87,10 +94,10 @@ flowchart LR
 
 ## 7. Status の定義
 
-- **Implemented**: acceptance criteria と code/test/package evidence がある。
+- **Implemented**: 明記したscopeのACとcode/test/package evidenceがある。有界/internalの実装は親Phaseの完了や公開を意味しない。
 - **Operational hardening**: core はあるが release/package/docs または pilot evidence が不足。
 - **Experimental**: 到達可能だが compatibility 保証を意図的に限定。
-- **Planned**: Issue/spec が担当するが未リリース。
+- **Planned**: 明記したscopeの実装が未完了。実装済み・未公開とは区別する。
 - **Research**: feasibility または adoption が未決定。
 
 Issue を close しただけでは Status は変わりません。
@@ -101,12 +108,22 @@ Issue を close しただけでは Status は変わりません。
 | --- | --- |
 | Cloudflare/auth と compiler test | 現行の implemented foundation / operational hardening |
 | Issue と docs の整合 | 現行の docs/status governance |
-| monitor/observability と multi-CDN parity | v2.2 accuracy / v2.3 Runtime Evidence |
-| overlay/inheritance と governance helper | v2.4 Policy Governance |
-| Stable API / provider 方針 | v3.0 GA |
+| monitor/observability と multi-CDN parity | A hardening / B Runtime Evidence |
+| overlay/inheritance と governance helper | D Policy Governance |
+| Stable API / provider 方針 | GA; version not adopted |
 | Rust/WASM と追加 CDN の調査 | Research backlog |
 
 旧 Track A–G は履歴の説明であり、別の release plan ではありません。
+
+旧版名は採用済みの将来releaseを意味しません。未完了ACの正本は各Epicへ保持します。
+
+| 過去の版label | 現在の責任 |
+| --- | --- |
+| v2.2.0 | #533 Aと残る精度/導入hardening |
+| v2.3.0 | #534 B |
+| v2.4.0 | #536 D |
+| v3.0.0 | #537 GA |
+| v3.1.0 | #539 optional |
 
 ## 9. 共通 release contract
 
@@ -122,6 +139,5 @@ Release evidence は次を示します。
 
 ## 10. Status 更新ルール
 
-Issue tracker を implementation source of truth とします。対応する Issue/PR/test/package
-evidence が存在してからこの roadmap を更新します。英語版と日本語版は意味を一致させ、
+code/test/package evidenceと対応するIssueで実装状態を確認し、その根拠が存在してからこのroadmapを更新します。英語版と日本語版は意味を一致させ、
 全 release gate を owner にリンクし、future/experimental feature を Released と表現しません。

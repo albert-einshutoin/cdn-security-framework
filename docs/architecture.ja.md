@@ -23,7 +23,7 @@ artifact に変換します。CDN / WAF の動作やアプリケーション認�
 どの Truth も別の Truth の証明とは扱いません。未対応・partial な解析は推測で
 補完せず、review 用 finding として報告します。
 
-公開済みは1.4.0。2026-09-22のmainではschema2と明示migrationを実装・検証済みですが、2.0.0は未公開・RC GO前です。 [Evidence](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249).
+公開済みは **1.4.0 / Policy schema 1**。2026-10-26に照合したmain `31975ebcf9862ba040905c1a693fe17714b5a5fd`の技術基準は、明示migrationを持つ**未公開2.0.0-rc.0 / Policy schema 2**です。[候補の証拠](https://github.com/albert-einshutoin/cdn-security-framework/issues/1024)。H01 EN/JAは未実施で、RC GOと公開は未達です。
 
 ### Capability status
 
@@ -34,9 +34,13 @@ artifact に変換します。CDN / WAF の動作やアプリケーション認�
 | OpenAPI↔Policy drift | Implemented | CLI/JSON/SARIF/GHA | no source needed |
 | NestJS Source Analyzer core | Experimental/Implemented core | Programmatic | no app execution; metadata is not enforcement proof |
 | Source-aware contract diff CLI | Planned v2.1 | — | — |
-| Runtime Evidence v1 | Planned v2.3 | — | — |
-| Policy Composition | Planned v2.4 | — | — |
-| LSP/VS Code | Planned v3.1 | — | — |
+| Auth/cache model verification (#1119) | Implemented bounded core | Internal harness | model-only; no deployed authentication proof |
+| Cloudflare artifact HTTP verification (#1123) | Implemented local MVP | Internal native HTTP harness | bound artifact/runtime; no live Cloud or AWS cache proof |
+| Runtime / Deployment Evidence (#534) | Planned beyond the local MVP | — | Phase B; release version not adopted |
+| Policy Composition / Regression Guard (#536) | Planned | — | Phase D; release version not adopted |
+| LSP/VS Code (#539) | Optional after GA | — | release version not adopted |
+
+有界model coreとlocal artifact MVPはinternal・未公開の実装であり、public verifier APIやPhase A/B全体の完了ではありません。Deployment検証とprovider同値性はPlannedです。[#1119](https://github.com/albert-einshutoin/cdn-security-framework/issues/1119)と[#1123](https://github.com/albert-einshutoin/cdn-security-framework/issues/1123)に受入範囲を記録し、[#533 → #534 → #1118 → #536](ROADMAP.ja.md#4-version-release-train)で製品採用を判断します。
 
 対応済み interface は [OpenAPI 導入ガイド](openapi-integration.ja.md)、
 [NestJS Source Analysis](source-analysis-nestjs.ja.md)、[CLI リファレンス](cli.ja.md)、

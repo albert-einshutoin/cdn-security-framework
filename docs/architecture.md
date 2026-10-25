@@ -24,7 +24,7 @@ Four independent truths are kept separate:
 No truth is treated as proof of another. Unsupported or partial analysis is
 reported as a finding for review rather than filled in by an assumption.
 
-Published: 1.4.0. On 2026-09-22 main implements and validates schema2 and explicit migration; 2.0.0 remains unpublished and before RC GO. [Evidence](https://github.com/albert-einshutoin/cdn-security-framework/issues/1023#issuecomment-5764409249).
+Published: **1.4.0 / Policy schema 1**. The technical baseline checked on 2026-10-26 at main `31975ebcf9862ba040905c1a693fe17714b5a5fd` is **unpublished 2.0.0-rc.0 / Policy schema 2**, with explicit migration. [Candidate evidence](https://github.com/albert-einshutoin/cdn-security-framework/issues/1024). H01 EN/JA is not performed; RC GO and publication remain pending.
 
 ### Capability status
 
@@ -35,9 +35,13 @@ Published: 1.4.0. On 2026-09-22 main implements and validates schema2 and explic
 | OpenAPI↔Policy drift | Implemented | CLI/JSON/SARIF/GHA | no source needed |
 | NestJS Source Analyzer core | Experimental/Implemented core | Programmatic | no app execution; metadata is not enforcement proof |
 | Source-aware contract diff CLI | Planned v2.1 | — | — |
-| Runtime Evidence v1 | Planned v2.3 | — | — |
-| Policy Composition | Planned v2.4 | — | — |
-| LSP/VS Code | Planned v3.1 | — | — |
+| Auth/cache model verification (#1119) | Implemented bounded core | Internal harness | model-only; no deployed authentication proof |
+| Cloudflare artifact HTTP verification (#1123) | Implemented local MVP | Internal native HTTP harness | bound artifact/runtime; no live Cloud or AWS cache proof |
+| Runtime / Deployment Evidence (#534) | Planned beyond the local MVP | — | Phase B; release version not adopted |
+| Policy Composition / Regression Guard (#536) | Planned | — | Phase D; release version not adopted |
+| LSP/VS Code (#539) | Optional after GA | — | release version not adopted |
+
+The bounded model core and local artifact MVP are internal, unpublished implementations, not a public verifier API or completion of Phases A/B. Deployment verification and provider equivalence remain planned. [#1119](https://github.com/albert-einshutoin/cdn-security-framework/issues/1119) and [#1123](https://github.com/albert-einshutoin/cdn-security-framework/issues/1123) record the accepted limits; [#533 → #534 → #1118 → #536](ROADMAP.md#4-version-release-train) owns product adoption.
 
 Use the [OpenAPI integration guide](openapi-integration.md), [NestJS source
 analysis guide](source-analysis-nestjs.md), [CLI reference](cli.md), and
