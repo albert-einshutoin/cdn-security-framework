@@ -163,7 +163,7 @@ This is advisory — REGIONAL scope skips the warning because ALB + WAF logs are
 
 ### Managed-rule coverage lint
 
-Same lint pass warns when enforce-mode policies omit every one of BotControl / ATP / IPReputationList / AnonymousIpList. These four are where operators most frequently forget to opt in and are responsible for the vast majority of "why didn't the WAF catch this?" retros. The warning does not fail the build — adopt the rules you need for your risk posture.
+The same lint pass warns when explicit enforce-mode policies with a WAF section omit every one of BotControl / ATP / IPReputationList / AnonymousIpList, including when `scope` is omitted. This checks the Policy's managed-rule list without inferring a provider; AWS output still uses its existing REGIONAL default, while the logging warning above requires explicit CLOUDFRONT scope. The warning does not fail the build or add rules. Review availability, equivalence, and charges for the selected target before adopting rules. These reminders do not prove deployed WAF behavior or compliance.
 
 ### Custom block response
 
