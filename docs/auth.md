@@ -31,6 +31,24 @@ The JWT/JWKS sections below describe Cloudflare Workers.
 See [AWS trigger order](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-cloudfront-trigger-events.html)
 and [cache policies](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-cache-policies.html).
 
+## AWS monitor responses with an unresolved path
+
+With `defaults.mode: monitor`, request paths outside the bounded normalization
+model may reach the origin unchanged. When no auth-protected prefixes are configured,
+the response function preserves the
+origin status and content, applies the global headers and baseline CSP, and
+skips route-specific admin matching and `Clear-Site-Data`. It records
+`response_path_unknown` using the selected JSON/text log format without adding
+the raw path, body, or credentials to that diagnostic.
+
+Such responses receive `no-store`, `Pragma: no-cache`, and `Vary: Authorization,
+Cookie` even if `force_vary_auth` is disabled, because path-specific response
+behavior is unknown. Enforce mode and policies with any auth-protected prefix retain their
+error for an unresolved response path. Keep required auth gates configured;
+removing them is not a safe way to enable this behavior. These
+viewer-facing headers do not verify or disable CloudFront's internal cache.
+Local generated-function checks are not deployed CloudFront evidence.
+
 ## Admin Token / Basic Auth Comparison
 
 Both `static_token` and `basic_auth` gates verify the presented credential

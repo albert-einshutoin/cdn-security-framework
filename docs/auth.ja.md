@@ -27,6 +27,20 @@ AWSのJWT/署名URL対応を再開するには、viewerごとの認証と配信�
 根拠: [AWSのtrigger順序](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/lambda-cloudfront-trigger-events.html)、
 [cache policy](https://docs.aws.amazon.com/AmazonCloudFront/latest/DeveloperGuide/using-managed-cache-policies.html)。
 
+## AWS monitorの応答pathが解析不能な場合
+
+`defaults.mode: monitor`では、有界の正規化モデルで解釈できないpathも元の要求のまま
+originへ届く場合があります。認証保護prefixが設定されていないとき、応答関数はoriginのstatusと内容、global headerとbaseline
+CSPを維持し、route固有のadmin判定と`Clear-Site-Data`を省略します。
+選択したJSON/textログで`response_path_unknown`を記録し、この診断へraw path、body、
+資格情報を追加しません。
+
+path固有の応答制御が不明なため、`force_vary_auth`が無効でも`no-store`、`Pragma: no-cache`、
+`Vary: Authorization, Cookie`を付けます。enforce、または認証保護prefixが1つでもある場合は
+応答path解析不能のErrorを維持します。この挙動を使うために必要な認証ゲートを削除しないでください。
+これらのviewer向けheaderはCloudFront内部cacheの検証・無効化を意味しません。
+ローカルの生成関数チェックは実CloudFront配備の証拠ではありません。
+
 ## 管理トークン / Basic 認証の比較
 
 `static_token` と `basic_auth` は、CloudFront Functions と Cloudflare Workers の両方で定時間比較を実装している。

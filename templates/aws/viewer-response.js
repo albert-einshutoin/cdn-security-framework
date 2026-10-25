@@ -110,14 +110,23 @@ function handler(event) {
     return p;
   }
   const uri = canonicalizeResponsePath(req.uri || '/');
-  if (uri === null) throw new Error('Invalid response request path');
-  const matchPath = RESPONSE_CFG.caseInsensitive !== false ? uri.toLowerCase() : uri;
-  const isAdminPath = /* {{FEATURE_ADMIN_INDEX}} */ true && RESPONSE_CFG.adminPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.adminPathIndex)
-    : adminMatchPrefixes.some(function (p) { return pathMatchesPrefix(matchPath, p); });
+  const pathUnknown = uri === null;
+  if (pathUnknown) {
+    if (RESPONSE_CFG.mode !== 'monitor' || !Array.isArray(RESPONSE_CFG.authProtectedPrefixes)
+        || RESPONSE_CFG.authProtectedPrefixes.length !== 0) throw new Error('Invalid response request path');
+    // Only an unprotected monitor scope can retain an unknown-path response.
+    // Auth gates remain fail-closed, and unknown responses cannot use shared caching.
+    if (RESPONSE_CFG.logFormat === 'text') console.log('[monitor]', 'response_path_unknown', 'viewer-response');
+    else console.log(JSON.stringify({ ts: Date.now(), level: 'info', event: 'monitor',
+      block_reason: 'response_path_unknown', phase: 'viewer-response' }));
+  }
+  const matchPath = pathUnknown ? null : RESPONSE_CFG.caseInsensitive !== false ? uri.toLowerCase() : uri;
+  const isAdminPath = !pathUnknown && (/* {{FEATURE_ADMIN_INDEX}} */ true && RESPONSE_CFG.adminPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.adminPathIndex)
+    : adminMatchPrefixes.some(function (p) { return pathMatchesPrefix(matchPath, p); }));
   // Union of auth-gate prefixes — broader than admin-only; catches jwt/basic/signed_url too.
-  const isAuthPath = /* {{FEATURE_AUTH_PATH_INDEX}} */ true && RESPONSE_CFG.authPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.authPathIndex) : authMatchPrefixes.some(function (p) {
+  const isAuthPath = !pathUnknown && (/* {{FEATURE_AUTH_PATH_INDEX}} */ true && RESPONSE_CFG.authPathIndex ? pathHasMatch(matchPath, RESPONSE_CFG.authPathIndex) : authMatchPrefixes.some(function (p) {
     return pathMatchesPrefix(matchPath, p);
-  });
+  }));
 
   // CSP: substitute per-response nonce into any `'nonce-PLACEHOLDER'` in policy strings.
   var nonce = '';
@@ -151,7 +160,7 @@ function handler(event) {
   // fired for the first matching admin route.
   // These viewer-facing headers do not disable CloudFront's internal cache or
   // cause origin-request authentication to execute on a cache hit.
-  if (RESPONSE_CFG.forceVaryAuth && isAuthPath) {
+  if (pathUnknown || (RESPONSE_CFG.forceVaryAuth && isAuthPath)) {
     set(h, "Cache-Control", "no-store, no-cache, must-revalidate, private");
     set(h, "Pragma", "no-cache");
     appendVary(h, "Authorization");
@@ -163,7 +172,7 @@ function handler(event) {
   // downstream cache cannot replay the cleared response to a returning user.
   var status = parseInt(res.statusCode, 10) || 0;
   var isSuccess = status >= 200 && status < 400;
-  var hitsClearPath = (RESPONSE_CFG.clearSiteDataPaths || []).some(function (p) {
+  var hitsClearPath = !pathUnknown && (RESPONSE_CFG.clearSiteDataPaths || []).some(function (p) {
     return uri === p || uri.startsWith(p + "/");
   });
   if (hitsClearPath && isSuccess) {
