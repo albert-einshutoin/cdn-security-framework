@@ -86,3 +86,48 @@ test('limits unsupported analysis to unknown and rejects malformed or oversized 
     expect(() => analyzeApplicationDependencies({ ...inputs().input(), packageJson })).toThrow(ApplicationDependencyError);
   }
 });
+
+// Literal vendor boundaries, independent of the catalog's range calculation.
+test.each([
+  ['GHSA-p9j2-gv94-2wf4', '11.1.4', 'not-affected-version'],
+  ['GHSA-p9j2-gv94-2wf4', '12.0.0', 'unknown'],
+  ['GHSA-p9j2-gv94-2wf4', '15.5.20', 'unknown'],
+  ['GHSA-p9j2-gv94-2wf4', '15.5.21', 'not-affected-version'],
+  ['GHSA-p9j2-gv94-2wf4', '16.2.10', 'unknown'],
+  ['GHSA-p9j2-gv94-2wf4', '16.2.11', 'not-affected-version'],
+  ['GHSA-4c39-4ccg-62r3', '12.3.5', 'not-affected-version'],
+  ['GHSA-4c39-4ccg-62r3', '13.0.0', 'unknown'],
+  ['GHSA-4c39-4ccg-62r3', '15.5.20', 'unknown'],
+  ['GHSA-4c39-4ccg-62r3', '15.5.21', 'not-affected-version'],
+  ['GHSA-4c39-4ccg-62r3', '16.2.10', 'unknown'],
+  ['GHSA-4c39-4ccg-62r3', '16.2.11', 'not-affected-version'],
+  ['GHSA-2xp9-vwfh-vxw4', '9.5.5', 'not-affected-version'],
+  ['GHSA-2xp9-vwfh-vxw4', '10.0.0', 'unknown'],
+  ['GHSA-2xp9-vwfh-vxw4', '15.5.23', 'unknown'],
+  ['GHSA-2xp9-vwfh-vxw4', '15.5.24', 'not-affected-version'],
+  ['GHSA-2xp9-vwfh-vxw4', '16.3.2', 'unknown'],
+  ['GHSA-2xp9-vwfh-vxw4', '16.3.3', 'not-affected-version'],
+  ['GHSA-68g3-v927-f742', '12.3.5', 'not-affected-version'],
+  ['GHSA-68g3-v927-f742', '13.0.0', 'upgrade-required'],
+  ['GHSA-68g3-v927-f742', '15.5.20', 'upgrade-required'],
+  ['GHSA-68g3-v927-f742', '15.5.21', 'not-affected-version'],
+  ['GHSA-68g3-v927-f742', '16.2.10', 'upgrade-required'],
+  ['GHSA-68g3-v927-f742', '16.2.11', 'not-affected-version'],
+  ['GHSA-6gpp-xcg3-4w24', '14.2.24', 'not-affected-version'],
+  ['GHSA-6gpp-xcg3-4w24', '15.5.20', 'not-affected-version'],
+  ['GHSA-6gpp-xcg3-4w24', '16.0.0', 'upgrade-required'],
+  ['GHSA-6gpp-xcg3-4w24', '16.2.10', 'upgrade-required'],
+  ['GHSA-6gpp-xcg3-4w24', '16.2.11', 'not-affected-version'],
+])('reports %s at vendor version %s as %s', (id, version, status) => {
+  expect(analyzeApplicationDependencies(inputs(version).input()).findings)
+    .toContainEqual(expect.objectContaining({ id, version, status }));
+});
+
+test('does not infer active runtime features from a package version or unknown deployment', () => {
+  const exported = analyzeApplicationDependencies(inputs('16.0.0', '*', 'static-export').input());
+  expect(exported.findings.slice(1)).toHaveLength(5);
+  expect(exported.findings.slice(1).every(({ status }) => status === 'not-applicable')).toBe(true);
+  const unknown = analyzeApplicationDependencies(inputs('16.0.0', '*', 'unknown').input());
+  expect(unknown.findings.slice(1)).toHaveLength(5);
+  expect(unknown.findings.slice(1).every(({ status }) => status === 'unknown')).toBe(true);
+});

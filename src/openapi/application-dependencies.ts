@@ -6,6 +6,19 @@ const semver = require('semver') as {
   satisfies(version: string, range: string): boolean;
 };
 
+const NEXT_ADVISORIES = [
+  ['GHSA-p9j2-gv94-2wf4', '>=12.0.0 <15.5.21 || >=16.0.0 <16.2.11',
+    'rewrite-or-redirect-hostname-is-not-observable-from-package-input'],
+  ['GHSA-4c39-4ccg-62r3', '>=13.0.0 <15.5.21 || >=16.0.0 <16.2.11',
+    'provider-must-enforce-5-mib-before-origin-and-capability-is-not-provided'],
+  ['GHSA-2xp9-vwfh-vxw4', '>=10.0.0 <15.5.24 || >=16.0.0 <16.3.3',
+    'image-optimization-avif-entrypoint-and-safe-disablement-are-not-observable-from-package-input'],
+  ['GHSA-68g3-v927-f742', '>=13.0.0 <15.5.21 || >=16.0.0 <16.2.11',
+    'vendor-documents-upgrade-only-no-generic-edge-mitigation'],
+  ['GHSA-6gpp-xcg3-4w24', '>=16.0.0 <16.2.11',
+    'next-upgrade-or-origin-authorization-required-no-generic-edge-mitigation'],
+] as const;
+
 export const MAX_APPLICATION_INPUT_BYTES = 8 * 1024 * 1024;
 export type ApplicationDeployment = 'self-hosted' | 'static-export' | 'unknown';
 export interface ApplicationDependencyInput {
@@ -15,16 +28,17 @@ export interface ApplicationDependencyInput {
 }
 
 export interface ApplicationDependencyAnalysis {
-  catalog: 'nextjs-middleware-v1';
-  coverage: 'CVE-2025-29927 only; other vulnerabilities and dependencies are unassessed';
+  catalog: 'nextjs-advisory-v2';
+  coverage: 'Next.js vendor advisory catalog covers only the listed GHSA entries; other vulnerabilities and dependencies are unassessed';
   packageJsonDigest: string;
   packageLockDigest: string;
   deployment: ApplicationDeployment;
   findings: Array<{
-    id: 'CVE-2025-29927';
+    id: 'CVE-2025-29927' | typeof NEXT_ADVISORIES[number][0];
     package: 'next';
     version: string | null;
-    status: 'mitigation-generated' | 'not-affected-version' | 'not-applicable' | 'not-declared' | 'unknown';
+    status: 'mitigation-generated' | 'upgrade-required' | 'not-affected-version'
+      | 'not-applicable' | 'not-declared' | 'unknown';
     reason: string;
     source: string;
   }>;
@@ -63,15 +77,16 @@ function sameDeclarations(left: Record<string, string>, right: Record<string, st
     && keys.every((key) => Object.hasOwn(right, key) && left[key] === right[key]);
 }
 
-// This catalog deliberately implements the vendor's header-presence workaround,
-// not payload signatures. It covers framework routes absent from OpenAPI too.
+// The first catalog entry implements the vendor's header-presence workaround,
+// not payload signatures. Additional entries are diagnostic only unless their
+// status explicitly says otherwise; framework routes remain outside OpenAPI.
 export function analyzeApplicationDependencies(input: ApplicationDependencyInput): ApplicationDependencyAnalysis {
   if (!input || !['self-hosted', 'static-export', 'unknown'].includes(input.deployment)) invalid();
   const manifest = parse(input.packageJson);
   const lock = parse(input.packageLock);
   const result: ApplicationDependencyAnalysis = {
-    catalog: 'nextjs-middleware-v1',
-    coverage: 'CVE-2025-29927 only; other vulnerabilities and dependencies are unassessed',
+    catalog: 'nextjs-advisory-v2',
+    coverage: 'Next.js vendor advisory catalog covers only the listed GHSA entries; other vulnerabilities and dependencies are unassessed',
     packageJsonDigest: `sha256:${createHash('sha256').update(input.packageJson).digest('hex')}`,
     packageLockDigest: `sha256:${createHash('sha256').update(input.packageLock).digest('hex')}`,
     deployment: input.deployment,
@@ -130,6 +145,22 @@ export function analyzeApplicationDependencies(input: ApplicationDependencyInput
     finding.status = 'mitigation-generated'; finding.reason = 'block-external-middleware-subrequest-header-before-origin';
   } else {
     finding.reason = 'affected-next-deployment-is-unknown';
+  }
+  for (const [id, range, reason] of NEXT_ADVISORIES) {
+    if (!semver.satisfies(version, range)) {
+      result.findings.push({ id, package: 'next', version, status: 'not-affected-version',
+        reason: 'outside-vendor-affected-version-ranges',
+        source: `https://github.com/vercel/next.js/security/advisories/${id}` });
+      continue;
+    }
+    const upgradeOnly = id === 'GHSA-68g3-v927-f742' || id === 'GHSA-6gpp-xcg3-4w24';
+    const notApplicable = input.deployment === 'static-export';
+    result.findings.push({ id, package: 'next', version,
+      status: notApplicable ? 'not-applicable' : input.deployment === 'unknown' ? 'unknown'
+        : upgradeOnly ? 'upgrade-required' : 'unknown',
+      reason: notApplicable ? 'static-export-has-no-next-runtime'
+        : input.deployment === 'unknown' ? 'affected-next-deployment-is-unknown' : reason,
+      source: `https://github.com/vercel/next.js/security/advisories/${id}` });
   }
   return result;
 }

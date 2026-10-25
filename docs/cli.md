@@ -110,7 +110,7 @@ npx cdn-security openapi generate-policy \
   never guessed or approximated.
 - Optional `--package-json` and `--package-lock` must be supplied together.
   `--deployment self-hosted|static-export|unknown` describes the Next.js origin
-  (default `unknown`). Initial coverage is CVE-2025-29927 only; uncertain version
+  (default `unknown`). The catalog generates a guard for CVE-2025-29927 and diagnoses five additional Next.js GHSA entries; uncertain version
   or deployment analysis stops generation. See [version-aware candidates](openapi-policy-candidates.md#version-aware-nextjs-virtual-patch).
 
 See the [OpenAPI integration guide](openapi-integration.md) for the runnable
@@ -127,7 +127,9 @@ npx cdn-security advisory check \
 The command resolves a direct production `next` version from npm lockfile v2/v3,
 then queries public GitHub-reviewed npm advisories for that version. JSON records
 the check time, input digests, version, GHSA/CVE IDs, and
-`mitigation-candidate-available`, `unassessed`, or `not-applicable`. A candidate
+`mitigation-candidate-available`, `unassessed`, `unknown`, `upgrade-required`, or
+`not-applicable`. Separate `catalogFindings` retain curated vendor diagnostics;
+unresolved entries require action even when the reviewed feed is empty. A candidate
 does not prove deployment. Exit `0` means no actionable advisory within this
 limited check, `2` means action is needed, and `1` means input, deployment, or
 feed coverage could not be established. No direct production `next` declaration

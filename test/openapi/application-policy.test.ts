@@ -50,9 +50,17 @@ test('combines exact Next.js version evidence with OpenAPI without narrowing fra
   expect(policy.request.block.header_present).toEqual(['x-middleware-subrequest']);
   expect(policy.request.allow_methods).toEqual(['GET', 'HEAD', 'POST']);
   expect(policy.request.block.header_missing).toEqual(['user-agent']);
-  expect(metadata.application.findings).toEqual([expect.objectContaining({
+  expect(metadata.application.findings).toContainEqual(expect.objectContaining({
     id: 'CVE-2025-29927', status: 'mitigation-generated', version: '14.2.24',
-  })]);
+  }));
+  expect(metadata.application.findings).toContainEqual(expect.objectContaining({
+    id: 'GHSA-68g3-v927-f742', status: 'upgrade-required',
+  }));
+  expect(metadata.omittedRecommendations).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'api-schema-validation' }),
+    expect.objectContaining({ id: 'adaptive-bot-rate-suppression' }),
+    expect.objectContaining({ id: 'origin-direct-access' }),
+  ]));
   expect(metadata.omittedRecommendations).toContainEqual(expect.objectContaining({
     id: 'global-allowed-methods', reason: 'openapi-does-not-cover-application-routes',
   }));
@@ -66,6 +74,20 @@ test.each([null, false, 0, ''])('rejects malformed application option %j instead
     profile: 'balanced', profilePolicy, sourceDigest: inspection.report.analyzer.sourceDigest,
     application: application as never,
   })).toThrowError(expect.objectContaining({ code: 'APPLICATION_INPUT_INVALID' }));
+});
+
+test('refuses unknown deployment after the middleware patch version, without writing a candidate', () => {
+  const directory = workspace('16.0.0');
+  const manifest = JSON.parse(fs.readFileSync(path.join(directory, 'package.json'), 'utf8'));
+  const lock = JSON.parse(fs.readFileSync(path.join(directory, 'package-lock.json'), 'utf8'));
+  manifest.dependencies.next = '^16.0.0';
+  lock.packages[''].dependencies.next = '^16.0.0';
+  fs.writeFileSync(path.join(directory, 'package.json'), JSON.stringify(manifest));
+  fs.writeFileSync(path.join(directory, 'package-lock.json'), JSON.stringify(lock));
+  const result = generate(directory, ['--deployment', 'unknown']);
+  expect(result.status).toBe(1);
+  expect(result.stderr).toContain('APPLICATION_ANALYSIS_UNKNOWN');
+  expect(fs.readdirSync(path.join(directory, 'policy'))).toEqual([]);
 });
 
 test.each(['14.2.25', '15.2.3'])('omits the virtual patch for fixed Next.js %s', (version) => {

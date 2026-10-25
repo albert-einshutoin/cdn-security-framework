@@ -62,7 +62,7 @@ npx cdn-security openapi generate-policy \
 npx cdn-security build --policy policy/next.candidate.yml --target aws --out-dir dist/next-aws
 ```
 
-Initial catalog `nextjs-middleware-v1` covers **CVE-2025-29927 only**. It is not
+Current catalog `nextjs-advisory-v2` covers **CVE-2025-29927 plus the listed Next.js GHSA advisories**. It is not
 a complete dependency audit or a live advisory feed. It checks direct production
 `next` declarations against npm lockfile v2/v3, including matching root identity
 and dependency declarations. Only stable exact versions resolved from the public
@@ -86,6 +86,34 @@ receive no patch for **this CVE**; that does not establish general safety.
 Managed hosting is not inferred. Choose `unknown` for unsupported deployment
 contexts rather than guessing that a host is unaffected.
 
+For additional catalog entries, the candidate is deliberately conservative: the
+rewrite/redirect hostname SSRF and AVIF optimization RCE are `unknown` because
+package metadata cannot prove the exact route/config entry or safe disablement.
+The Edge Server Action body advisory is also `unknown` until a provider proves a
+5 MiB limit before origin (AWS WAF body inspection is 16 KiB by default and 64
+KiB maximum for CloudFront; [inspection limits](https://docs.aws.amazon.com/waf/latest/developerguide/waf-oversize-request-components.html)
+alone do not establish a 5 MiB enforcement rule). Cache confusion and the
+Turbopack middleware bypass are `upgrade-required`. The latter also has a vendor
+workaround requiring authorization in the page's server-side data path; neither
+is converted to a generic Edge rule.
+
+Curated boundaries, checked 2026-10-26 (stable versions only):
+
+| Advisory | Affected Next.js versions | Diagnostic for an affected self-hosted version |
+| --- | --- | --- |
+| [Hostname SSRF](https://github.com/vercel/next.js/security/advisories/GHSA-p9j2-gv94-2wf4) | `>=12.0.0 <15.5.21` or `>=16.0.0 <16.2.11` | `unknown` |
+| [Server Action body](https://github.com/vercel/next.js/security/advisories/GHSA-4c39-4ccg-62r3) | `>=13.0.0 <15.5.21` or `>=16.0.0 <16.2.11` | `unknown` |
+| [AVIF optimization](https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4) | `>=10.0.0 <15.5.24` or `>=16.0.0 <16.3.3` | `unknown` |
+| [Server-fetch cache confusion](https://github.com/vercel/next.js/security/advisories/GHSA-68g3-v927-f742) | `>=13.0.0 <15.5.21` or `>=16.0.0 <16.2.11` | `upgrade-required` |
+| [Turbopack middleware bypass](https://github.com/vercel/next.js/security/advisories/GHSA-6gpp-xcg3-4w24) | `>=16.0.0 <16.2.11` | `upgrade-required` |
+
+Version matching does not prove the vulnerable feature is enabled. An explicit
+static export has no relevant Next.js server runtime; an unknown deployment
+stops generation and the live check. A version outside a listed range is only
+`not-affected-version` for that entry. Catalog changes require vendor-source and
+boundary-test review; an updated, withdrawn, or contradictory advisory requires
+reassessment. A contradictory live version range fails the check.
+
 Both AWS CloudFront Functions and Cloudflare Workers reject any occurrence of
 the header, including an empty value, before CORS preflight or origin forwarding.
 The rule applies to every path, including framework routes absent from OpenAPI.
@@ -94,6 +122,11 @@ numeric limits are omitted and the selected profile baseline is retained because
 an API specification does not describe all application traffic. Other OpenAPI
 recommendations remain visible for review. Review profile limits and CSP against
 your pages, assets and authentication before adoption.
+
+The candidate also records omissions for runtime API-schema validation, adaptive
+bot/rate suppression, and origin-direct-access prevention. Those require
+application, provider, or network evidence and are not claimed by an OpenAPI
+policy candidate.
 
 The sidecar's `application` field records both raw input digests, the supplied
 deployment, catalog coverage, resolved version, decision and advisory source.
@@ -123,15 +156,19 @@ The API parses the supplied strings and does not read files.
 package-lock.json --deployment self-hosted` queries public GitHub-reviewed npm
 advisories for an exact direct production Next.js version. Its JSON separates
 `mitigation-candidate-available` (supported by this catalog), `unassessed`
-(no catalog mitigation), and `not-applicable` (only this CVE and deployment
+(no curated assessment), `unknown`, `upgrade-required`, and `not-applicable` (only this advisory and deployment
 combination). A candidate does not prove that a policy is active at the CDN.
+The `catalogFindings` field separately reports curated entries as `unknown`,
+`upgrade-required`, `not-affected-version`, or `not-applicable`; unknown and
+upgrade-required entries remain actionable even when the GitHub feed is empty or
+has not yet ingested a vendor advisory.
 
 The GitHub API endpoint is fixed. The check is bounded to 100 entries, 4 MiB,
 and 10 seconds; a next page, unavailable or invalid response, or unknown version
 or deployment never produces a clean result. Exit `0` means no actionable result
 within this scope, `2` means action is needed, and `1` means the check is unknown
-or input is invalid. Coverage is limited to direct production `next` and public
-GitHub-reviewed advisories. The check time and input digests do not attest the
+or input is invalid. Coverage is limited to direct production `next`, the listed
+vendor catalog, and public GitHub-reviewed advisories. The check time and input digests do not attest the
 running deployment or CDN attachment. Upgrading Next.js according to the vendor
 advisory is the permanent remedy.
 

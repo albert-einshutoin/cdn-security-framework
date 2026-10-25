@@ -17,8 +17,8 @@ export class AdvisoryCheckError extends Error {
 
 export interface NextAdvisoryCheck {
   source: 'github-reviewed-npm';
-  coverage: 'Direct production next dependency and GitHub-reviewed public advisories only';
-  catalog: 'nextjs-middleware-v1';
+  coverage: 'Direct production next dependency; curated vendor diagnostics and GitHub-reviewed public advisories only';
+  catalog: 'nextjs-advisory-v2';
   checkedAt: string | null;
   feedDigest: string | null;
   packageJsonDigest: string;
@@ -30,7 +30,14 @@ export interface NextAdvisoryCheck {
     ghsaId: string;
     cveId: string | null;
     url: string;
-    status: 'mitigation-candidate-available' | 'not-applicable' | 'unassessed';
+    status: 'mitigation-candidate-available' | 'not-applicable' | 'unassessed' | 'unknown' | 'upgrade-required';
+  }>;
+  catalogFindings: Array<{
+    id: string;
+    version: string | null;
+    status: 'upgrade-required' | 'unknown' | 'not-affected-version' | 'not-applicable';
+    reason: string;
+    source: string;
   }>;
 }
 
@@ -94,7 +101,7 @@ export async function checkNextAdvisories(
   const catalogFinding = analysis.findings[0];
   const report: NextAdvisoryCheck = {
     source: 'github-reviewed-npm',
-    coverage: 'Direct production next dependency and GitHub-reviewed public advisories only',
+    coverage: 'Direct production next dependency; curated vendor diagnostics and GitHub-reviewed public advisories only',
     catalog: analysis.catalog,
     checkedAt: null,
     feedDigest: null,
@@ -104,9 +111,12 @@ export async function checkNextAdvisories(
     deployment: input.deployment,
     status: 'not-declared',
     findings: [],
+    catalogFindings: analysis.findings.slice(1).map(({ id, version, status, reason, source }) => ({
+      id, version, status: status as 'upgrade-required' | 'unknown' | 'not-affected-version' | 'not-applicable', reason, source,
+    })),
   };
   if (catalogFinding.status === 'not-declared') return report;
-  if (catalogFinding.status === 'unknown' || !catalogFinding.version) {
+  if (input.deployment === 'unknown' || catalogFinding.status === 'unknown' || !catalogFinding.version) {
     throw new ApplicationDependencyError('APPLICATION_ANALYSIS_UNKNOWN',
       'The installed Next.js version or deployment could not be established.');
   }
@@ -139,10 +149,14 @@ export async function checkNextAdvisories(
     if (!item.vulnerabilities.some((value: unknown) => matchesNextVersion(value, catalogFinding.version as string))) invalid();
     if (id === 'GHSA-f82v-jwr5-mffw'
       && (item.cve_id !== 'CVE-2025-29927' || catalogFinding.status === 'not-affected-version')) invalid();
+    const catalog = report.catalogFindings.find((finding) => finding.id === id);
+    if (catalog?.status === 'not-affected-version') invalid();
     report.findings.push({
       ghsaId: id, cveId: item.cve_id as string | null, url: item.html_url as string,
-      status: id !== 'GHSA-f82v-jwr5-mffw' ? 'unassessed'
-        : catalogFinding.status === 'not-applicable' ? 'not-applicable' : 'mitigation-candidate-available',
+      status: id === 'GHSA-f82v-jwr5-mffw'
+        ? catalogFinding.status === 'not-applicable' ? 'not-applicable' : 'mitigation-candidate-available'
+        : catalog?.status === 'unknown' || catalog?.status === 'upgrade-required' || catalog?.status === 'not-applicable'
+          ? catalog.status : 'unassessed',
     });
   }
   if (catalogFinding.status === 'mitigation-generated'
@@ -150,8 +164,10 @@ export async function checkNextAdvisories(
   report.findings.sort((left, right) => left.ghsaId < right.ghsaId ? -1 : left.ghsaId > right.ghsaId ? 1 : 0);
   report.checkedAt = new Date().toISOString();
   report.feedDigest = feed.digest;
-  report.status = report.findings.length === 0 ? 'no-reviewed-advisories'
-    : report.findings.some((finding) => finding.status !== 'not-applicable')
-      ? 'action-required' : 'not-applicable';
+  const catalogActionable = report.catalogFindings.some(({ status }) => status === 'unknown' || status === 'upgrade-required');
+  report.status = catalogActionable || report.findings.some(({ status }) => status !== 'not-applicable')
+    ? 'action-required'
+    : report.findings.length > 0 || report.catalogFindings.some(({ status }) => status === 'not-applicable')
+      ? 'not-applicable' : 'no-reviewed-advisories';
   return report;
 }
