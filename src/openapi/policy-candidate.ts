@@ -162,9 +162,10 @@ export function generatePolicyCandidate(
 
   if (options.profilePolicy.version !== 2) throw new Error('policy schema 2 is required');
   const application = options.application === undefined ? undefined : analyzeApplicationDependencies(options.application);
-  if (application?.findings.some(({ status }) => status === 'unknown')) {
+  if (application && (application.deployment === 'unknown' || application.findings[0]?.status === 'unknown')) {
     throw new ApplicationDependencyError('APPLICATION_ANALYSIS_UNKNOWN',
-      `Application analysis is unknown: ${application.findings.filter(({ status }) => status === 'unknown').map(({ reason }) => reason).join(', ')}. No candidate was generated.`);
+      `Application analysis is unknown: ${application.deployment === 'unknown'
+        ? 'application-deployment-is-unknown' : application.findings[0].reason}. No candidate was generated.`);
   }
   const policy = structuredClone(options.profilePolicy);
   const request = objectValue(policy.request);
@@ -219,6 +220,11 @@ export function generatePolicyCandidate(
   });
 
   if (application) {
+    omitted.push(
+      { id: 'api-schema-validation', reason: 'runtime-schema-validation-is-not-represented-by-the-edge-policy', basis: [] },
+      { id: 'adaptive-bot-rate-suppression', reason: 'provider-capability-and-traffic-baseline-are-required', basis: [] },
+      { id: 'origin-direct-access', reason: 'origin-network-boundary-is-not-represented-by-the-edge-policy', basis: [] },
+    );
     for (const id of Object.keys(POLICY_LIMITS)) omitted.push({
       id, reason: 'openapi-does-not-cover-application-routes', basis: [],
     });
@@ -227,6 +233,13 @@ export function generatePolicyCandidate(
       block.header_present = uniqueSorted([...existing, 'x-middleware-subrequest']);
       applied.push({ id: 'CVE-2025-29927', policyPath: 'request.block.header_present',
         basis: [application.findings[0].source], value: block.header_present });
+    }
+    for (const finding of application.findings.slice(1)) {
+      if (finding.status === 'unknown' || finding.status === 'upgrade-required') omitted.push({
+        id: finding.id,
+        reason: finding.status === 'upgrade-required' ? finding.reason : `unknown-${finding.reason}`,
+        basis: [finding.source],
+      });
     }
   } else {
     applyNumericLimit(limits, 'max_query_params',

@@ -58,7 +58,7 @@ npx cdn-security openapi generate-policy \
 npx cdn-security build --policy policy/next.candidate.yml --target aws --out-dir dist/next-aws
 ```
 
-初期catalog `nextjs-middleware-v1`は**CVE-2025-29927だけ**を扱います。依存全体の
+現行catalog `nextjs-advisory-v2`は**CVE-2025-29927と列挙したNext.js GHSA**を扱います。依存全体の
 脆弱性監査や最新advisory feedではありません。直接の本番用`next`宣言をnpm
 lockfile v2/v3と照合し、root identityと依存宣言の一致を確認します。public npmの
 `next` tarballに解決された安定版の確定バージョンだけを扱い、alias、local/workspace
@@ -80,6 +80,30 @@ install、network照会、module探索は行いません。
 安全性を保証しません。managed hostingを自動判定せず、未対応の実行方式は
 安全だと推測せず`unknown`を使います。
 
+追加catalogの判定も保守的です。rewrite/redirectのhostname SSRFとAVIF
+optimization RCEは、package metadataだけでは正確なroute/config入口や安全な停止を
+証明できないため`unknown`です。Edge Server Action bodyは、providerがorigin到達前に
+5 MiB制限を強制する証拠がない限り`unknown`です（CloudFrontのAWS WAF body検査は既定
+16 KiB、最大64 KiB。[検査上限](https://docs.aws.amazon.com/waf/latest/developerguide/waf-oversize-request-components.html)だけでは
+5 MiBの遮断を証明しません）。cache confusionとTurbopack middleware bypassは
+`upgrade-required`です。後者にはpageのserver-side data pathで認可を強制するvendorの
+回避策もあります。どちらも汎用Edge ruleへ変換しません。
+
+curated境界（2026-10-26確認、安定版のみ）:
+
+| Advisory | 影響するNext.js版 | 影響版・self-hostedの診断 |
+| --- | --- | --- |
+| [Hostname SSRF](https://github.com/vercel/next.js/security/advisories/GHSA-p9j2-gv94-2wf4) | `>=12.0.0 <15.5.21`または`>=16.0.0 <16.2.11` | `unknown` |
+| [Server Action body](https://github.com/vercel/next.js/security/advisories/GHSA-4c39-4ccg-62r3) | `>=13.0.0 <15.5.21`または`>=16.0.0 <16.2.11` | `unknown` |
+| [AVIF optimization](https://github.com/vercel/next.js/security/advisories/GHSA-2xp9-vwfh-vxw4) | `>=10.0.0 <15.5.24`または`>=16.0.0 <16.3.3` | `unknown` |
+| [Server-fetch cache confusion](https://github.com/vercel/next.js/security/advisories/GHSA-68g3-v927-f742) | `>=13.0.0 <15.5.21`または`>=16.0.0 <16.2.11` | `upgrade-required` |
+| [Turbopack middleware bypass](https://github.com/vercel/next.js/security/advisories/GHSA-6gpp-xcg3-4w24) | `>=16.0.0 <16.2.11` | `upgrade-required` |
+
+版の一致は脆弱なfeatureの有効化を証明しません。明示したstatic exportには対象のNext.js
+server runtimeがなく、未知のdeploymentは生成とlive照会を停止します。範囲外の版は
+その項目のみ`not-affected-version`です。catalog更新はvendor原典と境界テストのreviewを
+要し、更新・撤回・矛盾したadvisoryは再評価します。live feedの版境界矛盾はErrorです。
+
 AWS CloudFront FunctionsとCloudflare Workersの両方で、空値も含む対象headerの
 存在をCORS preflightやorigin転送より先に拒否します。OpenAPIにないframework
 routeも含めて全pathへ適用します。application inputがある場合、API仕様だけでは
@@ -87,6 +111,10 @@ routeも含めて全pathへ適用します。application inputがある場合、
 header・数値limitは省略し、選択profileのbaselineを保持します。他のRecommendationは
 review用metadataへ残します。採用前に画面・asset・認証に対するprofileのlimitと
 CSPを確認してください。
+
+さらにruntimeのAPI schema validation、適応的なbot/rate抑制、origin直アクセス防止は、
+application/provider/networkの証拠が必要なため、Candidateが実装済みとは主張せず、
+省略Recommendationとして記録します。
 
 sidecarの`application`には両inputのraw digest、指定deployment、catalogの対象範囲、
 解決版、判断、公式sourceを記録します。不正inputやmanifest/lock不一致は
@@ -114,13 +142,16 @@ fileを読みません。
 package-lock.json --deployment self-hosted`は、確定した直接の本番用Next.js版を
 GitHubの公開・審査済みnpm advisoryで照会します。結果はJSONで、GHSA/CVE IDと
 `mitigation-candidate-available`（このcatalogで生成可能）、`unassessed`
-（このcatalogに緩和策なし）、`not-applicable`（このCVEと実行方式の組合せのみ対象外）を
-区別します。候補は有効Policy・CDNへの配備や実際の防御を証明しません。
+（curated評価なし）、`unknown`、`upgrade-required`、`not-applicable`（このadvisoryと実行方式の組合せのみ対象外）を
+区別します。`catalogFindings`にはcurated entryごとの`unknown`、`upgrade-required`、
+`not-affected-version`、`not-applicable`も記録し、feedが空または未収載でも
+`unknown`/`upgrade-required`があれば対応が必要です。候補は有効Policy・CDNへの配備や
+実際の防御を証明しません。
 
 照会先は固定のGitHub APIです。最大100件・4 MiB・10秒で、続きのページ、取得失敗、
 不正応答、版または実行方式の不明を成功扱いしません。終了コードは対象なし`0`、
-対応が必要`2`、判断不能または不正入力`1`です。対象範囲は直接の本番用`next`と
-GitHub審査済みの公開advisoryに限られます。結果の時刻・入力digestは実際の稼働版や
+対応が必要`2`、判断不能または不正入力`1`です。対象範囲は直接の本番用`next`、
+列挙したvendor catalog、GitHub審査済みの公開advisoryに限られます。結果の時刻・入力digestは実際の稼働版や
 CDN適用状態の証拠ではありません。恒久対応はadvisoryに沿ったNext.jsの更新です。
 
 ## 決定性とmetadata

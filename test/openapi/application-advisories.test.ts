@@ -44,10 +44,26 @@ test('finds reviewed advisories for the locked Next version without claiming dep
   expect(JSON.stringify(result)).not.toContain('protected');
 });
 
-test('reports a successful empty feed only after an exact supported version was checked', async () => {
+test('keeps a successful feed actionable when the curated catalog has unresolved affected advisories', async () => {
   const result = await checkNextAdvisories(input('16.0.0'), feed([]));
-  expect(result).toMatchObject({ status: 'no-reviewed-advisories', version: '16.0.0', findings: [] });
+  expect(result).toMatchObject({ status: 'action-required', version: '16.0.0', findings: [] });
+  expect(result.catalogFindings).toEqual(expect.arrayContaining([
+    expect.objectContaining({ id: 'GHSA-p9j2-gv94-2wf4', status: 'unknown' }),
+    expect.objectContaining({ id: 'GHSA-68g3-v927-f742', status: 'upgrade-required' }),
+  ]));
   expect(result.checkedAt).toMatch(/^\d{4}-\d\d-\d\dT/);
+});
+
+test('labels known feed entries with the curated mitigation boundary', async () => {
+  const result = await checkNextAdvisories(input(), feed([
+    advisory('GHSA-f82v-jwr5-mffw', '>= 14.0.0, < 14.2.25', 'CVE-2025-29927'),
+    advisory('GHSA-4c39-4ccg-62r3', '>= 13.0.0, < 15.5.21'),
+    advisory('GHSA-68g3-v927-f742', '>= 13.0.0, < 15.5.21'),
+  ]));
+  expect(result.findings).toEqual(expect.arrayContaining([
+    expect.objectContaining({ ghsaId: 'GHSA-4c39-4ccg-62r3', status: 'unknown' }),
+    expect.objectContaining({ ghsaId: 'GHSA-68g3-v927-f742', status: 'upgrade-required' }),
+  ]));
 });
 
 test('marks this middleware advisory inapplicable to static export, without generalizing to other advisories', async () => {
@@ -67,6 +83,49 @@ test('does not call a static-export middleware advisory actionable', async () =>
     advisory('GHSA-f82v-jwr5-mffw', '>= 14.0.0, < 14.2.25', 'CVE-2025-29927'),
   ]));
   expect(result.status).toBe('not-applicable');
+});
+
+test('reports static export as not applicable even when the reviewed feed is empty', async () => {
+  const result = await checkNextAdvisories(input('14.2.24', 'static-export'), feed([]));
+  expect(result.status).toBe('not-applicable');
+  expect(result.catalogFindings).toEqual([
+    expect.objectContaining({ id: 'GHSA-p9j2-gv94-2wf4', status: 'not-applicable' }),
+    expect.objectContaining({ id: 'GHSA-4c39-4ccg-62r3', status: 'not-applicable' }),
+    expect.objectContaining({ id: 'GHSA-2xp9-vwfh-vxw4', status: 'not-applicable' }),
+    expect.objectContaining({ id: 'GHSA-68g3-v927-f742', status: 'not-applicable' }),
+    expect.objectContaining({ id: 'GHSA-6gpp-xcg3-4w24', status: 'not-affected-version' }),
+  ]);
+});
+
+test('keeps known runtime-only entries inapplicable to explicit static export and leaves other advisories unassessed', async () => {
+  const result = await checkNextAdvisories(input('16.0.0', 'static-export'), feed([
+    advisory('GHSA-4c39-4ccg-62r3', '>= 16.0.0, < 16.2.11'),
+    advisory('GHSA-aaaa-bbbb-cccc', '>= 16.0.0, < 16.2.11'),
+  ]));
+  expect(result.status).toBe('action-required');
+  expect(result.findings).toContainEqual(expect.objectContaining({ ghsaId: 'GHSA-4c39-4ccg-62r3', status: 'not-applicable' }));
+  expect(result.findings).toContainEqual(expect.objectContaining({ ghsaId: 'GHSA-aaaa-bbbb-cccc', status: 'unassessed' }));
+});
+
+test('reports an empty reviewed feed without outstanding catalog entries only at a fixed version', async () => {
+  const result = await checkNextAdvisories(input('16.3.3'), feed([]));
+  expect(result.status).toBe('no-reviewed-advisories');
+  expect(result.catalogFindings).toHaveLength(5);
+  expect(result.catalogFindings.every(({ status }) => status === 'not-affected-version')).toBe(true);
+});
+
+test('rejects a feed that contradicts a curated affected-version boundary', async () => {
+  await expect(checkNextAdvisories(input('15.5.20'), feed([
+    advisory('GHSA-6gpp-xcg3-4w24', '>= 13.0.0, < 16.2.11'),
+  ]))).rejects.toMatchObject({ code: 'ADVISORY_FEED_INVALID' });
+});
+
+test('does not query a feed for an unknown deployment even if the original middleware CVE is fixed', async () => {
+  let called = false;
+  await expect(checkNextAdvisories(input('16.0.0', 'unknown'), async () => {
+    called = true; return new Response('[]');
+  })).rejects.toMatchObject({ code: 'APPLICATION_ANALYSIS_UNKNOWN' });
+  expect(called).toBe(false);
 });
 
 test('reports no direct production Next declaration without querying the advisory feed', async () => {

@@ -95,7 +95,7 @@ JSON出力は[`openapi-inspection-v1.schema.json`](../schemas/openapi-inspection
 
 任意の`--package-json`と`--package-lock`は必ず対で指定します。
 `--deployment self-hosted|static-export|unknown`はNext.js originの実行方式
-（既定`unknown`）です。初期対応はCVE-2025-29927だけで、版や実行方式が
+（既定`unknown`）です。catalogはCVE-2025-29927のguardを生成し、追加5件のNext.js GHSAを診断します。版や実行方式が
 確定しなければ生成を止めます。[バージョン別Candidate](openapi-policy-candidates.ja.md#nextjsのバージョンに応じた仮想パッチ)を参照してください。
 
 ```bash
@@ -126,7 +126,9 @@ npx cdn-security advisory check \
 
 直接の本番用`next`をnpm lockfile v2/v3から確定し、GitHubの公開・審査済みnpm
 advisoryをその版で照会します。JSONには照会時刻、入力digest、版、GHSA/CVE ID、
-`mitigation-candidate-available` / `unassessed` / `not-applicable`を記録します。
+`mitigation-candidate-available` / `unassessed` / `unknown` / `upgrade-required` /
+`not-applicable`を記録します。別の`catalogFindings`にvendorの診断を保持し、
+審査済みfeedが空でも未解決項目があれば対応が必要です。
 候補は配備済みの証明ではありません。終了コード`0`はこの限定した照会で対応対象なし、
 `2`は対応が必要、`1`は入力・実行方式・feedを確定できない失敗です。直接の本番用
 `next`宣言がない場合も`not-declared`のJSONと終了コード`1`になります。
