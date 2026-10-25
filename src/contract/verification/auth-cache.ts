@@ -132,14 +132,14 @@ function admitted(p: Projection, r: ModelRequest): boolean {
   return p.surface.defaults.methods.includes(r.method) && relateRoute(
     { path: {kind:'exact',value:r.path}, methods:[r.method], hosts:{kind:'allowlist',values:[r.host]} },
     { path: {kind:'exact',value:r.path}, methods:[r.method], hosts:p.surface.defaults.hosts },
-    {phase:'normalized-path',collapseSlashes:false,removeDotSegments:false},
+    {phase:'normalized-path',collapseSlashes:false,removeDotSegments:false,caseInsensitive:false},
   ).relation === 'definitely-covered';
 }
 function matchingRules(p: Projection, r: ModelRequest) {
   return p.surface.orderedRules.filter(rule => rule.auth.kind !== 'none' && rule.match.authEffectiveValues.some(prefix =>
     relateRoute({path:{kind:'exact',value:r.path},methods:[r.method],hosts:{kind:'allowlist',values:[r.host]}},
       {path:{kind:'prefix',value:prefix},methods:rule.methods.effective,hosts:p.surface.defaults.hosts},
-      {phase:'normalized-path',collapseSlashes:false,removeDotSegments:false}).relation === 'definitely-covered'));
+      {phase:'normalized-path',collapseSlashes:false,removeDotSegments:false,caseInsensitive:false}).relation === 'definitely-covered'));
 }
 function cacheKey(p: Projection, r: ModelRequest): string {
   const key = p.model.cache!.key!;

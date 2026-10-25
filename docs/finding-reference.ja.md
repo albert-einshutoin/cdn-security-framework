@@ -43,6 +43,13 @@ OpenAPI Security Contractと実効Allowed Surface Modelを比較します。AWS�
 Policy Capabilityの実効範囲が異なるため、Targetは必須です。Monitor Modeは`actual`へ
 保持し、Enforce ModeでのみBlockするControlをEnforce時と同じErrorにはしません。
 
+PolicyのPath比較は、正規の`request.normalize.path.case_insensitive`設定（既定`true`）を
+Operation PathとPolicy Match値の両方へ適用します。明示`false`は大小文字の相違を維持し、
+Path Segment境界も維持します。Allowed Surfaceの`caseInsensitive`と
+`RouteRelationOptions.caseInsensitive`は必須boolで、欠落・不正値は入力Errorです。
+OpenAPIやSourceのIdentityを書き換えず、Regex/Templateの対応範囲やBroad-prefix Warningを
+変更しません。有限Auth/Cache VerifierではCase-insensitive正規化は引き続きUnsupported/UNKNOWNです。
+
 | Rule | Severity | Deterministicな条件 |
 | --- | --- | --- |
 | `SC-EXPOSURE-001` | Error、MonitorではWarning | 実効Method Surfaceが完全なRoute宣言にないMethodを許可する。MonitorではMethod拒否を記録するがRequestを通す。 |

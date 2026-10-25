@@ -98,6 +98,45 @@ function input(
 }
 
 describe('OpenAPI and Policy contract drift', () => {
+  test('rejects absent or non-boolean case settings at the comparison boundary', () => {
+    for (const value of [undefined, 'true', 1]) {
+      const comparison = input(contract([operation('GET', '/health')]), policy());
+      Object.assign(comparison.allowed.defaults.pathNormalization, { caseInsensitive: value });
+      expect(() => compareSecurityContracts(comparison)).toThrow('invalid contract drift input');
+    }
+  });
+
+  test.each(['aws', 'cloudflare'] as const)('%s compares auth/header paths with the canonical Policy case setting', (target) => {
+    for (const caseInsensitive of [true, false, undefined]) {
+      for (const [declaredPath, policyPath] of [['/Admin', '/admin'], ['/admin', '/ADMIN']]) {
+        const declared = contract([operation('GET', declaredPath, {
+          exposure: 'authenticated',
+          auth: { mode: 'alternatives', alternatives: [{ anonymous: false, schemes: [{
+            name: 'edge', kind: 'api-key', location: 'header', parameterName: 'x-edge-token',
+            scopes: [], capability: 'supported',
+          }] }] },
+          request: {
+            contentTypes: [], requiredHeaders: ['x-edge-token'], queryParameters: [],
+            pathParameters: [], headerParameters: [], cookieParameters: [],
+          },
+        })]);
+        const comparison = input(declared, policy({
+          request: { allow_methods: ['GET'], block: { header_missing: [] },
+            normalize: { path: caseInsensitive === undefined ? {} : { case_insensitive: caseInsensitive } } },
+          routes: [{ name: 'admin', match: { path_prefixes: [policyPath] },
+            auth_gate: { type: 'static_token', header: 'x-edge-token', token_env: 'SYNTHETIC_TOKEN' } }],
+        }), target);
+        const findings = compareSecurityContracts(comparison);
+        const covered = caseInsensitive !== false;
+        expect(findings.some(({ ruleId }) => ruleId === 'SC-AUTHN-001')).toBe(!covered);
+        expect(findings.some(({ ruleId }) => ruleId === 'SC-REQUEST-001')).toBe(!covered);
+        expect(findings.find(({ ruleId }) => ruleId === 'SC-EXPOSURE-003')).toMatchObject({
+          severity: 'warning', actual: { relations: [covered ? 'definitely-covered' : 'definitely-disjoint'] },
+        });
+      }
+    }
+  });
+
   test('classifies exact and broad route/method drift without promoting uncertainty to Error', () => {
     const findings = comparePathMethodContracts(input(
       contract([operation('POST', '/users')]),

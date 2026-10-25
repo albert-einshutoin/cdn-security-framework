@@ -10,15 +10,39 @@ import {
   relateRoute,
   type OpenApiPath,
   type PolicyPathMatcher,
+  type RouteRelation,
 } from '../../src/contract';
 
 const normalized = {
   phase: 'normalized-path' as const,
   collapseSlashes: true,
   removeDotSegments: true,
+  caseInsensitive: false,
 };
 
 describe('route relation', () => {
+  test('uses explicit case comparison without widening path or pattern proofs', () => {
+    const cases: Array<[OpenApiPath, PolicyPathMatcher, RouteRelation, RouteRelation]> = [
+      [{ kind: 'exact', value: '/Admin' }, { kind: 'prefix', value: '/admin' }, 'definitely-disjoint', 'definitely-covered'],
+      [{ kind: 'exact', value: '/admin/Users' }, { kind: 'prefix', value: '/ADMIN' }, 'definitely-disjoint', 'definitely-covered'],
+      [{ kind: 'exact', value: '/Administrator' }, { kind: 'prefix', value: '/admin' }, 'definitely-disjoint', 'definitely-disjoint'],
+      [{ kind: 'exact', value: '/ADMIN' }, { kind: 'exact', value: '/admin' }, 'definitely-disjoint', 'definitely-covered'],
+      [{ kind: 'template', value: '/Users/{id}' }, { kind: 'prefix', value: '/users' }, 'definitely-disjoint', 'possibly-overlapping'],
+      [{ kind: 'exact', value: '/admin' }, { kind: 'pattern', syntax: 'regex', value: '^/Admin$' }, 'definitely-disjoint', 'definitely-covered'],
+      [{ kind: 'exact', value: '/admin/a' }, { kind: 'pattern', syntax: 'regex', value: '^/Admin/.+$' }, 'unknown', 'unknown'],
+      [{ kind: 'exact', value: '/Admin/%2f/child' }, { kind: 'prefix', value: '/admin' }, 'unknown', 'unknown'],
+    ];
+    for (const [source, policy, sensitive, insensitive] of cases) {
+      expect(relatePath(source, policy, normalized)).toBe(sensitive);
+      expect(relatePath(source, policy, { ...normalized, caseInsensitive: true })).toBe(insensitive);
+    }
+    for (const invalid of [undefined, 'true', 1]) {
+      expect(() => relatePath({ kind: 'exact', value: '/Admin' }, { kind: 'prefix', value: '/admin' },
+        { ...normalized, caseInsensitive: invalid } as unknown as typeof normalized))
+        .toThrow('invalid route relation options');
+    }
+  });
+
   test('proves exact and segment-boundary prefix relations without decoding paths', () => {
     const exact = (value: string): OpenApiPath => ({ kind: 'exact', value });
     const prefix = (value: string): PolicyPathMatcher => ({ kind: 'prefix', value });

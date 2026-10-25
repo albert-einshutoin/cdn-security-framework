@@ -45,6 +45,15 @@ The target is required because AWS and Cloudflare do not enforce every Policy
 capability in the same way. Monitor mode is retained in `actual`; a control that
 would block only in enforce mode is not reported as an enforce-mode Error.
 
+Policy route comparisons use the canonical `request.normalize.path.case_insensitive`
+setting (default `true`) for both operation paths and Policy match values. Explicit
+`false` preserves case differences and path-segment boundaries still apply. The
+Allowed Surface `caseInsensitive` field and `RouteRelationOptions.caseInsensitive`
+are required booleans; missing or invalid values are input Errors. This compares
+paths without rewriting OpenAPI or Source identity, expanding regex/template
+support, or removing the broad-prefix warning. The finite auth/cache verifier
+continues to report case-insensitive normalization as unsupported/UNKNOWN.
+
 | Rule | Severity | Deterministic condition |
 | --- | --- | --- |
 | `SC-EXPOSURE-001` | Error; Warning in monitor mode | The effective method surface allows a method absent from a completely declared route. Monitor mode observes method rejection but permits the request. |

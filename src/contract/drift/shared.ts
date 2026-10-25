@@ -26,6 +26,7 @@ export function pathRelation(
       phase: 'normalized-path',
       collapseSlashes: allowed.defaults.pathNormalization.collapseSlashes,
       removeDotSegments: allowed.defaults.pathNormalization.removeDotSegments,
+      caseInsensitive: allowed.defaults.pathNormalization.caseInsensitive,
     },
   );
 }
@@ -89,6 +90,7 @@ export function validateComparisonInput(input: ContractDriftInput): void {
     || !['aws', 'cloudflare'].includes(input.target)
     || !Array.isArray(input.declared.operations) || !Array.isArray(input.allowed.orderedRules)
     || !Array.isArray(input.allowed.defaults?.methods)
+    || typeof input.allowed.defaults.pathNormalization?.caseInsensitive !== 'boolean'
     || (input.allowed.defaults.requiredHeaders !== undefined
       && !Array.isArray(input.allowed.defaults.requiredHeaders.values))) {
     throw new Error('invalid contract drift input');
