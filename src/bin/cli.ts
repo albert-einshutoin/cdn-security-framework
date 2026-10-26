@@ -7,7 +7,7 @@ assertSupportedNode(require.main === module);
  * Commands: init (scaffold policy YAML), build (compile policy → dist)
  */
 
-import { AnalyzeError, runAnalyze, printAnalyzeReport } from './analyze';
+import { AnalyzeError, CloudflareEventError, runAnalyze, printAnalyzeReport, runCloudflareEventAnalyze, printCloudflareEventReview } from './analyze';
 import { ReadinessOutputError, prepareReadinessOutput, writeReadinessOutput } from './readiness-output';
 
 const path = require('path');
@@ -3608,13 +3608,15 @@ const analyzeCommand = program
   .command('analyze')
   .configureOutput({ writeErr: () => {} })
   .exitOverride()
-  .description('Aggregate monitor-mode JSON logs and flag low-frequency blocking candidates')
+  .description('Review monitor JSONL logs or explicit synthetic Cloudflare Events fixtures without applying changes')
   .requiredOption('-i, --input <path>', 'Path to JSONL log input')
+  .option('--format <format>', 'Input format: monitor | cloudflare-events (synthetic normalized fixtures only)', 'monitor')
   .option('--min-count <n>', 'Candidate threshold for suspicious low-frequency blocks', '5')
   .option('--top <n>', 'Maximum route candidates to print/export', '20')
   .option('--json', 'Emit machine-readable output')
   .action((opts: {
     input: string;
+    format: string;
     minCount: string;
     top: string;
     json?: boolean;
@@ -3622,7 +3624,9 @@ const analyzeCommand = program
     try {
       const minCount = Number(opts.minCount);
       const top = Number(opts.top);
-      const report = runAnalyze({
+      if (!['monitor', 'cloudflare-events'].includes(opts.format)
+        || (opts.format === 'cloudflare-events' && analyzeCommand.getOptionValueSource('minCount') === 'cli')) throw new AnalyzeError('ANALYZE_ARGUMENT_INVALID');
+      const report = opts.format === 'cloudflare-events' ? runCloudflareEventAnalyze({ input: opts.input, top }) : runAnalyze({
         input: opts.input,
         minCount,
         top,
@@ -3630,15 +3634,16 @@ const analyzeCommand = program
       if (opts.json) {
         console.log(JSON.stringify(report, null, 2));
       } else {
-        printAnalyzeReport(report);
+        if ('scope' in report) printCloudflareEventReview(report);
+        else printAnalyzeReport(report);
       }
       if (report.summary.inputStatus !== 'complete') {
         const status = report.summary.inputStatus;
-        console.error(`[${status === 'invalid' ? 'ERROR' : 'WARN'}] ANALYZE_INPUT_${status.toUpperCase()}`);
+        console.error(`[${status === 'invalid' || status === 'unknown' ? 'ERROR' : 'WARN'}] ANALYZE_INPUT_${status.toUpperCase()}`);
         process.exitCode = 1;
       }
     } catch (e: unknown) {
-      console.error('[ERROR]', e instanceof AnalyzeError ? e.code : 'ANALYZE_INTERNAL_ERROR');
+      console.error('[ERROR]', e instanceof AnalyzeError || e instanceof CloudflareEventError ? e.code : 'ANALYZE_INTERNAL_ERROR');
       process.exitCode = 1;
     }
   });

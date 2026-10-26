@@ -222,7 +222,7 @@ npx cdn-security analyze --input /path/to/monitor.jsonl
 npx cdn-security analyze --input /path/to/monitor.jsonl --min-count 3 --top 10 --json
 ```
 
-`analyze` reads JSONL without modifying the input. It groups valid records by route/reason and surfaces low-frequency block candidates; it does not decide whether a policy is safe or apply changes.
+With `--format monitor` (the default), `analyze` reads JSONL without modifying the input. It groups valid records by route/reason and surfaces low-frequency block candidates; it does not decide whether a policy is safe or apply changes. The following monitor contract is separate from the explicit synthetic Cloudflare format below. An unsupported format fails without a fallback.
 
 - `--input`: required JSONL file path.
 - `--min-count`: inclusive upper count threshold for block candidates (default `5`, rounded down).
@@ -267,6 +267,37 @@ Exit 0 means input processing completed; it is not a security approval. Nonzero 
 9. `ANALYZE_STATUS_VALUE`: invalid status.
 
 Each rejected line produces one diagnostic: JSON/object and record selection first, then event type/known value/agreement, containers (`request`, then `httpRequest`), string fields in the table order, and status. Fatal errors emit no report (stdout empty), exit 1, and a fixed stderr line: `[ERROR] ANALYZE_INPUT_NOT_FOUND`, `[ERROR] ANALYZE_INPUT_READ_FAILED`, or `[ERROR] ANALYZE_ARGUMENT_INVALID` (including missing/unknown options). `analyze --help` retains normal help and exit 0.
+
+### Synthetic Cloudflare Events
+
+From a built checkout (or the installed package directory), run the packaged synthetic example:
+
+```bash
+node bin/cli.js analyze --format cloudflare-events --input examples/sample-cloudflare-events.jsonl --top 10 --json
+node bin/cli.js analyze --format cloudflare-events --input examples/sample-cloudflare-events.jsonl --top 10
+```
+
+This example contains one header and 28 synthetic events, including partial sampling and UNKNOWN cases, so both commands intentionally exit 1 with `[WARN] ANALYZE_INPUT_PARTIAL` while emitting a report. It contains no real traffic, IP, cookie or credential. This is a bounded normalized fixture format, not a Cloudflare REST export or live acquisition adapter.
+
+The first nonblank JSONL line is the exact `version: 1`, `scope: "synthetic-cloudflare-events"` header. Its other required fields are `sourceSha256` (declared source identity, lowercase 64-hex or null), `capturedAtMs`, `period: {fromMs,toMs}` (safe millisecond integers from 0 through 8.64×10^15, or null), `sampling: {kind,rate}` and `missing`. `kind` is `none` (rate must be 1), `sampled`, or `unknown`; a rate is null or greater than 0 and at most 1. `missing` is a unique subset of `events`, `period`, `sampling`, `attribution`, `rule-source`. Source identity and capture time are declarations, not provider attestation. The report separately hashes the actual input bytes.
+
+Every event has exactly `observedAtMs`, `source` (`waf`, `http`, `unknown`), `action` (`block`, `allow`, `skip`, `challenge`, `log`, `unknown`), `status` (100–599 integer or null), `path` (literal absolute path, optionally query/fragment, or null), `ruleSource` (`custom-waf`, `managed-waf`, `rate-limit`, `http`, `unknown`), `ruleIdSha256`, `policyRouteSha256` (64-hex or null) and `attribution` (`declared`, `ambiguous`, `unmatched`, `unknown`). Attribution remains a declaration; even a complete mapping is marked `ATTRIBUTION_NOT_ATTESTED`. Source/action/rule/attribution identifiers are lowercase ASCII letters/hyphens of at most 32 characters. Well-formed unknown values become fixed UNKNOWN diagnostics; invalid known structure, types, times, hashes or extra fields are fatal errors.
+
+Limits are 1 MiB UTF-8 input, 8 KiB per physical line including leading UTF-8 BOM bytes and whitespace-only lines (excluding CRLF/LF), 1,000 events, paths of at most 2,048 UTF-8 bytes, and integer `--top` 1–100 (default 20). Only regular files are read, with a byte cap. `--min-count` is not applicable and an explicit value is rejected. Empty input/event inventory remains `empty`; unsupported versions remain `unknown` without interpreting version-1 event bodies. Malformed UTF-8/JSON/shape or exceeded limits stop the whole import, emit no report, and exit 1 with a fixed `ANALYZE_CLOUDFLARE_*` error. No raw input is echoed. Known observations with missing header metadata or some UNKNOWN events produce `partial`; all UNKNOWN observations produce `unknown`. Non-complete reports exit 1 (`[WARN] ANALYZE_INPUT_PARTIAL`, `[ERROR] ANALYZE_INPUT_UNKNOWN`, or `[WARN] ANALYZE_INPUT_EMPTY`); a complete supported import exits 0. Neither exit 0 nor a report is a security approval.
+
+`observed` action/status/time and opaque path/rule identities are separate from `inference`:
+
+When attribution is `unknown`/`ambiguous`, a declared mapping is incomplete, or ruleSource is `unknown`, that metadata axis stays UNKNOWN with fixed reasons and the import is `partial` with exit 1. It cannot become `complete`. Independently supported HTTP 200/404 observations and sensitive-path review candidates remain available despite missing attribution; they do not prove content or effectiveness. `unknownEvents` counts UNKNOWN observation classifications, not all missing metadata. Even with no header reasons and zero unknownEvents, unresolved event metadata makes the import partial.
+
+| Classification | Meaning and limit |
+| --- | --- |
+| `WAF_BLOCK_REPORTED` | A supported WAF-source block is reported; its effectiveness is not proved. |
+| `HTTP_404_NOT_SERVED` | The event reports 404; this does not establish WAF blocking or resource absence everywhere. |
+| `HTTP_200_REPORTED` | A literal ordinary path reports 200; content and safety are unknown. |
+| `REVIEW_SENSITIVE_PATH_200` | A literal `.env`, `.git`, `wp-config.php`, credentials or `id_rsa` path, including common suffixed backups, reports 200; inspect content separately, without concluding disclosure. |
+| `UNKNOWN` | Unsupported actions/paths, incomplete time scope, out-of-period observations or conflicting evidence. Encoded/dot-segment routing is not interpreted. |
+
+Only sensitive-path 200 observations become review candidates, in input order up to `--top`; total and omitted counts are explicit. The output omits raw path/query/fragment, IP, body, cookie and credential values. Path hashes cover the literal path before query/fragment; they are identifiers, not encryption. Period, sampling, missing fields, minimized rule source and declared attribution remain visible in JSON. Text gives safe aggregate counts, header reasons, the set of fixed event reasons, and candidate hashes. Event counts are never request counts or a denominator for a defense percentage. Content, WAF effectiveness and security verdict remain UNKNOWN; `mode` is `review-only` and `automaticApply` is false. This does not complete the broader runtime registry, 100k streaming, pilot or live deployment workstreams.
 
 ## `emit-waf`
 
