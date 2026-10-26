@@ -410,3 +410,68 @@ runtime. Actual URL-normalization settings, encoded-target mapping, provider
 acceptance, existing-zone ownership/order, deployment and port-defense efficacy
 remain `unknown`. No Cloud API, entitlement check, apply, production traffic or
 claim about security effectiveness is involved.
+
+
+### Saved Cloudflare custom-rule subset (internal)
+
+`compareSavedCloudflareWafSubset(contract, snapshot, observations, generatedWafBytes, savedInput)` in
+`src/contract/verification/cloudflare-deployment.ts` compares an emitted WAF file
+with a normalized, synthetic saved custom-rule fixture. The existing HTTP
+verifier checks the issued contract/snapshot/observations; the existing deployment
+binder checks receipt resource/version/artifact identities and time windows.
+There is no provider acquisition, CLI, public barrel export or automatic action.
+
+The authoritative input is `SavedCloudflareWafFixture` in that module. It has
+`version: 1`, `scope: 'saved-cloudflare-waf-subset'`, the existing
+`HttpDeploymentFixtureInput['expected']`, and at most eight `snapshots`. Each
+record declares `stage` (`plan`, `apply`, or `observe`), `sourceSha256`,
+`httpStatus` (or explicit null), `complete`, `missing` (`identity`, `rules`,
+`rule-order`, `exceptions`), the existing receipt identity/time fields, nullable
+`policySha256`/`wafArtifactSha256`, and `resources` (or null when uncollected).
+All fields are required. `sourceSha256` identifies the declared saved source;
+`metadata.inputSha256` hashes the exact supplied bytes, not a provider attestation.
+Both input byte arrays are capped at 65536 bytes and decoded with fatal UTF-8
+checking. Generated input is the compiler's Terraform JSON `resource` plus
+optional `variable` envelope. Saved `resources` is a normalized local fixture
+with that resource shape, not a raw Cloudflare REST response.
+
+Supported scope is one zone `http_request_firewall_custom` ruleset with at most
+five rules and the existing Free validator's field/function/action subset.
+The comparison preserves rule ref/order, enabled flag and literal expression
+(including a local exception), action and action-parameter differences. It does
+not interpret expression equivalence. Unsupported expressions/actions/parameters,
+unknown ruleset fields or other resource scopes remain `UNKNOWN`; an unparsed
+scope does not supply evidence that a rule is missing. A complete, explicitly
+empty actual custom scope can differ from nonempty expected rules; empty expected
+requirements never produce a successful comparison.
+
+Each stage independently returns `MATCHED`, `DIFFERENT` or `UNKNOWN`. A matching
+plan/apply record cannot supply a missing observe record. Receipt missing/stale/
+mixed state, HTTP 403/failed/uncollected reads, partial snapshots, declared missing
+components and Policy/WAF identity mismatches remain unknown with all applicable
+fixed reasons. Missing/future envelopes retain known artifact incompleteness.
+Malformed JSON/UTF-8/type/scope, extra raw fields, duplicate refs/receipts, invalid
+windows and resource limits throw fixed errors rather than trimming input.
+Recognizable custom rules always receive count/type/duplicate checks before
+unsupported fields or scope can make the comparison unknown; two custom
+rulesets also exceed this input contract.
+
+Results retain opaque field/configuration hashes and fixed differences/reasons;
+raw refs, expressions, resources, URLs, query/body/cookies and credentials are
+not copied. Exact input/source/capture and issued snapshot metadata stay separate
+from the deterministic semantic digest. Rule order and reason changes affect
+semantics; receipt order and time changes within unchanged identity/reason
+conditions do not. The HTTP channel retains its independent local-fixture
+verdict/digest and reason summary, including `VIOLATED` or `UNKNOWN`. There is no
+combined safety verdict or readiness mapping. `policyCoverage` and
+`liveDeployment` always remain `UNKNOWN`; literal configuration matching does not
+prove translation completeness, WAF execution, provider acceptance, entitlement,
+ownership, global order, URL normalization or actual enforcement.
+
+Run `npx --no-install vitest run test/contract/cloudflare-deployment.test.ts
+test/contract/artifact-http.test.ts` and, after `npm run build:ts`,
+`node scripts/cloudflare-http-e2e-tests.js`. The existing two-service native
+harness compares the actual emitted WAF file with an independently authored UA
+rule literal, an enabled-flag counterexample, a saved 403 and a plan-only record.
+Its HTTP 97/Artifact 81 checks remain separate from the saved config comparisons.
+No Cloud request, real payload, apply/deploy or public-verifier claim is involved.

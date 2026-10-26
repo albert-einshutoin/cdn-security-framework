@@ -385,3 +385,57 @@ Cloudflare fieldを推定したりしません。静的subsetの証拠であり�
 実URL-normalization設定、encoded targetの対応、provider受理、既存zoneのownership/順序、
 配備、port防御効果は`unknown`です。Cloud API・entitlement確認・apply・本番通信は行わず、
 セキュリティ効果も主張しません。
+
+
+### 保存Cloudflare custom-rule subset（internal）
+
+`src/contract/verification/cloudflare-deployment.ts` の
+`compareSavedCloudflareWafSubset(contract, snapshot, observations, generatedWafBytes, savedInput)`
+は、生成WAFファイルと正規化した合成保存fixtureを比較します。既存HTTP verifierで
+発行済みcontract/snapshot/observationsを確認し、既存deployment binderで
+resource/version/artifact identityと時刻windowを確認します。provider取得、CLI、
+公開barrel export、自動操作は追加していません。
+
+正本は同moduleの `SavedCloudflareWafFixture` 型です。`version: 1`、
+`scope: 'saved-cloudflare-waf-subset'`、既存 `HttpDeploymentFixtureInput['expected']` と、
+8件以下の `snapshots` を持ちます。各recordは `stage`（plan/apply/observe）、
+`sourceSha256`、`httpStatus`（未取得はnull）、`complete`、`missing`
+（identity/rules/rule-order/exceptions）、既存receiptのidentity/time、
+nullable `policySha256`/`wafArtifactSha256`、`resources`（未取得はnull）を明示します。
+すべて必須で、取得元SHAは宣言した保存元の識別子です。`metadata.inputSha256` は
+実際に渡したbytesのSHAであり、providerの認証済み証明ではありません。入力2本は
+各65536 bytes以下、UTF-8をfatal検査します。生成物はcompilerのTerraform JSON
+`resource` と任意 `variable` envelope、保存 `resources` は同resource形状に正規化した
+local fixtureです。生のCloudflare REST responseを取り込むAPIではありません。
+
+対応scopeはzoneの `http_request_firewall_custom` ruleset 1件・rule 5件以下と、
+既存Free validatorのfield/function/action subsetです。ref有無・配列順序・enabled・
+expression literal（局所例外を含む）・action/parametersの差を区別し、式の意味上の
+同値性は解釈しません。未対応式/action/parameters、未知ruleset field、他resource
+scopeはUNKNOWNです。未解析scopeからrule欠落の根拠を作りません。completeを明示した
+空のactual custom scopeは非空の期待ruleとDIFFERENTになり得ますが、期待要件0件を
+成功にしません。
+
+各stageは独立したMATCHED/DIFFERENT/UNKNOWNで、plan/applyが一致してもobserveを
+補いません。receiptの欠落/stale/mixed、403/失敗/未取得、部分snapshot、明示欠落、
+Policy/WAF identity不一致は全既知reasonを保持してUNKNOWNにします。入力なしや
+未対応versionでも既知のartifact不完全reasonを失いません。不正JSON/UTF8/type/scope、
+余分なraw field、重複ref/receipt、invalid windowと上限超過は固定Errorで停止し、
+切り詰めません。既知custom rulesの件数・型・重複refは、未対応field/scopeの
+判定より先に必ず検査します。custom ruleset 2件も入力契約の上限超過です。
+
+出力はopaqueなfield/configuration hashと固定差分・reasonに限定し、raw ref/式/
+resource/URL/query/body/cookie/credentialをコピーしません。元bytes・取得元・時刻・
+発行済みsnapshotのmetadataはsemantic digestと分けます。rule順序とreasonの変化は
+semanticへ影響し、identity/reasonが同じwindow内の時刻・receipt順の違いは影響しません。
+HTTP channelは既存local-fixture verdict/digest/reason要約をそのまま保持し、
+VIOLATED/UNKNOWNを構成一致で覆しません。合成した安全verdictやreadinessへの写像は
+なく、`policyCoverage`/`liveDeployment` は常にUNKNOWNです。構成literalの一致は
+変換完全性、実WAF、provider受理/entitlement/ownership/全体順序/URL normalization/
+防御効果を証明しません。
+
+`npx --no-install vitest run test/contract/cloudflare-deployment.test.ts test/contract/artifact-http.test.ts`
+と、`npm run build:ts` 後の `node scripts/cloudflare-http-e2e-tests.js` で再現します。
+既存2-service native harnessで実生成WAFファイルを独立したUA rule literalと照合し、
+enabled反例、保存403、planのみを検査します。HTTP97/Artifact81と保存構成照合は
+別の証拠です。Cloud通信・実payload・apply/deploy・公開verifierを導入しません。

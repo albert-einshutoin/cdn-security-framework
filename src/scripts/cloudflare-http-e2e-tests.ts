@@ -10,6 +10,7 @@ import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
 import { HTTP_FIXTURE_CASES, HTTP_FIXTURE_POLICY, HTTP_FIXTURE_HEADERS, HTTP_FIXTURE_SCOPE, HTTP_FIXTURE_ASSETS } from './fixtures/cloudflare-http-cases';
 import { createHttpArtifactContract, captureHttpArtifactSnapshot, captureHttpArtifactObservation, verifyHttpArtifact, createHttpArtifactBundle, replayHttpArtifact, type HttpArtifactCase, type HttpArtifactSnapshot, type HttpArtifactRawObservation } from '../contract/verification/artifact-http';
+import { compareSavedCloudflareWafSubset, type SavedCloudflareWafFixture } from '../contract/verification/cloudflare-deployment';
 
 const repo = fs.realpathSync(path.resolve(__dirname, '..'));
 const argv = process.argv.slice(2);
@@ -110,6 +111,8 @@ async function main() {
   let normalSnapshot:HttpArtifactSnapshot|undefined, negativeSnapshot:HttpArtifactSnapshot|undefined;
   const caseErrors:unknown[]=[];
   let artifactVerification:Record<string,unknown> = {state:'Error',code:'EXECUTION_INCOMPLETE'};
+  let deploymentSubset:Record<string,unknown> = {state:'Error',code:'EXECUTION_INCOMPLETE'};
+  let wafArtifacts:{normal:Buffer;negative:Buffer}|undefined;
   let originPort = 0;
   let failure: unknown;
   let identity: Record<string, unknown> = {};
@@ -196,6 +199,7 @@ fs.writeFileSync(process.env.CSF_COMPILER_RECEIPT,JSON.stringify({entry:'repo/'+
     const weakPolicy=policy.replace(authLine,'    # Verification negative: admin auth gate deliberately omitted');
     fs.writeFileSync(path.join(tmp,'policy/weak-security.yml'),weakPolicy,{mode:0o600});
     const negativeCompilerFiles=compile('policy/weak-security.yml','weak-dist','negative');
+    wafArtifacts={normal:fs.readFileSync(path.join(tmp,'dist/infra/cloudflare-waf.tf.json')),negative:fs.readFileSync(path.join(tmp,'weak-dist/infra/cloudflare-waf.tf.json'))};
     const generatedPath = path.join(tmp, 'dist/edge/cloudflare/index.ts');
     const generated = fs.readFileSync(generatedPath);
     // Same type erasure as deployment tooling; no replacement of fetch or Worker code.
@@ -232,7 +236,7 @@ const config :Workerd.Config = (
     };
     const sourcePaths=[
       ...Object.keys(require.cache).filter(p=>p.startsWith(repo+path.sep)&&!p.includes(path.sep+'node_modules'+path.sep)).map(absolute=>({name:path.relative(repo,absolute),absolute})),
-      ...['src/scripts/cloudflare-http-e2e-tests.ts','src/scripts/fixtures/cloudflare-http-cases.ts','src/contract/verification/artifact-http.ts'].map(name=>({name,absolute:path.join(repo,name)})),
+      ...['src/scripts/cloudflare-http-e2e-tests.ts','src/scripts/fixtures/cloudflare-http-cases.ts','src/contract/verification/artifact-http.ts','src/contract/verification/cloudflare-deployment.ts'].map(name=>({name,absolute:path.join(repo,name)})),
       {name:'dependencies/esbuild-main.js',absolute:require.resolve('esbuild')},
       {name:'dependencies/workerd-wrapper.js',absolute:require.resolve('workerd')},
     ].map(p=>({...p,sha256:digest(fs.readFileSync(p.absolute))}));
@@ -549,15 +553,40 @@ const config :Workerd.Config = (
     });
     if (cleanupErrors.length) failure = new AggregateError([failure, ...cleanupErrors].filter(Boolean), 'HTTP E2E or cleanup failed');
     try {
-      if(failure||!normalSnapshot||!negativeSnapshot)throw new Error('HTTP_EXECUTION_FAILED: '+String(failure??'snapshot missing'));
+      if(failure||!normalSnapshot||!negativeSnapshot||!wafArtifacts)throw new Error('HTTP_EXECUTION_FAILED: '+String(failure??'snapshot missing'));
+      const subsetResults:Record<string,unknown>={};
       const evaluate=(variant:'normal'|'weakened-policy',snapshot:HttpArtifactSnapshot)=>{
         const observed=artifactInputs.filter(i=>i.variant===variant).map(i=>captureHttpArtifactObservation(snapshot,{caseId:i.caseId,correlationId:i.correlationId,recordedAtMs:i.recordedAtMs,request:i.response.request,response:i.response,origins:i.origins,events:parseEvents().filter(e=>e.correlation_id===i.correlationId)}));
         const result=verifyHttpArtifact(expectedContract,snapshot,observed),bundle=createHttpArtifactBundle(expectedContract,snapshot,observed);
         assert.equal(replayHttpArtifact(expectedContract,JSON.parse(JSON.stringify(bundle)),bundle.digest).semanticDigest,result.semanticDigest);
+        const wafBytes=variant==='normal'?wafArtifacts!.normal:wafArtifacts!.negative;
+        // Independent saved rule literal from the fixture's declared UA requirement.
+        // This is a normalized local snapshot, not a provider response or WAF execution.
+        const savedResources=()=>({cloudflare_ruleset:{fixture_custom:{kind:'zone',phase:'http_request_firewall_custom',rules:[{
+          ref:'rule_1',enabled:true,expression:'(lower(http.user_agent) contains "sqlmap")',action:'block',action_parameters:{response:null},
+        }]}}});
+        const fixture:SavedCloudflareWafFixture={version:1,scope:'saved-cloudflare-waf-subset',
+          expected:{resourceIdSha256:digest('synthetic-custom-ruleset'),deploymentVersionSha256:digest('synthetic-deployment-version'),referenceTimeMs:snapshot.metadata.finishedAtMs,maxAgeMs:0},
+          snapshots:(['plan','apply','observe'] as const).map(stage=>({stage,sourceSha256:digest('independent-saved-waf-literal-v1'),httpStatus:200,complete:true,missing:[],
+            resourceIdSha256:digest('synthetic-custom-ruleset'),deploymentVersionSha256:digest('synthetic-deployment-version'),artifactId:snapshot.artifactId,
+            capturedAtMs:snapshot.metadata.finishedAtMs,policySha256:snapshot.actualPolicySha256,wafArtifactSha256:digest(wafBytes),resources:savedResources()})),
+        };
+        const compare=(input:SavedCloudflareWafFixture)=>compareSavedCloudflareWafSubset(expectedContract,snapshot,observed,wafBytes,Buffer.from(JSON.stringify(input)));
+        const matched=compare(fixture);
+        assert.ok(matched.semantic.phases.every(p=>p.comparison==='MATCHED'));
+        assert.equal(matched.semantic.http.verdict,result.semantic.verdict);
+        assert.equal(matched.semantic.liveDeployment,'UNKNOWN');assert.equal(matched.semantic.policyCoverage,'UNKNOWN');
+        const changed=structuredClone(fixture);(changed.snapshots[2].resources as ReturnType<typeof savedResources>).cloudflare_ruleset.fixture_custom.rules[0].enabled=false;
+        const different=compare(changed);assert.equal(different.semantic.phases[2].comparison,'DIFFERENT');
+        const denied=structuredClone(fixture);Object.assign(denied.snapshots[2],{httpStatus:403,complete:false,missing:['rules'],resources:null});
+        const unknown=compare(denied);assert.equal(unknown.semantic.phases[2].comparison,'UNKNOWN');assert.ok(unknown.semantic.phases[2].reasons.includes('SAVED_HTTP_DENIED'));
+        const planOnly=compare({...fixture,snapshots:fixture.snapshots.filter(r=>r.stage==='plan')});assert.equal(planOnly.semantic.phases[2].comparison,'UNKNOWN');
+        subsetResults[variant]={matched,different,unknown,planOnly};
         return {result,bundle,trustedBundleDigest:bundle.digest};
       };
       const normal=evaluate('normal',normalSnapshot),negative=evaluate('weakened-policy',negativeSnapshot);
       artifactVerification={state:'complete',normal,negative};
+      deploymentSubset={state:'complete',scope:'normalized-saved-cloudflare-waf-fixture',results:subsetResults,wafExecution:'UNKNOWN',liveDeployment:'UNKNOWN'};
       assert.equal(normal.result.semantic.verdict,'VERIFIED','Normal generated artifact must meet the entire fixed fixture');
       assert.equal(negative.result.semantic.verdict,'VIOLATED','Weakened artifact must be detected without weakening the oracle');
       console.log('OK: fixed artifact fixture VERIFIED; weakened artifact VIOLATED');
@@ -566,7 +595,7 @@ const config :Workerd.Config = (
     } catch(error){if(artifactVerification.state!=='complete')artifactVerification={state:'Error',code:'HTTP_EXECUTION_FAILED',error:String(error)};failure=failure??error;}
     identity.runtimeLogSha256=digest(runtimeLog);
     fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-    fs.writeFileSync(reportPath, JSON.stringify({ status: failure ? 'fail' : 'pass', fixtureScope: HTTP_FIXTURE_SCOPE, artifactVerification, identity, jwksCases, jwksReceipts, cases, receipts, cleanup, workerPid: runtime?.pid, tempDirectory: tmp, runtimeLog, error: failure ? String(failure) : null }, (_key,value)=>typeof value==='string'?value.replaceAll(token,'[credential:valid]').replaceAll('wrong-synthetic','[credential:wrong]'):value, 2));
+    fs.writeFileSync(reportPath, JSON.stringify({ status: failure ? 'fail' : 'pass', fixtureScope: HTTP_FIXTURE_SCOPE, artifactVerification, deploymentSubset, identity, jwksCases, jwksReceipts, cases, receipts, cleanup, workerPid: runtime?.pid, tempDirectory: tmp, runtimeLog, error: failure ? String(failure) : null }, (_key,value)=>typeof value==='string'?value.replaceAll(token,'[credential:valid]').replaceAll('wrong-synthetic','[credential:wrong]'):value, 2));
   }
   if (failure) throw failure;
   console.log('Cloudflare HTTP E2E passed; report:', reportPath);
