@@ -1,5 +1,6 @@
 import { previewFinding, SOURCE_AWARE_COMPARISONS } from '../contract/source-aware-finalizer';
 import type { SourceAwareOutputBundle } from '../contract/source-aware-output';
+import { FINDING_CATEGORIES, FINDING_EVIDENCE_SOURCES, FINDING_SEVERITIES } from '../contract/finding';
 import { sortFindings } from '../contract/finding-order';
 import { redactSensitiveText } from '../contract/sensitive-text';
 
@@ -26,6 +27,11 @@ function cell(value: string, max = 120): string {
 function linesFor(bundle: SourceAwareOutputBundle, top: number): string[] {
   const final = bundle.finalized;
   const error = bundle.finalizationError;
+  const groups = final ? [
+    ...final.findings.map((finding) => ({ finding, disposition: 'active' })),
+    ...final.suppressedFindings.map((finding) => ({ finding, disposition: 'suppressed' })),
+    ...final.exceptionDiagnostics.map((finding) => ({ finding, disposition: 'governance' })),
+  ] : [];
   const lines = [
     '# Source-aware Contract Diff (internal pre-Entry)', '',
     final?.analysis.outcome !== 'ok' ? '**Result: tool error**'
@@ -100,20 +106,29 @@ function linesFor(bundle: SourceAwareOutputBundle, top: number): string[] {
     `| Suppressed | ${final?.summary.suppressed ?? 'not evaluated'} |`,
     `| Governance | ${final?.summary.governance ?? 'not evaluated'} |`,
     '', 'Comparison counts may overlap: one canonical Finding can belong to multiple comparisons.',
-    '', '## Top findings', '', '| State | Severity | Rule | Instance | Route | Title | Comparisons |',
-    '| --- | --- | --- | --- | --- | --- | --- |');
-  const groups = final ? [
-    ...final.findings.map((finding) => ({ finding, disposition: 'active' })),
-    ...final.suppressedFindings.map((finding) => ({ finding, disposition: 'suppressed' })),
-    ...final.exceptionDiagnostics.map((finding) => ({ finding, disposition: 'governance' })),
-  ] : [];
+    'Counts below cover finalized active/suppressed Findings and governance diagnostics; comparison overlap is counted once.');
+  for (const [label, key, values] of [
+    ['Severity', 'severity', FINDING_SEVERITIES], ['Category', 'category', FINDING_CATEGORIES],
+  ] as const) {
+    lines.push('', `## Findings by ${key}`, '', `| ${label} | Active | Suppressed | Governance |`,
+      '| --- | ---: | ---: | ---: |');
+    for (const value of values) {
+      const counts = ['active', 'suppressed', 'governance'].map((state) => final
+        ? groups.filter(({ finding, disposition }) => finding[key] === value && disposition === state).length
+        : 'not evaluated');
+      lines.push(`| ${value} | ${counts.join(' | ')} |`);
+    }
+  }
+  lines.push('', '## Top findings', '', '| State | Severity | Confidence | Rule | Instance | Route | Title | Comparisons | Evidence source kinds |',
+    '| --- | --- | --- | --- | --- | --- | --- | --- | --- |');
   const ordered = sortFindings(groups.map(({ finding }) => finding));
   const state = new Map(groups.map(({ finding, disposition }) => [finding.instanceId, disposition]));
   const memberships = new Map(final?.memberships.map(({ instanceId, comparisons }) => [instanceId, comparisons]) ?? []);
   for (const finding of ordered.slice(0, top)) {
     const projected = previewFinding(finding, memberships.get(finding.instanceId) ?? []);
     const route = [projected.route?.method, projected.route?.path].filter(Boolean).join(' ') || '-';
-    lines.push(`| ${state.get(finding.instanceId) ?? 'governance'} | ${finding.severity} | ${cell(finding.ruleId)} | ${cell(finding.instanceId)} | ${cell(route)} | ${cell(finding.title)} | ${projected.comparisons.join(', ') || '-'} |`);
+    const sources = FINDING_EVIDENCE_SOURCES.filter((kind) => finding.evidence.some(({ source }) => source === kind));
+    lines.push(`| ${state.get(finding.instanceId) ?? 'governance'} | ${finding.severity} | ${cell(finding.confidence)} | ${cell(finding.ruleId)} | ${cell(finding.instanceId)} | ${cell(route)} | ${cell(finding.title)} | ${projected.comparisons.join(', ') || '-'} | ${cell(sources.join(', ') || '-')} |`);
   }
   lines.push('', `Top findings omitted: ${ordered.length - Math.min(ordered.length, top)}.`,
     '', '## Coverage and capabilities', '',
