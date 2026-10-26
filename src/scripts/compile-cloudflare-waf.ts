@@ -321,6 +321,19 @@ if (freeProfile !== undefined) {
     throw new Error('CLOUDFLARE_FREE_REJECTED: ' + assessment.reasons.join(','));
   }
 }
+// Rules contain Cloudflare data, including nested response text. Escape it at
+// one boundary; compiler-owned Terraform references live outside these rules.
+function terraformRuleData(value: unknown): unknown {
+  if (typeof value === 'string') return value.replace(/\$\{|%\{/g, marker => marker[0] + marker);
+  if (Array.isArray(value)) return value.map(terraformRuleData);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, item]) => [key, terraformRuleData(item)]));
+  }
+  return value;
+}
+for (const ruleset of Object.values<any>(tfJson.resource.cloudflare_ruleset || {})) {
+  ruleset.rules = terraformRuleData(ruleset.rules);
+}
 fs.mkdirSync(distDir, { recursive: true });
 const outPath = path.join(distDir, 'cloudflare-waf.tf.json');
 fs.writeFileSync(outPath, JSON.stringify(tfJson, null, 2), 'utf8');

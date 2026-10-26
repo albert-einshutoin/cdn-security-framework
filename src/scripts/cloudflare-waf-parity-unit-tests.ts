@@ -315,8 +315,10 @@ firewall:
     const lists = tf.resource.cloudflare_list;
     assert.strictEqual(lists['cf-custom-test_ip_blocklist'].item[0].value.ip, '203.0.113.0/24');
     assert.strictEqual(lists['cf-custom-test_ip_allowlist'].item[0].value.ip, '198.51.100.10/32');
+    assert.strictEqual(lists['cf-custom-test_ip_blocklist'].account_id, '${var.cloudflare_account_id}');
 
     const custom = tf.resource.cloudflare_ruleset['cf-custom-test_custom'];
+    assert.strictEqual(custom.zone_id, '${var.cloudflare_zone_id}');
     assert.ok(custom.rules.some((rule: any) => /Geo blocklist/.test(rule.description) && /"RU"/.test(rule.expression)));
     assert.ok(custom.rules.some((rule: any) => /Geo allowlist/.test(rule.description) && /not/.test(rule.expression)));
     assert.ok(custom.rules.some((rule: any) => /IP blocklist/.test(rule.description) && /\$cf-custom-test_ip_blocklist/.test(rule.expression)));
@@ -812,3 +814,50 @@ test('Free CLI refuses direct and scope-down rate templates before creating or r
     }
   }
 });
+
+
+for (const [name, literal, encoded, directive, encodedDirective] of [
+  ['template markers', '${1+1}', '$${1+1}', '%{if true}end%{endif}', '%%{if true}end%%{endif}'],
+  ['authored escape-like data', '$${1+1}', '$$${1+1}', '%%{if true}end%%{endif}', '%%%{if true}end%%%{endif}'],
+]) {
+  test('compiler: ruleset literals preserve ' + name + ' through Terraform JSON representation', () => {
+    const policy = POLICY_FREE_PREFLIGHT.replace('ua_contains: [bot]', () => 'ua_contains: [' + JSON.stringify(literal) + ']') + `  waf:
+    cloudflare_rate_limit_plan: business
+    cloudflare_rate_limit_period: 10
+    block_response:
+      status_code: 403
+      body: ${JSON.stringify('日本語 ' + literal + ' ' + directive)}
+      content_type: TEXT_PLAIN
+    rate_limit_rules:
+      - name: direct
+        limit: 100
+        expression_cloudflare: ${JSON.stringify('http.request.uri.path eq ' + JSON.stringify('/' + literal))}
+      - name: scoped
+        limit: 100
+        scope_down_statement:
+          byte_match_statement:
+            positional_constraint: STARTS_WITH
+            field_to_match: {uri_path: {}}
+            search_string: ${JSON.stringify('/' + literal)}
+`;
+    const ctx = tmpProject(policy);
+    try {
+      const result = runCompiler(ctx.policyPath, ctx.dir);
+      assert.strictEqual(result.status, 0, result.stderr);
+      const artifact = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json'), 'utf8'));
+      const custom = artifact.resource.cloudflare_ruleset['free-preflight_custom'];
+      const ua = custom.rules.find((rule: any) => rule.description === 'User-Agent blocklist');
+      assert.strictEqual(ua.expression, '(lower(http.user_agent) contains "' + encoded + '")');
+      const rate = artifact.resource.cloudflare_ruleset['free-preflight_ratelimit'];
+      assert.strictEqual(rate.rules.find((rule: any) => rule.description === 'direct').expression,
+        'http.request.uri.path eq "/' + encoded + '"');
+      assert.strictEqual(rate.rules.find((rule: any) => rule.description === 'scoped').expression,
+        'starts_with(http.request.uri.path, "/' + encoded + '")');
+      for (const set of [custom, rate]) {
+        assert.strictEqual(set.zone_id, '${var.cloudflare_zone_id}');
+        for (const rule of set.rules) assert.strictEqual(rule.action_parameters.response.content,
+          '日本語 ' + encoded + ' ' + encodedDirective);
+      }
+    } finally { ctx.cleanup(); }
+  });
+}

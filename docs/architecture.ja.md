@@ -263,6 +263,20 @@ npx --no-install vitest run test/contract/artifact-http.test.ts test/contract/au
 package barrel export、CLI、workflow、legacy adapter、自動Applyは追加して
 いません。この追加のrevertでfixture bindingを戻せます。
 
+## Terraform JSONにおけるWAF ruleデータ
+
+WAF専用compilerは生成rule内の文字列をCloudflareへ渡すデータとして保持します。
+共通の出力境界で、[Terraformのescape仕様](https://developer.hashicorp.com/terraform/language/expressions/strings)に従い
+`${`と`%{`を`$${`と`%%{`へ変換します。custom/rateの式とnested block response本文を含みます。
+たとえばPolicyのpath literal `/${1+1}`は、Terraform JSONでは`/$${1+1}`として出力します。
+入力自体に`$${`や`%%{`がある場合も、そのliteralを保持するため追加escapeします。
+この境界ではquote・backslash・その他の文字へ追加変換を行いません。
+
+compiler所有のzone/accountやLogpush destinationのTerraform参照形式は保持します。
+template markerのないruleの出力も維持します。Free preflightの保守的な入力制約は下記のままで、
+未指定経路のUA Unicode/case folding・引用処理は別の境界です。この表現変換はTerraformの
+plan/apply、provider受理、実WAFの保護を証明しません。
+
 ## Cloudflare Freeの生成前preflight
 
 既存のWAF専用compilerに、明示した場合だけFreeのローカル検査を追加します。
@@ -272,7 +286,8 @@ node scripts/compile-cloudflare-waf.js --policy policy.yml --out-dir review --cl
 node scripts/compile-cloudflare-waf.js --policy policy.yml --out-dir review --cloudflare-free --cloudflare-free-inventory saved-inventory.json
 ```
 
-このscriptはWorkerを追加しません。flag未指定の既存経路はそのままです。
+このscriptはWorkerを追加しません。Freeの検査はflag指定時に行い、共通のrule literal表現は
+flag未指定時にも適用します。
 新flagはこのscript専用で、公開`compileArtifacts` optionや`cdn-security build`
 flagとして追加するものではありません。
 
@@ -296,7 +311,7 @@ compilerは変換前のUA literalを確認し、UnicodeからASCIIになる場�
 `UA_LITERAL_ENCODING_UNSUPPORTED`でFree生成を止めます。生成式の共通検証ではcustom/rate双方の
 [Terraform template marker](https://developer.hashicorp.com/terraform/language/syntax/json#expression-mapping)を
 `EXPRESSION_TEMPLATE_UNSUPPORTED`で拒否します。直接指定したrate式とscope-downから生成した式も対象です。
-未指定経路の出力は変えません。
+この入力制約は明示Free modeに適用します。出力は上記の共通literal表現を使います。
 式全体の対応形状を確認し、disabled ruleも件数へ含めます。未対応field/function/action、
 list、managed phase、resourceは限定`unknown`診断でWAFファイル生成を止めます。
 既知のplan違反と容量超過でも生成を止め、`--allow-waf-approximation`では回避できません。

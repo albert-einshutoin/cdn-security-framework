@@ -266,6 +266,24 @@ npx --no-install vitest run test/contract/artifact-http.test.ts test/contract/au
 This entry has no package barrel export, CLI, workflow, legacy adapter, or
 automatic application. Reverting this addition removes the fixture binding.
 
+## WAF rule data in Terraform JSON
+
+The WAF-only compiler preserves strings inside generated rules as Cloudflare
+data. At the shared output boundary, `${` and `%{` become `$${` and `%%{`, as
+specified by [Terraform string escaping](https://developer.hashicorp.com/terraform/language/expressions/strings).
+This covers custom/rate expressions and nested block-response content. For
+example, the Policy path literal `/${1+1}` is emitted as `/$${1+1}` in Terraform
+JSON. Authored `$${` or `%%{` data receives another escape so its literal text is
+preserved too. Quotes, backslashes and other characters receive no additional
+transformation at this boundary.
+
+Compiler-owned zone/account and Logpush destination bindings retain their
+Terraform reference syntax. Rules without template markers keep their existing
+output. Free preflight retains its conservative input restrictions below;
+unflagged UA Unicode/case-folding and quoting behavior remains a separate
+boundary. This encoding does not attest to a Terraform plan/apply, provider
+acceptance or live WAF protection.
+
 ## Cloudflare Free generation preflight
 
 The WAF-only compiler offers an explicit, local Free preflight:
@@ -275,8 +293,9 @@ node scripts/compile-cloudflare-waf.js --policy policy.yml --out-dir review --cl
 node scripts/compile-cloudflare-waf.js --policy policy.yml --out-dir review --cloudflare-free --cloudflare-free-inventory saved-inventory.json
 ```
 
-This invokes the existing WAF compiler and does not add a Worker. Without these
-flags, the existing compiler path is unchanged. The flags belong to this script;
+This invokes the existing WAF compiler and does not add a Worker. The flags opt
+into preflight checks; shared rule-literal encoding also applies without them.
+The flags belong to this script;
 they are not new public `compileArtifacts` options or `cdn-security build` flags.
 
 Checked on 2026-10-26: [Free custom rules](https://developers.cloudflare.com/waf/custom-rules/)
@@ -300,8 +319,9 @@ restriction. If the existing emitter cannot preserve a literal in canonical
 JSON quoting, Free generation stops with `UA_LITERAL_ENCODING_UNSUPPORTED`.
 The shared emitted-expression check rejects [Terraform template markers](https://developer.hashicorp.com/terraform/language/syntax/json#expression-mapping)
 in both custom and rate rules with `EXPRESSION_TEMPLATE_UNSUPPORTED`, including
-direct rate expressions and generated scope-down expressions. These rejections do not change the
-unflagged emitter. The preflight checks whole supported shapes and
+direct rate expressions and generated scope-down expressions. These input
+restrictions apply to explicit Free mode. All emitted rules use the shared
+literal encoding above. The preflight checks whole supported shapes and
 counts disabled rules too. Unsupported fields, functions, actions, lists,
 managed phases or resources return bounded `unknown` diagnostics and stop WAF
 file generation. Known plan violations and capacity excess also stop generation;
