@@ -122,6 +122,24 @@ describe('bounded synthetic Cloudflare Events review', () => {
     expect(r.observations[0].inference.reasonCodes).toContain('ATTRIBUTION_NOT_ATTESTED');
     expect(r.observations[1].inference.reasonCodes).toContain('ATTRIBUTION_AMBIGUOUS'); expect(r.securityVerdict).toBe('UNKNOWN');
   });
+  it.each([
+    ['attribution', 200, '/index.html', 'HTTP_200_REPORTED', 'ATTRIBUTION_UNKNOWN'],
+    ['attribution', 404, '/absent', 'HTTP_404_NOT_SERVED', 'ATTRIBUTION_UNKNOWN'],
+    ['attribution', 200, '/.env', 'REVIEW_SENSITIVE_PATH_200', 'ATTRIBUTION_UNKNOWN'],
+    ['ruleSource', 200, '/index.html', 'HTTP_200_REPORTED', 'RULE_SOURCE_UNKNOWN'],
+    ['ruleSource', 404, '/absent', 'HTTP_404_NOT_SERVED', 'RULE_SOURCE_UNKNOWN'],
+    ['ruleSource', 200, '/.env', 'REVIEW_SENSITIVE_PATH_200', 'RULE_SOURCE_UNKNOWN'],
+  ])('keeps supported HTTP observations but makes missing %s metadata partial (%s %s)', (key, status, pathname, classification, reason) => {
+    const r = reviewCloudflareEvents(fixture([{ ...event({ status: status as number, path: pathname as string }), [key]: 'unknown' }]));
+    expect(r.summary.inputStatus).toBe('partial');
+    expect(r.observations[0].inference.classification).toBe(classification); expect(r.observations[0].inference.reasonCodes).toContain(reason);
+    expect(r.observations[0].observed).toMatchObject({ [key]: 'unknown', status });
+    expect(r.candidates).toHaveLength(pathname === '/.env' ? 1 : 0); expect(r.securityVerdict).toBe('UNKNOWN');
+  });
+  it.each(['ambiguous', 'declared'] as const)('does not call unresolved %s attribution complete', attribution => {
+    const r = reviewCloudflareEvents(fixture([event({ attribution })]));
+    expect(r.summary.inputStatus).toBe('partial'); expect(r.observations[0].observed.attribution).toBe(attribution);
+  });
   it('keeps404 out of sensitive200 candidates and reported WAF block separate from HTTP status', () => {
     const r = reviewCloudflareEvents(fixture([event({ path: '/.env', status: 404 }), event({ path: null, source: 'waf', ruleSource: 'managed-waf', action: 'block', status: null })]));
     expect(r.observations.map(o => o.inference.classification)).toEqual(['HTTP_404_NOT_SERVED', 'WAF_BLOCK_REPORTED']); expect(r.candidates).toEqual([]);
@@ -179,6 +197,13 @@ describe('actual Cloudflare Events CLI', () => {
     const result = cli([event({ observedAtMs: 999 })], ['--format', 'cloudflare-events']);
     expect(result.status).toBe(1); expect(result.stderr).toBe('[ERROR] ANALYZE_INPUT_UNKNOWN\n');
     expect(result.stdout).toContain('EVENT_OUTSIDE_PERIOD');
+  });
+  it('keeps sensitive200 review evidence while unknown attribution yields exit1 in JSON andtext', () => {
+    const json = cli([event({ path: '/.env', attribution: 'unknown' })], ['--format', 'cloudflare-events', '--json']);
+    expect(json.status).toBe(1); expect(json.stderr).toBe('[WARN] ANALYZE_INPUT_PARTIAL\n');
+    const r = JSON.parse(json.stdout); expect(r.summary.inputStatus).toBe('partial'); expect(r.candidates).toHaveLength(1); expect(r.observations[0].observed.attribution).toBe('unknown');
+    const text = cli([event({ path: '/.env', attribution: 'unknown' })], ['--format', 'cloudflare-events']);
+    expect(text.status).toBe(1); expect(text.stdout).toContain('ATTRIBUTION_UNKNOWN'); expect(text.stdout).toContain('input_status=partial'); expect(text.stdout).not.toContain('/.env');
   });
   it.each([['--format', 'unrecognized'], ['--format', 'cloudflare-events', '--min-count', '3'], ['--format', 'cloudflare-events', '--top', '101']])('rejects format/options without silently falling back %s', (...args) => {
     const result = cli([event()], args); expect(result.status).toBe(1); expect(result.stdout).toBe(''); expect(result.stderr).toMatch(/^\[ERROR\] ANALYZE_(?:CLOUDFLARE_)?ARGUMENT_INVALID\n$/);

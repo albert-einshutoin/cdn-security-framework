@@ -279,6 +279,8 @@ eventは正確に`observedAtMs`、`source`（`waf`/`http`/`unknown`）、`action
 
 `observed`のaction/status/time・opaqueなpath/rule identityと、`inference`を分離します。
 
+attributionが`unknown`/`ambiguous`、宣言された対応付けが不完全、またはruleSourceが`unknown`なら、そのmetadata軸をUNKNOWNとして固定理由を保持し、入力を`complete`へ昇格させず`partial`・exit 1にします。既知のHTTP 200/404観測や秘密らしいpathのreview候補は、対応付けの欠落だけを理由に捨てません。これらは効果・内容の証明ではありません。`unknownEvents`は観測分類が`UNKNOWN`の件数であり、metadata欠落をすべて数える値ではありません。header理由が空・unknownEventsが0でも、event側の未解消metadata理由があれば`partial`です。
+
 | 分類 | 意味と限界 |
 | --- | --- |
 | `WAF_BLOCK_REPORTED` | 対応するWAF-source blockの報告。効果の証明ではない。 |

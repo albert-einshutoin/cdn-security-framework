@@ -287,6 +287,8 @@ Limits are 1 MiB UTF-8 input, 8 KiB per physical line including leading UTF-8 BO
 
 `observed` action/status/time and opaque path/rule identities are separate from `inference`:
 
+When attribution is `unknown`/`ambiguous`, a declared mapping is incomplete, or ruleSource is `unknown`, that metadata axis stays UNKNOWN with fixed reasons and the import is `partial` with exit 1. It cannot become `complete`. Independently supported HTTP 200/404 observations and sensitive-path review candidates remain available despite missing attribution; they do not prove content or effectiveness. `unknownEvents` counts UNKNOWN observation classifications, not all missing metadata. Even with no header reasons and zero unknownEvents, unresolved event metadata makes the import partial.
+
 | Classification | Meaning and limit |
 | --- | --- |
 | `WAF_BLOCK_REPORTED` | A supported WAF-source block is reported; its effectiveness is not proved. |

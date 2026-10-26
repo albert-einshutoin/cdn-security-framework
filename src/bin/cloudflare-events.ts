@@ -134,6 +134,7 @@ function observation(value: unknown, line: number, header: CloudflareEventFixtur
   if (attribution === 'ambiguous' || attribution === 'unknown') reasons.push('ATTRIBUTION_' + attribution.toUpperCase());
   if (attribution === 'declared' && (ruleIdSha256 === null || policyRouteSha256 === null)) reasons.push('ATTRIBUTION_INCOMPLETE');
   if (source === 'unknown') reasons.push('SOURCE_UNKNOWN');
+  if (ruleSource === 'unknown') reasons.push('RULE_SOURCE_UNKNOWN');
   if (action === 'challenge' || action === 'unknown') reasons.push('ACTION_NOT_MODELED');
   if (status === null) reasons.push('STATUS_MISSING');
   if (pathname === null) reasons.push('PATH_MISSING');
@@ -199,9 +200,11 @@ export function reviewCloudflareEvents(input: Uint8Array, top = 20): CloudflareE
   }
   report.summary.unknownEvents = report.summary.counts.UNKNOWN;
   report.summary.omittedCandidates = report.summary.reviewCandidates - report.candidates.length;
+  const incompleteMetadata = report.observations.some(item => item.inference.reasonCodes.some(reason =>
+    ['ATTRIBUTION_UNKNOWN', 'ATTRIBUTION_AMBIGUOUS', 'ATTRIBUTION_INCOMPLETE', 'RULE_SOURCE_UNKNOWN'].includes(reason)));
   report.summary.inputStatus = report.summary.eventCount === 0 ? 'empty'
     : report.summary.unknownEvents === report.summary.eventCount ? 'unknown'
-      : report.reasonCodes.length || report.summary.unknownEvents ? 'partial' : 'complete';
+      : report.reasonCodes.length || report.summary.unknownEvents || incompleteMetadata ? 'partial' : 'complete';
   return report;
 }
 
