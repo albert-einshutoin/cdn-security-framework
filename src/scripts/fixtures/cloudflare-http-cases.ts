@@ -3,12 +3,21 @@ export const HTTP_FIXTURE_POLICY = `version: 2
 project: http-e2e
 defaults: { mode: enforce }
 request:
-  allow_methods: [GET, POST]
+  allow_methods: [GET, HEAD, POST, OPTIONS]
   limits: { max_uri_length: 200 }
   block:
     header_missing: [x-required]
     ua_contains: [sqlmap]
-    path_patterns: { contains: ['/../'] }
+    path_patterns:
+      contains: ['/../']
+      regex: ${JSON.stringify([
+        String.raw`(?i)^/\.env(?:$|[./])`,
+        String.raw`(?i)^/\.git(?:$|/)`,
+        String.raw`(?i)^/(?:id_rsa|id_ed25519|server\.key|private-key\.pem)(?:$|/)`,
+        String.raw`(?i)^/\.ssh/(?:id_rsa|id_ed25519)(?:$|/)`,
+        String.raw`(?i)^/(?:phpinfo\.php|wp-login\.php|xmlrpc\.php)(?:$|/)`,
+        String.raw`(?i)^/wp-admin(?:$|/)`,
+      ])}
   normalize:
     drop_query_keys: [utm_source]
   graphql_guard:
@@ -39,6 +48,18 @@ response_headers:
   referrer_policy: same-origin
 observability: { log_format: json, correlation_id_header: x-e2e-id, sample_rate: 1 }
 `;
+// These site assumptions belong only to the synthetic fixture, not a production preset.
+export const HTTP_FIXTURE_SCOPE = freeze({
+    unusedEndpoints: ['/phpinfo.php', '/wp-login.php', '/wp-admin', '/xmlrpc.php'],
+    requiredPhp: '/api/required.php',
+    network: 'loopback HTTP only; Host ports are logical authority variations',
+    wafExecution: 'UNKNOWN', portEnforcement: 'UNKNOWN',
+});
+export const HTTP_FIXTURE_ASSETS: Readonly<Record<string, { readonly contentType: string; readonly body: string }>> = freeze({
+    '/assets/app.js': { contentType: 'application/javascript', body: 'globalThis.syntheticFixture = true;\n' },
+    // Valid empty Wasm module: delivery bytes only, without execution or performance claims.
+    '/assets/app.wasm': { contentType: 'application/wasm', body: '\0asm\x01\0\0\0' },
+});
 export const HTTP_FIXTURE_HEADERS: Readonly<Record<string, string>> = Object.freeze({ 'user-agent': 'http-e2e', 'x-required': 'present' });
 function cases(): HttpArtifactCase[] {
     const tests: HttpArtifactCase[] = [
@@ -62,6 +83,42 @@ function cases(): HttpArtifactCase[] {
         { id: 'user-agent', target: '/public', headers: { 'user-agent': 'sqlmap' }, status: 403, reason: 'Forbidden' },
         { id: 'origin-error', target: '/origin-error', status: 503, forwarded: '/origin-error' },
     ];
+    // Explicitly unused endpoints and root secret names; required PHP and WP assets stay public.
+    const probes = [
+        ['env', '/.env'], ['env-local', '/.env.local'], ['env-encoded', '/%2eenv'],
+        ['env-case', '/.ENV'], ['env-slashes', '//.env'], ['env-matrix', '/.env;x=1'],
+        ['env-query', '/.env?example=synthetic'], ['git', '/.git/config'],
+        ['git-encoded', '/%2egit/config'], ['git-case', '/.GIT/HEAD'],
+        ['rsa', '/id_rsa'], ['ed25519', '/id_ed25519'], ['ssh-key', '/.ssh/id_rsa'],
+        ['server-key', '/server.key'], ['pem-key', '/private-key.pem'],
+        ['phpinfo', '/phpinfo.php'], ['phpinfo-case', '/PHPINFO.PHP'],
+        ['phpinfo-encoded', '/%70hpinfo.php'], ['phpinfo-double', '/%2570hpinfo.php'],
+        ['phpinfo-matrix', '/phpinfo.php;x=1'], ['phpinfo-child', '/phpinfo.php/extra'],
+        ['wp-login', '/wp-login.php'], ['wp-login-encoded', '/wp%2dlogin.php'],
+        ['wp-admin', '/wp-admin'], ['wp-admin-child', '/wp-admin/install.php'],
+        ['wp-admin-slashes', '//wp-admin//install.php'], ['xmlrpc', '/xmlrpc.php'],
+    ];
+    for (const [name, target] of probes)
+        tests.push({ id: 'probe-' + name, artifact: true, target, status: 400, reason: 'Bad Request' });
+    tests.push({ id: 'probe-double-dot', artifact: true, target: '/%252eenv', status: 400, reason: 'Bad Request' });
+    // The artifact contract requires JSON echo bodies; asset/HEAD delivery uses harness assertions.
+    const publicPaths = [
+        ['root', '/'], ['normal', '/about'], ['en', '/en/about'], ['ja', '/ja/about'],
+        ['ja-encoded', '/ja/%E6%9C%AC'], ['well-known', '/.well-known/security.txt'],
+        ['cdn-cgi', '/cdn-cgi/trace'], ['js', '/assets/app.js'], ['wasm', '/assets/app.wasm'],
+        ['required-php', '/api/required.php'], ['wp-static', '/wp-content/uploads/synthetic.png'],
+        ['env-boundary', '/.env-example'], ['git-boundary', '/.github/workflows'],
+        ['php-boundary', '/phpinfo.php.txt'], ['wp-boundary', '/wp-administrator'],
+    ];
+    for (const [name, target] of publicPaths)
+        tests.push({ id: 'site-' + name, artifact: !['js', 'wasm'].includes(name), publicResponse: true, target, status: 200, forwarded: target });
+    tests.push(
+        { id: 'site-head', publicResponse: true, target: '/assets/app.js', method: 'HEAD', status: 200, forwarded: '/assets/app.js' },
+        { id: 'site-options', artifact: true, publicResponse: true, target: '/api/required.php', method: 'OPTIONS', status: 200, forwarded: '/api/required.php' },
+        { id: 'site-post', artifact: true, publicResponse: true, target: '/api/required.php', method: 'POST', body: '{"synthetic":true}', headers: { 'content-type': 'application/json' }, status: 200, forwarded: '/api/required.php' },
+        { id: 'site-authority-443', artifact: true, publicResponse: true, target: '/about', headers: { host: 'fixture.example:443' }, status: 200, forwarded: '/about' },
+        { id: 'site-authority-8443', artifact: true, publicResponse: true, target: '/about', headers: { host: 'fixture.example:8443' }, status: 200, forwarded: '/about' },
+    );
     // Literal destinations are the contract, not a copy of the normalizer.
     const matrixPaths = [
         ['raw-root', '/admin;x=1', '/admin'],
