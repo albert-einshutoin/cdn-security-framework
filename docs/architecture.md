@@ -195,3 +195,73 @@ allowed, and observed API views without treating any one as globally authoritati
 * Keep policy and runtimes in sync: [policy-runtime-sync.md](policy-runtime-sync.md)
 * Observability: [observability.md](observability.md) for logging and metrics
 * CI quality gate (policy lint + build + runtime + unit + drift + security-baseline): `.github/workflows/policy-lint.yml`
+
+## Saved deployment fixture binding (internal)
+
+`bindHttpArtifactDeployment(snapshot, input)` extends the existing internal
+artifact HTTP verifier. `snapshot` must be the frozen object issued by
+`captureHttpArtifactSnapshot`; a deserialized copy is rejected. `input` is saved
+fixture JSON text or `undefined` when no receipt was collected. The module does
+not acquire deployment configuration or contact a provider.
+
+The authoritative input type is `HttpDeploymentFixtureInput` in
+`src/contract/verification/artifact-http.ts`. Version 1 has this shape:
+
+```ts
+const input: HttpDeploymentFixtureInput = {
+  version: 1,
+  scope: 'saved-deployment-fixture',
+  expected: {
+    resourceIdSha256, deploymentVersionSha256,
+    referenceTimeMs: 1000, maxAgeMs: 100,
+  },
+  receipts: [{
+    resourceIdSha256, deploymentVersionSha256,
+    artifactId: snapshot.artifactId, capturedAtMs: 950,
+  }],
+};
+const binding = bindHttpArtifactDeployment(snapshot, JSON.stringify(input));
+```
+
+The two identity variables are lowercase SHA-256 hex strings, not raw resource
+IDs. Each receipt identity may explicitly be `null` when uncollected. All v1
+fields are required; extra fields and malformed identities are input errors.
+No credential, URL, path, query, body, or raw resource identifier belongs here.
+
+Input is limited to 8192 UTF-8 bytes and eight receipts. Times are nonnegative
+safe integer milliseconds; `maxAgeMs` is at most 86400000. The freshness window
+includes both `referenceTimeMs - maxAgeMs` and `referenceTimeMs`. A future
+capture, an exact duplicate receipt, an invalid scope/JSON/type, or an unissued
+snapshot throws a fixed `HttpArtifactError` without raw input. An unsupported
+positive envelope version returns bounded `unknown` and is not decoded as v1.
+
+| State | Meaning within this saved fixture |
+| --- | --- |
+| `missing` | Artifact material, a receipt, or a receipt identity is missing. |
+| `unknown` | A receipt belongs to another resource, or its envelope version is unsupported. |
+| `mixed` | The selected resource has multiple deployment-version/artifact identities. |
+| `stale` | A version/artifact differs from the expectation, or a receipt is too old. |
+| `current` | Every required identity and time condition matches. |
+
+All applicable fixed reasons are retained. For combined v1 problems the state
+priority is missing, unknown, mixed, stale, current. Receipt order and time
+metadata changes that preserve every identity and reason do not alter the
+semantic digest. Crossing the freshness boundary changes the stale reason and
+digest even when the aggregate state remains `stale` or `missing`.
+The original input SHA-256, issued snapshot digest, reference/window and capture
+times remain separate metadata. Results are recursively frozen.
+
+`current` describes identity/time binding only. It does not return a security
+verdict, attest to a real deployment, or establish authentication enforcement.
+The existing independent HTTP verifier can still return `VIOLATED` for an
+artifact whose saved binding is `current`. Phase B, live readback, canonical
+events, readiness, product adoption and publication remain separate work.
+
+Run the repository fixtures with:
+
+```sh
+npx --no-install vitest run test/contract/artifact-http.test.ts test/contract/auth-cache.test.ts
+```
+
+This entry has no package barrel export, CLI, workflow, legacy adapter, or
+automatic application. Reverting this addition removes the fixture binding.
