@@ -170,6 +170,114 @@ export function captureHttpArtifactSnapshot(contract: HttpArtifactContract, mate
     contexts.set(snapshot, { contract, credentials: { ...material.credentials } });
     return snapshot;
 }
+export interface HttpDeploymentFixtureInput {
+    version: 1;
+    scope: 'saved-deployment-fixture';
+    expected: {
+        resourceIdSha256: string;
+        deploymentVersionSha256: string;
+        referenceTimeMs: number;
+        maxAgeMs: number;
+    };
+    receipts: Array<{
+        resourceIdSha256: string | null;
+        deploymentVersionSha256: string | null;
+        artifactId: string | null;
+        capturedAtMs: number;
+    }>;
+}
+type DeploymentState = 'current' | 'stale' | 'missing' | 'mixed' | 'unknown';
+function deploymentRecord(value: unknown, fields: string[]): Record<string, unknown> {
+    must(value && typeof value === 'object' && !Array.isArray(value), 'INVALID_DEPLOYMENT_INPUT');
+    const keys = Object.keys(value);
+    must(keys.length === fields.length && keys.every(key => fields.includes(key)), 'INVALID_DEPLOYMENT_INPUT');
+    return value as Record<string, unknown>;
+}
+/** Saved fixture provenance only; matching identities never establish runtime enforcement. */
+export function bindHttpArtifactDeployment(snapshot: HttpArtifactSnapshot, input: string | undefined) {
+    must(snapshots.has(snapshot), 'UNISSUED_SNAPSHOT');
+    let expected: HttpDeploymentFixtureInput['expected'] | null = null;
+    let receipts: HttpDeploymentFixtureInput['receipts'] = [];
+    // Capture times remain provenance; identities and every derived reason determine semantics.
+    const finish = (state: DeploymentState, reasons: string[]) => {
+        const identities = new Map(receipts.map(({ capturedAtMs: _time, ...identity }) => [canonical(identity), identity]));
+        const semantic = {
+            version: 1 as const, scope: 'saved-deployment-fixture' as const,
+            artifactId: snapshot.artifactId, contractDigest: snapshot.contractDigest,
+            resourceIdSha256: expected?.resourceIdSha256 ?? null,
+            deploymentVersionSha256: expected?.deploymentVersionSha256 ?? null,
+            state, reasons,
+            identities: [...identities.entries()].sort(([a], [b]) => a < b ? -1 : a > b ? 1 : 0).map(([, identity]) => identity),
+        };
+        return freeze({ semantic, semanticDigest: 'sha256:' + httpArtifactDigest(semantic), metadata: {
+            snapshotDigest: snapshot.digest,
+            inputSha256: input === undefined ? null : bytesDigest(Buffer.from(input)),
+            referenceTimeMs: expected?.referenceTimeMs ?? null,
+            maxAgeMs: expected?.maxAgeMs ?? null,
+            capturedAtMs: receipts.map(r => r.capturedAtMs).sort((a, b) => a - b),
+        } });
+    };
+    if (input === undefined)
+        return finish('missing', ['DEPLOYMENT_RECEIPTS_MISSING']);
+    must(typeof input === 'string' && input.length <= 8192 && Buffer.byteLength(input, 'utf8') <= 8192, 'DEPLOYMENT_INPUT_LIMIT');
+    let parsed: unknown;
+    try { parsed = JSON.parse(input); }
+    catch { throw new HttpArtifactError('INVALID_DEPLOYMENT_JSON'); }
+    must(parsed && typeof parsed === 'object' && !Array.isArray(parsed), 'INVALID_DEPLOYMENT_INPUT');
+    const root = parsed as Record<string, unknown>;
+    must(root.scope === 'saved-deployment-fixture', 'DEPLOYMENT_SCOPE_UNSUPPORTED');
+    must(Number.isSafeInteger(root.version) && (root.version as number) >= 1, 'INVALID_DEPLOYMENT_INPUT');
+    // A future envelope is bounded and hashed, but is never decoded as version 1.
+    if (root.version !== 1)
+        return finish('unknown', ['DEPLOYMENT_VERSION_UNSUPPORTED']);
+    deploymentRecord(root, ['version', 'scope', 'expected', 'receipts']);
+    const e = deploymentRecord(root.expected, ['resourceIdSha256', 'deploymentVersionSha256', 'referenceTimeMs', 'maxAgeMs']);
+    must(hex(e.resourceIdSha256) && hex(e.deploymentVersionSha256)
+        && typeof e.referenceTimeMs === 'number' && Number.isSafeInteger(e.referenceTimeMs) && e.referenceTimeMs >= 0
+        && typeof e.maxAgeMs === 'number' && Number.isSafeInteger(e.maxAgeMs) && e.maxAgeMs >= 0 && e.maxAgeMs <= 86400000, 'INVALID_DEPLOYMENT_INPUT');
+    expected = { resourceIdSha256: e.resourceIdSha256, deploymentVersionSha256: e.deploymentVersionSha256,
+        referenceTimeMs: e.referenceTimeMs, maxAgeMs: e.maxAgeMs };
+    const referenceTimeMs = e.referenceTimeMs, maxAgeMs = e.maxAgeMs;
+    must(Array.isArray(root.receipts) && root.receipts.length <= 8, 'DEPLOYMENT_RECEIPT_LIMIT');
+    const seen = new Set<string>();
+    receipts = root.receipts.map(value => {
+        const r = deploymentRecord(value, ['resourceIdSha256', 'deploymentVersionSha256', 'artifactId', 'capturedAtMs']);
+        for (const field of ['resourceIdSha256', 'deploymentVersionSha256', 'artifactId'])
+            must(r[field] === null || hex(r[field]), 'INVALID_DEPLOYMENT_IDENTITY');
+        must(typeof r.capturedAtMs === 'number' && Number.isSafeInteger(r.capturedAtMs) && r.capturedAtMs >= 0
+            && r.capturedAtMs <= referenceTimeMs, 'INVALID_DEPLOYMENT_TIME');
+        const receipt = { resourceIdSha256: r.resourceIdSha256 as string | null,
+            deploymentVersionSha256: r.deploymentVersionSha256 as string | null,
+            artifactId: r.artifactId as string | null, capturedAtMs: r.capturedAtMs };
+        const identity = canonical(receipt);
+        must(!seen.has(identity), 'DUPLICATE_DEPLOYMENT_RECEIPT');
+        seen.add(identity);
+        return receipt;
+    });
+    const reasons: string[] = [];
+    if (snapshot.missing.length)
+        reasons.push('ARTIFACT_SNAPSHOT_INCOMPLETE');
+    if (!receipts.length)
+        reasons.push('DEPLOYMENT_RECEIPTS_MISSING');
+    if (receipts.some(r => r.resourceIdSha256 === null || r.deploymentVersionSha256 === null || r.artifactId === null))
+        reasons.push('DEPLOYMENT_IDENTITY_MISSING');
+    if (receipts.some(r => r.resourceIdSha256 !== null && r.resourceIdSha256 !== e.resourceIdSha256))
+        reasons.push('DEPLOYMENT_RESOURCE_MISMATCH');
+    const identities = new Set(receipts.filter(r => r.resourceIdSha256 === e.resourceIdSha256
+        && r.deploymentVersionSha256 !== null && r.artifactId !== null).map(r => r.deploymentVersionSha256 + ':' + r.artifactId));
+    if (identities.size > 1)
+        reasons.push('DEPLOYMENT_MIXED');
+    if (receipts.some(r => r.deploymentVersionSha256 !== null && r.deploymentVersionSha256 !== e.deploymentVersionSha256))
+        reasons.push('DEPLOYMENT_VERSION_MISMATCH');
+    if (receipts.some(r => r.artifactId !== null && r.artifactId !== snapshot.artifactId))
+        reasons.push('DEPLOYMENT_ARTIFACT_MISMATCH');
+    if (receipts.some(r => referenceTimeMs - r.capturedAtMs > maxAgeMs))
+        reasons.push('DEPLOYMENT_RECEIPT_STALE');
+    const state = reasons.some(r => ['ARTIFACT_SNAPSHOT_INCOMPLETE', 'DEPLOYMENT_RECEIPTS_MISSING', 'DEPLOYMENT_IDENTITY_MISSING'].includes(r)) ? 'missing'
+        : reasons.includes('DEPLOYMENT_RESOURCE_MISMATCH') ? 'unknown'
+            : reasons.includes('DEPLOYMENT_MIXED') ? 'mixed' : reasons.length ? 'stale' : 'current';
+    return finish(state, reasons);
+}
 type Headers = Record<string, string | string[] | number | undefined>;
 interface Receipt {
     url: string;

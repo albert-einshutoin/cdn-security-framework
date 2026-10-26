@@ -194,3 +194,71 @@ Allowed、Observed API を対象とし、いずれか1つを常に正とは扱�
 * ポリシーとランタイムの同期: [policy-runtime-sync.ja.md](policy-runtime-sync.ja.md)
 * 観測: [observability.ja.md](observability.ja.md) でログ・メトリクス仕様
 * CI 品質ゲート（policy lint + build + runtime + unit + drift + security-baseline）: `.github/workflows/policy-lint.yml`
+
+## 保存Deployment fixtureのbinding（内部）
+
+`bindHttpArtifactDeployment(snapshot, input)`は既存の内部artifact HTTP
+verifierを拡張します。`snapshot`は`captureHttpArtifactSnapshot`が発行した
+凍結objectである必要があり、deserializeしたcopyは拒否します。`input`は
+保存fixtureのJSON text、receipt未取得なら`undefined`です。配備設定の取得や
+providerへの接続は行いません。
+
+入力の正本は`src/contract/verification/artifact-http.ts`の
+`HttpDeploymentFixtureInput`です。version 1の形は次のとおりです。
+
+```ts
+const input: HttpDeploymentFixtureInput = {
+  version: 1,
+  scope: 'saved-deployment-fixture',
+  expected: {
+    resourceIdSha256, deploymentVersionSha256,
+    referenceTimeMs: 1000, maxAgeMs: 100,
+  },
+  receipts: [{
+    resourceIdSha256, deploymentVersionSha256,
+    artifactId: snapshot.artifactId, capturedAtMs: 950,
+  }],
+};
+const binding = bindHttpArtifactDeployment(snapshot, JSON.stringify(input));
+```
+
+2つのidentity変数には生のresource IDでなく小文字SHA-256 hexを渡します。
+receiptのidentityは未取得を明示する`null`を許容します。v1の全fieldは必須で、
+追加fieldや不正identityは入力Errorです。credential、URL、path、query、body、
+生resource IDをこの入力へ持ち込まないでください。
+
+入力上限は8192 UTF-8 bytesとreceipt 8件です。時刻は非負の安全な整数ms、
+`maxAgeMs`は最大86400000です。freshnessの両端
+`referenceTimeMs - maxAgeMs`と`referenceTimeMs`を含みます。未来時刻、完全に
+重複したreceipt、不正scope/JSON/type、未発行snapshotは、生入力を含まない
+固定`HttpArtifactError`です。未対応の正のenvelope versionは有界の`unknown`
+とし、v1へ読み替えません。
+
+| State | 保存fixture内の意味 |
+| --- | --- |
+| `missing` | artifact material、receipt、またはreceipt identityが欠落。 |
+| `unknown` | 異なるresourceのreceipt、または未対応envelope version。 |
+| `mixed` | 対象resourceに複数のdeployment-version/artifact identityが存在。 |
+| `stale` | 期待version/artifactと不一致、または取得が古すぎる。 |
+| `current` | 必要なidentityと時刻条件がすべて一致。 |
+
+該当する固定reasonはすべて保持します。v1で複数の問題があればstateの優先順は
+missing、unknown、mixed、stale、currentです。receipt順や、全identityとreasonを
+保つ時刻metadata差はsemantic digestを変えません。freshness境界をまたぐとstaleの
+reasonが変わり、集約stateが同じ`stale`や`missing`でもdigestは変わります。
+元入力のSHA-256、発行snapshot digest、参照時刻・
+window・取得時刻は別metadataに保持し、結果は再帰的に凍結します。
+
+`current`はidentity/timeのbindingだけを表します。Security verdict、実配備の
+attestation、認証強制の証明は返しません。保存bindingが`current`でも、既存の
+独立HTTP verifierは同じartifactを`VIOLATED`と判定できます。Phase B全体、live
+readback、canonical events、readiness、製品採用・公開は別の残件です。
+
+repoのfixtureは次のコマンドで実行します。
+
+```sh
+npx --no-install vitest run test/contract/artifact-http.test.ts test/contract/auth-cache.test.ts
+```
+
+package barrel export、CLI、workflow、legacy adapter、自動Applyは追加して
+いません。この追加のrevertでfixture bindingを戻せます。

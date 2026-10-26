@@ -1,6 +1,6 @@
 import { expect, test } from 'vitest';
 import { createHash } from 'node:crypto';
-import { createHttpArtifactContract, captureHttpArtifactSnapshot, captureHttpArtifactObservation, verifyHttpArtifact, createHttpArtifactBundle, replayHttpArtifact, type HttpArtifactRawObservation, } from '../../src/contract/verification/artifact-http';
+import { createHttpArtifactContract, captureHttpArtifactSnapshot, captureHttpArtifactObservation, verifyHttpArtifact, createHttpArtifactBundle, replayHttpArtifact, bindHttpArtifactDeployment, type HttpArtifactRawObservation, } from '../../src/contract/verification/artifact-http';
 const sha = (bytes: string) => createHash('sha256').update(bytes).digest('hex');
 const expected = createHttpArtifactContract('baseline-policy', [
     { id: 'admin-missing', target: '/admin', status: 401, reason: 'Unauthorized', artifact: true },
@@ -140,4 +140,166 @@ test('foreign decision events are invalid joins', () => {
     const s = snapshot(), raw = rawObservation(s);
     raw.events[0].correlation_id = 'other-case';
     expect(() => captureHttpArtifactObservation(s, raw)).toThrow('INVALID_EVENT_BINDING');
+});
+
+function deploymentInput(s: ReturnType<typeof snapshot>) {
+    return {
+        version: 1, scope: 'saved-deployment-fixture',
+        expected: { resourceIdSha256: sha('fixture-resource'), deploymentVersionSha256: sha('fixture-version'), referenceTimeMs: 1000, maxAgeMs: 100 },
+        receipts: [{ resourceIdSha256: sha('fixture-resource') as string | null,
+            deploymentVersionSha256: sha('fixture-version') as string | null,
+            artifactId: s.artifactId as string | null, capturedAtMs: 950 }],
+    };
+}
+
+test('saved deployment receipt matches only the issued artifact and explicit resource/version/window', () => {
+    const s = snapshot(), result = bindHttpArtifactDeployment(s, JSON.stringify(deploymentInput(s)));
+    expect(result.semantic).toMatchObject({ scope: 'saved-deployment-fixture', state: 'current', reasons: [], artifactId: s.artifactId, contractDigest: expected.digest });
+    expect(result.semantic).not.toHaveProperty('verdict');
+});
+
+test('absent deployment receipt and missing artifact identity remain missing', () => {
+    const s = snapshot(), input = deploymentInput(s);
+    input.receipts = [];
+    expect(bindHttpArtifactDeployment(s, undefined).semantic.state).toBe('missing');
+    expect(bindHttpArtifactDeployment(s, JSON.stringify(input)).semantic).toMatchObject({ state: 'missing', reasons: ['DEPLOYMENT_RECEIPTS_MISSING'] });
+    input.receipts = deploymentInput(s).receipts;
+    input.receipts[0].artifactId = null;
+    expect(bindHttpArtifactDeployment(s, JSON.stringify(input)).semantic.state).toBe('missing');
+});
+
+test('expired receipt and mixed deployment identities do not become current', () => {
+    const s = snapshot(), input = deploymentInput(s);
+    input.receipts[0].capturedAtMs = 899;
+    expect(bindHttpArtifactDeployment(s, JSON.stringify(input)).semantic).toMatchObject({ state: 'stale', reasons: ['DEPLOYMENT_RECEIPT_STALE'] });
+    input.receipts[0].capturedAtMs = 950;
+    input.receipts.push({ ...input.receipts[0], deploymentVersionSha256: sha('fixture-version-2'), artifactId: sha('different-artifact'), capturedAtMs: 951 });
+    expect(bindHttpArtifactDeployment(s, JSON.stringify(input)).semantic).toMatchObject({ state: 'mixed', reasons: expect.arrayContaining(['DEPLOYMENT_MIXED']) });
+});
+
+test.each([900, 1000])('deployment freshness includes the explicit window boundary %i', capturedAtMs => {
+    const s = snapshot(), input = deploymentInput(s);
+    input.receipts[0].capturedAtMs = capturedAtMs;
+    expect(bindHttpArtifactDeployment(s, JSON.stringify(input)).semantic.state).toBe('current');
+});
+
+test('deployment receipt limits and UTF-8 byte budget reject excess rather than trim it', () => {
+    const s = snapshot(), input = deploymentInput(s);
+    input.receipts = Array.from({ length: 8 }, (_, i) => ({ ...input.receipts[0], capturedAtMs: 993 + i }));
+    expect(bindHttpArtifactDeployment(s, JSON.stringify(input)).semantic.state).toBe('current');
+    input.receipts.push({ ...input.receipts[0], capturedAtMs: 992 });
+    expect(() => bindHttpArtifactDeployment(s, JSON.stringify(input))).toThrow('DEPLOYMENT_RECEIPT_LIMIT');
+    const body = JSON.stringify(deploymentInput(s)).padEnd(8192);
+    expect(bindHttpArtifactDeployment(s, body).semantic.state).toBe('current');
+    expect(() => bindHttpArtifactDeployment(s, body + ' ')).toThrow('DEPLOYMENT_INPUT_LIMIT');
+    expect(() => bindHttpArtifactDeployment(s, JSON.stringify({ version: 2, scope: 'saved-deployment-fixture', note: '😀'.repeat(2048) }))).toThrow('DEPLOYMENT_INPUT_LIMIT');
+});
+
+test.each(['resourceIdSha256', 'deploymentVersionSha256', 'artifactId'] as const)('an explicitly uncollected deployment %s is missing', field => {
+    const s = snapshot(), input = deploymentInput(s);
+    input.receipts[0][field] = null;
+    expect(bindHttpArtifactDeployment(s, JSON.stringify(input)).semantic).toMatchObject({ state: 'missing', reasons: ['DEPLOYMENT_IDENTITY_MISSING'] });
+});
+
+test('missing artifact snapshot material cannot be repaired by a matching saved receipt', () => {
+    const s = snapshot({ missing: 'runtime-binary' });
+    expect(bindHttpArtifactDeployment(s, JSON.stringify(deploymentInput(s))).semantic).toMatchObject({ state: 'missing', reasons: ['ARTIFACT_SNAPSHOT_INCOMPLETE'] });
+});
+
+test('a different resource is unknown and a different version or artifact is stale', () => {
+    const s = snapshot();
+    for (const [field, state, reason] of [
+        ['resourceIdSha256', 'unknown', 'DEPLOYMENT_RESOURCE_MISMATCH'],
+        ['deploymentVersionSha256', 'stale', 'DEPLOYMENT_VERSION_MISMATCH'],
+        ['artifactId', 'stale', 'DEPLOYMENT_ARTIFACT_MISMATCH'],
+    ] as const) {
+        const input = deploymentInput(s);
+        input.receipts[0][field] = sha('different-identity');
+        expect(bindHttpArtifactDeployment(s, JSON.stringify(input)).semantic).toMatchObject({ state, reasons: [reason] });
+    }
+});
+
+test('duplicate, future, invalid shape and trust-boundary inputs are Error', () => {
+    const s = snapshot(), input = deploymentInput(s);
+    input.receipts.push({ ...input.receipts[0] });
+    expect(() => bindHttpArtifactDeployment(s, JSON.stringify(input))).toThrow('DUPLICATE_DEPLOYMENT_RECEIPT');
+    input.receipts = [{ ...input.receipts[0], capturedAtMs: 1001 }];
+    expect(() => bindHttpArtifactDeployment(s, JSON.stringify(input))).toThrow('INVALID_DEPLOYMENT_TIME');
+    expect(() => bindHttpArtifactDeployment(structuredClone(s), JSON.stringify(deploymentInput(s)))).toThrow('UNISSUED_SNAPSHOT');
+    expect(() => bindHttpArtifactDeployment(s, '{')).toThrow('INVALID_DEPLOYMENT_JSON');
+    expect(() => bindHttpArtifactDeployment(s, 'null')).toThrow('INVALID_DEPLOYMENT_INPUT');
+    expect(() => bindHttpArtifactDeployment(s, JSON.stringify({ ...deploymentInput(s), scope: 'live-cloud' }))).toThrow('DEPLOYMENT_SCOPE_UNSUPPORTED');
+    expect(() => bindHttpArtifactDeployment(s, JSON.stringify({ ...deploymentInput(s), body: 'PRIVATE_SENTINEL' }))).toThrow('INVALID_DEPLOYMENT_INPUT');
+    expect(() => bindHttpArtifactDeployment(s, JSON.stringify({ ...deploymentInput(s), expected: { ...deploymentInput(s).expected, maxAgeMs: 86400001 } }))).toThrow('INVALID_DEPLOYMENT_INPUT');
+    expect(() => bindHttpArtifactDeployment(s, JSON.stringify({ ...deploymentInput(s), receipts: [{ ...deploymentInput(s).receipts[0], artifactId: 'PRIVATE_SENTINEL' }] }))).toThrow('INVALID_DEPLOYMENT_IDENTITY');
+});
+
+test('unknown deployment envelope version is bounded unknown without decoding a v1 receipt', () => {
+    const s = snapshot(), body = JSON.stringify({ version: 2, scope: 'saved-deployment-fixture', future: 'PRIVATE_SENTINEL' });
+    const result = bindHttpArtifactDeployment(s, body);
+    expect(result.semantic).toMatchObject({ state: 'unknown', reasons: ['DEPLOYMENT_VERSION_UNSUPPORTED'], resourceIdSha256: null, deploymentVersionSha256: null, identities: [] });
+    expect(result.metadata.inputSha256).toBe(sha(body));
+    expect(JSON.stringify(result)).not.toContain('PRIVATE_SENTINEL');
+});
+
+test('deployment semantic identity ignores receipt order and window-internal times while preserving input metadata', () => {
+    const a = snapshot(), b = snapshot({ port: 3333, runId: 'different-metadata' }), input = deploymentInput(a);
+    input.receipts.push({ ...input.receipts[0], capturedAtMs: 951 });
+    const first = bindHttpArtifactDeployment(a, JSON.stringify(input));
+    input.receipts.reverse();
+    const reordered = bindHttpArtifactDeployment(b, JSON.stringify(input));
+    expect(reordered.semanticDigest).toBe(first.semanticDigest);
+    expect(reordered.metadata.inputSha256).not.toBe(first.metadata.inputSha256);
+    expect(reordered.metadata.snapshotDigest).not.toBe(first.metadata.snapshotDigest);
+    input.receipts[0].capturedAtMs = 999;
+    const changedTime = bindHttpArtifactDeployment(a, JSON.stringify(input));
+    expect(changedTime.semanticDigest).toBe(first.semanticDigest);
+    expect(changedTime.metadata.capturedAtMs).not.toEqual(first.metadata.capturedAtMs);
+    expect(Object.isFrozen(first)).toBe(true);
+    expect(Object.isFrozen(first.semantic.identities)).toBe(true);
+});
+
+test('a current binding for a weakened artifact does not change the independent security verdict or expose raw material', () => {
+    const s = snapshot({ weak: true }), input = deploymentInput(s), before = JSON.stringify(s);
+    const binding = bindHttpArtifactDeployment(s, JSON.stringify(input));
+    expect(binding.semantic.state).toBe('current');
+    expect(verifyHttpArtifact(expected, s, [observation(s, 'admin-missing', true)]).semantic.verdict).toBe('VIOLATED');
+    expect(JSON.stringify(s)).toBe(before);
+    for (const raw of ['unit-synthetic-valid', 'unit-synthetic-wrong', 'fixture-resource', 'baseline-policy', 'normal-run', '127.0.0.1'])
+        expect(JSON.stringify(binding)).not.toContain(raw);
+});
+
+test('combined deployment problems retain every reason and missing has priority', () => {
+    const s = snapshot(), input = deploymentInput(s);
+    input.receipts.push({ ...input.receipts[0], artifactId: null, capturedAtMs: 951 });
+    input.receipts.push({ ...input.receipts[0], deploymentVersionSha256: sha('version-2'), artifactId: sha('artifact-2'), capturedAtMs: 899 });
+    const result = bindHttpArtifactDeployment(s, JSON.stringify(input));
+    expect(result.semantic).toMatchObject({ state: 'missing', reasons: [
+        'DEPLOYMENT_IDENTITY_MISSING', 'DEPLOYMENT_MIXED', 'DEPLOYMENT_VERSION_MISMATCH',
+        'DEPLOYMENT_ARTIFACT_MISMATCH', 'DEPLOYMENT_RECEIPT_STALE',
+    ] });
+});
+
+test('zero age is explicit and absent fields do not acquire defaults', () => {
+    const s = snapshot(), input = deploymentInput(s);
+    input.expected.maxAgeMs = 0;
+    input.receipts[0].capturedAtMs = 1000;
+    expect(bindHttpArtifactDeployment(s, JSON.stringify(input)).semantic.state).toBe('current');
+    input.receipts[0].capturedAtMs = 999;
+    expect(bindHttpArtifactDeployment(s, JSON.stringify(input)).semantic.state).toBe('stale');
+    const { expected: _expected, ...withoutExpected } = input;
+    expect(() => bindHttpArtifactDeployment(s, JSON.stringify(withoutExpected))).toThrow('INVALID_DEPLOYMENT_INPUT');
+    const { artifactId: _artifact, ...withoutArtifact } = input.receipts[0];
+    expect(() => bindHttpArtifactDeployment(s, JSON.stringify({ ...input, receipts: [withoutArtifact] }))).toThrow('INVALID_DEPLOYMENT_INPUT');
+});
+
+test('a freshness reason changes deployment semantic identity even when another cause keeps the state stale', () => {
+    const s = snapshot(), input = deploymentInput(s);
+    input.receipts[0].deploymentVersionSha256 = sha('different-version');
+    const fresh = bindHttpArtifactDeployment(s, JSON.stringify(input));
+    input.receipts[0].capturedAtMs = 899;
+    const expired = bindHttpArtifactDeployment(s, JSON.stringify(input));
+    expect(fresh.semantic).toMatchObject({ state: 'stale', reasons: ['DEPLOYMENT_VERSION_MISMATCH'] });
+    expect(expired.semantic).toMatchObject({ state: 'stale', reasons: ['DEPLOYMENT_VERSION_MISMATCH', 'DEPLOYMENT_RECEIPT_STALE'] });
+    expect(expired.semanticDigest).not.toBe(fresh.semanticDigest);
 });
