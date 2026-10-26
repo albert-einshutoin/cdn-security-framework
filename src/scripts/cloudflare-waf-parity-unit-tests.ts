@@ -242,6 +242,8 @@ test('compiler: untranslated scope_down rejects before output even with approxim
   } finally { ctx.cleanup(); }
 });
 
+
+
 test('compiler: expression_cloudflare override suppresses the scope_down warning', () => {
   const policy = `${POLICY_SCOPE_DOWN_UNTRANSLATED}        expression_cloudflare: 'http.request.uri.path eq "/login"'
 `;
@@ -486,3 +488,327 @@ for (const [name, config] of Object.entries({
 })) {
   test('rate profiles reject ' + name, () => assert.throws(() => buildCloudflareRateRules(config), /CLOUDFLARE_RATE_LIMIT_INVALID/));
 }
+
+const { assessCloudflareFreeWaf } = require('./lib/cloudflare-rate-limit');
+const freeCustomResources = (count: number) => ({ cloudflare_ruleset: { custom: {
+  kind: 'zone', phase: 'http_request_firewall_custom', rules: Array.from({ length: count }, (_, i) => ({
+    enabled: i % 2 === 0, expression: '(ip.geoip.country in {"CN"})', action: 'block',
+    action_parameters: { response: null },
+  })),
+} } });
+const freeInventory = (changes: Record<string, unknown> = {}) => JSON.stringify({
+  version: 1, scope: 'saved-cloudflare-free-inventory', capturedAtMs: 0, complete: true,
+  plan: 'free', existingCustomRules: 1, existingRateRules: 0, ...changes,
+});
+
+test('Free preflight counts every generated rule plus existing zone consumption', () => {
+  const result = assessCloudflareFreeWaf(freeCustomResources(5), freeInventory(), 0);
+  assert.strictEqual(result.savedCapacity, 'exceeded');
+  assert.ok(result.reasons.includes('CUSTOM_RULE_CAPACITY_EXCEEDED'));
+  assert.strictEqual(result.liveDeployment, 'unknown');
+});
+
+test('Free preflight never infers an empty account inventory', () => {
+  const result = assessCloudflareFreeWaf(freeCustomResources(1), undefined, 0);
+  assert.strictEqual(result.localGeneration, 'supported');
+  assert.strictEqual(result.savedCapacity, 'unknown');
+  assert.ok(result.reasons.includes('INVENTORY_MISSING'));
+  assert.strictEqual(result.liveDeployment, 'unknown');
+});
+
+test('explicit Free compilation rejects Log before creating an artifact', () => {
+  const ctx = tmpProject(`version: 2
+project: free-log
+request:
+  allow_methods: [GET]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  waf:
+    fingerprint_action: count
+    ja3_fingerprints: [d41d8cd98f00b204e9800998ecf8427e]
+`);
+  try {
+    const result = runCompiler(ctx.policyPath, ctx.dir, ['--cloudflare-free']);
+    assert.notStrictEqual(result.status, 0);
+    assert.match(result.stderr, /LOG_ACTION_NOT_FREE/);
+    assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
+  } finally { ctx.cleanup(); }
+});
+
+test('Free capacity boundaries include disabled rules and both independent quotas', () => {
+  for (const count of [0, 1, 5, 6]) {
+    const result = assessCloudflareFreeWaf(freeCustomResources(count), freeInventory({ existingCustomRules: 0 }), 0);
+    assert.strictEqual(result.generated.customRules, count);
+    assert.strictEqual(result.localGeneration, count <= 5 ? 'supported' : 'unsupported');
+    assert.strictEqual(result.savedCapacity, count <= 5 ? 'fits' : 'exceeded');
+  }
+  for (const count of [0, 1, 2]) {
+    const resources = { cloudflare_ruleset: { rate: { kind: 'zone', phase: 'http_ratelimit',
+      rules: Array.from({ length: count }, () => buildCloudflareRateRules(freeRate)[0]),
+    } } };
+    const empty = assessCloudflareFreeWaf(resources, freeInventory({ existingCustomRules: 0, existingRateRules: 0 }), 0);
+    assert.strictEqual(empty.savedCapacity, count <= 1 ? 'fits' : 'exceeded');
+    const used = assessCloudflareFreeWaf(resources, freeInventory({ existingRateRules: 1 }), 0);
+    assert.strictEqual(used.savedCapacity, count === 0 ? 'fits' : 'exceeded');
+  }
+});
+
+test('Free inventory cannot assert capacity from partial, stale, unknown-plan/count/version data', () => {
+  for (const changes of [{ complete: false }, { plan: null }, { existingCustomRules: null }, { existingRateRules: null }, { version: 2 }]) {
+    const result = assessCloudflareFreeWaf(freeCustomResources(1), freeInventory(changes), 0);
+    assert.strictEqual(result.savedCapacity, 'unknown');
+    assert.strictEqual(result.liveDeployment, 'unknown');
+  }
+  assert.strictEqual(assessCloudflareFreeWaf(freeCustomResources(1), freeInventory(), 86400000).savedCapacity, 'fits');
+  assert.strictEqual(assessCloudflareFreeWaf(freeCustomResources(1), freeInventory({ existingCustomRules: 5 }), 86400001).savedCapacity, 'unknown');
+  assert.strictEqual(assessCloudflareFreeWaf(freeCustomResources(1), freeInventory({ existingCustomRules: 5, complete: false }), 0).savedCapacity, 'unknown');
+});
+
+test('Free inventory rejects malformed/oversized/foreign data without echoing raw input', () => {
+  const invalid = [
+    'not-json-private-token', '[]', freeInventory({ version: 0 }), freeInventory({ version: 1.5 }),
+    freeInventory({ scope: 'private-token' }), freeInventory({ capturedAtMs: 1 }), freeInventory({ capturedAtMs: -1 }),
+    freeInventory({ complete: 'false' }), freeInventory({ plan: 'business' }), freeInventory({ secret: 'private-token' }),
+    freeInventory({ existingCustomRules: -1 }), freeInventory({ existingRateRules: 1.5 }),
+    freeInventory({ existingCustomRules: 10001 }), freeInventory({ existingRateRules: Number.MAX_SAFE_INTEGER + 1 }),
+  ];
+  for (const text of invalid) assert.throws(() => assessCloudflareFreeWaf({}, text, 0), (error: Error) =>
+    error.message.startsWith('CLOUDFLARE_FREE_INVALID:') && !error.message.includes('private-token'));
+  const text = freeInventory();
+  assert.strictEqual(assessCloudflareFreeWaf({}, text.padEnd(8192, ' '), 0).savedCapacity, 'fits');
+  assert.throws(() => assessCloudflareFreeWaf({}, text.padEnd(8193, ' '), 0), /INVENTORY_BYTES/);
+  assert.throws(() => assessCloudflareFreeWaf({}, undefined, -1), /INPUT/);
+});
+
+test('Free feature checks parse whole supported shapes and ignore keywords inside quoted UA data', () => {
+  const rule = freeCustomResources(1).cloudflare_ruleset.custom.rules[0];
+  const withRule = (changes: Record<string, unknown>) => ({ cloudflare_ruleset: { custom: {
+    kind: 'zone', phase: 'http_request_firewall_custom', rules: [{ ...rule, ...changes }],
+  } } });
+  const benign = assessCloudflareFreeWaf(withRule({ expression: '(lower(http.user_agent) contains "matches cf.bot_management.ja3_hash")' }), undefined, 0);
+  assert.strictEqual(benign.localGeneration, 'supported');
+  for (const [changes, reason] of [
+    [{ action: 'log' }, 'LOG_ACTION_NOT_FREE'],
+    [{ expression: 'http.user_agent matches "bot"' }, 'REGEX_NOT_FREE'],
+    [{ expression: '(cf.bot_management.ja3_hash in {"x"})' }, 'BOT_MANAGEMENT_NOT_FREE'],
+    [{ expression: '(lower(http.user_agent) contains "ok") or true' }, 'EXPRESSION_NOT_SUPPORTED'],
+    [{ expression: '(lower(http.user_agent) contains "bad\\n")' }, 'EXPRESSION_NOT_SUPPORTED'],
+    [{ expression: 'lower(http.host) eq "example.invalid"' }, 'EXPRESSION_NOT_SUPPORTED'],
+    [{ action: 'skip' }, 'ACTION_NOT_SUPPORTED'],
+    [{ action_parameters: { response: { status_code: 403, content: 'x' } } }, 'ACTION_PARAMETERS_NOT_SUPPORTED'],
+    [{ unexpected: true }, 'RULE_FIELD_NOT_SUPPORTED'],
+  ] as [Record<string, unknown>, string][]) {
+    const result = assessCloudflareFreeWaf(withRule(changes), undefined, 0);
+    assert.notStrictEqual(result.localGeneration, 'supported');
+    assert.ok(result.reasons.includes(reason), reason);
+  }
+  assert.ok(assessCloudflareFreeWaf({ cloudflare_logpush_job: { logs: {} } }, undefined, 0).reasons.includes('METERED_RESOURCE_NOT_ALLOWED'));
+  assert.strictEqual(assessCloudflareFreeWaf({ cloudflare_list: { list: {} } }, undefined, 0).localGeneration, 'unknown');
+  assert.strictEqual(assessCloudflareFreeWaf({ cloudflare_ruleset: { managed: {
+    kind: 'zone', phase: 'http_request_firewall_managed', rules: [],
+  } } }, undefined, 0).localGeneration, 'unknown');
+});
+
+const POLICY_FREE_PREFLIGHT = `version: 2
+project: free-preflight
+request:
+  allow_methods: [GET]
+  block:
+    ua_contains: [bot]
+response_headers:
+  hsts: "max-age=1"
+firewall:
+  geo:
+    block_countries: [CN]
+`;
+
+test('Free CLI emits the same local artifact and reports unknown live applicability', () => {
+  const ctx = tmpProject(POLICY_FREE_PREFLIGHT);
+  try {
+    const legacy = runCompiler(ctx.policyPath, path.join(ctx.dir, 'legacy'));
+    assert.strictEqual(legacy.status, 0, legacy.stderr);
+    const free = runCompiler(ctx.policyPath, path.join(ctx.dir, 'free'), ['--cloudflare-free']);
+    assert.strictEqual(free.status, 0, free.stderr);
+    const line = free.stderr.split('\n').find((line: string) => line.startsWith('Cloudflare Free preflight: '));
+    const report = JSON.parse(line.slice('Cloudflare Free preflight: '.length));
+    assert.strictEqual(report.savedCapacity, 'unknown');
+    assert.strictEqual(report.liveDeployment, 'unknown');
+    assert.deepStrictEqual(report.generated, { customRules: 2, rateRules: 0 });
+    assert.deepStrictEqual(fs.readFileSync(path.join(ctx.dir, 'legacy/infra/cloudflare-waf.tf.json')),
+      fs.readFileSync(path.join(ctx.dir, 'free/infra/cloudflare-waf.tf.json')));
+  } finally { ctx.cleanup(); }
+});
+
+test('Free CLI binds saved capacity and never overwrites an existing artifact on rejection', () => {
+  const ctx = tmpProject(POLICY_FREE_PREFLIGHT);
+  try {
+    const inventory = path.join(ctx.dir, 'inventory.json');
+    fs.writeFileSync(inventory, freeInventory({ capturedAtMs: Date.now(), existingCustomRules: 3 }));
+    const args = ['--cloudflare-free', '--cloudflare-free-inventory', inventory];
+    const first = runCompiler(ctx.policyPath, ctx.dir, args);
+    assert.strictEqual(first.status, 0, first.stderr);
+    assert.match(first.stderr, /"savedCapacity":"fits"/);
+    const output = path.join(ctx.dir, 'infra/cloudflare-waf.tf.json');
+    fs.writeFileSync(output, 'preserve-existing-output');
+    fs.writeFileSync(inventory, freeInventory({ capturedAtMs: Date.now(), existingCustomRules: 4 }));
+    const rejected = runCompiler(ctx.policyPath, ctx.dir, [...args, '--allow-waf-approximation']);
+    assert.notStrictEqual(rejected.status, 0);
+    assert.match(rejected.stderr, /CUSTOM_RULE_CAPACITY_EXCEEDED/);
+    assert.strictEqual(fs.readFileSync(output, 'utf8'), 'preserve-existing-output');
+  } finally { ctx.cleanup(); }
+});
+
+test('Free CLI rejects ambiguous flags and invalid UTF8/oversized inventory files', () => {
+  const ctx = tmpProject(POLICY_FREE_PREFLIGHT);
+  try {
+    const file = path.join(ctx.dir, 'private-token-inventory.json');
+    for (const flags of [
+      ['--cloudflare-free', '--cloudflare-free'], ['--cloudflare-free-inventory', file],
+      ['--cloudflare-free=false'], ['--cloudflare-free-inventory=' + file],
+      ['--cloudflare-free', '--cloudflare-free-inventory'],
+      ['--cloudflare-free', '--cloudflare-free-inventory', file, '--cloudflare-free-inventory', file],
+    ]) {
+      const result = runCompiler(ctx.policyPath, ctx.dir, flags);
+      assert.notStrictEqual(result.status, 0);
+      assert.match(result.stderr, /CLOUDFLARE_FREE_INVALID: ARGUMENTS/);
+    }
+    for (const bytes of [Buffer.from([0xc3, 0x28]), Buffer.alloc(8193, 32)]) {
+      fs.writeFileSync(file, bytes);
+      const result = runCompiler(ctx.policyPath, ctx.dir, ['--cloudflare-free', '--cloudflare-free-inventory', file]);
+      assert.notStrictEqual(result.status, 0);
+      assert.match(result.stderr, /CLOUDFLARE_FREE_INVALID: INVENTORY_FILE/);
+      assert.ok(!result.stderr.includes('private-token'));
+    }
+    assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
+  } finally { ctx.cleanup(); }
+});
+
+test('Free CLI reuses the explicit rate profile and rejects a Business window before writing', () => {
+  for (const plan of ['free', 'business']) {
+    const ctx = tmpProject(POLICY_FREE_PREFLIGHT + `  waf:
+    cloudflare_rate_limit_plan: ${plan}
+    cloudflare_rate_limit_period: ${plan === 'free' ? 10 : 300}
+    rate_limit: 200
+`);
+    try {
+      const result = runCompiler(ctx.policyPath, ctx.dir, ['--cloudflare-free']);
+      assert.strictEqual(result.status, plan === 'free' ? 0 : 1, result.stderr);
+      if (plan === 'free') assert.match(result.stderr, /"generated":\{"customRules":2,"rateRules":1\}/);
+      else {
+        assert.match(result.stderr, /RATE_WINDOW_NOT_FREE/);
+        assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
+      }
+    } finally { ctx.cleanup(); }
+  }
+});
+
+test('Free inventory rejects a non-regular file without waiting on its contents', () => {
+  const ctx = tmpProject(POLICY_FREE_PREFLIGHT);
+  try {
+    let file = ctx.dir;
+    if (process.platform !== 'win32') {
+      file = path.join(ctx.dir, 'inventory.fifo');
+      const created = spawnSync('mkfifo', [file], { encoding: 'utf8' });
+      assert.strictEqual(created.status, 0, created.stderr);
+    }
+    const result = spawnSync(process.execPath, [compilerPath, '--policy', ctx.policyPath, '--out-dir', ctx.dir,
+      '--cloudflare-free', '--cloudflare-free-inventory', file], { encoding: 'utf8', timeout: 3000 });
+    assert.strictEqual(result.error, undefined);
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stderr, /CLOUDFLARE_FREE_INVALID: INVENTORY_FILE/);
+    assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
+  } finally { ctx.cleanup(); }
+});
+
+test('Free expression shape matching cannot mistake a raw marker for a JSON literal', () => {
+  const source = freeCustomResources(1);
+  for (const expression of ['(ip.geoip.country in {#})', '(lower(http.user_agent) contains #)',
+    '(ip.geoip.country in {# "CN"})']) {
+    source.cloudflare_ruleset.custom.rules[0].expression = expression;
+    const result = assessCloudflareFreeWaf(source, undefined, 0);
+    assert.strictEqual(result.localGeneration, 'unknown', expression);
+    assert.ok(result.reasons.includes('EXPRESSION_NOT_SUPPORTED'));
+  }
+  source.cloudflare_ruleset.custom.rules[0].expression = '(lower(http.user_agent) contains "# matches")';
+  assert.strictEqual(assessCloudflareFreeWaf(source, undefined, 0).localGeneration, 'supported');
+});
+
+test('Free UA subset does not claim Unicode case folding that Cloudflare lower cannot provide', () => {
+  const source = freeCustomResources(1);
+  source.cloudflare_ruleset.custom.rules[0].expression = '(lower(http.user_agent) contains "évil")';
+  const assessment = assessCloudflareFreeWaf(source, undefined, 0);
+  assert.strictEqual(assessment.localGeneration, 'unknown');
+  assert.ok(assessment.reasons.includes('UA_UNICODE_CASE_UNSUPPORTED'));
+  const ctx = tmpProject(POLICY_FREE_PREFLIGHT.replace('ua_contains: [bot]', 'ua_contains: ["ÉVIL"]'));
+  try {
+    const free = runCompiler(ctx.policyPath, ctx.dir, ['--cloudflare-free']);
+    assert.strictEqual(free.status, 1);
+    assert.match(free.stderr, /UA_UNICODE_CASE_UNSUPPORTED/);
+    assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
+    const unchanged = runCompiler(ctx.policyPath, ctx.dir);
+    assert.strictEqual(unchanged.status, 0, unchanged.stderr);
+    const artifact = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json'), 'utf8'));
+    const ua = artifact.resource.cloudflare_ruleset['free-preflight_custom'].rules.find((r: any) => r.description === 'User-Agent blocklist');
+    assert.strictEqual(ua.expression, '(lower(http.user_agent) contains "évil")');
+  } finally { ctx.cleanup(); }
+});
+
+test('Free UA input domain is checked before Unicode-to-ASCII and literal encoding lose information', () => {
+  for (const [literal, reason] of [['K', 'UA_UNICODE_CASE_UNSUPPORTED'], ['a\\\\b', 'UA_LITERAL_ENCODING_UNSUPPORTED'],
+    ['${var.ua}', 'EXPRESSION_TEMPLATE_UNSUPPORTED'], ['%{if true}', 'EXPRESSION_TEMPLATE_UNSUPPORTED']]) {
+    const ctx = tmpProject(POLICY_FREE_PREFLIGHT.replace('ua_contains: [bot]', 'ua_contains: [' + JSON.stringify(literal) + ']'));
+    try {
+      const result = runCompiler(ctx.policyPath, ctx.dir, ['--cloudflare-free']);
+      assert.strictEqual(result.status, 1, literal);
+      assert.match(result.stderr, new RegExp(reason));
+      assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
+    } finally { ctx.cleanup(); }
+  }
+});
+
+
+test('Free emitted-expression boundary rejects Terraform templates across custom and rate rules', () => {
+  for (const literal of ['${1+1}', '%{if true}', '$${1+1}', '%%{if true}']) {
+    for (const expression of ['(lower(http.user_agent) contains ' + JSON.stringify(literal) + ')',
+      '(ip.geoip.country in {' + JSON.stringify(literal) + '})']) {
+      const resources = freeCustomResources(1);
+      resources.cloudflare_ruleset.custom.rules[0].expression = expression;
+      const report = assessCloudflareFreeWaf(resources, undefined, 0);
+      assert.strictEqual(report.localGeneration, 'unknown', expression);
+      assert.ok(report.reasons.includes('EXPRESSION_TEMPLATE_UNSUPPORTED'));
+    }
+    const rules = buildCloudflareRateRules({ ...freeRate, rate_limit: undefined,
+      rate_limit_rules: [{ name: 'path', limit: 100, expression_cloudflare: 'http.request.uri.path eq ' + JSON.stringify('/' + literal) }] });
+    const report = assessCloudflareFreeWaf({ cloudflare_ruleset: { rate: { kind: 'zone', phase: 'http_ratelimit', rules } } }, undefined, 0);
+    assert.strictEqual(report.localGeneration, 'unknown', literal);
+    assert.ok(report.reasons.includes('EXPRESSION_TEMPLATE_UNSUPPORTED'));
+  }
+});
+
+test('Free CLI refuses direct and scope-down rate templates before creating or replacing WAF output', () => {
+  for (const literal of ['/${1+1}', '/%{if true}']) {
+    for (const field of ['expression_cloudflare: ' + JSON.stringify('http.request.uri.path eq ' + JSON.stringify(literal)),
+      'scope_down_statement: {byte_match_statement: {positional_constraint: STARTS_WITH, field_to_match: {uri_path: {}}, search_string: ' + JSON.stringify(literal) + '}}']) {
+      const ctx = tmpProject(POLICY_FREE_PREFLIGHT + `  waf:
+    cloudflare_rate_limit_plan: free
+    cloudflare_rate_limit_period: 10
+    rate_limit_rules:
+      - name: path
+        limit: 100
+        ${field}
+`);
+      try {
+        const output = path.join(ctx.dir, 'infra/cloudflare-waf.tf.json');
+        for (const existing of [false, true]) {
+          if (existing) { fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, 'preserve-existing-output'); }
+          const result = runCompiler(ctx.policyPath, ctx.dir, ['--cloudflare-free', '--allow-waf-approximation']);
+          assert.strictEqual(result.status, 1, result.stderr);
+          assert.match(result.stderr, /EXPRESSION_TEMPLATE_UNSUPPORTED/);
+          if (existing) assert.strictEqual(fs.readFileSync(output, 'utf8'), 'preserve-existing-output');
+          else assert.ok(!fs.existsSync(output));
+        }
+      } finally { ctx.cleanup(); }
+    }
+  }
+});

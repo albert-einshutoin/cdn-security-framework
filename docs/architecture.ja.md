@@ -262,3 +262,66 @@ npx --no-install vitest run test/contract/artifact-http.test.ts test/contract/au
 
 package barrel export、CLI、workflow、legacy adapter、自動Applyは追加して
 いません。この追加のrevertでfixture bindingを戻せます。
+
+## Cloudflare Freeの生成前preflight
+
+既存のWAF専用compilerに、明示した場合だけFreeのローカル検査を追加します。
+
+```sh
+node scripts/compile-cloudflare-waf.js --policy policy.yml --out-dir review --cloudflare-free
+node scripts/compile-cloudflare-waf.js --policy policy.yml --out-dir review --cloudflare-free --cloudflare-free-inventory saved-inventory.json
+```
+
+このscriptはWorkerを追加しません。flag未指定の既存経路はそのままです。
+新flagはこのscript専用で、公開`compileArtifacts` optionや`cdn-security build`
+flagとして追加するものではありません。
+
+2026-10-26に[Free custom rules](https://developers.cloudflare.com/waf/custom-rules/)
+のzone custom phase全体5ルール・custom ruleset1個・Regex/Log不可と、
+[Free rate limiting](https://developers.cloudflare.com/waf/rate-limiting-rules/)
+の1ルール・period/mitigation各10秒を確認しました。既存rate validatorの明示閾値と
+URI-path式の限定契約を再利用します。
+[Bot Management field](https://developers.cloudflare.com/ruleset-engine/rules-language/fields/reference/)
+はEnterprise add-onが必要です。
+[Logpushは2026-09-30から全planで従量課金付き](https://developers.cloudflare.com/changelog/post/2026-09-30-logpush-usage-based-pricing/)
+になったため、含まれる利用枠の有無を推測せず、追加費用0円profileではresourceを拒否します。
+
+初期対応subsetはcompilerのGeo/ASCII-UA block式と、検証済みFree rate rulesです。
+[Cloudflareの`lower()`](https://developers.cloudflare.com/ruleset-engine/rules-language/functions/#lower)
+はASCIIだけを変換します。非ASCIIのUA literalは、既存JavaScript generatorで既に
+小文字化されていても`UA_UNICODE_CASE_UNSUPPORTED`の`unknown`としてFree生成を止めます。
+Unicode case foldingの同等性は主張しません。
+compilerは変換前のUA literalを確認し、UnicodeからASCIIになる場合も見逃しません。
+既存emitterの引用形式がcanonical JSONとして元literalを保持できない場合は、
+`UA_LITERAL_ENCODING_UNSUPPORTED`でFree生成を止めます。生成式の共通検証ではcustom/rate双方の
+[Terraform template marker](https://developer.hashicorp.com/terraform/language/syntax/json#expression-mapping)を
+`EXPRESSION_TEMPLATE_UNSUPPORTED`で拒否します。直接指定したrate式とscope-downから生成した式も対象です。
+未指定経路の出力は変えません。
+式全体の対応形状を確認し、disabled ruleも件数へ含めます。未対応field/function/action、
+list、managed phase、resourceは限定`unknown`診断でWAFファイル生成を止めます。
+既知のplan違反と容量超過でも生成を止め、`--allow-waf-approximation`では回避できません。
+拒否時は既存outputを保持します。検査は生成resourceに限定し、Policy全体のcoverageは
+証明しません。Path/Method制御は別途実装するまでこのcompilerではWorker側だけで、
+`policyCoverage`は`unknown`を保持します。
+
+任意の保存inventoryは8192 UTF-8 bytes以下のstrict JSONです。
+
+```json
+{"version":1,"scope":"saved-cloudflare-free-inventory","capturedAtMs":0,"complete":false,"plan":null,"existingCustomRules":null,"existingRateRules":null}
+```
+
+この例はaccount情報が未取得だと明示しています。v1はこのfieldだけをすべて必須とし、
+時刻と既知件数は非負の安全な整数、件数上限10000、planは`free`またはnull、件数もnullを
+許容します。`complete: true`は対象zoneの該当phase全体を取得したという宣言で、
+attestationではありません。未取得・部分・24時間超・plan/count不明・未対応versionから
+`savedCapacity: fits`を返しません。未来時刻、不正type/field/JSON/UTF-8、上限超過は
+生入力やinventory file pathをechoしない固定Errorです。
+
+stderrのassessmentは生成件数・保存件数/時点/入力SHA-256と固定reasonを示します。
+完全・24時間以内・Freeと宣言された保存inventoryではexisting+generatedの追加を仮定して
+`savedCapacity`を`fits`/`exceeded`にします。Terraformのownership/import、既存zone ruleを
+保持する手順は別途reviewが必要です。不明inventoryでも対応subsetのローカル生成は可能で、
+`savedCapacity: unknown`を明記します。保存計算がfitsでも`liveDeployment`は常に`unknown`です。
+account entitlement、API受理、実配備、防御、安全性を証明せず、API/credential/applyや
+自動的な要件緩和は行いません。`npm run build:ts`の後に
+`node scripts/cloudflare-waf-parity-unit-tests.js`で再現できます。
