@@ -150,7 +150,7 @@ function observation(value: unknown, line: number, header: CloudflareEventFixtur
     else if (status === 404) { classification = 'HTTP_404_NOT_SERVED'; reasons.push('STATUS_NOT_WAF_PROOF'); }
     else if (status === 200 && pathname !== null) {
       // Only literal paths are classified; encoded/normalized routing needs separate evidence.
-      const sensitive = /(?:^|\/)(?:\.git(?:\/|$)|(?:\.env|wp-config\.php|credentials|id_rsa)(?:[._~-][^/]*)?(?:\/|$))/i.test(pathname);
+      const sensitive = /(?:^|\/)(?:\.env|\.git|wp-config\.php|credentials|id_rsa)(?:[._~-][^/]*)?(?:\/|$)/i.test(pathname);
       classification = sensitive ? 'REVIEW_SENSITIVE_PATH_200' : 'HTTP_200_REPORTED';
       reasons.push('CONTENT_NOT_OBSERVED');
     }

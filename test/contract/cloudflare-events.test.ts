@@ -149,6 +149,19 @@ describe('bounded synthetic Cloudflare Events review', () => {
     expect(r.observations[0].inference.classification).toBe('REVIEW_SENSITIVE_PATH_200');
     expect(r.candidates[0].content).toBe('UNKNOWN');
   });
+  it.each(['/.git.bak', '/backup/.git~'])('keeps Git backup paths review-only: %s', pathname => {
+    const r = reviewCloudflareEvents(fixture([event({ path: pathname })]));
+    expect(r.observations[0].inference.classification).toBe('REVIEW_SENSITIVE_PATH_200'); expect(r.candidates).toHaveLength(1); expect(r.candidates[0].content).toBe('UNKNOWN');
+  });
+  it('applies the documented suffix contract to allfive filenames without matching unrelated names', () => {
+    for (const name of ['.env', '.git', 'wp-config.php', 'credentials', 'id_rsa']) {
+      for (const suffix of ['.bak', '.local.bak', '_saved', '-old', '~']) {
+        const pathname = '/backup/' + name + suffix;
+        expect(reviewCloudflareEvents(fixture([event({ path: pathname })])).candidates, pathname).toHaveLength(1);
+      }
+    }
+    for (const pathname of ['/.github/index.html', '/legit.bak', '/asset/file.git']) expect(reviewCloudflareEvents(fixture([event({ path: pathname })])).candidates, pathname).toEqual([]);
+  });
   it('handles CRLF/blank lines with physical line numbers and is deterministic', () => {
     const input = Buffer.from('\r\n' + JSON.stringify(header) + '\r\n\r\n' + JSON.stringify(event({ path: '/.env' })) + '\r\n');
     const r = reviewCloudflareEvents(input); expect(r.candidates[0].line).toBe(4); expect(reviewCloudflareEvents(input)).toEqual(r);
@@ -204,6 +217,10 @@ describe('actual Cloudflare Events CLI', () => {
     const r = JSON.parse(json.stdout); expect(r.summary.inputStatus).toBe('partial'); expect(r.candidates).toHaveLength(1); expect(r.observations[0].observed.attribution).toBe('unknown');
     const text = cli([event({ path: '/.env', attribution: 'unknown' })], ['--format', 'cloudflare-events']);
     expect(text.status).toBe(1); expect(text.stdout).toContain('ATTRIBUTION_UNKNOWN'); expect(text.stdout).toContain('input_status=partial'); expect(text.stdout).not.toContain('/.env');
+  });
+  it('emits a Git-backup review candidate through the actual CLI without claiming disclosure', () => {
+    const result = cli([event({ path: '/.git.bak' })], ['--format', 'cloudflare-events', '--json']);
+    expect(result.status).toBe(0); const report = JSON.parse(result.stdout); expect(report.candidates).toHaveLength(1); expect(report.candidates[0].content).toBe('UNKNOWN'); expect(report.securityVerdict).toBe('UNKNOWN'); expect(result.stdout).not.toContain('/.git.bak');
   });
   it.each([['--format', 'unrecognized'], ['--format', 'cloudflare-events', '--min-count', '3'], ['--format', 'cloudflare-events', '--top', '101']])('rejects format/options without silently falling back %s', (...args) => {
     const result = cli([event()], args); expect(result.status).toBe(1); expect(result.stdout).toBe(''); expect(result.stderr).toMatch(/^\[ERROR\] ANALYZE_(?:CLOUDFLARE_)?ARGUMENT_INVALID\n$/);
