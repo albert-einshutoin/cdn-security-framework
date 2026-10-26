@@ -8,7 +8,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import { execFileSync, spawn, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { HTTP_FIXTURE_CASES, HTTP_FIXTURE_POLICY, HTTP_FIXTURE_HEADERS } from './fixtures/cloudflare-http-cases';
+import { HTTP_FIXTURE_CASES, HTTP_FIXTURE_POLICY, HTTP_FIXTURE_HEADERS, HTTP_FIXTURE_SCOPE, HTTP_FIXTURE_ASSETS } from './fixtures/cloudflare-http-cases';
 import { createHttpArtifactContract, captureHttpArtifactSnapshot, captureHttpArtifactObservation, verifyHttpArtifact, createHttpArtifactBundle, replayHttpArtifact, type HttpArtifactCase, type HttpArtifactSnapshot, type HttpArtifactRawObservation } from '../contract/verification/artifact-http';
 
 const repo = fs.realpathSync(path.resolve(__dirname, '..'));
@@ -137,7 +137,9 @@ async function main() {
     for await (const chunk of req) chunks.push(Buffer.from(chunk));
     const receipt = { url: req.url!, method: req.method!, headers: { ...req.headers, ...(req.headers.authorization ? { authorization: '[redacted synthetic JWT]' } : {}) }, body: Buffer.concat(chunks).toString() };
     receipts.push(receipt);
-    if (req.url === '/origin-error') { res.writeHead(503, { 'content-type': 'text/plain' }); res.end('synthetic-origin-failure'); }
+    const asset = HTTP_FIXTURE_ASSETS[req.url!];
+    if (asset) { res.writeHead(200, { 'content-type': asset.contentType }); res.end(asset.body); }
+    else if (req.url === '/origin-error') { res.writeHead(503, { 'content-type': 'text/plain' }); res.end('synthetic-origin-failure'); }
     else { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(receipt)); }
     } catch (error) {
       // An interrupted streamed POST must reject the run, not become an
@@ -379,7 +381,17 @@ const config :Workerd.Config = (
           assert.equal(observed[0].headers['x-forwarded-for'], undefined);
           assert.equal(observed[0].headers['x-edge-authenticated'], undefined);
         }
-        if(!test.artifact){
+        if (test.publicResponse && !test.artifact) {
+          assert.equal(result.headers['cache-control'], undefined, test.id + ': public cache');
+          assert.ok(!String(result.headers.vary ?? '').toLowerCase().split(',').map(v => v.trim()).includes('authorization'), test.id + ': public vary');
+        }
+        const asset = HTTP_FIXTURE_ASSETS[test.forwarded];
+        if (test.method === 'HEAD') assert.equal(result.body, '', test.id + ': HEAD body');
+        if (asset) {
+          assert.equal(result.headers['content-type'], asset.contentType, test.id + ': asset content-type');
+          if (test.method !== 'HEAD') assert.deepEqual(Buffer.from(result.body), Buffer.from(asset.body), test.id + ': asset bytes');
+        }
+        if(!test.artifact && !asset && test.method !== 'HEAD'){
           if (test.id === 'origin-error') assert.equal(result.body, 'synthetic-origin-failure');
           else assert.deepEqual(JSON.parse(result.body), observed[0]);
         }
@@ -554,7 +566,7 @@ const config :Workerd.Config = (
     } catch(error){if(artifactVerification.state!=='complete')artifactVerification={state:'Error',code:'HTTP_EXECUTION_FAILED',error:String(error)};failure=failure??error;}
     identity.runtimeLogSha256=digest(runtimeLog);
     fs.mkdirSync(path.dirname(reportPath), { recursive: true });
-    fs.writeFileSync(reportPath, JSON.stringify({ status: failure ? 'fail' : 'pass', artifactVerification, identity, jwksCases, jwksReceipts, cases, receipts, cleanup, workerPid: runtime?.pid, tempDirectory: tmp, runtimeLog, error: failure ? String(failure) : null }, (_key,value)=>typeof value==='string'?value.replaceAll(token,'[credential:valid]').replaceAll('wrong-synthetic','[credential:wrong]'):value, 2));
+    fs.writeFileSync(reportPath, JSON.stringify({ status: failure ? 'fail' : 'pass', fixtureScope: HTTP_FIXTURE_SCOPE, artifactVerification, identity, jwksCases, jwksReceipts, cases, receipts, cleanup, workerPid: runtime?.pid, tempDirectory: tmp, runtimeLog, error: failure ? String(failure) : null }, (_key,value)=>typeof value==='string'?value.replaceAll(token,'[credential:valid]').replaceAll('wrong-synthetic','[credential:wrong]'):value, 2));
   }
   if (failure) throw failure;
   console.log('Cloudflare HTTP E2E passed; report:', reportPath);

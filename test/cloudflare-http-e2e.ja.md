@@ -2,6 +2,36 @@
 
 開発用の既存経路「Node HTTP client → native workerd → 別loopback Origin」を使い、現行compilerの生成物を独立した期待契約と照合します。正常・負例は同じworkerdプロセスの別service/portで動かし、外向きdeny-all、固定Origin、既存timeoutとfinally cleanupを維持します。実Cloud、token取得、配備、料金の発生するサービスは使いません。handler/fetchのmockや、native欠落時のNode fallbackはありません。
 
+## 合成探索と正常通信のfixture
+
+固定fixtureは、この合成サイトで `phpinfo.php`、`wp-login.php`、`wp-admin`、
+`xmlrpc.php` を未使用と宣言します。rootの秘密名（`.env`、`.git`、`id_rsa`、
+`id_ed25519`、`server.key`、`private-key.pem`、`.ssh` 配下の2鍵名）だけを
+fixture専用の明示path regexで拒否します。raw・encoded・大文字小文字・slash・
+matrix・queryのliteralケースは、HTTP 400・Worker block event・origin到達0を
+要求します。曖昧な二重encoded dotも400を要求しますが、そのbytesをpath regexが
+処理した証拠とはしません。期待path/statusはcompile前に独立して固定します。
+
+正常側ではroot・通常・日英ページ、`.well-known`、`cdn-cgi`、JS/Wasm資産、
+`/api/required.php`、WP静的upload、`.env-example`・`.github`・
+`phpinfo.php.txt`・`wp-administrator` の境界名を保持します。合成origin応答であり、
+PHP/WP実行やCloudflare予約endpointの動作は証明しません。fixtureではGET・HEAD・
+POST・OPTIONSを明示許可し、DELETEは405のままです。合成 `x-required` 前提も
+維持するため、browserのCORSテストではありません。JS/Wasmの配送bytesと
+content type、HEADの空bodyを確認し、Wasm実行・CPU・latency・browser互換性は
+検証しません。
+
+Artifact Verification契約は既存のJSON echo body要件を維持します。JS/Wasmと
+HEADの配送はそのsubset外のharness assertionで確認します。固定artifact subsetと
+これらのassertionのどちらかが失敗すれば、harness全体が失敗します。
+
+Hostの `fixture.example:443` と `fixture.example:8443` はlogical authorityの
+変形です。現Worker Policyにはport規則がないため、両方を許可する期待値です。
+実socketとoutbound originはloopback HTTPに固定します。reportの `fixtureScope`
+ではWAF実行・port保護を `UNKNOWN` と記録します。TLS・公開DNS・Cloudflareの
+port filtering・WAF式parity・配備済み保護の証拠とはしません。WAF subset照合には、
+別途明示したcompiler/evidence契約が必要です。
+
 ```sh
 npm ci --ignore-scripts
 npm run test:cloudflare-http-e2e

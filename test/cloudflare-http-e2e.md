@@ -8,6 +8,39 @@ own native workerd process. Neither the Worker handler nor its fetch is mocked.
 The Artifact Verification negative service shares that process and origin, but
 executes its separately generated module on a second loopback socket.
 
+## Synthetic probe / normal traffic fixture
+
+The fixed fixture declares `phpinfo.php`, `wp-login.php`, `wp-admin` and
+`xmlrpc.php` unused for this synthetic site. Its root secret names (`.env`,
+`.git`, `id_rsa`, `id_ed25519`, `server.key`, `private-key.pem`, and the two SSH
+key names under `.ssh`) are rejected using explicit fixture-only path regexes.
+Literal raw, encoded, case, slash, matrix and query cases require HTTP 400, a
+Worker block event and zero origin arrivals. Ambiguous double-encoded dot input
+also requires 400; it is not evidence that the path regex handled those bytes.
+Expected paths/statuses are fixed independently before compilation.
+
+Positive cases preserve root/normal/English/Japanese routes, `.well-known`,
+`cdn-cgi`, JS/Wasm assets, `/api/required.php`, static WP uploads and boundary
+names such as `.env-example`, `.github`, `phpinfo.php.txt` and
+`wp-administrator`. These are synthetic origin responses, not PHP/WP execution
+or Cloudflare-reserved endpoint behavior. GET, HEAD, POST and OPTIONS are
+explicitly allowed in this fixture; DELETE remains 405. Requests retain the
+fixture's synthetic `x-required` prerequisite; this is not a browser CORS test.
+The harness checks JS/Wasm bytes and content type and HEAD's empty body. It
+does not execute Wasm or measure CPU, latency or browser compatibility.
+
+The Artifact Verification contract retains its JSON-echo body requirement;
+JS/Wasm and HEAD delivery run as direct harness assertions outside that subset.
+The overall harness fails if either the fixed artifact subset or these assertions fail.
+
+Host values `fixture.example:443` and `fixture.example:8443` are logical
+authority variations; both are expected to pass because this Worker Policy
+has no port rule. The actual client socket and outbound origin remain bound
+to loopback HTTP. `fixtureScope` records WAF execution and port enforcement
+as `UNKNOWN`. These observations do not prove TLS, public DNS, Cloudflare port
+filtering, WAF expression parity or deployed protection. WAF subset checks
+require their own declared compiler/evidence contract.
+
 ## Run
 
 Use a supported native workerd platform and the repository's Node >=20.17
