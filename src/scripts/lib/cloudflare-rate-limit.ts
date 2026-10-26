@@ -118,11 +118,12 @@ export function assessCloudflareFreeWaf(resources: unknown, inventoryText?: stri
   const reject = (reason: string, known = false) => { reasons.add(reason); if (known) unsupported = true; else unknown = true; };
   const customExpression = (expression: unknown) => {
     if (typeof expression !== 'string' || Buffer.byteLength(expression) > 4096) return false;
-    let valid = true;
+    let valid = true, nonAsciiLiteral = false;
     const stripped = expression.replace(/"(?:[^"\\\x00-\x1f]|\\.)*"/g, literal => {
       try {
         const value = JSON.parse(literal);
         if (JSON.stringify(value) !== literal || /[\x00-\x1f\x7f]/.test(value)) valid = false;
+        if (/[^\x00-\x7f]/.test(value)) nonAsciiLiteral = true;
       } catch { valid = false; }
       return '""';
     });
@@ -130,8 +131,11 @@ export function assessCloudflareFreeWaf(resources: unknown, inventoryText?: stri
     if (/\bcf\.bot_management\./.test(stripped)) reject('BOT_MANAGEMENT_NOT_FREE', true);
     // Full emitted shapes, after validating/removing literals. Keywords inside UA
     // strings cannot introduce operators or manufacture a paid-feature finding.
-    return valid && (/^(?:not )?\(ip\.geoip\.country in \{""(?: "")*\}\)$/.test(stripped)
-      || /^\(lower\(http\.user_agent\) contains ""(?: or lower\(http\.user_agent\) contains "")*\)$/.test(stripped));
+    const ua = /^\(lower\(http\.user_agent\) contains ""(?: or lower\(http\.user_agent\) contains "")*\)$/.test(stripped);
+    // Cloudflare lower folds ASCII only; the existing generator's JavaScript
+    // lowercasing must not turn Unicode literals into a supported Free claim.
+    if (ua && nonAsciiLiteral) { reject('UA_UNICODE_CASE_UNSUPPORTED'); return false; }
+    return valid && (/^(?:not )?\(ip\.geoip\.country in \{""(?: "")*\}\)$/.test(stripped) || ua);
   };
   for (const [type, entries] of Object.entries(resources as Record<string, unknown>)) {
     if (!object(entries) || Object.keys(entries).length > 16) invalid('RESOURCE_SHAPE_OR_LIMIT');

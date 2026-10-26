@@ -286,7 +286,15 @@ URI-path式の限定契約を再利用します。
 [Logpushは2026-09-30から全planで従量課金付き](https://developers.cloudflare.com/changelog/post/2026-09-30-logpush-usage-based-pricing/)
 になったため、含まれる利用枠の有無を推測せず、追加費用0円profileではresourceを拒否します。
 
-初期対応subsetはcompilerのGeo/UA block式と、検証済みFree rate rulesです。
+初期対応subsetはcompilerのGeo/ASCII-UA block式と、検証済みFree rate rulesです。
+[Cloudflareの`lower()`](https://developers.cloudflare.com/ruleset-engine/rules-language/functions/#lower)
+はASCIIだけを変換します。非ASCIIのUA literalは、既存JavaScript generatorで既に
+小文字化されていても`UA_UNICODE_CASE_UNSUPPORTED`の`unknown`としてFree生成を止めます。
+Unicode case foldingの同等性は主張しません。
+compilerは変換前のUA literalを確認し、UnicodeからASCIIになる場合も見逃しません。
+既存emitterの引用形式がcanonical JSONとして元literalを保持できない場合や、
+[Terraform template marker](https://developer.hashicorp.com/terraform/language/syntax/json#expression-mapping)を含む場合も、
+`UA_LITERAL_ENCODING_UNSUPPORTED`でFree生成を止めます。未指定経路の出力は変えません。
 式全体の対応形状を確認し、disabled ruleも件数へ含めます。未対応field/function/action、
 list、managed phase、resourceは限定`unknown`診断でWAFファイル生成を止めます。
 既知のplan違反と容量超過でも生成を止め、`--allow-waf-approximation`では回避できません。

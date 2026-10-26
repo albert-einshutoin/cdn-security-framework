@@ -242,6 +242,8 @@ test('compiler: untranslated scope_down rejects before output even with approxim
   } finally { ctx.cleanup(); }
 });
 
+
+
 test('compiler: expression_cloudflare override suppresses the scope_down warning', () => {
   const policy = `${POLICY_SCOPE_DOWN_UNTRANSLATED}        expression_cloudflare: 'http.request.uri.path eq "/login"'
 `;
@@ -730,4 +732,37 @@ test('Free expression shape matching cannot mistake a raw marker for a JSON lite
   }
   source.cloudflare_ruleset.custom.rules[0].expression = '(lower(http.user_agent) contains "# matches")';
   assert.strictEqual(assessCloudflareFreeWaf(source, undefined, 0).localGeneration, 'supported');
+});
+
+test('Free UA subset does not claim Unicode case folding that Cloudflare lower cannot provide', () => {
+  const source = freeCustomResources(1);
+  source.cloudflare_ruleset.custom.rules[0].expression = '(lower(http.user_agent) contains "évil")';
+  const assessment = assessCloudflareFreeWaf(source, undefined, 0);
+  assert.strictEqual(assessment.localGeneration, 'unknown');
+  assert.ok(assessment.reasons.includes('UA_UNICODE_CASE_UNSUPPORTED'));
+  const ctx = tmpProject(POLICY_FREE_PREFLIGHT.replace('ua_contains: [bot]', 'ua_contains: ["ÉVIL"]'));
+  try {
+    const free = runCompiler(ctx.policyPath, ctx.dir, ['--cloudflare-free']);
+    assert.strictEqual(free.status, 1);
+    assert.match(free.stderr, /UA_UNICODE_CASE_UNSUPPORTED/);
+    assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
+    const unchanged = runCompiler(ctx.policyPath, ctx.dir);
+    assert.strictEqual(unchanged.status, 0, unchanged.stderr);
+    const artifact = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json'), 'utf8'));
+    const ua = artifact.resource.cloudflare_ruleset['free-preflight_custom'].rules.find((r: any) => r.description === 'User-Agent blocklist');
+    assert.strictEqual(ua.expression, '(lower(http.user_agent) contains "évil")');
+  } finally { ctx.cleanup(); }
+});
+
+test('Free UA input domain is checked before Unicode-to-ASCII and literal encoding lose information', () => {
+  for (const [literal, reason] of [['K', 'UA_UNICODE_CASE_UNSUPPORTED'], ['a\\\\b', 'UA_LITERAL_ENCODING_UNSUPPORTED'],
+    ['${var.ua}', 'UA_LITERAL_ENCODING_UNSUPPORTED'], ['%{if true}', 'UA_LITERAL_ENCODING_UNSUPPORTED']]) {
+    const ctx = tmpProject(POLICY_FREE_PREFLIGHT.replace('ua_contains: [bot]', 'ua_contains: [' + JSON.stringify(literal) + ']'));
+    try {
+      const result = runCompiler(ctx.policyPath, ctx.dir, ['--cloudflare-free']);
+      assert.strictEqual(result.status, 1, literal);
+      assert.match(result.stderr, new RegExp(reason));
+      assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
+    } finally { ctx.cleanup(); }
+  }
 });

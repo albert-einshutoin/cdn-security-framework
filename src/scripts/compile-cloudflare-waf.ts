@@ -30,6 +30,9 @@ export function compileCloudflareWaf(policy: any, options: CompilerOptions): voi
 const outDir = options.outDir;
 const console = options.logger || globalThis.console;
 const failOnApproximation = options.failOnWafApproximation !== false;
+const freeProfile = options.cloudflareFree;
+if (freeProfile !== undefined && (!freeProfile || typeof freeProfile !== 'object' || Array.isArray(freeProfile)
+  || Object.keys(freeProfile).some(k => k !== 'inventoryText'))) throw new Error('CLOUDFLARE_FREE_INVALID: OPTIONS');
 
 // Parity warnings collected during emission — surfaced once at the end so
 // the order is stable (managed rules first, then scope-down notes).
@@ -158,7 +161,22 @@ const uaDeny = Array.isArray((policy.request || {}).block?.ua_contains)
   ? policy.request.block.ua_contains
   : [];
 if (uaDeny.length > 0) {
-  const uaExprs = uaDeny.map((s: unknown) => `lower(http.user_agent) contains "${String(s).toLowerCase().replace(/"/g, '\\"')}"`);
+  const uaExprs = uaDeny.map((s: unknown) => {
+    if (freeProfile !== undefined && typeof s !== 'string') throw new Error('CLOUDFLARE_FREE_INVALID: UA_LITERAL_TYPE');
+    // Check the original value: Unicode lowering can erase the unsupported
+    // input (Kelvin sign becomes ASCII k) before emitted-resource validation.
+    if (freeProfile !== undefined && typeof s === 'string' && /[^\x00-\x7f]/.test(s)) {
+      throw new Error('CLOUDFLARE_FREE_UNKNOWN: UA_UNICODE_CASE_UNSUPPORTED');
+    }
+    const folded = String(s).toLowerCase();
+    const quoted = '"' + folded.replace(/"/g, '\\"') + '"';
+    // Preserve the existing emitter, but do not approve a Free literal whose
+    // encoding loses source characters or would invoke Terraform templating.
+    if (freeProfile !== undefined && (quoted !== JSON.stringify(folded) || folded.includes('${') || folded.includes('%{'))) {
+      throw new Error('CLOUDFLARE_FREE_UNKNOWN: UA_LITERAL_ENCODING_UNSUPPORTED');
+    }
+    return `lower(http.user_agent) contains ${quoted}`;
+  });
   customRules.push(Object.assign({
     description: 'User-Agent blocklist',
     enabled: true,
@@ -295,10 +313,8 @@ if (logging.enabled) {
 
 // Write file (always — empty WAF config still produces a file with just variables, so
 // downstream tooling can `terraform plan` without a missing-file error).
-if (options.cloudflareFree !== undefined) {
-  if (!options.cloudflareFree || typeof options.cloudflareFree !== 'object' || Array.isArray(options.cloudflareFree)
-    || Object.keys(options.cloudflareFree).some(k => k !== 'inventoryText')) throw new Error('CLOUDFLARE_FREE_INVALID: OPTIONS');
-  const assessment = assessCloudflareFreeWaf(tfJson.resource, options.cloudflareFree.inventoryText);
+if (freeProfile !== undefined) {
+  const assessment = assessCloudflareFreeWaf(tfJson.resource, freeProfile.inventoryText);
   console.error('Cloudflare Free preflight: ' + JSON.stringify(assessment));
   if (assessment.localGeneration !== 'supported' || assessment.savedCapacity === 'exceeded') {
     throw new Error('CLOUDFLARE_FREE_REJECTED: ' + assessment.reasons.join(','));

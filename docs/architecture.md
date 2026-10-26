@@ -289,8 +289,17 @@ require an Enterprise add-on. [Logpush changed on 2026-09-30](https://developers
 to availability on all plans with usage pricing, so this zero-additional-cost
 profile rejects Logpush resources even when an account might have included usage.
 
-The initial local subset accepts the compiler's Geo/UA block expressions and
-validated Free rate rules. It checks whole supported expression shapes and
+The initial local subset accepts the compiler's Geo/ASCII-UA block expressions
+and validated Free rate rules. [Cloudflare `lower()`](https://developers.cloudflare.com/ruleset-engine/rules-language/functions/#lower)
+folds ASCII only. Non-ASCII UA literals return `unknown` with
+`UA_UNICODE_CASE_UNSUPPORTED` and stop Free generation, including literals that
+the existing JavaScript generator already lowercased. This profile makes no
+Unicode case-folding equivalence claim. The compiler checks the original UA
+literal before case conversion, so Unicode-to-ASCII mappings cannot bypass the
+restriction. If the existing emitter cannot preserve a literal in canonical
+JSON quoting, or the literal contains [Terraform template markers](https://developer.hashicorp.com/terraform/language/syntax/json#expression-mapping), Free generation
+stops with `UA_LITERAL_ENCODING_UNSUPPORTED`. These rejections do not change the
+unflagged emitter. The preflight checks whole supported shapes and
 counts disabled rules too. Unsupported fields, functions, actions, lists,
 managed phases or resources return bounded `unknown` diagnostics and stop WAF
 file generation. Known plan violations and capacity excess also stop generation;
