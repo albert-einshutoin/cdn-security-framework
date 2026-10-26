@@ -66,6 +66,7 @@ const schemaHintExpectedFiles: SchemaHintExpectation[] = [
   { path: 'policy/profiles/strict.yml', schemaPath: '../schema.json', required: true },
   { path: 'policy/profiles/permissive.yml', schemaPath: '../schema.json', required: true },
   { path: 'policy/archetypes/spa-static-site.yml', schemaPath: '../schema.json', required: true },
+  { path: 'policy/archetypes/cloudflare-free-static-site.yml', schemaPath: '../schema.json', required: true },
   { path: 'policy/archetypes/rest-api.yml', schemaPath: '../schema.json', required: true },
   { path: 'policy/archetypes/admin-panel.yml', schemaPath: '../schema.json', required: true },
   { path: 'policy/archetypes/microservice-origin.yml', schemaPath: '../schema.json', required: true },
@@ -292,6 +293,7 @@ export function assertPackageContents(pack: PackResult) {
     'policy/profiles/strict.yml',
     'policy/profiles/permissive.yml',
     'policy/archetypes/spa-static-site.yml',
+    'policy/archetypes/cloudflare-free-static-site.yml',
     'policy/archetypes/rest-api.yml',
     'policy/archetypes/admin-panel.yml',
     'policy/archetypes/microservice-origin.yml',
@@ -519,6 +521,20 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer?: st
     assert.ok(fs.existsSync(path.join(installDir, 'openapi.candidate.meta.json')));
     assertInstalledContents(installedRoot);
     assertSchemaHints(installedRoot);
+
+    const staticWafOut = path.join(installDir, 'static-waf');
+    run(process.execPath, [
+      path.join(installedRoot, 'scripts', 'compile-cloudflare-waf.js'),
+      '--policy', path.join(installedRoot, 'policy', 'archetypes', 'cloudflare-free-static-site.yml'),
+      '--cloudflare-free', '--out-dir', staticWafOut,
+    ], { cwd: installDir });
+    const staticWaf = JSON.parse(fs.readFileSync(path.join(staticWafOut, 'infra', 'cloudflare-waf.tf.json'), 'utf8'));
+    const staticRulesets = Object.values<any>(staticWaf.resource.cloudflare_ruleset);
+    assert.strictEqual(staticRulesets.length, 1);
+    assert.strictEqual(staticRulesets[0].phase, 'http_request_firewall_custom');
+    assert.strictEqual(staticRulesets[0].rules.length, 4);
+    assert.ok(staticRulesets[0].rules.every((rule: any) => rule.action === 'block' && rule.action_parameters.response === null));
+    assert.ok(!fs.existsSync(path.join(staticWafOut, 'edge')));
 
     run(cliPath, [
       'build', '--policy', path.join(installDir, 'openapi.candidate.yml'), '--out-dir', 'dist',

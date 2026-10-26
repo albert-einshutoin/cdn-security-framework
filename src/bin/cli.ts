@@ -2417,6 +2417,12 @@ function evaluateReadiness(
   const firewall = (policy && policy.firewall) || {};
   const waf = firewall.waf || {};
 
+  if (require(path.join(pkgRoot, 'scripts/lib/cloudflare-static-waf')).isStaticWafPolicy(policy)) {
+    findings.push(readinessFinding('fail', 'firewall.waf.cloudflare_static_site.waf_only',
+      'This WAF-only profile cannot build a Worker or AWS artifact for this readiness target.',
+      'Use compile-cloudflare-waf.js --cloudflare-free. Local preflight does not verify deployed WAF readiness.'));
+  }
+
   if (target === 'cloudflare') {
     try { require(path.join(pkgRoot, 'scripts/lib/cloudflare-rate-limit')).buildCloudflareRateRules(waf); }
     catch (error: unknown) {

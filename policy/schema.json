@@ -491,6 +491,119 @@
               "minimum": 10,
               "maximum": 86400
             },
+            "cloudflare_static_site": {
+              "description": "Explicit Cloudflare Free WAF-only static-site requirements. Compile only with compile-cloudflare-waf --cloudflare-free; other compiler targets reject this profile. Reuses request.allow_methods. Literal lowercase ASCII URI-field matching only; no raw HTTP normalization, deployed WAF or port-efficacy proof. Exceptions negate only their own path/method block, never Skip. Existing Worker path_patterns and other unsupported Worker controls cannot be mixed into this profile.",
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "allow_ports",
+                "block_paths"
+              ],
+              "properties": {
+                "allow_ports": {
+                  "description": "Allowed Cloudflare edge receive ports, not the HTTP Host authority port. Explicit nonempty set; no default.",
+                  "type": "array",
+                  "items": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 65535
+                  },
+                  "minItems": 1,
+                  "maxItems": 32,
+                  "uniqueItems": true
+                },
+                "block_paths": {
+                  "description": "Case-insensitive ASCII comparisons on http.request.uri.path. Exact and prefix are literal operations; at least one list must be nonempty. No regex, query or encoded path literals. URL normalization settings are not configured or verified.",
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "exact",
+                    "prefix"
+                  ],
+                  "properties": {
+                    "exact": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^/[a-z0-9._/;=-]*$"
+                      },
+                      "maxItems": 32,
+                      "uniqueItems": true
+                    },
+                    "prefix": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^/[a-z0-9._/;=-]*$"
+                      },
+                      "maxItems": 32,
+                      "uniqueItems": true
+                    },
+                    "exceptions": {
+                      "type": "array",
+                      "items": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^/[a-z0-9._/;=-]*$"
+                      },
+                      "maxItems": 32,
+                      "uniqueItems": true,
+                      "description": "Exact path exceptions to the path block only; other method/port/UA rules still apply."
+                    }
+                  },
+                  "not": {
+                    "type": "object",
+                    "properties": {
+                      "exact": {
+                        "type": "array",
+                        "maxItems": 0
+                      },
+                      "prefix": {
+                        "type": "array",
+                        "maxItems": 0
+                      }
+                    }
+                  }
+                },
+                "method_exceptions": {
+                  "description": "Additional methods on each exact path only. Does not exempt path, port, UA or any other WAF rule. Paths must be unique.",
+                  "type": "array",
+                  "maxItems": 32,
+                  "uniqueItems": true,
+                  "items": {
+                    "type": "object",
+                    "additionalProperties": false,
+                    "required": [
+                      "path",
+                      "methods"
+                    ],
+                    "properties": {
+                      "path": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 256,
+                        "pattern": "^/[a-z0-9._/;=-]*$"
+                      },
+                      "methods": {
+                        "type": "array",
+                        "items": {
+                          "type": "string",
+                          "pattern": "^[A-Z]{1,16}$"
+                        },
+                        "minItems": 1,
+                        "maxItems": 32,
+                        "uniqueItems": true
+                      }
+                    }
+                  }
+                }
+              }
+            },
             "cloudflare_rate_limit_plan": {
               "description": "Required for Cloudflare rate limits, with no default. Locally checked free/business subset only: block, IP plus cf.colo.id, simple URI-path expressions, total rules at most 1/5. Does not verify account entitlement, available slots or API acceptance; not a whole-WAF Free guarantee. AWS counting remains 300 seconds.",
               "enum": ["free", "business"]

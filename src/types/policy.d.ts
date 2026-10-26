@@ -558,6 +558,50 @@ export interface CDNSecurityFrameworkPolicy {
        */
       rate_limit_mitigation_timeout?: number;
       /**
+       * Explicit Cloudflare Free WAF-only static-site requirements. Compile only with compile-cloudflare-waf --cloudflare-free; other compiler targets reject this profile. Reuses request.allow_methods. Literal lowercase ASCII URI-field matching only; no raw HTTP normalization, deployed WAF or port-efficacy proof. Exceptions negate only their own path/method block, never Skip. Existing Worker path_patterns and other unsupported Worker controls cannot be mixed into this profile.
+       */
+      cloudflare_static_site?: {
+        /**
+         * Allowed Cloudflare edge receive ports, not the HTTP Host authority port. Explicit nonempty set; no default.
+         *
+         * @minItems 1
+         * @maxItems 32
+         */
+        allow_ports: [number, ...number[]];
+        /**
+         * Case-insensitive ASCII comparisons on http.request.uri.path. Exact and prefix are literal operations; at least one list must be nonempty. No regex, query or encoded path literals. URL normalization settings are not configured or verified.
+         */
+        block_paths: {
+          /**
+           * @maxItems 32
+           */
+          exact: string[];
+          /**
+           * @maxItems 32
+           */
+          prefix: string[];
+          /**
+           * Exact path exceptions to the path block only; other method/port/UA rules still apply.
+           *
+           * @maxItems 32
+           */
+          exceptions?: string[];
+        };
+        /**
+         * Additional methods on each exact path only. Does not exempt path, port, UA or any other WAF rule. Paths must be unique.
+         *
+         * @maxItems 32
+         */
+        method_exceptions?: {
+          path: string;
+          /**
+           * @minItems 1
+           * @maxItems 32
+           */
+          methods: [string, ...string[]];
+        }[];
+      };
+      /**
        * Required for Cloudflare rate limits, with no default. Locally checked free/business subset only: block, IP plus cf.colo.id, simple URI-path expressions, total rules at most 1/5. Does not verify account entitlement, available slots or API acceptance; not a whole-WAF Free guarantee. AWS counting remains 300 seconds.
        */
       cloudflare_rate_limit_plan?: "free" | "business";

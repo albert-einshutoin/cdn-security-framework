@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { rejectStaticWafPolicy } from './lib/cloudflare-static-waf';
 import { assertSupportedNode } from '../lib/node-engine';
 assertSupportedNode(require.main === module);
 
@@ -19,6 +20,7 @@ const path = require('path');
 const { buildWafRules } = require('./lib/waf-rule-builder');
 
 export function compileInfra(policy: any, options: CompilerOptions): void {
+  rejectStaticWafPolicy(policy);
 const outDir = options.outDir;
 const console = options.logger || globalThis.console;
 const outputMode = options.ruleGroupOnly ? 'rule-group' : (options.outputMode || 'full');

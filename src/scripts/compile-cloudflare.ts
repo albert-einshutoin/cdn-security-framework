@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { rejectStaticWafPolicy } from './lib/cloudflare-static-waf';
 import { assertSupportedNode } from '../lib/node-engine';
 assertSupportedNode(require.main === module);
 
@@ -51,6 +52,7 @@ function maxIndexKeyLength(index: Record<string, number[]> | null): number {
 }
 
 export function compileCloudflare(policy: any, options: CompilerOptions): string {
+  rejectStaticWafPolicy(policy);
 const repoRoot = options.rootDir || path.join(__dirname, '..');
 const outDir = options.outDir;
 const console = options.logger || globalThis.console;
