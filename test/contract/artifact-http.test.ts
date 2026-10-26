@@ -303,3 +303,12 @@ test('a freshness reason changes deployment semantic identity even when another 
     expect(expired.semantic).toMatchObject({ state: 'stale', reasons: ['DEPLOYMENT_VERSION_MISMATCH', 'DEPLOYMENT_RECEIPT_STALE'] });
     expect(expired.semanticDigest).not.toBe(fresh.semanticDigest);
 });
+
+test.each(['absent', 'unsupported'] as const)('known artifact incompleteness survives %s deployment receipt', kind => {
+    const s = snapshot({ missing: 'runtime-binary' });
+    const input = kind === 'absent' ? undefined : JSON.stringify({ version: 2, scope: 'saved-deployment-fixture' });
+    expect(bindHttpArtifactDeployment(s, input).semantic).toMatchObject({
+        state: kind === 'absent' ? 'missing' : 'unknown',
+        reasons: ['ARTIFACT_SNAPSHOT_INCOMPLETE', kind === 'absent' ? 'DEPLOYMENT_RECEIPTS_MISSING' : 'DEPLOYMENT_VERSION_UNSUPPORTED'],
+    });
+});

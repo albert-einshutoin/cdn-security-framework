@@ -198,6 +198,9 @@ export function bindHttpArtifactDeployment(snapshot: HttpArtifactSnapshot, input
     must(snapshots.has(snapshot), 'UNISSUED_SNAPSHOT');
     let expected: HttpDeploymentFixtureInput['expected'] | null = null;
     let receipts: HttpDeploymentFixtureInput['receipts'] = [];
+    const reasons: string[] = [];
+    if (snapshot.missing.length)
+        reasons.push('ARTIFACT_SNAPSHOT_INCOMPLETE');
     // Capture times remain provenance; identities and every derived reason determine semantics.
     const finish = (state: DeploymentState, reasons: string[]) => {
         const identities = new Map(receipts.map(({ capturedAtMs: _time, ...identity }) => [canonical(identity), identity]));
@@ -218,7 +221,7 @@ export function bindHttpArtifactDeployment(snapshot: HttpArtifactSnapshot, input
         } });
     };
     if (input === undefined)
-        return finish('missing', ['DEPLOYMENT_RECEIPTS_MISSING']);
+        return finish('missing', [...reasons, 'DEPLOYMENT_RECEIPTS_MISSING']);
     must(typeof input === 'string' && input.length <= 8192 && Buffer.byteLength(input, 'utf8') <= 8192, 'DEPLOYMENT_INPUT_LIMIT');
     let parsed: unknown;
     try { parsed = JSON.parse(input); }
@@ -229,7 +232,7 @@ export function bindHttpArtifactDeployment(snapshot: HttpArtifactSnapshot, input
     must(Number.isSafeInteger(root.version) && (root.version as number) >= 1, 'INVALID_DEPLOYMENT_INPUT');
     // A future envelope is bounded and hashed, but is never decoded as version 1.
     if (root.version !== 1)
-        return finish('unknown', ['DEPLOYMENT_VERSION_UNSUPPORTED']);
+        return finish('unknown', [...reasons, 'DEPLOYMENT_VERSION_UNSUPPORTED']);
     deploymentRecord(root, ['version', 'scope', 'expected', 'receipts']);
     const e = deploymentRecord(root.expected, ['resourceIdSha256', 'deploymentVersionSha256', 'referenceTimeMs', 'maxAgeMs']);
     must(hex(e.resourceIdSha256) && hex(e.deploymentVersionSha256)
@@ -254,9 +257,6 @@ export function bindHttpArtifactDeployment(snapshot: HttpArtifactSnapshot, input
         seen.add(identity);
         return receipt;
     });
-    const reasons: string[] = [];
-    if (snapshot.missing.length)
-        reasons.push('ARTIFACT_SNAPSHOT_INCOMPLETE');
     if (!receipts.length)
         reasons.push('DEPLOYMENT_RECEIPTS_MISSING');
     if (receipts.some(r => r.resourceIdSha256 === null || r.deploymentVersionSha256 === null || r.artifactId === null))
