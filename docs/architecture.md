@@ -265,3 +265,63 @@ npx --no-install vitest run test/contract/artifact-http.test.ts test/contract/au
 
 This entry has no package barrel export, CLI, workflow, legacy adapter, or
 automatic application. Reverting this addition removes the fixture binding.
+
+## Cloudflare Free generation preflight
+
+The WAF-only compiler offers an explicit, local Free preflight:
+
+```sh
+node scripts/compile-cloudflare-waf.js --policy policy.yml --out-dir review --cloudflare-free
+node scripts/compile-cloudflare-waf.js --policy policy.yml --out-dir review --cloudflare-free --cloudflare-free-inventory saved-inventory.json
+```
+
+This invokes the existing WAF compiler and does not add a Worker. Without these
+flags, the existing compiler path is unchanged. The flags belong to this script;
+they are not new public `compileArtifacts` options or `cdn-security build` flags.
+
+Checked on 2026-10-26: [Free custom rules](https://developers.cloudflare.com/waf/custom-rules/)
+allow five rules across the zone's custom phase, one custom ruleset, and no Regex
+or Log action. [Free rate limiting](https://developers.cloudflare.com/waf/rate-limiting-rules/)
+allows one rule with a ten-second period and mitigation; the existing rate
+validator still enforces its explicit threshold and URI-path expression subset.
+[Bot Management fields](https://developers.cloudflare.com/ruleset-engine/rules-language/fields/reference/)
+require an Enterprise add-on. [Logpush changed on 2026-09-30](https://developers.cloudflare.com/changelog/post/2026-09-30-logpush-usage-based-pricing/)
+to availability on all plans with usage pricing, so this zero-additional-cost
+profile rejects Logpush resources even when an account might have included usage.
+
+The initial local subset accepts the compiler's Geo/UA block expressions and
+validated Free rate rules. It checks whole supported expression shapes and
+counts disabled rules too. Unsupported fields, functions, actions, lists,
+managed phases or resources return bounded `unknown` diagnostics and stop WAF
+file generation. Known plan violations and capacity excess also stop generation;
+`--allow-waf-approximation` cannot bypass this check. Existing output is preserved
+on rejection. This checks generated resources, not complete Policy coverage:
+Path/Method controls remain Worker-only in this compiler until separately
+implemented, and `policyCoverage` stays `unknown`.
+
+The optional saved inventory is strict JSON, at most 8192 UTF-8 bytes:
+
+```json
+{"version":1,"scope":"saved-cloudflare-free-inventory","capturedAtMs":0,"complete":false,"plan":null,"existingCustomRules":null,"existingRateRules":null}
+```
+
+This example deliberately declares no account knowledge. Version 1 requires
+exactly these fields. Times and known counts are safe nonnegative integers;
+counts are at most 10000. `plan` is `free` or null, and either count may be null.
+`complete: true` declares collection of the entire selected zone's corresponding
+phases; it is not an attestation. Missing/partial/older-than-24-hour inventories,
+unknown plan/counts and unsupported versions cannot produce `savedCapacity: fits`.
+Future times, invalid types/fields/JSON/UTF-8 and oversized files are fixed input
+errors. Raw input and inventory file paths are not echoed in those errors.
+
+The stderr assessment reports generated counts, saved counts/time/input SHA-256,
+and fixed reasons. For a complete fresh declared-Free inventory, `savedCapacity`
+adds existing and generated counts and reports `fits` or `exceeded`. This is
+append arithmetic only: Terraform ownership/import and preservation of existing
+zone rules must be reviewed separately. Unknown inventory may still allow local
+generation of the supported subset, with `savedCapacity: unknown`.
+`liveDeployment` is always `unknown`, including when the saved arithmetic fits.
+No account entitlement, API acceptance, actual deployment, protection or safety
+is established. No API, credential, apply or automatic security relaxation is
+performed. Reproduce with `npm run build:ts` then
+`node scripts/cloudflare-waf-parity-unit-tests.js`.

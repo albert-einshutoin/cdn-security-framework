@@ -1,3 +1,5 @@
+import { createHash } from 'node:crypto';
+
 // Local configuration profiles, not account entitlement or deployed-WAF proof.
 // API discrete values and plan limits checked 2026-10-13:
 // https://developers.cloudflare.com/waf/rate-limiting-rules/parameters/
@@ -105,4 +107,106 @@ export function buildCloudflareRateRules(waf: any = {}): any[] {
   rules.sort((a, b) => a.priority - b.priority);
   for (const rule of rules) delete rule.priority;
   return global ? [global, ...rules] : rules;
+}
+
+export function assessCloudflareFreeWaf(resources: unknown, inventoryText?: string, referenceTimeMs = Date.now()) {
+  function invalid(reason: string): never { throw new Error('CLOUDFLARE_FREE_INVALID: ' + reason); }
+  const object = (value: unknown): value is Record<string, any> => Boolean(value) && typeof value === 'object' && !Array.isArray(value);
+  if (!object(resources) || !Number.isSafeInteger(referenceTimeMs) || referenceTimeMs < 0) invalid('INPUT');
+  const reasons = new Set<string>(['LIVE_DEPLOYMENT_UNVERIFIED', 'POLICY_COVERAGE_UNVERIFIED']);
+  let unsupported = false, unknown = false, custom = 0, rate = 0, customSets = 0;
+  const reject = (reason: string, known = false) => { reasons.add(reason); if (known) unsupported = true; else unknown = true; };
+  const customExpression = (expression: unknown) => {
+    if (typeof expression !== 'string' || Buffer.byteLength(expression) > 4096) return false;
+    let valid = true;
+    const stripped = expression.replace(/"(?:[^"\\\x00-\x1f]|\\.)*"/g, literal => {
+      try {
+        const value = JSON.parse(literal);
+        if (JSON.stringify(value) !== literal || /[\x00-\x1f\x7f]/.test(value)) valid = false;
+      } catch { valid = false; }
+      return '""';
+    });
+    if (/\bmatches\b/.test(stripped)) reject('REGEX_NOT_FREE', true);
+    if (/\bcf\.bot_management\./.test(stripped)) reject('BOT_MANAGEMENT_NOT_FREE', true);
+    // Full emitted shapes, after validating/removing literals. Keywords inside UA
+    // strings cannot introduce operators or manufacture a paid-feature finding.
+    return valid && (/^(?:not )?\(ip\.geoip\.country in \{""(?: "")*\}\)$/.test(stripped)
+      || /^\(lower\(http\.user_agent\) contains ""(?: or lower\(http\.user_agent\) contains "")*\)$/.test(stripped));
+  };
+  for (const [type, entries] of Object.entries(resources as Record<string, unknown>)) {
+    if (!object(entries) || Object.keys(entries).length > 16) invalid('RESOURCE_SHAPE_OR_LIMIT');
+    if (type === 'cloudflare_logpush_job') { reject('METERED_RESOURCE_NOT_ALLOWED', true); continue; }
+    if (type !== 'cloudflare_ruleset') { reject('RESOURCE_NOT_SUPPORTED'); continue; }
+    for (const set of Object.values(entries)) {
+      if (!object(set) || !Array.isArray(set.rules) || set.rules.length > 1000) invalid('RULESET_SHAPE_OR_LIMIT');
+      if (set.kind !== 'zone') reject('SCOPE_NOT_SUPPORTED');
+      const isCustom = set.phase === 'http_request_firewall_custom';
+      const isRate = set.phase === 'http_ratelimit';
+      if (isCustom) { custom += set.rules.length; customSets++; }
+      else if (isRate) rate += set.rules.length;
+      else { reject('PHASE_NOT_SUPPORTED'); continue; }
+      for (const rule of set.rules) {
+        if (!object(rule)) invalid('RULE_SHAPE');
+        if (rule.action === 'log') reject('LOG_ACTION_NOT_FREE', true);
+        else if (rule.action !== 'block') reject('ACTION_NOT_SUPPORTED');
+        if (Object.keys(rule).some(k => !['ref', 'description', 'enabled', 'expression', 'action', 'action_parameters', ...(isRate ? ['ratelimit'] : [])].includes(k))) reject('RULE_FIELD_NOT_SUPPORTED');
+        if (!object(rule.action_parameters) || Object.keys(rule.action_parameters).join() !== 'response' || rule.action_parameters.response !== null) reject('ACTION_PARAMETERS_NOT_SUPPORTED');
+        if (isCustom) {
+          if (!customExpression(rule.expression)) reject('EXPRESSION_NOT_SUPPORTED');
+        } else {
+          const limit = rule.ratelimit;
+          if (!object(limit) || Object.keys(limit).sort().join() !== 'characteristics,mitigation_timeout,period,requests_per_period') { reject('RATE_FIELDS_NOT_SUPPORTED'); continue; }
+          if (limit.period !== 10 || limit.mitigation_timeout !== 10) reject('RATE_WINDOW_NOT_FREE', true);
+          try {
+            // Reuse the canonical Free rate validator, including its expression
+            // subset, rather than adding another rate-profile interpretation.
+            buildCloudflareRateRules({ cloudflare_rate_limit_plan: 'free', cloudflare_rate_limit_period: limit.period,
+              rate_limit_mitigation_timeout: limit.mitigation_timeout, rate_limit_rules: [{ name: 'preflight', limit: limit.requests_per_period,
+                action: rule.action, cloudflare_characteristics: limit.characteristics, expression_cloudflare: rule.expression }] });
+          } catch { reject('RATE_CONFIGURATION_NOT_SUPPORTED'); }
+        }
+      }
+    }
+  }
+  if (custom > 5) reject('CUSTOM_RULE_LIMIT_EXCEEDED', true);
+  if (customSets > 1) reject('CUSTOM_RULESET_LIMIT_EXCEEDED', true);
+  if (rate > 1) reject('RATE_RULE_LIMIT_EXCEEDED', true);
+
+  let existingCustom: number | null = null, existingRate: number | null = null, capturedAtMs: number | null = null;
+  let inventoryComplete = false;
+  if (inventoryText === undefined) reasons.add('INVENTORY_MISSING');
+  else {
+    if (typeof inventoryText !== 'string' || Buffer.byteLength(inventoryText) > 8192) invalid('INVENTORY_BYTES');
+    let data: unknown;
+    try { data = JSON.parse(inventoryText); } catch { invalid('INVENTORY_JSON'); }
+    if (!object(data) || data.scope !== 'saved-cloudflare-free-inventory' || !Number.isSafeInteger(data.version) || data.version < 1) invalid('INVENTORY_SCOPE_OR_VERSION');
+    if (data.version !== 1) reasons.add('INVENTORY_VERSION_UNSUPPORTED');
+    else {
+      const keys = ['version', 'scope', 'capturedAtMs', 'complete', 'plan', 'existingCustomRules', 'existingRateRules'];
+      if (Object.keys(data).length !== keys.length || keys.some(k => !Object.hasOwn(data, k))) invalid('INVENTORY_FIELDS');
+      if (typeof data.complete !== 'boolean' || (data.plan !== null && data.plan !== 'free')
+        || !Number.isSafeInteger(data.capturedAtMs) || data.capturedAtMs < 0 || data.capturedAtMs > referenceTimeMs) invalid('INVENTORY_TYPES_OR_TIME');
+      for (const key of ['existingCustomRules', 'existingRateRules']) if (data[key] !== null && (!Number.isSafeInteger(data[key]) || data[key] < 0 || data[key] > 10000)) invalid('INVENTORY_COUNT');
+      existingCustom = data.existingCustomRules; existingRate = data.existingRateRules; capturedAtMs = data.capturedAtMs;
+      if (!data.complete) reasons.add('INVENTORY_PARTIAL');
+      if (data.plan === null) reasons.add('INVENTORY_PLAN_UNKNOWN');
+      if (existingCustom === null || existingRate === null) reasons.add('INVENTORY_COUNTS_UNKNOWN');
+      if (referenceTimeMs - data.capturedAtMs > 86400000) reasons.add('INVENTORY_STALE');
+      inventoryComplete = data.complete && data.plan === 'free' && existingCustom !== null && existingRate !== null && referenceTimeMs - data.capturedAtMs <= 86400000;
+    }
+  }
+  // Unknown/partial/stale inventories never stand in for an empty account or
+  // current capacity. Only the generated count is independently known then.
+  const customExceeded = custom > 5 || (inventoryComplete && existingCustom !== null && custom + existingCustom > 5);
+  const rateExceeded = rate > 1 || (inventoryComplete && existingRate !== null && rate + existingRate > 1);
+  if (customExceeded) reasons.add('CUSTOM_RULE_CAPACITY_EXCEEDED');
+  if (rateExceeded) reasons.add('RATE_RULE_CAPACITY_EXCEEDED');
+  return Object.freeze({ version: 1, scope: 'local-cloudflare-free-preflight', checkedSpecificationDate: '2026-10-26',
+    localGeneration: unsupported ? 'unsupported' : unknown ? 'unknown' : 'supported',
+    savedCapacity: customExceeded || rateExceeded ? 'exceeded' : inventoryComplete ? 'fits' : 'unknown',
+    liveDeployment: 'unknown', policyCoverage: 'unknown', reasons: Object.freeze([...reasons].sort()),
+    generated: Object.freeze({ customRules: custom, rateRules: rate }),
+    inventory: Object.freeze({ capturedAtMs, referenceTimeMs, existingCustomRules: existingCustom, existingRateRules: existingRate,
+      inputSha256: inventoryText === undefined ? null : createHash('sha256').update(inventoryText).digest('hex') }),
+  });
 }

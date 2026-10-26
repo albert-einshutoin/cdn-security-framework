@@ -12,6 +12,7 @@ export type CompilerOptions = {
   failOnWafApproximation?: boolean;
   outputMode?: string;
   ruleGroupOnly?: boolean;
+  cloudflareFree?: { inventoryText?: string };
 };
 
 // CLI adapters load once; programmatic callers pass their validated snapshot.

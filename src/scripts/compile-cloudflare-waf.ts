@@ -9,7 +9,7 @@ assertSupportedNode(require.main === module);
  * 問題（issue #16）を解消する。
  *
  * Emitted resources:
- *   - cloudflare_ruleset   (http_request_firewall_custom) — Geo / IP / UA / path blocks
+ *   - cloudflare_ruleset   (http_request_firewall_custom) — Geo / IP / UA / fingerprints
  *   - cloudflare_ruleset   (http_ratelimit)               — rate_limit + rate_limit_rules
  *   - cloudflare_ruleset   (http_request_firewall_managed) — managed rulesets (OWASP, etc.)
  *   - cloudflare_list      (ip_list)                      — optional IP block/allowlists
@@ -24,7 +24,7 @@ const path = require('path');
 const { numberOr } = require('./lib/value-normalize');
 
 const parity = require('./lib/cloudflare-waf-parity');
-const { buildCloudflareRateRules } = require('./lib/cloudflare-rate-limit');
+const { buildCloudflareRateRules, assessCloudflareFreeWaf } = require('./lib/cloudflare-rate-limit');
 
 export function compileCloudflareWaf(policy: any, options: CompilerOptions): void {
 const outDir = options.outDir;
@@ -52,7 +52,6 @@ rateRules = buildCloudflareRateRules(waf);
 if (rateRules!.length) console.error('Cloudflare rate-limit profile: ' + waf.cloudflare_rate_limit_plan + '; local configuration only, account entitlement and remaining rule slots are unverified.');
 
 const distDir = path.join(outDir, 'infra');
-fs.mkdirSync(distDir, { recursive: true });
 
 const tfJson: any = {
   variable: {
@@ -98,7 +97,9 @@ if (ipAllowlistEntries.length > 0) {
   };
 }
 
-// 2. Custom firewall ruleset (geo + IP + UA + path)
+// 2. Custom firewall ruleset (geo + IP + UA + fingerprints).
+// request.block.path_patterns and request.allow_methods are Worker controls here;
+// this compiler does not yet emit their WAF equivalents.
 const customRules: any[] = [];
 let customPriority = 1;
 
@@ -294,6 +295,16 @@ if (logging.enabled) {
 
 // Write file (always — empty WAF config still produces a file with just variables, so
 // downstream tooling can `terraform plan` without a missing-file error).
+if (options.cloudflareFree !== undefined) {
+  if (!options.cloudflareFree || typeof options.cloudflareFree !== 'object' || Array.isArray(options.cloudflareFree)
+    || Object.keys(options.cloudflareFree).some(k => k !== 'inventoryText')) throw new Error('CLOUDFLARE_FREE_INVALID: OPTIONS');
+  const assessment = assessCloudflareFreeWaf(tfJson.resource, options.cloudflareFree.inventoryText);
+  console.error('Cloudflare Free preflight: ' + JSON.stringify(assessment));
+  if (assessment.localGeneration !== 'supported' || assessment.savedCapacity === 'exceeded') {
+    throw new Error('CLOUDFLARE_FREE_REJECTED: ' + assessment.reasons.join(','));
+  }
+}
+fs.mkdirSync(distDir, { recursive: true });
 const outPath = path.join(distDir, 'cloudflare-waf.tf.json');
 fs.writeFileSync(outPath, JSON.stringify(tfJson, null, 2), 'utf8');
 console.log('Build complete:', outPath);
@@ -312,4 +323,36 @@ if (failOnApproximation && sawApproximationOrUnsupported) {
 
 }
 
-if (require.main === module) runCompilerCli(compileCloudflareWaf);
+if (require.main === module) {
+  const args = process.argv.slice(2), remaining: string[] = [];
+  let free = 0, inventory = 0, invalidFreeFlag = false, inventoryFile: string | undefined;
+  for (let i = 0; i < args.length; i++) {
+    if (args[i] === '--cloudflare-free') { free++; continue; }
+    if (args[i] === '--cloudflare-free-inventory') {
+      inventory++;
+      if (args[i + 1] && !args[i + 1].startsWith('--')) inventoryFile = args[++i];
+      continue;
+    }
+    if (args[i].startsWith('--cloudflare-free')) { invalidFreeFlag = true; continue; }
+    remaining.push(args[i]);
+  }
+  runCompilerCli((policy, options) => {
+    if (invalidFreeFlag || free > 1 || inventory > 1 || (inventory && (!free || !inventoryFile))) throw new Error('CLOUDFLARE_FREE_INVALID: ARGUMENTS');
+    let inventoryText: string | undefined;
+    if (inventoryFile !== undefined) {
+      let fd: number | undefined;
+      try {
+        // A FIFO must not block before the regular-file check can reject it.
+        fd = fs.openSync(inventoryFile, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+        if (!fs.fstatSync(fd).isFile()) throw new Error();
+        const buffer = Buffer.alloc(8193);
+        let used = 0, count: number;
+        do { count = fs.readSync(fd, buffer, used, buffer.length - used, null); used += count; } while (count > 0 && used < buffer.length);
+        if (used > 8192) throw new Error();
+        inventoryText = new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, used));
+      } catch { throw new Error('CLOUDFLARE_FREE_INVALID: INVENTORY_FILE'); }
+      finally { if (fd !== undefined) fs.closeSync(fd); }
+    }
+    compileCloudflareWaf(policy, free ? { ...options, cloudflareFree: { inventoryText } } : options);
+  }, remaining);
+}
