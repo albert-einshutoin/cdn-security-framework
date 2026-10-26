@@ -2,6 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { StringDecoder } from 'node:string_decoder';
 import { redactSensitiveText } from '../contract/sensitive-text';
+import { CLOUDFLARE_EVENT_MAX_BYTES, reviewCloudflareEvents, type CloudflareEventReviewReport } from './cloudflare-events';
+export { CloudflareEventError, printCloudflareEventReview } from './cloudflare-events';
 
 type AnalyzeLogOptions = {
   input: string;
@@ -184,6 +186,26 @@ export class AnalyzeError extends Error {
   constructor(readonly code: 'ANALYZE_ARGUMENT_INVALID' | 'ANALYZE_INPUT_NOT_FOUND' | 'ANALYZE_INPUT_READ_FAILED') {
     super(code);
   }
+}
+
+export function runCloudflareEventAnalyze(opts: { input: string; top: number }): CloudflareEventReviewReport {
+  if (!opts.input) throw new AnalyzeError('ANALYZE_ARGUMENT_INVALID');
+  const input = path.resolve(process.cwd(), opts.input);
+  if (!fs.existsSync(input)) throw new AnalyzeError('ANALYZE_INPUT_NOT_FOUND');
+  const buffer = Buffer.alloc(CLOUDFLARE_EVENT_MAX_BYTES + 1);
+  let fd: number | undefined, length = 0;
+  try {
+    // A FIFO must not block before the regular-file check.
+    fd = fs.openSync(input, fs.constants.O_RDONLY | fs.constants.O_NONBLOCK);
+    if (!fs.fstatSync(fd).isFile()) throw new Error('not a regular file');
+    while (length < buffer.length) {
+      const count = fs.readSync(fd, buffer, length, buffer.length - length, null);
+      if (count === 0) break;
+      length += count;
+    }
+  } catch { throw new AnalyzeError('ANALYZE_INPUT_READ_FAILED'); }
+  finally { if (fd !== undefined) fs.closeSync(fd); }
+  return reviewCloudflareEvents(buffer.subarray(0, length), opts.top);
 }
 
 function buildEmptyAnalyzeReport(input: string, minCount: number, top: number): AnalyzeReport {

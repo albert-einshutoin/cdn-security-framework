@@ -137,7 +137,7 @@
     "README.md", "README.ja.md", "LICENSE", "docs/api-manifest.json", "docs/quickstart.md", "docs/quickstart.ja.md",
     "docs/openapi-integration.md", "docs/openapi-integration.ja.md", "docs/programmatic-api.md", "docs/programmatic-api.ja.md",
     "examples/openapi/openapi.yaml", "examples/nestjs-contract/run-analysis.cjs", "examples/github-actions/contract-diff.yml",
-    "examples/github-actions/advisory-check.yml",
+    "examples/github-actions/advisory-check.yml", "examples/sample-cloudflare-events.jsonl",
     "types/policy.d.ts"
   ],
   "internalPaths": [
@@ -183,7 +183,8 @@
       "examples/nestjs-contract/tsconfig.json",
       "examples/openapi/README.ja.md",
       "examples/openapi/README.md",
-      "examples/openapi/openapi.yaml"
+      "examples/openapi/openapi.yaml",
+      "examples/sample-cloudflare-events.jsonl"
     ],
     "experimental": [
       "schemas/nestjs-source-analysis-options.schema.json",
@@ -205,6 +206,7 @@
     "required-runtime": [
       "bin/analyze.js",
       "bin/cli.js",
+      "bin/cloudflare-events.js",
       "bin/commands/contract-diff.js",
       "bin/commands/openapi-inspect.js",
       "bin/commands/safe-output.js",
@@ -302,6 +304,7 @@
     "required-types": [
       "bin/analyze.d.ts",
       "bin/cli.d.ts",
+      "bin/cloudflare-events.d.ts",
       "bin/commands/contract-diff.d.ts",
       "bin/commands/openapi-inspect.d.ts",
       "bin/commands/safe-output.d.ts",

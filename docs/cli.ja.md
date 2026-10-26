@@ -214,7 +214,7 @@ npx cdn-security analyze --input /path/to/monitor.jsonl
 npx cdn-security analyze --input /path/to/monitor.jsonl --min-count 3 --top 10 --json
 ```
 
-`analyze` はJSONLを変更せずに読み取り、有効recordをroute/reason別に集計して低頻度block候補を抽出します。ポリシーの安全性判定や変更の適用は行いません。
+既定の`--format monitor`では、`analyze` はJSONLを変更せずに読み取り、有効recordをroute/reason別に集計して低頻度block候補を抽出します。ポリシーの安全性判定や変更の適用は行いません。以下のmonitor契約と、後述する明示的な合成Cloudflare形式は別です。未知形式はfallbackせずエラーにします。
 
 - `--input`: JSONLファイルパス（必須）。
 - `--min-count`: block候補の件数の上限しきい値（以下を採用、既定`5`、小数切捨て）。
@@ -259,6 +259,35 @@ exit0は入力処理の完了であり、安全性の合格ではありません
 9. `ANALYZE_STATUS_VALUE`: status不正。
 
 1不正行につき診断は1件です。JSON/objectとrecord選択、eventの型・既知値・一致、container（`request`→`httpRequest`）、上表順の文字列field、statusの順に検証します。fatalではreportを返さずstdoutは空、exit1と固定stderrの`[ERROR] ANALYZE_INPUT_NOT_FOUND`、`[ERROR] ANALYZE_INPUT_READ_FAILED`、`[ERROR] ANALYZE_ARGUMENT_INVALID`（必須/未知optionも対象）のいずれかを返します。`analyze --help`は通常helpとexit0を維持します。
+
+### 合成Cloudflare Events
+
+build済みcheckout、またはinstalled packageのdirectoryから、同梱した合成sampleを実行できます。
+
+```bash
+node bin/cli.js analyze --format cloudflare-events --input examples/sample-cloudflare-events.jsonl --top 10 --json
+node bin/cli.js analyze --format cloudflare-events --input examples/sample-cloudflare-events.jsonl --top 10
+```
+
+sampleはheader 1行と合成event 28件です。部分sampling・UNKNOWN例を含むため、どちらもreportを出しつつ`[WARN] ANALYZE_INPUT_PARTIAL`で意図的にexit 1になります。実traffic・IP・cookie・credentialは含みません。有界な正規化fixture形式であり、Cloudflare REST exportやlive取得adapterではありません。
+
+最初の非空JSONL行は`version: 1`、`scope: "synthetic-cloudflare-events"`のheaderです。他の必須fieldは`sourceSha256`（宣言された取得元identity、英小文字64桁hexまたはnull）、`capturedAtMs`、`period: {fromMs,toMs}`（0〜8.64×10^15の安全なミリ秒整数またはnull）、`sampling: {kind,rate}`、`missing`です。`kind`は`none`（rateは1）、`sampled`、`unknown`、rateはnullまたは0より大きく1以下です。`missing`は`events`、`period`、`sampling`、`attribution`、`rule-source`の重複しない部分集合です。source identityや取得時刻は宣言でありprovider attestationではありません。実入力bytesのhashは別に記録します。
+
+eventは正確に`observedAtMs`、`source`（`waf`/`http`/`unknown`）、`action`（`block`/`allow`/`skip`/`challenge`/`log`/`unknown`）、`status`（100〜599整数またはnull）、`path`（literalな絶対path、query/fragment付き可、またはnull）、`ruleSource`（`custom-waf`/`managed-waf`/`rate-limit`/`http`/`unknown`）、`ruleIdSha256`、`policyRouteSha256`（64桁hexまたはnull）、`attribution`（`declared`/`ambiguous`/`unmatched`/`unknown`）を持ちます。対応付けは宣言のままで、情報が揃っていても`ATTRIBUTION_NOT_ATTESTED`を残します。source/action/rule/attributionは32文字以内の英小文字ASCIIとハイフンからなる識別子です。形式が正しい未知値は固定UNKNOWN診断、不正な既知構造・型・時刻・hash・余分なfieldはErrorです。
+
+上限はUTF-8入力1MiB、先頭UTF-8 BOMのbytesと空白だけの行を含む各物理行8KiB（CRLF/LFを除く）、event 1,000件、path 2,048 UTF-8 bytes、整数`--top` 1〜100（既定20）です。通常ファイルだけをbyte上限付きで読みます。`--min-count`は非対応で、明示指定はエラーです。入力/event集合が空なら`empty`、未対応versionはv1 event本文を解釈せず`unknown`。不正UTF-8/JSON/shapeや上限超過は取込全体を停止し、stdoutなし、固定`ANALYZE_CLOUDFLARE_*`エラーでexit 1にします。raw入力は出しません。header情報の欠落や一部UNKNOWNを含む有効観測は`partial`、すべてUNKNOWNなら`unknown`です。非complete reportはexit 1（`[WARN] ANALYZE_INPUT_PARTIAL`、`[ERROR] ANALYZE_INPUT_UNKNOWN`、`[WARN] ANALYZE_INPUT_EMPTY`）、対応済み入力の処理完了はexit 0です。exit 0やreportは安全承認ではありません。
+
+`observed`のaction/status/time・opaqueなpath/rule identityと、`inference`を分離します。
+
+| 分類 | 意味と限界 |
+| --- | --- |
+| `WAF_BLOCK_REPORTED` | 対応するWAF-source blockの報告。効果の証明ではない。 |
+| `HTTP_404_NOT_SERVED` | 当該eventは404。WAF blockや全環境でのresource不存在を証明しない。 |
+| `HTTP_200_REPORTED` | literalな通常pathで200を報告。内容・安全性はUNKNOWN。 |
+| `REVIEW_SENSITIVE_PATH_200` | literalな`.env`、`.git`、`wp-config.php`、credentials、`id_rsa` pathや一般的なsuffix付きbackupの200。内容を別途確認する候補で、漏洩と断定しない。 |
+| `UNKNOWN` | 未対応action/path、不完全な時間scope、期間外や矛盾した観測。encoded/dot-segment routingは解釈しない。 |
+
+秘密らしいpathの200だけを入力順・`--top`件までreview候補へ出し、総数と省略数を明示します。raw path/query/fragment・IP・body・cookie・credentialを出力しません。path hashはquery/fragmentを除いたliteral pathの識別子で、暗号化ではありません。期間・sampling・欠落・最小化したrule source・宣言されたattributionはJSONへ保持し、textは安全な集計・header理由・event側の固定理由の集合・候補hashを表示します。eventsをrequestsや防御率の分母にしません。content・WAF効果・security verdictはUNKNOWN、`mode`は`review-only`、`automaticApply`はfalseです。より広いruntime registry、100k streaming、pilot、live deployment workstreamの完了を意味しません。
 
 ## `emit-waf`
 
