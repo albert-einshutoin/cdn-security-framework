@@ -347,6 +347,7 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer?: st
       const path = require('path');
       const pkgRoot = path.join(process.cwd(), 'node_modules', ${JSON.stringify(packageName)});
       const pkg = require(${JSON.stringify(packageName)});
+      assert.strictEqual(typeof require(path.join(pkgRoot, 'contract/verification/cloudflare-deployment.js')).compareSavedCloudflareWafSubset, 'function');
       const manifest = require(path.join(pkgRoot, 'docs', 'api-manifest.json'));
       const contract = require(${JSON.stringify(`${packageName}/contract`)});
       const securityIr = require(${JSON.stringify(`${packageName}/contract/security-ir`)});
