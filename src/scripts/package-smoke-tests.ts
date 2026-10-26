@@ -405,6 +405,21 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer?: st
       assert.strictEqual(pkg.lintPolicy({ policyPath: migrationInput }).ok, true);
       assert.strictEqual(pkg.migratePolicy({ policyPath: migrationInput, write: true }).noop, true);
       console.log('OK: packed schema2 migration preview/save/backup/CLI/noop');
+      // Keep these installed-package assertions in the API/Schema command;
+      // single-pack aggregate requires the existing twelve consumer commands.
+      const staticWafOut = path.join(process.cwd(), 'static-waf');
+      cp.execFileSync(process.execPath, [
+        path.join(pkgRoot, 'scripts', 'compile-cloudflare-waf.js'),
+        '--policy', path.join(pkgRoot, 'policy', 'archetypes', 'cloudflare-free-static-site.yml'),
+        '--cloudflare-free', '--out-dir', staticWafOut,
+      ], { encoding: 'utf8' });
+      const staticWaf = JSON.parse(fs.readFileSync(path.join(staticWafOut, 'infra', 'cloudflare-waf.tf.json'), 'utf8'));
+      const staticRulesets = Object.values(staticWaf.resource.cloudflare_ruleset);
+      assert.strictEqual(staticRulesets.length, 1);
+      assert.strictEqual(staticRulesets[0].phase, 'http_request_firewall_custom');
+      assert.strictEqual(staticRulesets[0].rules.length, 4);
+      assert.ok(staticRulesets[0].rules.every(rule => rule.action === 'block' && rule.action_parameters.response === null));
+      assert.ok(!fs.existsSync(path.join(staticWafOut, 'edge')));
       const result = pkg.lintPolicy({
         policyPath: path.join(pkgRoot, 'policy', 'base.yml'),
         cwd: process.cwd(),
@@ -521,20 +536,6 @@ export function smokeInstalledPackage(tarballPath: string, preparedConsumer?: st
     assert.ok(fs.existsSync(path.join(installDir, 'openapi.candidate.meta.json')));
     assertInstalledContents(installedRoot);
     assertSchemaHints(installedRoot);
-
-    const staticWafOut = path.join(installDir, 'static-waf');
-    run(process.execPath, [
-      path.join(installedRoot, 'scripts', 'compile-cloudflare-waf.js'),
-      '--policy', path.join(installedRoot, 'policy', 'archetypes', 'cloudflare-free-static-site.yml'),
-      '--cloudflare-free', '--out-dir', staticWafOut,
-    ], { cwd: installDir });
-    const staticWaf = JSON.parse(fs.readFileSync(path.join(staticWafOut, 'infra', 'cloudflare-waf.tf.json'), 'utf8'));
-    const staticRulesets = Object.values<any>(staticWaf.resource.cloudflare_ruleset);
-    assert.strictEqual(staticRulesets.length, 1);
-    assert.strictEqual(staticRulesets[0].phase, 'http_request_firewall_custom');
-    assert.strictEqual(staticRulesets[0].rules.length, 4);
-    assert.ok(staticRulesets[0].rules.every((rule: any) => rule.action === 'block' && rule.action_parameters.response === null));
-    assert.ok(!fs.existsSync(path.join(staticWafOut, 'edge')));
 
     run(cliPath, [
       'build', '--policy', path.join(installDir, 'openapi.candidate.yml'), '--out-dir', 'dist',
