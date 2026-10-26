@@ -9,7 +9,7 @@ assertSupportedNode(require.main === module);
  * 問題（issue #16）を解消する。
  *
  * Emitted resources:
- *   - cloudflare_ruleset   (http_request_firewall_custom) — Geo / IP / UA / fingerprints
+ *   - cloudflare_ruleset   (http_request_firewall_custom) — Geo / IP / UA / fingerprints / explicit static-site conditions
  *   - cloudflare_ruleset   (http_ratelimit)               — rate_limit + rate_limit_rules
  *   - cloudflare_ruleset   (http_request_firewall_managed) — managed rulesets (OWASP, etc.)
  *   - cloudflare_list      (ip_list)                      — optional IP block/allowlists
@@ -25,6 +25,7 @@ const { numberOr } = require('./lib/value-normalize');
 
 const parity = require('./lib/cloudflare-waf-parity');
 const { buildCloudflareRateRules, assessCloudflareFreeWaf } = require('./lib/cloudflare-rate-limit');
+const { buildCloudflareStaticConditions, isStaticWafPolicy } = require('./lib/cloudflare-static-waf');
 
 export function compileCloudflareWaf(policy: any, options: CompilerOptions): void {
 const outDir = options.outDir;
@@ -33,6 +34,11 @@ const failOnApproximation = options.failOnWafApproximation !== false;
 const freeProfile = options.cloudflareFree;
 if (freeProfile !== undefined && (!freeProfile || typeof freeProfile !== 'object' || Array.isArray(freeProfile)
   || Object.keys(freeProfile).some(k => k !== 'inventoryText'))) throw new Error('CLOUDFLARE_FREE_INVALID: OPTIONS');
+
+if (isStaticWafPolicy(policy) && freeProfile === undefined) {
+  throw new Error('CLOUDFLARE_STATIC_INVALID: FREE_PROFILE_REQUIRED');
+}
+const staticConditions = buildCloudflareStaticConditions(policy);
 
 // Parity warnings collected during emission — surfaced once at the end so
 // the order is stable (managed rules first, then scope-down notes).
@@ -101,8 +107,8 @@ if (ipAllowlistEntries.length > 0) {
 }
 
 // 2. Custom firewall ruleset (geo + IP + UA + fingerprints).
-// request.block.path_patterns and request.allow_methods are Worker controls here;
-// this compiler does not yet emit their WAF equivalents.
+// Worker request.path_patterns remain separate. Only the explicit static WAF
+// profile adds its literal path, shared method and edge-port requirements.
 const customRules: any[] = [];
 let customPriority = 1;
 
@@ -185,6 +191,10 @@ if (uaDeny.length > 0) {
   }, makeBlockAction()));
 }
 
+for (const condition of staticConditions) {
+  customRules.push(Object.assign({ ...condition, enabled: true }, makeBlockAction()));
+}
+
 // JA3/JA4 fingerprint rules
 const fpAction = waf.fingerprint_action === 'count' ? 'log' : 'block';
 const ja3List = Array.isArray(waf.ja3_fingerprints) ? waf.ja3_fingerprints.filter((h: unknown) => Boolean(h)) : [];
@@ -215,7 +225,8 @@ if (customRules.length > 0) {
   tfJson.resource.cloudflare_ruleset[projectName + '_custom'] = {
     zone_id: '${var.cloudflare_zone_id}',
     name: projectName + '-custom',
-    description: 'CDN Security Framework: custom firewall rules (geo/IP/UA/fingerprint)',
+    description: staticConditions.length ? 'CDN Security Framework: explicit static-site WAF'
+      : 'CDN Security Framework: custom firewall rules (geo/IP/UA/fingerprint)',
     kind: 'zone',
     phase: 'http_request_firewall_custom',
     rules: customRules.map((r: any, idx: number) => Object.assign({ ref: `rule_${idx + 1}` }, r)),

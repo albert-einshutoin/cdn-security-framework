@@ -861,3 +861,230 @@ for (const [name, literal, encoded, directive, encodedDirective] of [
     } finally { ctx.cleanup(); }
   });
 }
+
+// Independent requirements for the explicit WAF-only archetype; not Worker/WAF runtime parity.
+const staticArchetypePath = path.join(repoRoot, 'policy/archetypes/cloudflare-free-static-site.yml');
+const staticArchetypePolicy = () => fs.readFileSync(staticArchetypePath, 'utf8');
+test('static Free archetype emits independent path method port blocks and no Worker', () => {
+  const proj = tmpProject(staticArchetypePolicy());
+  try {
+    const result = runCompiler(proj.policyPath, proj.dir, ['--cloudflare-free']);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const resource = JSON.parse(fs.readFileSync(path.join(proj.dir, 'infra/cloudflare-waf.tf.json'), 'utf8')).resource;
+    assert.deepStrictEqual(Object.keys(resource), ['cloudflare_ruleset']);
+    const sets = Object.values(resource.cloudflare_ruleset) as any[];
+    assert.strictEqual(sets.length, 1);
+    const rules = sets[0].rules;
+    assert.strictEqual(rules.length, 4);
+    assert.ok(rules.every((rule: any) => rule.enabled && rule.action === 'block' && rule.action_parameters.response === null));
+    assert.strictEqual(rules.find((rule: any) => rule.description === 'Static site method allowlist').expression, 'not (http.request.method in {"GET" "HEAD"})');
+    assert.strictEqual(rules.find((rule: any) => rule.description === 'Static site edge port allowlist').expression, 'not (cf.edge.server_port in {80 443})');
+    assert.strictEqual(fs.existsSync(path.join(proj.dir, 'edge')), false);
+    assert.match(result.stderr, /"generated":\{"customRules":4,"rateRules":0\}/);
+  } finally { proj.cleanup(); }
+});
+test('static Free archetype requires explicit Free admission even with approximation allowed', () => {
+  const proj = tmpProject(staticArchetypePolicy());
+  try {
+    const result = runCompiler(proj.policyPath, proj.dir, ['--allow-waf-approximation']);
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stderr, /CLOUDFLARE_STATIC_INVALID: FREE_PROFILE_REQUIRED/);
+    assert.strictEqual(fs.existsSync(path.join(proj.dir, 'infra')), false);
+  } finally { proj.cleanup(); }
+});
+for (const entry of ['compile.js', 'compile-cloudflare.js', 'compile-infra.js']) {
+  test('static WAF-only profile rejects wrong target ' + entry + ' before output', () => {
+    const proj = tmpProject(staticArchetypePolicy());
+    try {
+      const result = spawnSync(process.execPath, [path.join(repoRoot, 'scripts', entry), '--policy', proj.policyPath, '--out-dir', path.join(proj.dir, 'out'), '--allow-placeholder-token'], { encoding: 'utf8' });
+      assert.strictEqual(result.status, 1, result.stderr);
+      assert.match(result.stderr, /CLOUDFLARE_STATIC_INVALID: WAF_ONLY_PROFILE/);
+      assert.strictEqual(fs.existsSync(path.join(proj.dir, 'out')), false);
+    } finally { proj.cleanup(); }
+  });
+}
+test('static WAF profile rejects mixed Worker path requirements instead of ignoring them', () => {
+  const text = staticArchetypePolicy().replace('    ua_contains:', "    path_patterns: { contains: ['/.hidden'] }\n    ua_contains:");
+  const proj = tmpProject(text);
+  try {
+    const result = runCompiler(proj.policyPath, proj.dir, ['--cloudflare-free']);
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stderr, /CLOUDFLARE_STATIC_UNKNOWN: WORKER_REQUIREMENTS/);
+    assert.strictEqual(fs.existsSync(path.join(proj.dir, 'infra')), false);
+  } finally { proj.cleanup(); }
+});
+
+const staticFieldPolicy = () => ({
+  version: 2, project: 'static-fields', defaults: { mode: 'enforce' },
+  request: { allow_methods: ['GET', 'HEAD'], block: { ua_contains: ['sqlmap'] } }, response_headers: {},
+  firewall: { waf: { cloudflare_static_site: {
+    allow_ports: [80, 443],
+    block_paths: { exact: ['/.env', '/phpinfo.php'], prefix: ['/.git/', '/wp-admin/'], exceptions: ['/wp-admin/status'] },
+    method_exceptions: [{ path: '/api/required.php', methods: ['POST'] }],
+  } } },
+});
+const STATIC_PATH_WIRE = '((lower(http.request.uri.path) in {"/.env" "/phpinfo.php"} or starts_with(lower(http.request.uri.path), "/.git/") or starts_with(lower(http.request.uri.path), "/wp-admin/")) and not (lower(http.request.uri.path) in {"/wp-admin/status"}))';
+const STATIC_METHOD_WIRE = 'not (http.request.method in {"GET" "HEAD"} or (http.request.method in {"POST"} and lower(http.request.uri.path) eq "/api/required.php"))';
+const STATIC_PORT_WIRE = 'not (cf.edge.server_port in {80 443})';
+test('static field fixtures preserve normal resources and keep exceptions within their own block', () => {
+  const proj = tmpProject(JSON.stringify(staticFieldPolicy()));
+  try {
+    const result = runCompiler(proj.policyPath, proj.dir, ['--cloudflare-free']);
+    assert.strictEqual(result.status, 0, result.stderr);
+    const resource = JSON.parse(fs.readFileSync(path.join(proj.dir, 'infra/cloudflare-waf.tf.json'), 'utf8')).resource;
+    const rules = (Object.values(resource.cloudflare_ruleset) as any[])[0].rules;
+    // Four literal expressions and their independent requirement truth table.
+    // This is a finite wire-format oracle, not a Rules-language/WAF interpreter.
+    type Fields = { uri: string; method: string; edgePort: number; ua: string };
+    const asciiLower = (text: string) => text.replace(/[A-Z]/g, c => c.toLowerCase());
+    const requirements = new Map<string, (f: Fields) => boolean>([
+      ['(lower(http.user_agent) contains "sqlmap")', f => asciiLower(f.ua).includes('sqlmap')],
+      [STATIC_PATH_WIRE, f => {
+        const p = asciiLower(f.uri);
+        return (p === '/.env' || p === '/phpinfo.php' || p.startsWith('/.git/') || p.startsWith('/wp-admin/')) && p !== '/wp-admin/status';
+      }],
+      [STATIC_METHOD_WIRE, f => !(['GET', 'HEAD'].includes(f.method) || (f.method === 'POST' && asciiLower(f.uri) === '/api/required.php'))],
+      [STATIC_PORT_WIRE, f => f.edgePort !== 80 && f.edgePort !== 443],
+    ]);
+    assert.strictEqual(rules.length, 4);
+    assert.deepStrictEqual(new Set(rules.map((rule: any) => rule.expression)), new Set(requirements.keys()));
+    assert.ok(rules.every((rule: any) => rule.enabled && rule.action === 'block' && rule.action_parameters.response === null));
+    const httpCases = require('./fixtures/cloudflare-http-cases').HTTP_FIXTURE_CASES as Array<{ id: string; target: string; method?: string }>;
+    const selected: Array<[string, boolean]> = [
+      ['probe-env', true], ['probe-phpinfo', true], ['probe-git', true], ['probe-wp-admin-child', true],
+      ['site-root', false], ['site-normal', false], ['site-en', false], ['site-ja', false], ['site-ja-encoded', false],
+      ['site-well-known', false], ['site-cdn-cgi', false], ['site-js', false], ['site-wasm', false], ['site-required-php', false],
+      ['site-wp-static', false], ['site-env-boundary', false], ['site-git-boundary', false], ['site-php-boundary', false], ['site-wp-boundary', false],
+      ['site-head', false], ['site-post', false], ['method', true],
+    ];
+    // Reuse input literals only. These are supplied synthetic URI field values;
+    // do not infer Cloudflare normalization from raw HTTP targets or Worker status.
+    const cases = selected.map(([id, blocked]) => {
+      const request = httpCases.find(c => c.id === id)!;
+      return { id, fields: { uri: request.target, method: request.method || 'GET', edgePort: 443, ua: 'synthetic-browser' }, blocked };
+    });
+    cases.push(
+      { id: 'ASCII-case', fields: { uri: '/.ENV', method: 'GET', edgePort: 443, ua: 'synthetic-browser' }, blocked: true },
+      { id: 'path-exception', fields: { uri: '/wp-admin/status', method: 'GET', edgePort: 443, ua: 'synthetic-browser' }, blocked: false },
+      { id: 'path-exception-method-block', fields: { uri: '/wp-admin/status', method: 'DELETE', edgePort: 443, ua: 'synthetic-browser' }, blocked: true },
+      { id: 'path-exception-port-block', fields: { uri: '/wp-admin/status', method: 'GET', edgePort: 8443, ua: 'synthetic-browser' }, blocked: true },
+      { id: 'path-exception-UA-block', fields: { uri: '/wp-admin/status', method: 'GET', edgePort: 443, ua: 'sqlmap' }, blocked: true },
+      { id: 'method-exception-port-block', fields: { uri: '/api/required.php', method: 'POST', edgePort: 8443, ua: 'synthetic-browser' }, blocked: true },
+      { id: 'method-exception-other-path', fields: { uri: '/about', method: 'POST', edgePort: 443, ua: 'synthetic-browser' }, blocked: true },
+    );
+    for (const c of cases) assert.strictEqual(rules.some((rule: any) => requirements.get(rule.expression)!(c.fields)), c.blocked, c.id);
+    console.log('Static synthetic field subset: ' + cases.length + ' fixed cases; actual WAF/normalization/runtime UNKNOWN');
+  } finally { proj.cleanup(); }
+});
+
+test('static Free quota includes new conditions and other generated custom rules', () => {
+  const policy = staticFieldPolicy() as any;
+  policy.firewall.geo = { block_countries: ['CN'], allow_countries: ['JP'] };
+  const proj = tmpProject(JSON.stringify(policy));
+  try {
+    const result = runCompiler(proj.policyPath, proj.dir, ['--cloudflare-free']);
+    assert.strictEqual(result.status, 1);
+    assert.match(result.stderr, /CUSTOM_RULE_LIMIT_EXCEEDED/);
+    assert.match(result.stderr, /"customRules":6/);
+    assert.strictEqual(fs.existsSync(path.join(proj.dir, 'infra')), false);
+  } finally { proj.cleanup(); }
+});
+
+test('static Free admission cannot reuse paid or unrecognized shape through literal stripping', () => {
+  const allowed = [STATIC_PATH_WIRE, STATIC_METHOD_WIRE, STATIC_PORT_WIRE];
+  for (const expression of allowed) {
+    const resource = freeCustomResources(1) as any;
+    resource.cloudflare_ruleset.custom.rules[0].expression = expression;
+    assert.strictEqual(assessCloudflareFreeWaf(resource, undefined, 0).localGeneration, 'supported', expression);
+    for (const suffix of [' or true', ' and http.host eq "example.invalid"']) {
+      resource.cloudflare_ruleset.custom.rules[0].expression = expression + suffix;
+      assert.strictEqual(assessCloudflareFreeWaf(resource, undefined, 0).localGeneration, 'unknown');
+    }
+  }
+  for (const expression of ['not (cf.edge.server_port in {0})', 'not (cf.edge.server_port in {65536})', 'not (cf.edge.server_port in {1e3})', 'not (cf.edge.server_port in {"443"})']) {
+    const resource = freeCustomResources(1) as any;
+    resource.cloudflare_ruleset.custom.rules[0].expression = expression;
+    assert.strictEqual(assessCloudflareFreeWaf(resource, undefined, 0).localGeneration, 'unknown');
+  }
+});
+
+const staticInvalid: Array<[string, (p: any) => void]> = [
+  ['empty paths', p => { p.firewall.waf.cloudflare_static_site.block_paths = { exact: [], prefix: [] }; }],
+  ['regex', p => { p.firewall.waf.cloudflare_static_site.block_paths.regex = ['.*']; }],
+  ['unknown field', p => { p.firewall.waf.cloudflare_static_site.skip = true; }],
+  ['port type', p => { p.firewall.waf.cloudflare_static_site.allow_ports = ['443']; }],
+  ['port zero', p => { p.firewall.waf.cloudflare_static_site.allow_ports = [0]; }],
+  ['port overflow', p => { p.firewall.waf.cloudflare_static_site.allow_ports = [65536]; }],
+  ['duplicate ports', p => { p.firewall.waf.cloudflare_static_site.allow_ports = [443, 443]; }],
+  ['path trailing newline', p => { p.firewall.waf.cloudflare_static_site.block_paths.exact = ['/.env\n']; }],
+  ['method trailing newline', p => { p.request.allow_methods = ['GET\n']; }],
+  ['Unicode path', p => { p.firewall.waf.cloudflare_static_site.block_paths.exact = ['/private-K']; }],
+  ['encoded path literal', p => { p.firewall.waf.cloudflare_static_site.block_paths.exact = ['/%2eenv']; }],
+  ['query literal', p => { p.firewall.waf.cloudflare_static_site.block_paths.exact = ['/.env?private-token']; }],
+  ['template literal', p => { p.firewall.waf.cloudflare_static_site.block_paths.exact = ['/${private-token}']; }],
+  ['duplicate exception paths', p => { p.firewall.waf.cloudflare_static_site.method_exceptions.push({ path: '/api/required.php', methods: ['PUT'] }); }],
+  ['method type', p => { p.request.allow_methods = [null]; }],
+  ['empty methods', p => { p.request.allow_methods = []; }],
+  ['monitor', p => { p.defaults.mode = 'monitor'; }],
+  ['Worker route', p => { p.routes = [{ name: 'protected', match: { path_prefixes: ['/admin'] }, auth_gate: { type: 'static_token' } }]; }],
+  ['Worker headers', p => { p.response_headers.hsts = 'max-age=100'; }],
+  ['Worker normalize', p => { p.request.normalize = { drop_query_keys: ['utm_source'] }; }],
+  ['AWS scope', p => { p.firewall.waf.scope = 'REGIONAL'; }],
+];
+for (const [name, alter] of staticInvalid) {
+  test('static direct compiler rejects ' + name + ' before output', () => {
+    const policy = staticFieldPolicy(); alter(policy);
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-static-invalid-'));
+    try {
+      assert.throws(() => require('./compile-cloudflare-waf').compileCloudflareWaf(policy, { outDir: path.join(out, 'generated'), cloudflareFree: {}, logger: { log() {}, error() {} } }), /CLOUDFLARE_STATIC_(?:INVALID|UNKNOWN):/);
+      assert.strictEqual(fs.existsSync(path.join(out, 'generated')), false);
+    } finally { fs.rmSync(out, { recursive: true, force: true }); }
+  });
+}
+test('static expression size and sparse programmatic ports fail before output', () => {
+  for (const sparse of [true, false]) {
+    const policy = staticFieldPolicy() as any;
+    if (sparse) policy.firewall.waf.cloudflare_static_site.allow_ports = Array(1);
+    else policy.firewall.waf.cloudflare_static_site.block_paths.prefix = Array.from({ length: 32 }, (_, i) => '/' + String(i) + 'a'.repeat(250));
+    const out = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-static-bound-'));
+    try {
+      assert.throws(() => require('./compile-cloudflare-waf').compileCloudflareWaf(policy, { outDir: path.join(out, 'generated'), cloudflareFree: {}, logger: { log() {}, error() {} } }), /CLOUDFLARE_STATIC_INVALID: (POLICY_SCHEMA|EXPRESSION_LIMIT)/);
+      assert.strictEqual(fs.existsSync(path.join(out, 'generated')), false);
+    } finally { fs.rmSync(out, { recursive: true, force: true }); }
+  }
+});
+
+for (const [name, compile] of [
+  ['AWS Worker', (p: any, o: any) => require('./lib/compile-core').build(p, o)],
+  ['Cloudflare Worker', (p: any, o: any) => require('./compile-cloudflare').compileCloudflare(p, o)],
+  ['AWS Infra', (p: any, o: any) => require('./compile-infra').compileInfra(p, o)],
+] as const) {
+  test('programmatic ' + name + ' rejects WAF-only profile before output', () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-static-target-'));
+    try {
+      const outDir = path.join(dir, 'out');
+      assert.throws(() => compile(staticFieldPolicy(), { outDir }), /CLOUDFLARE_STATIC_INVALID: WAF_ONLY_PROFILE/);
+      assert.strictEqual(fs.existsSync(outDir), false);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+}
+
+for (const target of ['aws', 'cloudflare']) {
+  test('readiness rejects WAF-only profile for unsupported ' + target + ' build target', () => {
+    const proj = tmpProject(staticArchetypePolicy());
+    try {
+      const result = spawnSync(process.execPath, [path.join(repoRoot, 'bin/cli.js'), 'readiness', '--policy', proj.policyPath, '--target', target, '--json'], { encoding: 'utf8', timeout: 15000 });
+      assert.strictEqual(result.status, 1, result.stderr);
+      const report = JSON.parse(result.stdout);
+      assert.ok(report.findings.some((finding: any) => finding.id === 'firewall.waf.cloudflare_static_site.waf_only' && finding.severity === 'fail'));
+    } finally { proj.cleanup(); }
+  });
+}
+
+test('static resource placeholders cannot manufacture supported fields', () => {
+  for (const expression of ['(S)', '(P)', 'not (M)', 'not (M or (M and E))']) {
+    const resource = freeCustomResources(1) as any;
+    resource.cloudflare_ruleset.custom.rules[0].expression = expression;
+    assert.strictEqual(assessCloudflareFreeWaf(resource, undefined, 0).localGeneration, 'unknown', expression);
+  }
+});

@@ -1,0 +1,48 @@
+# yaml-language-server: $schema=../schema.json
+# Explicit WAF-only static site: no write API or these unused PHP/WP endpoints.
+# node scripts/compile-cloudflare-waf.js --policy <this-file> --cloudflare-free --out-dir <dir>
+# Generates no Worker. Existing spa-static-site.yml remains a separate Worker-oriented archetype.
+version: 2
+project: example-cloudflare-free-static
+metadata:
+  risk_level: balanced
+  description: "Explicit Free WAF-only static site; synthetic local compatibility, not deployed protection."
+defaults:
+  mode: enforce
+request:
+  allow_methods: [GET, HEAD]
+  block:
+    ua_contains: [sqlmap, nikto, acunetix, masscan]
+response_headers: {}
+firewall:
+  waf:
+    cloudflare_static_site:
+      allow_ports: [80, 443]
+      block_paths:
+        exact:
+          - /.env
+          - /.git
+          - /id_rsa
+          - /id_ed25519
+          - /server.key
+          - /private-key.pem
+          - /.ssh/id_rsa
+          - /.ssh/id_ed25519
+          - /phpinfo.php
+          - /wp-login.php
+          - /wp-admin
+          - /xmlrpc.php
+        prefix:
+          - /.env.
+          - /.env/
+          - /.env;
+          - /.git/
+          - /.git;
+          - /phpinfo.php/
+          - /phpinfo.php;
+          - /wp-login.php/
+          - /wp-login.php;
+          - /wp-admin/
+          - /wp-admin;
+          - /xmlrpc.php/
+          - /xmlrpc.php;

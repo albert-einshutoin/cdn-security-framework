@@ -301,7 +301,8 @@ URI-path式の限定契約を再利用します。
 [Logpushは2026-09-30から全planで従量課金付き](https://developers.cloudflare.com/changelog/post/2026-09-30-logpush-usage-based-pricing/)
 になったため、含まれる利用枠の有無を推測せず、追加費用0円profileではresourceを拒否します。
 
-初期対応subsetはcompilerのGeo/ASCII-UA block式と、検証済みFree rate rulesです。
+対応subsetはcompilerのGeo/ASCII-UA block式、検証済みFree rate rulesと、
+明示static profileのliteral Path・Method・edge Port block式です。
 [Cloudflareの`lower()`](https://developers.cloudflare.com/ruleset-engine/rules-language/functions/#lower)
 はASCIIだけを変換します。非ASCIIのUA literalは、既存JavaScript generatorで既に
 小文字化されていても`UA_UNICODE_CASE_UNSUPPORTED`の`unknown`としてFree生成を止めます。
@@ -316,8 +317,9 @@ compilerは変換前のUA literalを確認し、UnicodeからASCIIになる場�
 list、managed phase、resourceは限定`unknown`診断でWAFファイル生成を止めます。
 既知のplan違反と容量超過でも生成を止め、`--allow-waf-approximation`では回避できません。
 拒否時は既存outputを保持します。検査は生成resourceに限定し、Policy全体のcoverageは
-証明しません。Path/Method制御は別途実装するまでこのcompilerではWorker側だけで、
-`policyCoverage`は`unknown`を保持します。
+証明しません。通常のWorker用`request.block.path_patterns`はこのcompilerで変換しません。
+下記の明示static WAF profileだけが独自literal pathと共通`request.allow_methods`を使い、
+`policyCoverage`は引き続き`unknown`を保持します。
 
 任意の保存inventoryは8192 UTF-8 bytes以下のstrict JSONです。
 
@@ -340,3 +342,46 @@ stderrのassessmentは生成件数・保存件数/時点/入力SHA-256と固定r
 account entitlement、API受理、実配備、防御、安全性を証明せず、API/credential/applyや
 自動的な要件緩和は行いません。`npm run build:ts`の後に
 `node scripts/cloudflare-waf-parity-unit-tests.js`で再現できます。
+
+
+### Workerを追加しないFree静的サイト
+
+`policy/archetypes/cloudflare-free-static-site.yml`は、既存のWorker向け
+`spa-static-site.yml`とは別のWAF専用プリセットです。既存側のBusiness rate設定は
+維持します。採用前に未使用と宣言するPHP/WP endpointを確認してください。
+必要なPHPルートやWP静的資産を一括拒否するものではありません。
+`init --archetype`やWorker buildではなく、専用compilerを使います。
+
+```sh
+node scripts/compile-cloudflare-waf.js --policy policy/archetypes/cloudflare-free-static-site.yml --cloudflare-free --out-dir review-static
+```
+
+任意field `firewall.waf.cloudflare_static_site`の正本は`policy/schema.json`で、
+型は同Schemaから生成します。`allow_ports`とliteralの`block_paths.exact`/`prefix`
+配列を明示し、pathは少なくとも一方を非空にします。共通`request.allow_methods`も
+非空の明示配列が必須です。プリセットはUAとPath・Method・Portの4 custom blockを
+生成し、rate ruleとWorkerは生成しません。保存inventoryの枠計算も全4件を含めます。
+他のWorker/AWS targetは、このprofileを出力前に拒否します。
+Worker/AWS用の`readiness`も、このprofileでは明示したfailを返します。
+
+pathは小文字ASCIIの絶対literal（256文字以下）を`lower(http.request.uri.path)`で
+比較します。exact/prefixはliteral一致で、Regex・query照合・URL decode adapterは
+ありません。各listは重複なし32件以下、生成式は4096 ASCII bytes以下です。
+`block_paths.exceptions`はそのexact pathをpath ruleからだけ除外します。
+`method_exceptions`は各exact pathで明示methodを追加するだけです。他のPort/UA blockを
+除外せず、`Skip`も生成しません。PortはHost headerの値ではなく、
+[`cf.edge.server_port`](https://developers.cloudflare.com/ruleset-engine/rules-language/fields/reference/cf.edge.server_port/)です。
+これらのfieldとFree custom rule上限は2026-10-27に確認しました。
+
+Worker条件（`request.block.path_patterns`、normalize、routes、response headerなど）、
+monitor mode、AWS scope、不正/未知field、未対応path literalは生成前に拒否します。
+必須の`response_headers: {}`は意図的です。WAF専用presetは応答headerを生成しないため、
+originや別途reviewしたCloudflare機構で設定してください。Free admissionは必須で、
+approximation flagでも検査を回避できません。
+
+テストは生成式と、独立した有限の要件truth tableを合成Rules-language fieldで照合します。
+HTTP fixtureの一部入力literalは再利用しますが、Worker結果を期待値にしたり、raw targetから
+Cloudflare fieldを推定したりしません。静的subsetの証拠であり、実WAF runtimeではありません。
+実URL-normalization設定、encoded targetの対応、provider受理、既存zoneのownership/順序、
+配備、port防御効果は`unknown`です。Cloud API・entitlement確認・apply・本番通信は行わず、
+セキュリティ効果も主張しません。

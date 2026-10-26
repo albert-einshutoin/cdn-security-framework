@@ -1,3 +1,4 @@
+import { rejectStaticWafPolicy } from './cloudflare-static-waf';
 import { buildPathIndex, PATH_INDEX_HELPER, PATH_MATCH_HELPER } from './path-index';
 import type { CompilerOptions } from './compiler-entry';
 const fs = require('fs');
@@ -382,6 +383,7 @@ function warnUnsupportedGraphqlGuard(policy: any, target: string, options: any =
 }
 
 function build(policy: any, options: any = {}) {
+  rejectStaticWafPolicy(policy);
   // This emitter does not own CloudFront cache behaviors. Refuse origin-only
   // auth before any writes, including calls that bypass CLI validation.
   const authErrors: string[] = [];

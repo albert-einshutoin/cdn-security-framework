@@ -308,8 +308,9 @@ require an Enterprise add-on. [Logpush changed on 2026-09-30](https://developers
 to availability on all plans with usage pricing, so this zero-additional-cost
 profile rejects Logpush resources even when an account might have included usage.
 
-The initial local subset accepts the compiler's Geo/ASCII-UA block expressions
-and validated Free rate rules. [Cloudflare `lower()`](https://developers.cloudflare.com/ruleset-engine/rules-language/functions/#lower)
+The local subset accepts the compiler's Geo/ASCII-UA block expressions,
+validated Free rate rules and the explicit static profile's literal path,
+method and edge-port block shapes. [Cloudflare `lower()`](https://developers.cloudflare.com/ruleset-engine/rules-language/functions/#lower)
 folds ASCII only. Non-ASCII UA literals return `unknown` with
 `UA_UNICODE_CASE_UNSUPPORTED` and stop Free generation, including literals that
 the existing JavaScript generator already lowercased. This profile makes no
@@ -327,8 +328,9 @@ managed phases or resources return bounded `unknown` diagnostics and stop WAF
 file generation. Known plan violations and capacity excess also stop generation;
 `--allow-waf-approximation` cannot bypass this check. Existing output is preserved
 on rejection. This checks generated resources, not complete Policy coverage:
-Path/Method controls remain Worker-only in this compiler until separately
-implemented, and `policyCoverage` stays `unknown`.
+Ordinary Worker `request.block.path_patterns` are not translated by this
+compiler. The explicit static WAF profile below declares its own literal paths
+and reuses `request.allow_methods`; `policyCoverage` still stays `unknown`.
 
 The optional saved inventory is strict JSON, at most 8192 UTF-8 bytes:
 
@@ -356,3 +358,55 @@ No account entitlement, API acceptance, actual deployment, protection or safety
 is established. No API, credential, apply or automatic security relaxation is
 performed. Reproduce with `npm run build:ts` then
 `node scripts/cloudflare-waf-parity-unit-tests.js`.
+
+
+### Free static site without a Worker
+
+The separate `policy/archetypes/cloudflare-free-static-site.yml` is a WAF-only
+alternative to the existing Worker-oriented `spa-static-site.yml`, which keeps
+its existing Business rate configuration. Review the new file's explicit unused
+PHP/WP endpoints before adoption; required PHP or static WP assets are not
+blanket-blocked. Use the standalone compiler, not `init --archetype` or a Worker
+build target:
+
+```sh
+node scripts/compile-cloudflare-waf.js --policy policy/archetypes/cloudflare-free-static-site.yml --cloudflare-free --out-dir review-static
+```
+
+The optional `firewall.waf.cloudflare_static_site` contract is defined in
+`policy/schema.json`; types are generated from it. It requires explicit
+`allow_ports` and literal `block_paths.exact`/`prefix` arrays, with at least one
+nonempty. The shared `request.allow_methods` must be explicit and nonempty.
+The preset generates four custom block rules (UA plus path/method/port), no rate
+rule and no Worker. Existing saved-inventory capacity checks count all of them.
+Other Worker/AWS compiler targets reject this profile before writing output.
+The Worker/AWS `readiness` targets also return an explicit failure for it.
+
+Path values are lowercase ASCII absolute literals (at most 256 characters),
+matched against `lower(http.request.uri.path)`. Exact and prefix have their
+literal meanings; there is no regex, query matching or URL-decoding adapter.
+Lists contain at most 32 distinct entries and generated expressions at most
+4096 ASCII bytes. `block_paths.exceptions` exempts only those exact paths from
+the path rule. `method_exceptions` adds explicitly listed methods on each exact
+path to the method rule. Path/method exceptions do not exempt edge-port or UA
+blocks, and never emit `Skip`. The edge port is
+[`cf.edge.server_port`](https://developers.cloudflare.com/ruleset-engine/rules-language/fields/reference/cf.edge.server_port/),
+not a Host header port. These fields and the Free custom-rule limits were checked
+on 2026-10-27.
+
+Unsupported Worker requirements (including `request.block.path_patterns`,
+normalization, routes and response headers), monitor mode, AWS scope, malformed
+or unknown fields and unsupported path literals fail before output. The required
+`response_headers: {}` is intentional: this WAF-only preset does not generate
+response headers; configure them at the origin or through a separately reviewed
+Cloudflare mechanism. Free admission is still mandatory and approximation flags
+cannot bypass these checks.
+
+The tests compare emitted expressions with a finite, independent requirement
+truth table over supplied synthetic Rules-language fields. They reuse selected
+HTTP fixture input literals, without interpreting Worker results or inferring a
+Cloudflare field from a raw target. This is static subset evidence, not a WAF
+runtime. Actual URL-normalization settings, encoded-target mapping, provider
+acceptance, existing-zone ownership/order, deployment and port-defense efficacy
+remain `unknown`. No Cloud API, entitlement check, apply, production traffic or
+claim about security effectiveness is involved.

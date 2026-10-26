@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { isCloudflareStaticExpressionShape } from './cloudflare-static-waf';
 
 // Local configuration profiles, not account entitlement or deployed-WAF proof.
 // API discrete values and plan limits checked 2026-10-13:
@@ -135,7 +136,7 @@ export function assessCloudflareFreeWaf(resources: unknown, inventoryText?: stri
     // Cloudflare lower folds ASCII only; the existing generator's JavaScript
     // lowercasing must not turn Unicode literals into a supported Free claim.
     if (ua && nonAsciiLiteral) { reject('UA_UNICODE_CASE_UNSUPPORTED'); return false; }
-    return valid && (/^(?:not )?\(ip\.geoip\.country in \{""(?: "")*\}\)$/.test(stripped) || ua);
+    return valid && (/^(?:not )?\(ip\.geoip\.country in \{""(?: "")*\}\)$/.test(stripped) || ua || isCloudflareStaticExpressionShape(stripped));
   };
   for (const [type, entries] of Object.entries(resources as Record<string, unknown>)) {
     if (!object(entries) || Object.keys(entries).length > 16) invalid('RESOURCE_SHAPE_OR_LIMIT');
