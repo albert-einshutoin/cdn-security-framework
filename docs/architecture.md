@@ -297,8 +297,10 @@ the existing JavaScript generator already lowercased. This profile makes no
 Unicode case-folding equivalence claim. The compiler checks the original UA
 literal before case conversion, so Unicode-to-ASCII mappings cannot bypass the
 restriction. If the existing emitter cannot preserve a literal in canonical
-JSON quoting, or the literal contains [Terraform template markers](https://developer.hashicorp.com/terraform/language/syntax/json#expression-mapping), Free generation
-stops with `UA_LITERAL_ENCODING_UNSUPPORTED`. These rejections do not change the
+JSON quoting, Free generation stops with `UA_LITERAL_ENCODING_UNSUPPORTED`.
+The shared emitted-expression check rejects [Terraform template markers](https://developer.hashicorp.com/terraform/language/syntax/json#expression-mapping)
+in both custom and rate rules with `EXPRESSION_TEMPLATE_UNSUPPORTED`, including
+direct rate expressions and generated scope-down expressions. These rejections do not change the
 unflagged emitter. The preflight checks whole supported shapes and
 counts disabled rules too. Unsupported fields, functions, actions, lists,
 managed phases or resources return bounded `unknown` diagnostics and stop WAF

@@ -151,6 +151,11 @@ export function assessCloudflareFreeWaf(resources: unknown, inventoryText?: stri
       else { reject('PHASE_NOT_SUPPORTED'); continue; }
       for (const rule of set.rules) {
         if (!object(rule)) invalid('RULE_SHAPE');
+        // Terraform JSON evaluates expression strings as templates. Keep this
+        // boundary shared by custom and rate rules so neither can change meaning.
+        if (typeof rule.expression === 'string' && (rule.expression.includes('${') || rule.expression.includes('%{'))) {
+          reject('EXPRESSION_TEMPLATE_UNSUPPORTED');
+        }
         if (rule.action === 'log') reject('LOG_ACTION_NOT_FREE', true);
         else if (rule.action !== 'block') reject('ACTION_NOT_SUPPORTED');
         if (Object.keys(rule).some(k => !['ref', 'description', 'enabled', 'expression', 'action', 'action_parameters', ...(isRate ? ['ratelimit'] : [])].includes(k))) reject('RULE_FIELD_NOT_SUPPORTED');

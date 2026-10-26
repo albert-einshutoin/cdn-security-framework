@@ -171,8 +171,9 @@ if (uaDeny.length > 0) {
     const folded = String(s).toLowerCase();
     const quoted = '"' + folded.replace(/"/g, '\\"') + '"';
     // Preserve the existing emitter, but do not approve a Free literal whose
-    // encoding loses source characters or would invoke Terraform templating.
-    if (freeProfile !== undefined && (quoted !== JSON.stringify(folded) || folded.includes('${') || folded.includes('%{'))) {
+    // encoding loses source characters. Template markers are checked at the
+    // shared emitted-expression boundary for both custom and rate rules.
+    if (freeProfile !== undefined && quoted !== JSON.stringify(folded)) {
       throw new Error('CLOUDFLARE_FREE_UNKNOWN: UA_LITERAL_ENCODING_UNSUPPORTED');
     }
     return `lower(http.user_agent) contains ${quoted}`;

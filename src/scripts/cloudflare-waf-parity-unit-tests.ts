@@ -756,7 +756,7 @@ test('Free UA subset does not claim Unicode case folding that Cloudflare lower c
 
 test('Free UA input domain is checked before Unicode-to-ASCII and literal encoding lose information', () => {
   for (const [literal, reason] of [['K', 'UA_UNICODE_CASE_UNSUPPORTED'], ['a\\\\b', 'UA_LITERAL_ENCODING_UNSUPPORTED'],
-    ['${var.ua}', 'UA_LITERAL_ENCODING_UNSUPPORTED'], ['%{if true}', 'UA_LITERAL_ENCODING_UNSUPPORTED']]) {
+    ['${var.ua}', 'EXPRESSION_TEMPLATE_UNSUPPORTED'], ['%{if true}', 'EXPRESSION_TEMPLATE_UNSUPPORTED']]) {
     const ctx = tmpProject(POLICY_FREE_PREFLIGHT.replace('ua_contains: [bot]', 'ua_contains: [' + JSON.stringify(literal) + ']'));
     try {
       const result = runCompiler(ctx.policyPath, ctx.dir, ['--cloudflare-free']);
@@ -764,5 +764,51 @@ test('Free UA input domain is checked before Unicode-to-ASCII and literal encodi
       assert.match(result.stderr, new RegExp(reason));
       assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
     } finally { ctx.cleanup(); }
+  }
+});
+
+
+test('Free emitted-expression boundary rejects Terraform templates across custom and rate rules', () => {
+  for (const literal of ['${1+1}', '%{if true}', '$${1+1}', '%%{if true}']) {
+    for (const expression of ['(lower(http.user_agent) contains ' + JSON.stringify(literal) + ')',
+      '(ip.geoip.country in {' + JSON.stringify(literal) + '})']) {
+      const resources = freeCustomResources(1);
+      resources.cloudflare_ruleset.custom.rules[0].expression = expression;
+      const report = assessCloudflareFreeWaf(resources, undefined, 0);
+      assert.strictEqual(report.localGeneration, 'unknown', expression);
+      assert.ok(report.reasons.includes('EXPRESSION_TEMPLATE_UNSUPPORTED'));
+    }
+    const rules = buildCloudflareRateRules({ ...freeRate, rate_limit: undefined,
+      rate_limit_rules: [{ name: 'path', limit: 100, expression_cloudflare: 'http.request.uri.path eq ' + JSON.stringify('/' + literal) }] });
+    const report = assessCloudflareFreeWaf({ cloudflare_ruleset: { rate: { kind: 'zone', phase: 'http_ratelimit', rules } } }, undefined, 0);
+    assert.strictEqual(report.localGeneration, 'unknown', literal);
+    assert.ok(report.reasons.includes('EXPRESSION_TEMPLATE_UNSUPPORTED'));
+  }
+});
+
+test('Free CLI refuses direct and scope-down rate templates before creating or replacing WAF output', () => {
+  for (const literal of ['/${1+1}', '/%{if true}']) {
+    for (const field of ['expression_cloudflare: ' + JSON.stringify('http.request.uri.path eq ' + JSON.stringify(literal)),
+      'scope_down_statement: {byte_match_statement: {positional_constraint: STARTS_WITH, field_to_match: {uri_path: {}}, search_string: ' + JSON.stringify(literal) + '}}']) {
+      const ctx = tmpProject(POLICY_FREE_PREFLIGHT + `  waf:
+    cloudflare_rate_limit_plan: free
+    cloudflare_rate_limit_period: 10
+    rate_limit_rules:
+      - name: path
+        limit: 100
+        ${field}
+`);
+      try {
+        const output = path.join(ctx.dir, 'infra/cloudflare-waf.tf.json');
+        for (const existing of [false, true]) {
+          if (existing) { fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, 'preserve-existing-output'); }
+          const result = runCompiler(ctx.policyPath, ctx.dir, ['--cloudflare-free', '--allow-waf-approximation']);
+          assert.strictEqual(result.status, 1, result.stderr);
+          assert.match(result.stderr, /EXPRESSION_TEMPLATE_UNSUPPORTED/);
+          if (existing) assert.strictEqual(fs.readFileSync(output, 'utf8'), 'preserve-existing-output');
+          else assert.ok(!fs.existsSync(output));
+        }
+      } finally { ctx.cleanup(); }
+    }
   }
 });

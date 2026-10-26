@@ -292,9 +292,11 @@ URI-path式の限定契約を再利用します。
 小文字化されていても`UA_UNICODE_CASE_UNSUPPORTED`の`unknown`としてFree生成を止めます。
 Unicode case foldingの同等性は主張しません。
 compilerは変換前のUA literalを確認し、UnicodeからASCIIになる場合も見逃しません。
-既存emitterの引用形式がcanonical JSONとして元literalを保持できない場合や、
-[Terraform template marker](https://developer.hashicorp.com/terraform/language/syntax/json#expression-mapping)を含む場合も、
-`UA_LITERAL_ENCODING_UNSUPPORTED`でFree生成を止めます。未指定経路の出力は変えません。
+既存emitterの引用形式がcanonical JSONとして元literalを保持できない場合は、
+`UA_LITERAL_ENCODING_UNSUPPORTED`でFree生成を止めます。生成式の共通検証ではcustom/rate双方の
+[Terraform template marker](https://developer.hashicorp.com/terraform/language/syntax/json#expression-mapping)を
+`EXPRESSION_TEMPLATE_UNSUPPORTED`で拒否します。直接指定したrate式とscope-downから生成した式も対象です。
+未指定経路の出力は変えません。
 式全体の対応形状を確認し、disabled ruleも件数へ含めます。未対応field/function/action、
 list、managed phase、resourceは限定`unknown`診断でWAFファイル生成を止めます。
 既知のplan違反と容量超過でも生成を止め、`--allow-waf-approximation`では回避できません。
