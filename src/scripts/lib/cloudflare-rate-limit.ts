@@ -133,8 +133,8 @@ export function assessCloudflareFreeWaf(resources: unknown, inventoryText?: stri
     // Full emitted shapes, after validating/removing literals. Keywords inside UA
     // strings cannot introduce operators or manufacture a paid-feature finding.
     const ua = /^\(lower\(http\.user_agent\) contains ""(?: or lower\(http\.user_agent\) contains "")*\)$/.test(stripped);
-    // Cloudflare lower folds ASCII only; the existing generator's JavaScript
-    // lowercasing must not turn Unicode literals into a supported Free claim.
+    // Independently supplied resources must satisfy the same ASCII-only UA
+    // subset as the compiler; a valid shape is not Unicode parity evidence.
     if (ua && nonAsciiLiteral) { reject('UA_UNICODE_CASE_UNSUPPORTED'); return false; }
     return valid && (/^(?:not )?\(ip\.geoip\.country in \{""(?: "")*\}\)$/.test(stripped) || ua || isCloudflareStaticExpressionShape(stripped));
   };

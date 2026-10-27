@@ -736,7 +736,7 @@ test('Free expression shape matching cannot mistake a raw marker for a JSON lite
   assert.strictEqual(assessCloudflareFreeWaf(source, undefined, 0).localGeneration, 'supported');
 });
 
-test('Free UA subset does not claim Unicode case folding that Cloudflare lower cannot provide', () => {
+test('UA compilation in both modes refuses Unicode folding that Cloudflare lower cannot provide', () => {
   const source = freeCustomResources(1);
   source.cloudflare_ruleset.custom.rules[0].expression = '(lower(http.user_agent) contains "évil")';
   const assessment = assessCloudflareFreeWaf(source, undefined, 0);
@@ -748,16 +748,15 @@ test('Free UA subset does not claim Unicode case folding that Cloudflare lower c
     assert.strictEqual(free.status, 1);
     assert.match(free.stderr, /UA_UNICODE_CASE_UNSUPPORTED/);
     assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
-    const unchanged = runCompiler(ctx.policyPath, ctx.dir);
-    assert.strictEqual(unchanged.status, 0, unchanged.stderr);
-    const artifact = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json'), 'utf8'));
-    const ua = artifact.resource.cloudflare_ruleset['free-preflight_custom'].rules.find((r: any) => r.description === 'User-Agent blocklist');
-    assert.strictEqual(ua.expression, '(lower(http.user_agent) contains "évil")');
+    const normal = runCompiler(ctx.policyPath, ctx.dir);
+    assert.strictEqual(normal.status, 1);
+    assert.match(normal.stderr, /UA_UNICODE_CASE_UNSUPPORTED/);
+    assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
   } finally { ctx.cleanup(); }
 });
 
-test('Free UA input domain is checked before Unicode-to-ASCII and literal encoding lose information', () => {
-  for (const [literal, reason] of [['K', 'UA_UNICODE_CASE_UNSUPPORTED'], ['a\\\\b', 'UA_LITERAL_ENCODING_UNSUPPORTED'],
+test('Free UA input domain is checked before Unicode-to-ASCII conversion and Terraform templates', () => {
+  for (const [literal, reason] of [['K', 'UA_UNICODE_CASE_UNSUPPORTED'],
     ['${var.ua}', 'EXPRESSION_TEMPLATE_UNSUPPORTED'], ['%{if true}', 'EXPRESSION_TEMPLATE_UNSUPPORTED']]) {
     const ctx = tmpProject(POLICY_FREE_PREFLIGHT.replace('ua_contains: [bot]', 'ua_contains: [' + JSON.stringify(literal) + ']'));
     try {
@@ -766,6 +765,64 @@ test('Free UA input domain is checked before Unicode-to-ASCII and literal encodi
       assert.match(result.stderr, new RegExp(reason));
       assert.ok(!fs.existsSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json')));
     } finally { ctx.cleanup(); }
+  }
+});
+
+test('UA unsupported literals preserve absent and existing outputs in both modes,even with approximation allowed', () => {
+  for (const [literal, reason] of [['K', 'UA_UNICODE_CASE_UNSUPPORTED'], ['İ', 'UA_UNICODE_CASE_UNSUPPORTED'],
+    ['Σ', 'UA_UNICODE_CASE_UNSUPPORTED'], ['a\nb', 'UA_LITERAL_ENCODING_UNSUPPORTED'],
+    ['a\tb', 'UA_LITERAL_ENCODING_UNSUPPORTED'], ['a\u007fb', 'UA_LITERAL_ENCODING_UNSUPPORTED']]) {
+    for (const extra of [[], ['--cloudflare-free']]) {
+      const ctx = tmpProject(POLICY_FREE_PREFLIGHT.replace('ua_contains: [bot]', () => 'ua_contains: [' + JSON.stringify(literal) + ']'));
+      const output = path.join(ctx.dir, 'infra/cloudflare-waf.tf.json');
+      try {
+        for (const existing of [false, true]) {
+          if (existing) { fs.mkdirSync(path.dirname(output), { recursive: true }); fs.writeFileSync(output, 'preserve-existing-ua-output'); }
+          const result = runCompiler(ctx.policyPath, ctx.dir, [...extra, '--allow-waf-approximation']);
+          assert.strictEqual(result.status, 1, JSON.stringify({ literal, extra, stderr: result.stderr }));
+          assert.match(result.stderr, new RegExp('CLOUDFLARE_WAF_UNKNOWN: ' + reason));
+          assert.ok(!result.stderr.includes(literal), 'diagnostic must not echo the literal');
+          if (existing) assert.strictEqual(fs.readFileSync(output, 'utf8'), 'preserve-existing-ua-output');
+          else assert.ok(!fs.existsSync(output));
+        }
+      } finally { ctx.cleanup(); }
+    }
+  }
+});
+
+for (const [literal, expression] of [
+  ['BadBot', '(lower(http.user_agent) contains "badbot")'],
+  ['A\\B', String.raw`(lower(http.user_agent) contains "a\\b")`],
+  ['A\\"B', String.raw`(lower(http.user_agent) contains "a\\\"b")`],
+  [String.raw`A\nB`, String.raw`(lower(http.user_agent) contains "a\\nb")`],
+  ['A" or true or "B', String.raw`(lower(http.user_agent) contains "a\" or true or \"b")`],
+]) {
+  test('UA supported literal has the independent expected wire in both modes: ' + JSON.stringify(literal), () => {
+    for (const extra of [[], ['--cloudflare-free']]) {
+      const ctx = tmpProject(POLICY_FREE_PREFLIGHT.replace('ua_contains: [bot]', () => 'ua_contains: [' + JSON.stringify(literal) + ']'));
+      try {
+        const result = runCompiler(ctx.policyPath, ctx.dir, extra);
+        assert.strictEqual(result.status, 0, result.stderr);
+        const artifact = JSON.parse(fs.readFileSync(path.join(ctx.dir, 'infra/cloudflare-waf.tf.json'), 'utf8'));
+        const ua = artifact.resource.cloudflare_ruleset['free-preflight_custom'].rules.find((r: any) => r.description === 'User-Agent blocklist');
+        assert.strictEqual(ua.expression, expression);
+      } finally { ctx.cleanup(); }
+    }
+  });
+}
+
+test('UA programmatic boundary rejects non-string items without coercion in both modes', () => {
+  const { compileCloudflareWaf } = require(compilerPath);
+  for (const literal of [1, null, {}, []]) {
+    for (const free of [false, true]) {
+      const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'cf-ua-invalid-'));
+      try {
+        assert.throws(() => compileCloudflareWaf({ version: 2, request: { block: { ua_contains: [literal] } } }, {
+          outDir: dir, logger: { log() {}, error() {} }, ...(free ? { cloudflareFree: {} } : {}),
+        }), /^Error: CLOUDFLARE_WAF_INVALID: UA_LITERAL_TYPE$/);
+        assert.ok(!fs.existsSync(path.join(dir, 'infra')));
+      } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+    }
   }
 });
 
