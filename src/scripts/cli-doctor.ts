@@ -23,6 +23,7 @@ assertSupportedNode(require.main === module);
 
 const fs = require('fs');
 const path = require('path');
+const crypto = require('crypto');
 const { defaultPolicyPath } = require('./lib/policy-io');
 const { errorMessage } = require('./lib/errors');
 
@@ -32,6 +33,7 @@ const CHECK_POLICY_PARSES = 'policy_parses';
 const CHECK_POLICY_SCHEMA_VERSION = 'policy_schema_version';
 const CHECK_ENV_VARS = 'env_vars_referenced_by_policy';
 const CHECK_DIST_WRITABLE = 'dist_edge_writable';
+const CHECK_DIST_INFRA_WRITABLE = 'dist_infra_writable';
 const CHECK_DEPENDENCIES = 'npm_dependencies';
 
 const MIN_NODE_VERSION = '20.17.0';
@@ -210,18 +212,30 @@ function checkEnvVars(policyDoc: any, envProvider: EnvProvider): CheckRow {
 }
 
 function checkDistWritable(cwd: string): CheckRow {
-  const distDir = path.join(cwd, 'dist');
-  const edgeDir = path.join(distDir, 'edge');
+  return checkOutputWritable(cwd, 'edge', CHECK_DIST_WRITABLE);
+}
+
+function checkOutputWritable(cwd: string, leaf: 'edge' | 'infra', name: string): CheckRow {
+  const dir = path.join(cwd, 'dist', leaf);
   try {
-    fs.mkdirSync(edgeDir, { recursive: true });
-    const probe = path.join(edgeDir, '.doctor-write-probe');
-    fs.writeFileSync(probe, 'ok', 'utf8');
-    fs.unlinkSync(probe);
-    return pass(CHECK_DIST_WRITABLE, `dist/edge/ is writable (${edgeDir}).`);
+    fs.mkdirSync(dir, { recursive: true });
+    const probe = path.join(dir, `.doctor-write-probe-${crypto.randomUUID()}`);
+    // Exclusive creation prevents overwriting an existing file or following a probe symlink.
+    const fd = fs.openSync(probe, 'wx');
+    try {
+      fs.writeFileSync(fd, 'ok', 'utf8');
+    } finally {
+      try {
+        fs.closeSync(fd);
+      } finally {
+        fs.unlinkSync(probe);
+      }
+    }
+    return pass(name, `dist/${leaf}/ is writable (${dir}).`);
   } catch (e: unknown) {
     return fail(
-      CHECK_DIST_WRITABLE,
-      `Cannot write to dist/edge/: ${errorMessage(e)}. Check filesystem permissions — build will fail.`
+      name,
+      `Cannot write to dist/${leaf}/: ${errorMessage(e)}. Check filesystem permissions — build will fail.`
     );
   }
 }
@@ -291,6 +305,7 @@ function runDoctor(opts?: DoctorOptions) {
   checks.push(checkSchemaVersion(policyDoc));
   checks.push(checkEnvVars(policyDoc, envProvider));
   checks.push(checkDistWritable(cwd));
+  checks.push(checkOutputWritable(cwd, 'infra', CHECK_DIST_INFRA_WRITABLE));
   checks.push(checkDependencies(cwd, spawnSyncImpl));
 
   const strict = Boolean(opts && opts.strict);

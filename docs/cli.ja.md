@@ -327,12 +327,15 @@ npx cdn-security doctor --no-report                   # JSON レポートを生�
 | `node_version` | Node < 20.17.0 |
 | `policy_exists` | `policy/security.yml` も `policy/base.yml` も見つからない |
 | `policy_parses` | YAML パースエラー、またはトップレベルがオブジェクトでない |
-| `policy_schema_version` | `version` がない、または CLI が対応するスキーマ（現状 v1）と不一致 |
+| `policy_schema_version` | `version` がない、または CLI が対応するスキーマ（現状 v2）と不一致 |
 | `env_vars_referenced_by_policy` | `routes[].auth_gate.{token_env,credentials_env,secret_env}` や `origin.auth.secret_env` が参照する環境変数のいずれかが未設定 / 空。CloudFront Functions はランタイムで env を読めないため、ビルド時に焼き込みます。空のまま通すと silent auth bypass の原因になります。 |
 | `dist_edge_writable` | `dist/edge/` に書き込めない |
+| `dist_infra_writable` | `dist/infra/` に書き込めない |
 | `npm_dependencies` | `npm ls --depth=0 --json` が `problems[]` を返す。npm 自体がない環境では fail ではなく warn になります。 |
 
 失敗チェックが 1 件もなければ exit `0`、あれば `1`。`--strict` では warn チェックも失敗扱いにします。デフォルトで `doctor-report.json` を書き出すので CI artifact にアップロードできます。
+
+出力先の2つのチェックは、存在しないディレクトリを作り、それぞれ一意のプローブファイルを排他的に作成・書き込み・削除します。既存ファイルやプローブ名のsymlinkを保護します。プローブの作成・書き込み・後片付けに失敗すると該当チェックは失敗し、出力ディレクトリは後続のビルド用に残ります。
 
 ### CI 利用例
 
