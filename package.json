@@ -204,8 +204,8 @@
   "devDependencies": {
     "@types/js-yaml": "^4.0.9",
     "c8": "^11.0.0",
-    "json-schema-to-typescript": "^15.0.4",
-    "vitest": "^4.1.12",
-    "workerd": "1.20261012.1"
+    "json-schema-to-typescript": "^16.0.0",
+    "vitest": "^5.0.5",
+    "workerd": "1.20261021.1"
   }
 }
