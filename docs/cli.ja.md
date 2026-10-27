@@ -2,6 +2,8 @@
 
 > **言語:** [English](./cli.md) · 日本語
 
+最小YAML例と信頼境界は[PolicyのSecurity Controls](security-controls.ja.md)を参照してください。
+
 `cdn-security` はポリシーのスキャフォールド、エッジランタイムへのコンパイル、インフラ設定の生成、環境診断までを担う単一のエントリーポイントです。
 
 このreferenceの前に[空consumerへの候補導入](quickstart.ja.md)を行ってください。公開1.4.0とschema2候補は別です。以下の`npx`表記は導入済みlocal binaryの実行を前提とし、未導入状態でregistry fallbackを使いません。初回導入例は明示的な`./node_modules/.bin/cdn-security`を使います。

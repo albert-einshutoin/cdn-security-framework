@@ -107,7 +107,7 @@ if (ipAllowlistEntries.length > 0) {
 }
 
 // 2. Custom firewall ruleset (geo + IP + UA + fingerprints).
-// Worker request.path_patterns remain separate. Only the explicit static WAF
+// Worker request.block.path_patterns remain separate. Only the explicit static WAF
 // profile adds its literal path, shared method and edge-port requirements.
 const customRules: any[] = [];
 let customPriority = 1;
