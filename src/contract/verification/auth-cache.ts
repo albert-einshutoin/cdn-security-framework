@@ -15,12 +15,12 @@ import { checkAuthCacheWitness } from './auth-cache-witness';
 export interface ModelRequest { method: string; host: string; path: string; credential: 'absent' | 'valid' }
 export interface CacheFill { request: ModelRequest; storedAtMs: number; location: string }
 export interface ExecutionModel {
-  version: 1; hosts: string[]; distribution: string; location: string; nowMs: number;
+  version: 2; provider: 'aws' | 'cloudflare'; hosts: string[]; cacheNamespace: string; location: string; nowMs: number;
   flow?: 'standard'; originResponds?: boolean;
-  associations?: { rule: number; phase: 'viewer-request' | 'origin-request' | 'unassociated' | 'unknown' | 'origin-response' | 'viewer-response' }[];
-  effects?: { kind: 'redirect' | 'custom-error' | 'bypass' | 'unknown'; hosts?: string[]; methods?: string[]; paths?: string[] }[];
+  associations?: { rule: number; phase: 'viewer-request' | 'origin-request' | 'unassociated' | 'unknown' | 'origin-response' | 'viewer-response' | 'worker-before-cache' | 'worker-after-cache' | 'worker-response' }[];
+  effects?: { kind: 'redirect' | 'custom-error' | 'bypass' | 'skip' | 'unknown'; hosts?: string[]; methods?: string[]; paths?: string[] }[];
   cache?: { enabled: boolean; cacheable?: boolean; ttlMs?: number;
-    key?: { host: 'distribution' | 'viewer'; credential: 'shared' | 'partitioned' }; fills?: CacheFill[] };
+    key?: { host: 'namespace' | 'viewer'; credential: 'shared' | 'partitioned' }; fills?: CacheFill[] };
 }
 export type Verdict = 'VERIFIED' | 'VIOLATED' | 'UNKNOWN';
 export interface Witness {
@@ -75,23 +75,24 @@ function request(input: ModelRequest): ModelRequest {
   return { method: input.method, host: input.host, path: input.path, credential: input.credential };
 }
 function normalizeModel(m: ExecutionModel): ExecutionModel {
-  must(m && typeof m === 'object', 'INVALID_MODEL'); keys(m, ['version', 'hosts', 'distribution', 'location', 'nowMs', 'flow', 'originResponds', 'associations', 'effects', 'cache']);
-  must(m.version === 1 && time(m.nowMs) && host(m.distribution) && typeof m.location === 'string' && /^[a-z0-9-]{1,32}$/.test(m.location), 'INVALID_MODEL');
+  must(m && typeof m === 'object', 'INVALID_MODEL'); keys(m, ['version', 'provider', 'hosts', 'cacheNamespace', 'location', 'nowMs', 'flow', 'originResponds', 'associations', 'effects', 'cache']);
+  must(m.version === 2 && ['aws', 'cloudflare'].includes(m.provider) && time(m.nowMs) && host(m.cacheNamespace) && typeof m.location === 'string' && /^[a-z0-9-]{1,32}$/.test(m.location), 'INVALID_MODEL');
   must(m.flow === undefined || m.flow === 'standard', 'INVALID_FLOW');
   must(m.originResponds === undefined || typeof m.originResponds === 'boolean', 'INVALID_ORIGIN');
-  const out: ExecutionModel = { version: 1, hosts: stringSet(m.hosts, host, 16), distribution: m.distribution, location: m.location, nowMs: m.nowMs };
+  const out: ExecutionModel = { version: 2, provider: m.provider, hosts: stringSet(m.hosts, host, 16), cacheNamespace: m.cacheNamespace, location: m.location, nowMs: m.nowMs };
   must(out.hosts.length > 0, 'EMPTY_HOST_DOMAIN');
   if (m.flow !== undefined) out.flow = m.flow;
   if (m.originResponds !== undefined) out.originResponds = m.originResponds;
   if (m.associations !== undefined) {
     must(boundedList(m.associations), 'ASSOCIATION_LIMIT');
-    out.associations = m.associations.map(a => { keys(a, ['rule', 'phase']); must(time(a.rule) && ['viewer-request', 'origin-request', 'unassociated', 'unknown', 'origin-response', 'viewer-response'].includes(a.phase), 'INVALID_ASSOCIATION'); return { rule: a.rule, phase: a.phase }; }).sort((a,b) => a.rule-b.rule);
+    const phases = m.provider === 'aws' ? ['viewer-request', 'origin-request', 'unassociated', 'unknown', 'origin-response', 'viewer-response'] : ['worker-before-cache', 'worker-after-cache', 'worker-response', 'unassociated', 'unknown'];
+    out.associations = m.associations.map(a => { keys(a, ['rule', 'phase']); must(time(a.rule) && phases.includes(a.phase), 'INVALID_ASSOCIATION'); return { rule: a.rule, phase: a.phase }; }).sort((a,b) => a.rule-b.rule);
     must(new Set(out.associations.map(a => a.rule)).size === out.associations.length, 'DUPLICATE_ASSOCIATION');
   }
   if (m.effects !== undefined) {
     must(boundedList(m.effects), 'EFFECT_LIMIT');
     out.effects = m.effects.map(e => {
-      keys(e, ['kind', 'hosts', 'methods', 'paths']); must(['redirect', 'custom-error', 'bypass', 'unknown'].includes(e.kind), 'INVALID_EFFECT');
+      keys(e, ['kind', 'hosts', 'methods', 'paths']); must(['redirect', 'custom-error', 'bypass', 'skip', 'unknown'].includes(e.kind), 'INVALID_EFFECT');
       return { kind: e.kind, ...(e.hosts === undefined ? {} : { hosts: stringSet(e.hosts, host, 16) }), ...(e.methods === undefined ? {} : { methods: stringSet(e.methods, method) }), ...(e.paths === undefined ? {} : { paths: stringSet(e.paths, literalPath) }) };
     }).sort((a,b) => canonical(a)<canonical(b)?-1:canonical(a)>canonical(b)?1:0);
   }
@@ -101,7 +102,7 @@ function normalizeModel(m: ExecutionModel): ExecutionModel {
     const cache: NonNullable<ExecutionModel['cache']> = { enabled: c.enabled };
     if (c.cacheable !== undefined) cache.cacheable = c.cacheable;
     if (c.ttlMs !== undefined) cache.ttlMs = c.ttlMs;
-    if (c.key !== undefined) { keys(c.key, ['host', 'credential']); must(['distribution', 'viewer'].includes(c.key.host) && ['shared', 'partitioned'].includes(c.key.credential), 'INVALID_CACHE_KEY'); cache.key = { host: c.key.host, credential: c.key.credential }; }
+    if (c.key !== undefined) { keys(c.key, ['host', 'credential']); must(['namespace', 'viewer'].includes(c.key.host) && ['shared', 'partitioned'].includes(c.key.credential), 'INVALID_CACHE_KEY'); cache.key = { host: c.key.host, credential: c.key.credential }; }
     if (c.fills !== undefined) {
       must(boundedList(c.fills), 'FILL_LIMIT');
       cache.fills = c.fills.map(f => {
@@ -143,7 +144,7 @@ function matchingRules(p: Projection, r: ModelRequest) {
 }
 function cacheKey(p: Projection, r: ModelRequest): string {
   const key = p.model.cache!.key!;
-  return canonical([p.model.distribution, r.path, r.method === 'HEAD' ? 'GET' : r.method, key.host === 'viewer' ? r.host : null, key.credential === 'partitioned' ? r.credential : null]);
+  return canonical([p.model.cacheNamespace, r.path, r.method === 'HEAD' ? 'GET' : r.method, key.host === 'viewer' ? r.host : null, key.credential === 'partitioned' ? r.credential : null]);
 }
 export function projectAuthCache(contract: SecurityContractInputV1, policy: CDNSecurityFrameworkPolicy, model: ExecutionModel): Projection {
   // Bound JSON is also a snapshot: later caller mutation cannot alter the projection.
@@ -175,7 +176,7 @@ export function projectAuthCache(contract: SecurityContractInputV1, policy: CDNS
   }
   for (const f of normalized.cache?.fills ?? []) {
     must(['GET','HEAD','OPTIONS'].includes(f.request.method) && admitted(p,f.request), 'INVALID_FILL_REQUEST');
-    must(!matchingRules(p,f.request).some(rule => normalized.associations?.some(a => a.rule === rule.index && ['viewer-request','origin-request'].includes(a.phase)) && f.request.credential === 'absent'), 'UNREACHABLE_FILL');
+    must(!matchingRules(p,f.request).some(rule => normalized.associations?.some(a => a.rule === rule.index && ['viewer-request','origin-request','worker-before-cache','worker-after-cache'].includes(a.phase)) && f.request.credential === 'absent'), 'UNREACHABLE_FILL');
   }
   p.digest = modelDigest(projectionIdentity(p));
   freezeSnapshot(p);issuedProjections.add(p);
@@ -197,8 +198,8 @@ function unknownReason(p: Projection, r: ModelRequest): string | undefined {
   for (const rule of matchingRules(p,r)) {
     const phase = m.associations?.find(a => a.rule === rule.index)?.phase;
     if (phase === undefined || phase === 'unknown') return 'ASSOCIATION_UNKNOWN';
-    if (phase === 'origin-response' || phase === 'viewer-response') return 'RESPONSE_AUTH_PHASE_UNSUPPORTED';
-    if (phase !== 'unassociated' && rule.auth.verifiability.aws !== 'enforced') return 'AUTH_GATE_UNSUPPORTED';
+    if (phase === 'origin-response' || phase === 'viewer-response' || phase === 'worker-response') return 'RESPONSE_AUTH_PHASE_UNSUPPORTED';
+    if (phase !== 'unassociated' && (!['static_token','basic_auth'].includes(rule.auth.kind) || rule.auth.verifiability[m.provider] !== 'enforced')) return 'AUTH_GATE_UNSUPPORTED';
   }
   return undefined;
 }
@@ -215,6 +216,10 @@ export function verifyAuthCache(p: Projection, metadata: {generatedAt?:string} =
   must(issuedProjections.has(p), 'PROJECTION_BINDING');
   if(metadata.generatedAt!==undefined) must(/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/.test(metadata.generatedAt), 'INVALID_METADATA');
   const cells: Cell[]=[];
+  const beforeCache = p.model.provider === 'aws' ? 'viewer-request' : 'worker-before-cache';
+  const afterCache = p.model.provider === 'aws' ? 'origin-request' : 'worker-after-cache';
+  const entry = p.model.provider === 'aws' ? 'viewer-request' : 'worker';
+  const origin = p.model.provider === 'aws' ? 'origin-request' : 'origin-fetch';
   for (const op of p.contract.operations) for (const h of p.model.hosts) for (const credential of ['absent','valid'] as const) {
     const required = ['authenticated','privileged'].includes(op.exposure) || (op.auth.mode==='alternatives' && op.auth.alternatives.every(a=>!a.anonymous));
     if (!required && op.exposure!=='unknown' && op.auth.mode!=='unknown') continue;
@@ -224,20 +229,64 @@ export function verifyAuthCache(p: Projection, metadata: {generatedAt?:string} =
     if(reason){cell.reason=reason;continue;}
     const rules=matchingRules(p,r), phases=rules.map(rule=>p.model.associations!.find(a=>a.rule===rule.index)!.phase);
     // Check both credential partitions: valid-credential HITs can also skip the required gate.
-    if(phases.includes('viewer-request')) {cell.verdict='VERIFIED';cell.reason='VIEWER_AUTH_BEFORE_ANY_CACHE_PATH';const suffix=cachePath(p,r);cell.paths=[credential==='absent'?'viewer-request -> auth-check -> rejected':`viewer-request -> auth-check -> cache-lookup -> ${suffix?.kind ?? 'unknown-suffix'}`];continue;}
+    if(phases.includes(beforeCache)) {cell.verdict='VERIFIED';cell.reason=p.model.provider==='aws'?'VIEWER_AUTH_BEFORE_ANY_CACHE_PATH':'WORKER_AUTH_BEFORE_ANY_CACHE_PATH';const suffix=cachePath(p,r);cell.paths=[credential==='absent'?`${entry} -> auth-check -> rejected`:`${entry} -> auth-check -> cache-lookup -> ${suffix?.kind ?? 'unknown-suffix'}`];continue;}
     const cache=cachePath(p,r);
     if(!cache){cell.reason='CACHE_REACHABILITY_UNKNOWN';continue;}
-    if(cache.kind==='MISS' && phases.includes('origin-request')) {cell.verdict='VERIFIED';cell.reason='ONLY_MISS_REACHABLE_ORIGIN_AUTH';cell.paths=[`cache MISS -> origin-request -> auth-check:${credential==='absent'?'rejected':'accepted'}`];continue;}
+    if(cache.kind==='MISS' && phases.includes(afterCache)) {cell.verdict='VERIFIED';cell.reason=p.model.provider==='aws'?'ONLY_MISS_REACHABLE_ORIGIN_AUTH':'ONLY_MISS_REACHABLE_WORKER_AUTH';cell.paths=[`cache MISS -> ${afterCache} -> auth-check:${credential==='absent'?'rejected':'accepted'}`];continue;}
     if(cache.kind==='MISS' && p.model.originResponds!==true){cell.reason='ORIGIN_RESPONSE_UNKNOWN';continue;}
-    const trace=['viewer-request','cache-lookup',cache.kind,...(cache.kind==='MISS'?['origin-request']:[]),'protected-response'];
+    const trace=[entry,'cache-lookup',cache.kind,...(cache.kind==='MISS'?[origin]:[]),'protected-response'];
     const witness:Witness={inputDigest:p.digest,request:r,routeKey:op.routeKey,cache:cache.kind,...(cache.fill?{fill:cache.fill}:{}),trace};
     checkAuthCacheWitness(p,witness);
     cell.verdict='VIOLATED';cell.reason='PROTECTED_RESPONSE_WITHOUT_AUTH';cell.witness=witness;cell.paths=[trace.join(' -> ')];
   }
   const verdict:Verdict=cells.some(c=>c.verdict==='VIOLATED')?'VIOLATED':cells.length>0&&cells.every(c=>c.verdict==='VERIFIED')?'VERIFIED':'UNKNOWN';
   const artifacts=[p.policyArtifact,{name:'security-ir.json',content:serializeSecurityContract(p.contract)},{name:'allowed-surface.json',content:canonical(p.surface)+'\n'},{name:'execution-model.json',content:canonical(p.model)+'\n'}].map(a=>({...a,digest:`sha256:${createHash('sha256').update(a.content).digest('hex')}`}));
-  const semantic={model:'cloudfront-auth-cache-v1',inputDigest:p.digest,verdict,cells,emptyDomainReason:cells.length?null:'NO_PROTECTED_DOMAIN',invariant:{R:'Every declared protected admitted request, both credential states and its reachable execution path',E:'Requests whose execution evaluates a supported blocking auth gate',obligation:'R subset E',quantifier:'Exhaustive finite domain; not test sampling'},scope:{hosts:p.model.hosts,operations:p.contract.operations.map(o=>o.routeKey),credentials:['absent','valid'],timeMs:p.model.nowMs,location:p.model.location},assumptions:['Explicit model associations, not deployed configuration','Abstract gates reject absent and accept valid credentials without side effects','Resident fills remain at the specified cache location until input TTL expires','Only canonical literal paths; no query, cookie or other cache key dimensions beyond explicit credential state','Other non-auth request checks admit the modeled request; they never generate protected responses'],limitations:['Model-only coverage; no AWS/Cloudflare runtime, cryptographic, authorization or performance proof','Templates and declared unsupported effects remain UNKNOWN at affected cells','No eviction, revalidation, request rewriting, origin failover or implicit redirect/custom-error semantics']};
+  const semantic={model:'provider-auth-cache-v2',provider:p.model.provider,inputDigest:p.digest,verdict,cells,emptyDomainReason:cells.length?null:'NO_PROTECTED_DOMAIN',invariant:{R:'Every declared protected admitted request, both credential states and its reachable execution path',E:'Requests whose execution evaluates a supported blocking auth gate',obligation:'R subset E',quantifier:'Exhaustive finite domain; not test sampling'},scope:{hosts:p.model.hosts,operations:p.contract.operations.map(o=>o.routeKey),credentials:['absent','valid'],timeMs:p.model.nowMs,location:p.model.location},assumptions:['Explicit model associations, not deployed configuration','Abstract gates reject absent and accept valid credentials without side effects','Resident fills remain at the specified cache location until input TTL expires','Only canonical literal paths; no query, cookie or other cache key dimensions beyond explicit credential state','Other non-auth request checks admit the modeled request; they never generate protected responses'],limitations:['Model-only coverage; no AWS/Cloudflare runtime, cryptographic, authorization or performance proof','Templates and declared unsupported effects remain UNKNOWN at affected cells','No eviction, revalidation, request rewriting, origin failover or implicit redirect/custom-error semantics']};
   const digest=modelDigest(semantic);
-  const findings=cells.map((c,index)=>({c,index})).filter(({c})=>c.verdict==='VIOLATED').map(({c,index})=>createFinding({ruleId:'SC-AUTHCACHE-001',severity:'error',confidence:'deterministic',category:'authentication',title:'Model auth bypass',message:c.paths[0],route:{method:c.witness!.request.method,path:c.witness!.request.path},evidence:[{source:'generated-artifact',uri:'evidence.json',pointer:`/semantic/cells/${index}`,digest,analyzer:'auth-cache@1',capability:'explicit-cloudfront-model-only',complete:true}],remediation:{summary:'Review pre-cache authentication and the explicitly modeled cache configuration',safeAutoFix:false}}));
+  const findings=cells.map((c,index)=>({c,index})).filter(({c})=>c.verdict==='VIOLATED').map(({c,index})=>createFinding({ruleId:'SC-AUTHCACHE-001',severity:'error',confidence:'deterministic',category:'authentication',title:'Model auth bypass',message:c.paths[0],route:{method:c.witness!.request.method,path:c.witness!.request.path},evidence:[{source:'generated-artifact',uri:'evidence.json',pointer:`/semantic/cells/${index}`,digest,analyzer:'auth-cache@2',capability:'explicit-provider-auth-cache-model-only',complete:true}],remediation:{summary:'Review pre-cache authentication and the explicitly modeled cache configuration',safeAutoFix:false}}));
   return {semantic,semanticDigest:digest,artifacts,validationSchema:p.validationSchema,findings,metadata};
+}
+
+// Equality of finite gate coverage cannot turn two unsafe providers into a safe result.
+export function compareAuthCacheModels(aws: Projection, cloudflare: Projection) {
+  const reports = {aws: verifyAuthCache(aws), cloudflare: verifyAuthCache(cloudflare)};
+  must(aws.model.provider==='aws' && cloudflare.model.provider==='cloudflare', 'COMPARISON_PROVIDER');
+  const contractDigest=securityContractSemanticDigest(aws.contract);
+  must(contractDigest===securityContractSemanticDigest(cloudflare.contract), 'COMPARISON_CONTRACT');
+  must(aws.validationSchema.digest===cloudflare.validationSchema.digest, 'COMPARISON_SCHEMA');
+  const domain=(p:Projection)=>({hosts:p.model.hosts,timeMs:p.model.nowMs,location:p.model.location});
+  must(canonical(domain(aws))===canonical(domain(cloudflare)), 'COMPARISON_DOMAIN');
+  const key=(c:Cell)=>canonical([c.routeKey,c.host,c.credential]);
+  const peer=new Map(reports.cloudflare.semantic.cells.map(c=>[key(c),c]));
+  must(peer.size===reports.aws.semantic.cells.length, 'COMPARISON_DOMAIN');
+  const cells=reports.aws.semantic.cells.map(a=>{
+    const c=peer.get(key(a));must(c,'COMPARISON_DOMAIN');
+    const gateCoverageEqual=a.verdict==='UNKNOWN'||c.verdict==='UNKNOWN'?null:a.verdict===c.verdict;
+    return {routeKey:a.routeKey,host:a.host,credential:a.credential,
+      aws:{verdict:a.verdict,reason:a.reason},cloudflare:{verdict:c.verdict,reason:c.reason},gateCoverageEqual};
+  });
+  const counterexamples=[] as Array<{provider:ExecutionModel['provider'];witness:Witness}>;
+  for(const [provider,p] of [['aws',aws],['cloudflare',cloudflare]] as const) {
+    for(const c of reports[provider].semantic.cells) if(c.verdict==='VIOLATED') {
+      must(c.witness,'COMPARISON_WITNESS');checkAuthCacheWitness(p,c.witness);
+      counterexamples.push({provider,witness:c.witness});
+    }
+  }
+  const verdict:Verdict=counterexamples.length?'VIOLATED':cells.length>0&&cells.every(c=>c.aws.verdict==='VERIFIED'&&c.cloudflare.verdict==='VERIFIED')?'VERIFIED':'UNKNOWN';
+  const bindings=(provider:'aws'|'cloudflare',p:Projection)=>({provider,modelVersion:p.model.version,
+    inputDigest:p.digest,policyDigest:p.policyArtifact.digest,validationSchema:p.validationSchema,
+    artifacts:reports[provider].artifacts.map(a=>({name:a.name,digest:a.digest}))});
+  const semantic={model:'provider-auth-cache-comparison-v1' as const,scope:'finite-model-auth-gate-coverage' as const,
+    contractDigest,domain:domain(aws),verdict,
+    gateCoverageEqual:cells.length===0||cells.some(c=>c.gateCoverageEqual===null)?null:cells.every(c=>c.gateCoverageEqual),
+    providers:{aws:reports.aws.semantic.verdict,cloudflare:reports.cloudflare.semantic.verdict},
+    bindings:{aws:bindings('aws',aws),cloudflare:bindings('cloudflare',cloudflare)},cells,counterexamples,
+    runtime:'UNKNOWN' as const,deployment:'UNKNOWN' as const,wafExecution:'UNKNOWN' as const,
+    limitations:['Explicit finite models and declared placement only; no native/runtime/deployment equivalence',
+      'Only static_token/basic_auth gates, literal requests and declared resident cache state',
+      'Gate-coverage equality is separate from provider safety; both-unsafe remains VIOLATED',
+      'No cryptographic, authorization, WAF, performance or actual AWS cache lifecycle proof']};
+  const result={semantic,semanticDigest:modelDigest(semantic),findingsByProvider:{aws:reports.aws.findings,cloudflare:reports.cloudflare.findings}};
+  freezeSnapshot(result);
+  return result;
 }

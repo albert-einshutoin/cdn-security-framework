@@ -88,11 +88,12 @@
     "response_headers": {}
   },
   "model": {
-    "version": 1,
+    "version": 2,
+    "provider": "aws",
     "hosts": [
       "admin.example.test"
     ],
-    "distribution": "distribution.example.test",
+    "cacheNamespace": "distribution.example.test",
     "location": "edge-1",
     "nowMs": 2000,
     "flow": "standard",
@@ -109,7 +110,7 @@
       "cacheable": true,
       "ttlMs": 5000,
       "key": {
-        "host": "distribution",
+        "host": "namespace",
         "credential": "shared"
       },
       "fills": [
