@@ -137,7 +137,7 @@
     "README.md", "README.ja.md", "LICENSE", "docs/api-manifest.json", "docs/quickstart.md", "docs/quickstart.ja.md",
     "docs/openapi-integration.md", "docs/openapi-integration.ja.md", "docs/programmatic-api.md", "docs/programmatic-api.ja.md",
     "examples/openapi/openapi.yaml", "examples/nestjs-contract/run-analysis.cjs", "examples/github-actions/contract-diff.yml",
-    "examples/github-actions/advisory-check.yml", "examples/sample-cloudflare-events.jsonl",
+    "examples/github-actions/advisory-check.yml", "examples/sample-cloudflare-events.jsonl", "examples/sample-monitor.jsonl",
     "types/policy.d.ts"
   ],
   "internalPaths": [
@@ -184,7 +184,8 @@
       "examples/openapi/README.ja.md",
       "examples/openapi/README.md",
       "examples/openapi/openapi.yaml",
-      "examples/sample-cloudflare-events.jsonl"
+      "examples/sample-cloudflare-events.jsonl",
+      "examples/sample-monitor.jsonl"
     ],
     "experimental": [
       "schemas/nestjs-source-analysis-options.schema.json",

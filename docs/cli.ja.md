@@ -223,6 +223,33 @@ npx cdn-security analyze --input /path/to/monitor.jsonl --min-count 3 --top 10 -
 - `--top`: 候補数と候補ごとのsample数の上限（既定`20`、小数切捨て）。
 - `--json`: stdoutへ末尾改行付き単一JSON文書。指定しなければtext report。
 
+### 同梱の合成monitorサンプル
+
+[28 recordのサンプル](../examples/sample-monitor.jsonl)は既存の既定monitor入力契約を使います。導入済みconsumerでは次を実行できます。
+
+```bash
+./node_modules/.bin/cdn-security analyze --input node_modules/cdn-security-framework/examples/sample-monitor.jsonl --min-count 3 --top 10
+./node_modules/.bin/cdn-security analyze --input node_modules/cdn-security-framework/examples/sample-monitor.jsonl --min-count 3 --top 10 --json
+```
+
+repo checkoutでは`node bin/cli.js`と`--input examples/sample-monitor.jsonl`に置き換えます。両commandはexit0です。JSON reportは`summary.inputStatus=complete`、parsed/analyzed 28件、拒否・診断0件、block 12件・monitor 8件で、textも同じ件数を示します。残り8件は明示的な`allow`で、`pass`へ正規化されます。省略されたstatusからHTTP statusを推定しません。
+
+`--min-count 3`は件数の上限を含むため、候補5件は次の順になります。
+
+| Policy route | 理由 | block件数 |
+| --- | --- | --- |
+| `/login` | Unauthorized | 1 |
+| `/search` | URI Too Long | 1 |
+| `/upload` | Host Not Allowed | 1 |
+| `/legacy-api` | Method Not Allowed | 2 |
+| `/internal` | Missing user-agent | 3 |
+
+`/admin`のblockは4件なので、この閾値では除外されます。monitorだけの`/checkout`はblock候補になりません。reason/route集計はすべての有効eventを含み、合計はblockだけの件数ではありません。
+
+時刻・route/targetラベル・eventはすべて合成で、実IP・cookie・token・credentialを含みません。宣言された`policy_route`/`target`は集計の例で、配備先への信頼済みattributionではありません。log record数は一意request数でも防御率でもなく、monitorのcheckが実際にenforceされた証拠にもなりません。monitorのstatusはcheck結果で、最終HTTP結果とは限らず、認証は引き続きfail closedになり得ます。候補は人間のreview用で、allowlist変更や自動applyを許可しません。予定中のCanonical Event/Reason registryやRuntime Evidence全体の完了を意味せず、`sample-cloudflare-events.jsonl`とは別のfixtureです。
+
+### 既定monitor入力契約
+
 非空行は明示的なown propertyの`event`、`eventName`、`outcome`のいずれかを持つobjectである必要があります。前後空白と大文字小文字を正規化し、`allow`/`pass`/`passed`は`pass`、`block`/`blocked`は`block`、`monitor`/`monitoring`/`logged`は`monitor`として扱います。`audit`、`error`、`challenge`、`challenge_report`は意味を保持します。存在するevent aliasはすべて有効で、意味が一致する必要があります。statusだけからeventを推定せず、status 403のchallengeもblockへ変換しません。
 
 外側にevent aliasが1つでもあれば、値が不正でも外側recordを選びます。存在しなければ、own propertyの`message`にevent aliasを持つobjectをJSON文字列で格納します。展開は1段のみで、外側metadataとの合成や別recordへのfallbackはしません。
