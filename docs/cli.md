@@ -335,12 +335,15 @@ Checks run, in order:
 | `node_version` | Node < 20.17.0. |
 | `policy_exists` | Neither `policy/security.yml` nor `policy/base.yml` is found. |
 | `policy_parses` | YAML parse error or non-object top-level value. |
-| `policy_schema_version` | `version` field missing, or does not match the CLI's supported schema (currently v1). |
+| `policy_schema_version` | `version` field missing, or does not match the CLI's supported schema (currently v2). |
 | `env_vars_referenced_by_policy` | Any env var referenced by `routes[].auth_gate.{token_env,credentials_env,secret_env}` or `origin.auth.secret_env` is unset or empty. CloudFront Functions cannot read env at runtime, so these are baked into the build artifact — missing values produce a silent auth bypass. |
 | `dist_edge_writable` | Cannot create or write files under `dist/edge/`. |
+| `dist_infra_writable` | Cannot create or write files under `dist/infra/`. |
 | `npm_dependencies` | `npm ls --depth=0 --json` reports `problems[]` (missing / invalid peer / unmet dep). `warn` (not fail) when npm is absent. |
 
 Exit code is `0` when no check has status `fail`, else `1`. With `--strict`, warning checks also fail the command. Report is written to `doctor-report.json` by default — useful for CI capture.
+
+The two output checks create missing directories, then exclusively create, write and remove a unique probe file in each directory. Existing files and probe symlinks are preserved. A probe creation, write or cleanup failure fails the corresponding check; the output directories remain available for subsequent builds.
 
 ### Example CI usage
 

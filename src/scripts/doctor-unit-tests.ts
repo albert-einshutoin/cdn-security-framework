@@ -4,6 +4,7 @@ const assert = require('assert');
 const fs = require('fs');
 const os = require('os');
 const path = require('path');
+const crypto = require('crypto');
 
 const {
   runDoctor,
@@ -38,6 +39,19 @@ function mktmp(prefix = 'doctor-unit-') {
 }
 
 const repoRoot = path.join(__dirname, '..');
+
+function runWritableDoctor(tmp: string) {
+  fs.mkdirSync(path.join(tmp, 'policy'), { recursive: true });
+  fs.writeFileSync(path.join(tmp, 'policy', 'security.yml'), 'version: 2\nrequest:\n  allow_methods: [GET]\nresponse_headers: {}\n');
+  return runDoctor({
+    cwd: tmp,
+    pkgRoot: repoRoot,
+    envProvider: (): undefined => undefined,
+    spawnSync: (): { stdout: string } => ({ stdout: JSON.stringify({ problems: [] }) }),
+    log: false,
+    reportPath: 'doctor-report.json',
+  });
+}
 
 // ---- collectReferencedEnvVars --------------------------------------------
 
@@ -248,7 +262,127 @@ test('checkDistWritable: pass when cwd is writable', () => {
   }
 });
 
-// Skip read-only test on platforms where we cannot enforce it reliably.
+for (const leaf of ['edge', 'infra']) {
+  for (const kind of ['file', 'symlink']) {
+    test(`runDoctor: preserves existing ${leaf} fixed-name probe ${kind}`, () => {
+      const tmp = mktmp();
+      try {
+        const dir = path.join(tmp, 'dist', leaf);
+        fs.mkdirSync(dir, { recursive: true });
+        const probe = path.join(dir, '.doctor-write-probe');
+        const target = path.join(tmp, 'existing-output.txt');
+        fs.writeFileSync(target, 'keep existing output');
+        if (kind === 'symlink') fs.symlinkSync(target, probe);
+        else fs.writeFileSync(probe, 'keep existing output');
+        const result = runWritableDoctor(tmp);
+        assert.strictEqual(result.exitCode, 0);
+        assert.strictEqual(fs.readFileSync(probe, 'utf8'), 'keep existing output');
+        assert.strictEqual(fs.readFileSync(target, 'utf8'), 'keep existing output');
+        assert.strictEqual(fs.lstatSync(probe).isSymbolicLink(), kind === 'symlink');
+        assert.deepStrictEqual(fs.readdirSync(dir), ['.doctor-write-probe']);
+      } finally {
+        fs.rmSync(tmp, { recursive: true, force: true });
+      }
+    });
+  }
+
+  test(`runDoctor: fails when dist/${leaf} cannot be created`, () => {
+    const tmp = mktmp();
+    try {
+      fs.mkdirSync(path.join(tmp, 'dist'));
+      fs.writeFileSync(path.join(tmp, 'dist', leaf), 'keep obstructing file');
+      const result = runWritableDoctor(tmp);
+      assert.strictEqual(result.exitCode, 1);
+      const check = result.report.checks.find((c: any) => c.name === `dist_${leaf}_writable`);
+      assert.strictEqual(check?.status, 'fail');
+      assert.ok(check.detail.includes(`dist/${leaf}/`));
+      assert.strictEqual(fs.readFileSync(path.join(tmp, 'dist', leaf), 'utf8'), 'keep obstructing file');
+      const written = JSON.parse(fs.readFileSync(path.join(tmp, 'doctor-report.json'), 'utf8'));
+      assert.strictEqual(written.checks.find((c: any) => c.name === `dist_${leaf}_writable`)?.status, 'fail');
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}
+
+for (const kind of ['file', 'symlink']) {
+  test(`runDoctor: exclusive probe collision preserves existing ${kind} and fails closed`, () => {
+    const tmp = mktmp();
+    const originalUuid = crypto.randomUUID;
+    try {
+      const target = path.join(tmp, 'existing-output.txt');
+      fs.writeFileSync(target, 'keep collision target');
+      for (const leaf of ['edge', 'infra']) {
+        const dir = path.join(tmp, 'dist', leaf);
+        fs.mkdirSync(dir, { recursive: true });
+        const probe = path.join(dir, '.doctor-write-probe-collision');
+        if (kind === 'symlink') fs.symlinkSync(target, probe);
+        else fs.writeFileSync(probe, 'keep collision target');
+      }
+      crypto.randomUUID = () => 'collision';
+      const result = runWritableDoctor(tmp);
+      assert.strictEqual(result.exitCode, 1);
+      for (const leaf of ['edge', 'infra']) {
+        assert.strictEqual(result.report.checks.find((c: any) => c.name === `dist_${leaf}_writable`)?.status, 'fail');
+        const dir = path.join(tmp, 'dist', leaf);
+        const probe = path.join(dir, '.doctor-write-probe-collision');
+        assert.strictEqual(fs.readFileSync(probe, 'utf8'), 'keep collision target');
+        assert.strictEqual(fs.lstatSync(probe).isSymbolicLink(), kind === 'symlink');
+        assert.deepStrictEqual(fs.readdirSync(dir), ['.doctor-write-probe-collision']);
+      }
+      assert.strictEqual(fs.readFileSync(target, 'utf8'), 'keep collision target');
+    } finally {
+      crypto.randomUUID = originalUuid;
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+}
+
+test('runDoctor: probe cleanup failures fail both rows', () => {
+  const tmp = mktmp();
+  const originalUnlink = fs.unlinkSync;
+  try {
+    fs.unlinkSync = (file: string) => {
+      if (path.basename(file).startsWith('.doctor-write-probe-')) throw new Error('simulated probe cleanup denial');
+      return originalUnlink(file);
+    };
+    const result = runWritableDoctor(tmp);
+    assert.strictEqual(result.exitCode, 1);
+    for (const leaf of ['edge', 'infra']) {
+      const check = result.report.checks.find((c: any) => c.name === `dist_${leaf}_writable`);
+      assert.strictEqual(check?.status, 'fail');
+      assert.ok(check.detail.includes('simulated probe cleanup denial'));
+      const files = fs.readdirSync(path.join(tmp, 'dist', leaf));
+      assert.strictEqual(files.length, 1);
+      assert.ok(files[0].startsWith('.doctor-write-probe-'));
+    }
+  } finally {
+    fs.unlinkSync = originalUnlink;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
+
+test('runDoctor: probe write failures fail both rows and clean up owned files', () => {
+  const tmp = mktmp();
+  const originalWrite = fs.writeFileSync;
+  try {
+    fs.writeFileSync = (file: unknown, ...args: unknown[]) => {
+      if (typeof file === 'number') throw new Error('simulated probe write denial');
+      return originalWrite(file, ...args);
+    };
+    const result = runWritableDoctor(tmp);
+    assert.strictEqual(result.exitCode, 1);
+    for (const leaf of ['edge', 'infra']) {
+      const check = result.report.checks.find((c: any) => c.name === `dist_${leaf}_writable`);
+      assert.strictEqual(check?.status, 'fail');
+      assert.ok(check.detail.includes('simulated probe write denial'));
+      assert.deepStrictEqual(fs.readdirSync(path.join(tmp, 'dist', leaf)), []);
+    }
+  } finally {
+    fs.writeFileSync = originalWrite;
+    fs.rmSync(tmp, { recursive: true, force: true });
+  }
+});
 
 // ---- checkDependencies ---------------------------------------------------
 
@@ -354,6 +488,12 @@ routes:
     assert.strictEqual(written.exitCode, 0);
     assert.strictEqual(written.strict, false);
     assert.ok(Array.isArray(written.checks));
+    const names = written.checks.map((c: any) => c.name);
+    assert.strictEqual(names.indexOf('dist_infra_writable'), names.indexOf('dist_edge_writable') + 1);
+    for (const leaf of ['edge', 'infra']) {
+      assert.strictEqual(written.checks.find((c: any) => c.name === `dist_${leaf}_writable`)?.status, 'pass');
+      assert.deepStrictEqual(fs.readdirSync(path.join(tmp, 'dist', leaf)), []);
+    }
   } finally {
     fs.rmSync(tmp, { recursive: true, force: true });
   }
@@ -424,7 +564,7 @@ test('runDoctor: reportPath: null skips file write', () => {
     reportPath: null,
   });
   try {
-    // checkDistWritable legitimately creates dist/edge as a side effect; only
+    // Writability diagnostics legitimately create dist/edge and dist/infra; only
     // assert that no JSON report file appears when reportPath is null.
     const files = fs.readdirSync(tmp);
     assert.ok(!files.includes('doctor-report.json'), 'report file should not be written');
