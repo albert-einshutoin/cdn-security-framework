@@ -4,6 +4,8 @@
 
 `cdn-security` is the single entry point that scaffolds policy, compiles it to edge runtime code, emits infra config, and runs diagnostics.
 
+For minimal YAML examples and trust boundaries, see [Policy Security Controls](security-controls.md).
+
 First follow [candidate installation in an empty consumer](quickstart.md). Published1.4.0 and the schema2 candidate differ. Any `npx` notation below assumes an already installed local binary, not registry fallback. First-run examples use explicit `./node_modules/.bin/cdn-security`.
 
 ```bash

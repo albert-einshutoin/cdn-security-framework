@@ -470,6 +470,8 @@
       "docs/runbooks/secret-rotation.md",
       "docs/schema-migration.ja.md",
       "docs/schema-migration.md",
+      "docs/security-controls.ja.md",
+      "docs/security-controls.md",
       "docs/selective-testing.ja.md",
       "docs/selective-testing.md",
       "docs/signed-urls.ja.md",
