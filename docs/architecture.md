@@ -311,17 +311,22 @@ profile rejects Logpush resources even when an account might have included usage
 The local subset accepts the compiler's Geo/ASCII-UA block expressions,
 validated Free rate rules and the explicit static profile's literal path,
 method and edge-port block shapes. [Cloudflare `lower()`](https://developers.cloudflare.com/ruleset-engine/rules-language/functions/#lower)
-folds ASCII only. Non-ASCII UA literals return `unknown` with
-`UA_UNICODE_CASE_UNSUPPORTED` and stop Free generation, including literals that
-the existing JavaScript generator already lowercased. This profile makes no
-Unicode case-folding equivalence claim. The compiler checks the original UA
-literal before case conversion, so Unicode-to-ASCII mappings cannot bypass the
-restriction. If the existing emitter cannot preserve a literal in canonical
-JSON quoting, Free generation stops with `UA_LITERAL_ENCODING_UNSUPPORTED`.
+folds ASCII only. In both default and Free WAF compilation, non-ASCII UA literals
+stop generation with `CLOUDFLARE_WAF_UNKNOWN: UA_UNICODE_CASE_UNSUPPORTED`.
+The compiler checks the original literal before case conversion, including
+Unicode-to-ASCII mappings. Control characters stop generation with
+`CLOUDFLARE_WAF_UNKNOWN: UA_LITERAL_ENCODING_UNSUPPORTED`; non-string items are
+`CLOUDFLARE_WAF_INVALID: UA_LITERAL_TYPE`. Existing output remains unchanged.
+One shared encoder quotes printable ASCII and escapes both double quotes and
+backslashes according to [Cloudflare's basic string syntax](https://developers.cloudflare.com/ruleset-engine/rules-language/values/#quoted-string-syntax).
+This fixes the previous source-character loss and allows correctly encoded
+backslash literals in Free mode. These are generated-literal checks, not evidence
+of Unicode request matching parity, provider acceptance or deployed WAF efficacy.
 The shared emitted-expression check rejects [Terraform template markers](https://developer.hashicorp.com/terraform/language/syntax/json#expression-mapping)
 in both custom and rate rules with `EXPRESSION_TEMPLATE_UNSUPPORTED`, including
-direct rate expressions and generated scope-down expressions. These input
-restrictions apply to explicit Free mode. All emitted rules use the shared
+direct rate expressions and generated scope-down expressions. These
+template-marker restrictions apply to explicit Free mode; the UA input and
+quoting boundary above applies to both modes. All emitted rules use the shared
 literal encoding above. The preflight checks whole supported shapes and
 counts disabled rules too. Unsupported fields, functions, actions, lists,
 managed phases or resources return bounded `unknown` diagnostics and stop WAF

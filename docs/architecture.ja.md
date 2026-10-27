@@ -304,15 +304,20 @@ URI-path式の限定契約を再利用します。
 対応subsetはcompilerのGeo/ASCII-UA block式、検証済みFree rate rulesと、
 明示static profileのliteral Path・Method・edge Port block式です。
 [Cloudflareの`lower()`](https://developers.cloudflare.com/ruleset-engine/rules-language/functions/#lower)
-はASCIIだけを変換します。非ASCIIのUA literalは、既存JavaScript generatorで既に
-小文字化されていても`UA_UNICODE_CASE_UNSUPPORTED`の`unknown`としてFree生成を止めます。
-Unicode case foldingの同等性は主張しません。
-compilerは変換前のUA literalを確認し、UnicodeからASCIIになる場合も見逃しません。
-既存emitterの引用形式がcanonical JSONとして元literalを保持できない場合は、
-`UA_LITERAL_ENCODING_UNSUPPORTED`でFree生成を止めます。生成式の共通検証ではcustom/rate双方の
+はASCIIだけを変換します。通常・Free両方のWAF生成で、非ASCIIのUA literalは
+`CLOUDFLARE_WAF_UNKNOWN: UA_UNICODE_CASE_UNSUPPORTED`で生成を止めます。
+compilerは変換前の元literalを確認し、UnicodeからASCIIになる場合も見逃しません。
+control文字は`CLOUDFLARE_WAF_UNKNOWN: UA_LITERAL_ENCODING_UNSUPPORTED`、
+非string項目は`CLOUDFLARE_WAF_INVALID: UA_LITERAL_TYPE`で拒否し、既存outputを保持します。
+printable ASCIIのUAは一つの共通encoderで引用し、double quoteとbackslashを
+[Cloudflareのbasic string仕様](https://developers.cloudflare.com/ruleset-engine/rules-language/values/#quoted-string-syntax)
+に従ってescapeします。旧経路の文字欠落を修正し、正しくencodeしたbackslash literalは
+Free modeでも対応します。これは生成literalの検査であり、Unicode requestの一致同等性、
+provider受理、配備WAFの効果を証明しません。生成式の共通検証ではcustom/rate双方の
 [Terraform template marker](https://developer.hashicorp.com/terraform/language/syntax/json#expression-mapping)を
 `EXPRESSION_TEMPLATE_UNSUPPORTED`で拒否します。直接指定したrate式とscope-downから生成した式も対象です。
-この入力制約は明示Free modeに適用します。出力は上記の共通literal表現を使います。
+template markerの制約は明示Free modeに適用し、上記UAの入力・引用境界は両modeへ適用します。
+出力は上記の共通literal表現を使います。
 式全体の対応形状を確認し、disabled ruleも件数へ含めます。未対応field/function/action、
 list、managed phase、resourceは限定`unknown`診断でWAFファイル生成を止めます。
 既知のplan違反と容量超過でも生成を止め、`--allow-waf-approximation`では回避できません。

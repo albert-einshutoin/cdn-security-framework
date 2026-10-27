@@ -168,20 +168,18 @@ const uaDeny = Array.isArray((policy.request || {}).block?.ua_contains)
   : [];
 if (uaDeny.length > 0) {
   const uaExprs = uaDeny.map((s: unknown) => {
-    if (freeProfile !== undefined && typeof s !== 'string') throw new Error('CLOUDFLARE_FREE_INVALID: UA_LITERAL_TYPE');
+    if (typeof s !== 'string') throw new Error('CLOUDFLARE_WAF_INVALID: UA_LITERAL_TYPE');
     // Check the original value: Unicode lowering can erase the unsupported
-    // input (Kelvin sign becomes ASCII k) before emitted-resource validation.
-    if (freeProfile !== undefined && typeof s === 'string' && /[^\x00-\x7f]/.test(s)) {
-      throw new Error('CLOUDFLARE_FREE_UNKNOWN: UA_UNICODE_CASE_UNSUPPORTED');
+    // input (Kelvin sign becomes ASCII k). Cloudflare lower folds ASCII only.
+    if (/[^\x00-\x7f]/.test(s)) {
+      throw new Error('CLOUDFLARE_WAF_UNKNOWN: UA_UNICODE_CASE_UNSUPPORTED');
     }
-    const folded = String(s).toLowerCase();
-    const quoted = '"' + folded.replace(/"/g, '\\"') + '"';
-    // Preserve the existing emitter, but do not approve a Free literal whose
-    // encoding loses source characters. Template markers are checked at the
-    // shared emitted-expression boundary for both custom and rate rules.
-    if (freeProfile !== undefined && quoted !== JSON.stringify(folded)) {
-      throw new Error('CLOUDFLARE_FREE_UNKNOWN: UA_LITERAL_ENCODING_UNSUPPORTED');
+    if (/[\x00-\x1f\x7f]/.test(s)) {
+      throw new Error('CLOUDFLARE_WAF_UNKNOWN: UA_LITERAL_ENCODING_UNSUPPORTED');
     }
+    // Printable ASCII needs only quote/backslash escapes under Cloudflare's
+    // basic string syntax. Terraform template encoding is a later boundary.
+    const quoted = JSON.stringify(s.toLowerCase());
     return `lower(http.user_agent) contains ${quoted}`;
   });
   customRules.push(Object.assign({
