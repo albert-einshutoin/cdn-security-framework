@@ -226,6 +226,33 @@ npx cdn-security analyze --input /path/to/monitor.jsonl --min-count 3 --top 10 -
 
 With `--format monitor` (the default), `analyze` reads JSONL without modifying the input. It groups valid records by route/reason and surfaces low-frequency block candidates; it does not decide whether a policy is safe or apply changes. The following monitor contract is separate from the explicit synthetic Cloudflare format below. An unsupported format fails without a fallback.
 
+### Bundled synthetic monitor sample
+
+The [28-record sample](../examples/sample-monitor.jsonl) uses this existing default monitor input contract. In an installed consumer:
+
+```bash
+./node_modules/.bin/cdn-security analyze --input node_modules/cdn-security-framework/examples/sample-monitor.jsonl --min-count 3 --top 10
+./node_modules/.bin/cdn-security analyze --input node_modules/cdn-security-framework/examples/sample-monitor.jsonl --min-count 3 --top 10 --json
+```
+
+In this repository checkout, use `node bin/cli.js` and `--input examples/sample-monitor.jsonl` instead. Both commands exit0. The JSON report has `summary.inputStatus=complete`, 28 parsed/analyzed records, 0 rejected records/diagnostics, 12 block records and 8 monitor records; text reports the same counts. The other 8 are explicit `allow` events, normalized to `pass`; their omitted status does not imply an HTTP status.
+
+With the inclusive upper threshold `--min-count 3`, the five candidates appear in this order:
+
+| Policy route | Reason | Block count |
+| --- | --- | --- |
+| `/login` | Unauthorized | 1 |
+| `/search` | URI Too Long | 1 |
+| `/upload` | Host Not Allowed | 1 |
+| `/legacy-api` | Method Not Allowed | 2 |
+| `/internal` | Missing user-agent | 3 |
+
+`/admin` has 4 block records and is excluded by this threshold. Monitor-only `/checkout` is not a block candidate. Reason/route groups include all valid events, so their totals are not block-only counts.
+
+All timestamps, route/target labels and events are synthetic; the file contains no real IP, cookie, token or credential. The declared `policy_route`/`target` labels illustrate grouping, not trusted deployment attribution. These are log records, not unique requests, a defense percentage or proof that a monitor check was enforced. Monitor status records a check result, not necessarily the final HTTP outcome; authentication can still fail closed. Candidates require human review and never authorize allowlist changes or automatic apply. This fixture does not implement the planned Canonical Event/Reason registry or complete the broader Runtime Evidence workstream, and is separate from `sample-cloudflare-events.jsonl`.
+
+### Default monitor input contract
+
 - `--input`: required JSONL file path.
 - `--min-count`: inclusive upper count threshold for block candidates (default `5`, rounded down).
 - `--top`: maximum candidates and samples per candidate (default `20`, rounded down).

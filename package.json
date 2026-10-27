@@ -168,6 +168,7 @@
     "types/",
     "templates/",
     "examples/sample-cloudflare-events.jsonl",
+    "examples/sample-monitor.jsonl",
     "examples/README.md",
     "examples/README.ja.md",
     "examples/aws-cloudfront/README.md",

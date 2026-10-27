@@ -1,0 +1,28 @@
+{"ts":1700000000000,"level":"warn","event":"block","status":401,"block_reason":"Unauthorized","method":"GET","uri":"/admin/settings","policy_route":"/admin","target":"aws"}
+{"ts":1700000001000,"level":"warn","event":"block","status":401,"block_reason":"Unauthorized","method":"GET","uri":"/admin/users","policy_route":"/admin","target":"cloudflare"}
+{"ts":1700000002000,"level":"warn","event":"block","status":401,"block_reason":"Unauthorized","method":"GET","uri":"/admin/reports","policy_route":"/admin","target":"aws"}
+{"ts":1700000003000,"level":"warn","event":"block","status":401,"block_reason":"Unauthorized","method":"GET","uri":"/admin/overview","policy_route":"/admin","target":"cloudflare"}
+{"ts":1700000004000,"level":"warn","event":"block","status":400,"block_reason":"Missing user-agent","method":"GET","uri":"/internal/metrics","policy_route":"/internal","target":"aws"}
+{"ts":1700000005000,"level":"warn","event":"block","status":400,"block_reason":"Missing user-agent","method":"GET","uri":"/internal/health","policy_route":"/internal","target":"cloudflare"}
+{"ts":1700000006000,"level":"warn","event":"block","status":400,"block_reason":"Missing user-agent","method":"GET","uri":"/internal/status","policy_route":"/internal","target":"aws"}
+{"ts":1700000007000,"level":"warn","event":"block","status":405,"block_reason":"Method Not Allowed","method":"POST","uri":"/legacy-api/items","policy_route":"/legacy-api","target":"cloudflare"}
+{"ts":1700000008000,"level":"warn","event":"block","status":405,"block_reason":"Method Not Allowed","method":"PUT","uri":"/legacy-api/item","policy_route":"/legacy-api","target":"aws"}
+{"ts":1700000009000,"level":"warn","event":"block","status":414,"block_reason":"URI Too Long","method":"GET","uri":"/search/results","policy_route":"/search","target":"cloudflare"}
+{"ts":1700000010000,"level":"warn","event":"block","status":400,"block_reason":"Host Not Allowed","method":"POST","uri":"/upload/image","policy_route":"/upload","target":"aws"}
+{"ts":1700000011000,"level":"warn","event":"block","status":401,"block_reason":"Unauthorized","method":"POST","uri":"/login/session","policy_route":"/login","target":"cloudflare"}
+{"ts":1700000012000,"level":"info","event":"monitor","status":401,"block_reason":"Unauthorized","method":"GET","uri":"/admin/settings","policy_route":"/admin","target":"aws"}
+{"ts":1700000013000,"level":"info","event":"monitor","status":401,"block_reason":"Unauthorized","method":"GET","uri":"/admin/users","policy_route":"/admin","target":"cloudflare"}
+{"ts":1700000014000,"level":"info","event":"monitor","status":400,"block_reason":"Missing user-agent","method":"GET","uri":"/internal/metrics","policy_route":"/internal","target":"aws"}
+{"ts":1700000015000,"level":"info","event":"monitor","status":400,"block_reason":"Missing user-agent","method":"GET","uri":"/internal/health","policy_route":"/internal","target":"cloudflare"}
+{"ts":1700000016000,"level":"info","event":"monitor","status":405,"block_reason":"Method Not Allowed","method":"POST","uri":"/checkout/cart","policy_route":"/checkout","target":"aws"}
+{"ts":1700000017000,"level":"info","event":"monitor","status":405,"block_reason":"Method Not Allowed","method":"PUT","uri":"/checkout/cart","policy_route":"/checkout","target":"cloudflare"}
+{"ts":1700000018000,"level":"info","event":"monitor","status":414,"block_reason":"URI Too Long","method":"GET","uri":"/search/results","policy_route":"/search","target":"aws"}
+{"ts":1700000019000,"level":"info","event":"monitor","status":400,"block_reason":"Host Not Allowed","method":"POST","uri":"/upload/image","policy_route":"/upload","target":"cloudflare"}
+{"ts":1700000020000,"level":"info","event":"allow","method":"GET","uri":"/","policy_route":"/","target":"aws"}
+{"ts":1700000021000,"level":"info","event":"allow","method":"HEAD","uri":"/","policy_route":"/","target":"cloudflare"}
+{"ts":1700000022000,"level":"info","event":"allow","method":"GET","uri":"/assets/site.js","policy_route":"/assets","target":"aws"}
+{"ts":1700000023000,"level":"info","event":"allow","method":"HEAD","uri":"/assets/site.js","policy_route":"/assets","target":"cloudflare"}
+{"ts":1700000024000,"level":"info","event":"allow","method":"GET","uri":"/api/items","policy_route":"/api","target":"aws"}
+{"ts":1700000025000,"level":"info","event":"allow","method":"POST","uri":"/api/items","policy_route":"/api","target":"cloudflare"}
+{"ts":1700000026000,"level":"info","event":"allow","method":"GET","uri":"/admin/overview","policy_route":"/admin","target":"aws"}
+{"ts":1700000027000,"level":"info","event":"allow","method":"POST","uri":"/login/session","policy_route":"/login","target":"cloudflare"}
