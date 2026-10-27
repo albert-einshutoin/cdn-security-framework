@@ -152,6 +152,8 @@
     "!docs/benchmarks/compiler-baseline-with-install.json",
     "scripts/README.md",
     "scripts/README.ja.md",
+    "scripts/auth-cache-regression.js",
+    "scripts/auth-cache-regression.d.ts",
     "scripts/cli-doctor.js",
     "scripts/cli-doctor.d.ts",
     "scripts/compile.js",
