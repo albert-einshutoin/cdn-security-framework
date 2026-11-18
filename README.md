@@ -7,16 +7,59 @@
 [![coverage ≥ 80%](https://img.shields.io/badge/coverage-%E2%89%A580%25%20lines-brightgreen)](https://github.com/albert-einshutoin/cdn-security-framework/blob/b436da43cb1f8c92759d6e4c121c95998bb78bb5/.github/workflows/policy-lint.yml)
 [![SLSA v1 provenance](https://img.shields.io/badge/SLSA-v1%20provenance-blue)](./docs/supply-chain.md)
 
-See the [version roadmap](./docs/ROADMAP.md) for the current release train,
-compatibility gates, and implemented/experimental/planned boundaries.
+CDN Security Framework turns a YAML policy into edge code and WAF configuration for AWS or Cloudflare.
 
-**CDN Security Framework** is a **security design and implementation framework** that can be used across major CDN edge execution environments such as CloudFront, CloudFront Functions, Lambda@Edge, and Cloudflare Workers.
+## Try the published CLI (1.4.0)
 
-The goal is simple.
+With Node.js 20.17.0 or later and npm, build a policy for a static site. The block runs only if it can create a new directory. Your project's policy stays in place.
 
-> **"Make CDN security reusable as a design philosophy, so anyone in the world can build a secure initial setup in a short time."**
+```bash
+mkdir cdn-security-1.4-demo && (
+  set -e
+  cd cdn-security-1.4-demo
+  npm init -y
+  npm install --save-dev --save-exact cdn-security-framework@1.4.0
+  ./node_modules/.bin/cdn-security init --platform aws --archetype spa-static-site
+  ./node_modules/.bin/cdn-security build --target aws
+)
+```
 
-**First run:** follow the [candidate-tarball Quickstart](docs/quickstart.md) in an empty consumer. Distinguish published1.4.0 from the unpublished schema2 candidate by SHA/digest; preserve existing input.
+Inside `cdn-security-1.4-demo/`, compare the schema 1 input `policy/security.yml` with the generated `dist/edge/viewer-request.js` and `dist/infra/waf-rules.tf.json`. The build runs locally. Running the same `init` again in that directory stops if the policy already exists.
+
+## Preview 2.0 locally: catch a blocked API operation
+
+An API team adds `POST /orders` alongside `GET /orders`. The CDN policy still allows only `GET`. Run the example from the root of the [2.0.0-rc.0 source checkout](https://github.com/albert-einshutoin/cdn-security-framework/tree/98009478bc349e9d64132c1c0909bb66890d035a). This unpublished candidate uses policy schema 2. For a supplied candidate tarball, use the [package verification quickstart](docs/quickstart.md).
+
+```bash
+npm ci
+demo_dir=$(mktemp -d)
+cp examples/github-actions/fixtures/policy.yml "${demo_dir:?}/policy.yml"
+cat > "$demo_dir/openapi.yml" <<'YAML'
+openapi: 3.1.0
+info: {title: Orders, version: 1.0.0}
+security: []
+paths:
+  /orders:
+    get:  {responses: {'200': {description: OK}}}
+    post: {responses: {'201': {description: Created}}}
+YAML
+
+check_orders() {
+  node bin/cli.js contract diff --workspace-root "$demo_dir" --target aws \
+    --openapi "$demo_dir/openapi.yml" --policy "$1" --fail-on error
+}
+check_orders "$demo_dir/policy.yml"
+```
+
+The command exits **1** with `ERROR SC-EXPOSURE-002 [deterministic] POST /orders Declared operation blocked by Policy`. The finding points to `/request/allow_methods` in the policy. To accept the new operation in this single-path demo, add `POST` to the policy's global method list and check the same OpenAPI file again in the same shell.
+
+```bash
+sed 's/allow_methods: \[GET\]/allow_methods: [GET, POST]/' \
+  "$demo_dir/policy.yml" > "$demo_dir/reviewed.yml"
+check_orders "$demo_dir/reviewed.yml"
+```
+
+The command now exits **0** with `Summary: total=0 error=0 warning=0 info=0 suppressed=0`. The method mismatch is resolved. The report still lists seven omitted or unknown comparisons.
 
 ## Product Surface and Release Status
 
@@ -52,7 +95,7 @@ The bounded verifier implementations are on main and remain unpublished; they do
 For the runnable paths, see the [OpenAPI integration guide](docs/openapi-integration.md),
 [NestJS source analysis guide](docs/source-analysis-nestjs.md),
 [CLI reference](docs/cli.md), and [Programmatic API](docs/programmatic-api.md).
-The [version roadmap](docs/ROADMAP.md) is the release-status source of truth.
+The [version roadmap](./docs/ROADMAP.md) is the release-status source of truth.
 
 The framework does not claim that a generated artifact is fully secure, that a
 Guard or analyzer result proves runtime enforcement, or that an unsupported
