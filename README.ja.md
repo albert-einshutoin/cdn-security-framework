@@ -2,20 +2,59 @@
 
 > **言語:** [English](./README.md) · 日本語
 
-現行の Release Train、互換性 gate、Implemented / Experimental / Planned の境界は
-[version roadmap](./docs/ROADMAP.ja.md) を参照してください。
+CDN Security Framework は、YAMLで記述したポリシーからAWS・Cloudflare向けのエッジコードとWAF設定を生成します。
 
-## 概要
+## 公開版1.4.0を試す
 
-**CDN Security Framework** は、CloudFront / CloudFront Functions / Lambda@Edge / Cloudflare Workers など、
-主要 CDN のエッジ実行環境で共通に使える **セキュリティ設計・実装フレームワーク**です。
+Node.js 20.17.0以上とnpmを使って、静的サイト用のポリシーをビルドします。新しいディレクトリを作成できたときだけ処理が進むので、既存プロジェクトのポリシーはそのまま残ります。
 
-目的はシンプルです。
+```bash
+mkdir cdn-security-1.4-demo && (
+  set -e
+  cd cdn-security-1.4-demo
+  npm init -y
+  npm install --save-dev --save-exact cdn-security-framework@1.4.0
+  ./node_modules/.bin/cdn-security init --platform aws --archetype spa-static-site
+  ./node_modules/.bin/cdn-security build --target aws
+)
+```
 
-> **「CDN セキュリティを“設計思想ごと”再利用可能にし、
-> 世界中の誰でも短時間で安全な初期構成を作れるようにする」**
+`cdn-security-1.4-demo/` の中で、入力したスキーマ1の `policy/security.yml` と、生成された `dist/edge/viewer-request.js`、`dist/infra/waf-rules.tf.json` を見比べてください。ビルドはローカルで完結します。同じディレクトリで再び `init` を実行すると、既存ポリシーを検出して停止します。
 
-**初回導入:** [候補tarballのQuickstart](docs/quickstart.ja.md)を空consumerで実行してください。公開1.4.0と未公開schema2候補をSHA/digestで区別し、既存入力を上書きしません。
+## 2.0候補版で、CDNが拒否するAPI操作を見つける
+
+注文APIの `GET /orders` に `POST /orders` を追加したのに、CDNのポリシーが `GET` だけを許可している例です。[2.0.0-rc.0のソース](https://github.com/albert-einshutoin/cdn-security-framework/tree/98009478bc349e9d64132c1c0909bb66890d035a)を取得し、リポジトリのルートから実行してください。この未公開候補版はポリシースキーマ2を使います。候補版のtarballを受け取った場合は[パッケージの検証手順](docs/quickstart.ja.md)を参照してください。
+
+```bash
+npm ci
+demo_dir=$(mktemp -d)
+cp examples/github-actions/fixtures/policy.yml "${demo_dir:?}/policy.yml"
+cat > "$demo_dir/openapi.yml" <<'YAML'
+openapi: 3.1.0
+info: {title: Orders, version: 1.0.0}
+security: []
+paths:
+  /orders:
+    get:  {responses: {'200': {description: OK}}}
+    post: {responses: {'201': {description: Created}}}
+YAML
+
+check_orders() {
+  node bin/cli.js contract diff --workspace-root "$demo_dir" --target aws \
+    --openapi "$demo_dir/openapi.yml" --policy "$1" --fail-on error
+}
+check_orders "$demo_dir/policy.yml"
+```
+
+終了コードは **1**。CLIは `ERROR SC-EXPOSURE-002 [deterministic] POST /orders Declared operation blocked by Policy` と表示し、ポリシーの `/request/allow_methods` を指します。この例のAPIは1パスだけなので、新しい操作を許可するためにポリシー全体の許可メソッドに `POST` を加えます。同じシェルで同じOpenAPIファイルと再比較します。
+
+```bash
+sed 's/allow_methods: \[GET\]/allow_methods: [GET, POST]/' \
+  "$demo_dir/policy.yml" > "$demo_dir/reviewed.yml"
+check_orders "$demo_dir/reviewed.yml"
+```
+
+修正後は終了コード **0**、出力は `Summary: total=0 error=0 warning=0 info=0 suppressed=0` です。メソッドの不一致は解消し、レポートには比較対象外・判定不能の7項目が引き続き表示されます。
 
 ## プロダクト境界とリリース状態
 
@@ -51,7 +90,7 @@ OpenAPI、source analysis、policy、runtime evidence は別々の Truth であ�
 実行可能な導入手順は [OpenAPI 導入ガイド](docs/openapi-integration.ja.md)、
 [NestJS Source Analysis](docs/source-analysis-nestjs.ja.md)、
 [CLI リファレンス](docs/cli.ja.md)、[プログラマティック API](docs/programmatic-api.ja.md)
-を参照してください。[Version roadmap](docs/ROADMAP.ja.md) が release status の正本です。
+を参照してください。[Version roadmap](./docs/ROADMAP.ja.md) が release status の正本です。
 
 生成 artifact が完全に安全であること、Guard や Analyzer の結果が runtime の
 enforcement を証明すること、未対応 provider の control が利用できることは主張しません。
